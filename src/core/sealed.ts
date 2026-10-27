@@ -7,8 +7,8 @@ const RSA = { name: 'RSA-OAEP', hash: 'SHA-256' } as const;
 const bytes = (b64: string): Uint8Array<ArrayBuffer> => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
 export async function newSealKeys(): Promise<{ publicKey: JsonWebKey; privateKey: CryptoKey }> {
-  const pair = await crypto.subtle.generateKey({ ...RSA, modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]) }, true, ['wrapKey', 'unwrapKey']);
-  return { publicKey: await crypto.subtle.exportKey('jwk', pair.publicKey), privateKey: pair.privateKey };
+  const pair = (await crypto.subtle.generateKey({ ...RSA, modulusLength: 3072, publicExponent: new Uint8Array([1, 0, 1]) }, true, ['wrapKey', 'unwrapKey'])) as CryptoKeyPair;
+  return { publicKey: (await crypto.subtle.exportKey('jwk', pair.publicKey)) as JsonWebKey, privateKey: pair.privateKey };
 }
 
 export async function openSealed(privateKey: CryptoKey, sealed: Sealed): Promise<string> {

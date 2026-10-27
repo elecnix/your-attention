@@ -1,6 +1,8 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on GET /v1/events, and posts answers.
 const { React, createRoot, Renderer, openuiChatLibrary } = window.__OpenUI;
+// The page may sit under a path, such as /i/<inbox id>/ on the hosted service, so every address is relative to it.
+const BASE = location.pathname.replace(/[^/]*$/, '');
 const h = React.createElement;
 const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back by triage' };
 const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed', reply: 'new reply' };
@@ -27,7 +29,7 @@ function report(fields) {
   const now = Date.now();
   if (!('visible' in fields) && !('focus' in fields) && now - lastReport < 20000) return;
   lastReport = now;
-  fetch(`/v1/person/${VIEWER}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J(fields) }).catch(() => {});
+  fetch(`${BASE}v1/person/${VIEWER}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J(fields) }).catch(() => {});
 }
 document.addEventListener('visibilitychange', () => report({ visible: document.visibilityState === 'visible', active: true }));
 for (const ev of ['keydown', 'pointerdown', 'scroll']) window.addEventListener(ev, () => report({ active: true }), { passive: true });
@@ -169,10 +171,10 @@ function SecretForm({ card, onSent, onSkip }) {
     try {
       const values = {};
       if (withValue) {
-        const { seal } = await import('/sealed.js');
+        const { seal } = await import(`${BASE}sealed.js`);
         values.sealed = await seal(card.secret.publicKey, value);
       }
-      const res = await api(`/v1/cards/${card.id}/answer`, { values, comment: comment.trim(), version: card.version });
+      const res = await api(`${BASE}v1/cards/${card.id}/answer`, { values, comment: comment.trim(), version: card.version });
       if (!res.ok) throw new Error((await res.json()).error || res.status);
       setValue('');
       onSent();
@@ -206,7 +208,7 @@ function LinkedText({ text, byId, open }) {
 }
 
 const isImage = (t) => /^image\/(png|jpeg|gif|webp)$/.test(t);
-const fileUrl = (f) => f.url || `/v1/attachments/${encodeURIComponent(f.id)}`;
+const fileUrl = (f) => f.url || `${BASE}v1/attachments/${encodeURIComponent(f.id)}`;
 const sizeText = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
 // One attached file, rendered by its type: Markdown, CSV and JSON in place, PDF in a frame, anything else as a download.
@@ -280,7 +282,7 @@ function Changes({ card }) {
 // The system card for new guidance: the person picks the agents, all of them at first.
 function BroadcastForm({ card, onDone }) {
   const [picked, setPicked] = React.useState(() => new Set(card.broadcast.agents));
-  const send = (choice) => api(`/v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] } }).then(onDone);
+  const send = (choice) => api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] } }).then(onDone);
   return h('div', { className: 'broadcast' },
     h('pre', null, card.broadcast.text),
     h('div', { className: 'agents' }, card.broadcast.agents.length ? card.broadcast.agents.map((a) => h('label', { key: a },
@@ -292,7 +294,7 @@ function BroadcastForm({ card, onDone }) {
 }
 
 function HtmlToggle({ settings }) {
-  const toggle = () => fetch('/v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: !settings.allowHtml }) });
+  const toggle = () => fetch(BASE + 'v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: !settings.allowHtml }) });
   return h('label', { className: 'notify', title: 'Show cards that bring their own HTML and scripts, in a sandboxed frame' },
     h('input', { type: 'checkbox', role: 'switch', checked: !!settings.allowHtml, onChange: toggle }), 'Allow HTML cards');
 }
@@ -333,7 +335,7 @@ function App() {
   const reportedFocus = React.useRef(undefined);
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
 
-  const refresh = React.useCallback(() => fetch('/v1/state').then((r) => {
+  const refresh = React.useCallback(() => fetch(BASE + 'v1/state').then((r) => {
     if (r.status === 401) { setAuth('needed'); return null; }
     return r.json();
   }).then((s) => {
@@ -361,13 +363,13 @@ function App() {
     const signIn = () => {
       const m = /token=([^&]+)/.exec(location.hash);
       if (!m) return Promise.resolve();
-      return fetch('/v1/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: J({ token: decodeURIComponent(m[1]) }) })
+      return fetch(BASE + 'v1/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: J({ token: decodeURIComponent(m[1]) }) })
         .then(() => history.replaceState(null, '', location.pathname));
     };
     const connect = () => signIn().then(() => {
       if (es) es.close();
       refreshRef.current();
-      es = new EventSource(`/v1/events?viewer=${encodeURIComponent(VIEWER)}`);
+      es = new EventSource(`${BASE}v1/events?viewer=${encodeURIComponent(VIEWER)}`);
       es.onopen = () => refreshRef.current();
       // A stream that fails may mean a revoked token: the state request tells.
       es.onerror = () => refreshRef.current();
@@ -428,7 +430,7 @@ function App() {
   const seenKey = current ? `${current.id}:${current.replies.length}` : null;
   if (current && current.replies.some((r) => !r.seenAt) && seenRef.current !== seenKey) {
     seenRef.current = seenKey;
-    setTimeout(() => api(`/v1/cards/${current.id}/seen`, {}), 1500);
+    setTimeout(() => api(`${BASE}v1/cards/${current.id}/seen`, {}), 1500);
   }
 
   const next = () => { pinnedRef.current = null; setFocus((pending.find((c) => c.id !== (current && current.id)) || {}).id || null); };
@@ -436,9 +438,9 @@ function App() {
 
   async function onAction(c, ev) {
     if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return next();
-    if (c.kind === 'blocked') return api(`/v1/cards/${c.id}/open`, {});
+    if (c.kind === 'blocked') return api(`${BASE}v1/cards/${c.id}/open`, {});
     const { values, comment } = formValues(ev.formState);
-    await api(`/v1/cards/${c.id}/answer`, { values, comment, version: c.version });
+    await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version });
     store.del(`draft:${c.id}:${c.version}`);
     setTimeout(() => { if (pinnedRef.current === c.id) pinnedRef.current = null; setFocus((f) => (f === c.id || f === null ? null : f)); }, 700);
   }
@@ -492,10 +494,10 @@ function App() {
         pres && h('span', { className: `pill small ${pres[0]}` }, pres[1])),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,
-        current.triage.state === 'held' && h('button', { className: 'btn', style: { marginLeft: 8 }, onClick: () => api(`/v1/cards/${current.id}/release`, {}) }, 'Release')),
+        current.triage.state === 'held' && h('button', { className: 'btn', style: { marginLeft: 8 }, onClick: () => api(`${BASE}v1/cards/${current.id}/release`, {}) }, 'Release')),
       (o.harness || o.host) && h('div', { className: 'origin' },
         h('span', null, [o.name, o.harness, o.host, o.cwd].filter(Boolean).join(' · ')),
-        o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`/v1/cards/${current.id}/open`, {}) }, 'Open session')),
+        o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/open`, {}) }, 'Open session')),
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), r.text)),
       a && s !== 'reply' && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
@@ -506,7 +508,7 @@ function App() {
       current.broadcast && !current.closed
         ? h(BroadcastForm, { card: current, onDone: next })
         : current.html !== undefined
-        ? h(HtmlCard, { card: current, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`/v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
+        ? h(HtmlCard, { card: current, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
         : current.kind === 'secret'
         ? h(React.Fragment, null,
           h('h2', { className: 'secret-title' }, current.title),
@@ -517,7 +519,7 @@ function App() {
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
         h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),
         h(Icon, { name: 'read', cls: 's read', dim: !a.readAt, tip: a.readAt ? `Read by the agent at ${time(a.readAt)}` : 'Not read by the agent yet' }),
-        !a.readAt && h('button', { className: 'btn', onClick: () => api(`/v1/cards/${current.id}/force`, {}) }, a.forcedAt ? `Force-sent at ${time(a.forcedAt)}. Send again` : 'Force-send')),
+        !a.readAt && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/force`, {}) }, a.forcedAt ? `Force-sent at ${time(a.forcedAt)}. Send again` : 'Force-send')),
       backlinks.length > 0 && h('div', { className: 'chain' }, 'Linked from ', backlinks.map((c, i) => h(React.Fragment, { key: c.id }, i ? ', ' : '', h('a', { onClick: () => open(c.id) }, c.title)))),
       prev && h('details', { className: 'earlier' },
         h('summary', null, 'The card before this one, and your answer'),

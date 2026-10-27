@@ -15,5 +15,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "test", "bin"]
+  "include": ["src", "test", "bin"],
+  "exclude": ["src/cloudflare", "test/cloudflare/object.test.ts"]
 }

@@ -1,0 +1,12 @@
+// The Cloudflare build. `npm run cloudflare:build` gathers the page into .cloudflare/assets first.
+{
+  "name": "your-attention",
+  "main": "src/cloudflare/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": ".cloudflare/assets", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": { "bindings": [{ "name": "INBOX", "class_name": "InboxObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InboxObject"] }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "your-attention-files" }],
+  "kv_namespaces": [{ "binding": "INVITES", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
+  "vars": { "MODE": "single" }
+}

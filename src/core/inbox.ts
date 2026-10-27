@@ -80,14 +80,38 @@ export class Inbox {
   /** Webhook deliveries still running, so tests and shutdown can wait for them. */
   readonly deliveries = new Set<Promise<boolean>>();
 
-  constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs()) {
+  /** `keepPresence` is for a platform whose sockets outlive the object, such as a Durable Object that wakes from hibernation. */
+  constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs(), opts: { keepPresence?: boolean } = {}) {
     this.store = store;
     this.now = now;
     this.blobs = blobs;
-    // Connections do not survive a restart, so nobody is online at start.
-    for (const p of store.list<Presence>('presence')) {
-      if (p.online) store.put('presence', p.agent, { ...p, online: false });
+    // On a laptop, connections do not survive a restart, so nobody is online at start.
+    if (!opts.keepPresence) {
+      for (const p of store.list<Presence>('presence')) {
+        if (p.online) store.put('presence', p.agent, { ...p, online: false });
+      }
     }
+  }
+
+  /** Store a token whose secret the deployment chose, such as an owner token set as a Worker secret. */
+  async adoptToken(secret: string, name: string, role: Role): Promise<Token> {
+    const id = secret.split('.')[0] ?? '';
+    if (!/^[0-9a-f]{12}$/.test(id) || !/^[0-9a-f]{12}\.[0-9a-f]{64}$/.test(secret)) throw new InboxError(400, 'a token is 12 hex digits, a dot, and 64 hex digits');
+    const token: Token = { id, hash: await sha256(secret), name, role, createdAt: this.now() };
+    this.store.put('tokens', id, token);
+    return token;
+  }
+
+  /** When the platform alarm must next call sweep(), or undefined when nothing waits. */
+  nextDeadline(): number | undefined {
+    const times: number[] = [];
+    for (const p of this.store.list<Presence>('presence')) if (p.online && p.leftAt !== undefined) times.push(p.leftAt + PRESENCE_GRACE_MS);
+    for (const p of this.store.list<Pairing>('pairings')) if (p.status === 'pending') times.push(p.createdAt + PAIRING_TTL_MS);
+    for (const c of this.store.list<Card>('cards')) {
+      if (c.triage?.state === 'pending' && c.triage.deadline) times.push(c.triage.deadline);
+      if (c.expiresAt && !c.closed) times.push(c.expiresAt);
+    }
+    return times.length ? Math.min(...times) : undefined;
   }
 
   // ---- tokens and pairing ----
@@ -237,7 +261,7 @@ export class Inbox {
       multiple: input.multiple,
       questions: input.questions,
       screen: input.screen,
-      secret: kind === 'secret' ? { name: String(input.secret?.name), publicKey: input.secret?.publicKey ?? {} } : undefined,
+      secret: kind === 'secret' ? { name: String(input.secret?.name), publicKey: (input.secret?.publicKey ?? {}) as JsonWebKey } : undefined,
       html: input.html,
       attachments: attachments?.length ? attachments : undefined,
       template: template ?? before?.template,

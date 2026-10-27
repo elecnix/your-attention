@@ -224,3 +224,27 @@ describe('attachment edge cases from review', () => {
     }
   });
 });
+
+describe('the platform alarm', () => {
+  it('names the next moment sweep() has work, and nothing when nothing waits', () => {
+    let t = 1000;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const agent: Caller = { token: 'ta', role: 'agent' };
+    assert.equal(inbox.nextDeadline(), undefined);
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q', expiresAt: 50_000 });
+    assert.equal(inbox.nextDeadline(), 50_000);
+    inbox.connect(agent, 's1', () => {})();
+    assert.equal(inbox.nextDeadline(), 1000 + 2000);
+    t = 3000;
+    inbox.sweep();
+    assert.equal(inbox.nextDeadline(), 50_000);
+  });
+
+  it('adopts a token the deployment chose, and refuses a malformed one', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const secret = `${'a'.repeat(12)}.${'b'.repeat(64)}`;
+    await inbox.adoptToken(secret, 'owner from a Worker secret', 'owner');
+    assert.equal((await inbox.authenticate(secret))?.role, 'owner');
+    await assert.rejects(inbox.adoptToken('short.token', 'x', 'owner'), /12 hex digits/);
+  });
+});

@@ -190,12 +190,18 @@ Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST 
 
 On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `v=1`, `id=<inbox id>`, `pair=/v1/pair`. `your-attention serve --no-mdns` turns the advertisement off.
 
-## Principles not built yet
+## The Cloudflare build
 
-The table lists what version 1 still lacks, by principle. The pull request that builds a missing part deletes its row.
+`src/cloudflare/worker.ts` runs the same core on Workers. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. The object hibernates when idle:
 
-| Principle | What is missing |
-| -- | -- |
-| Platform details sit behind small adapter interfaces | The Cloudflare build, with Durable Object storage, hibernatable WebSockets and alarms. |
-| Presence comes from connections, and it survives hibernation | Socket attachments, planned for the Cloudflare version. |
-| A hosted inbox works without an account | The hosted service. |
+- Each agent WebSocket keeps its agent id and token in the socket attachment, so the object reconnects every socket to the inbox when it wakes, and presence stays as it was.
+- The object answers `{"type":"ping"}` with `{"type":"pong"}` through the runtime's auto-response, which does not wake it. An alarm every 30 seconds closes a socket whose last pong is older than 60 seconds.
+- The object sets its alarm for the next moment `sweep()` has work, from `nextDeadline()`, and for no other time.
+
+With `MODE` set to `single`, the Worker serves one inbox, whose owner token is the `OWNER_TOKEN` secret. With `MODE` set to `hosted`, it serves many:
+
+- `POST /new {invite}` takes one use of an invite code, stored in KV as `invite:<code>` with the uses left, and returns the address of a new inbox and its owner sign-in link.
+- Each inbox is at `/i/<id>/`, where `id` is 32 random hex digits. Whoever knows the address can sign in with its token, so the person bookmarks the address and keeps it private. The Worker checks KV for `inbox:<id>` first, so an address nobody created reaches no Durable Object.
+- The operator manages invites with `wrangler kv key put invite:<code> <uses> --binding INVITES --remote`.
+
+`npm run cloudflare:check` bundles the Worker with a dry-run deploy, and `npm run test:cloudflare` runs the hosted build on `wrangler dev` with local Durable Objects, R2 and KV. The `deploy-cloudflare` workflow deploys it when someone runs it from the Actions tab.

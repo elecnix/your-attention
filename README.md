@@ -67,6 +67,14 @@ your-attention offer ssh build-box
 YOUR_ATTENTION_RELAY_KEY=... your-attention serve --relay https://relay.example
 ```
 
+On Cloudflare, one Durable Object per inbox hibernates when idle. Create a KV namespace, add the secrets that `deploy-cloudflare.yml` lists, then run that workflow from the Actions tab:
+
+```sh
+npx wrangler kv namespace create INVITES        # its id goes in the KV_NAMESPACE_ID variable
+npx wrangler secret put OWNER_TOKEN             # single mode: your owner token
+npx wrangler kv key put invite:<code> 5 --binding INVITES --remote   # hosted mode: an invite with 5 uses
+```
+
 Another machine on the LAN finds the inbox and pairs with it. Approve the card that shows the same code.
 
 ```sh

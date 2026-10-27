@@ -42,7 +42,7 @@ export function loadConfig(home = homeDir()): ClientConfig | undefined {
   return undefined;
 }
 
-export type Transport = 'sse' | 'ws' | 'poll';
+export type Transport = 'auto' | 'sse' | 'ws' | 'poll';
 
 export class Client {
   /** The link in use. */
@@ -117,18 +117,23 @@ export class Client {
   deadLetters(): Promise<{ card: Card; answer: Answer }[]> { return this.call('GET', '/v1/dead-letters'); }
 
   /** Receive answers for one agent until `signal` aborts. Reconnects after a drop, over the next link when one fails.
-   * `sse` is the default, `ws` uses a WebSocket, and `poll` long-polls for clients that cannot keep a connection. */
-  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'sse'): Promise<void> {
+   * `auto`, the default, uses a WebSocket and falls back to server-sent events on a link that cannot carry one.
+   * `poll` long-polls, for clients that cannot keep a connection. */
+  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto'): Promise<void> {
     let link = 0;
+    const noSocket = new Set<string>();
     const deliver = async (ev: AgentEvent): Promise<void> => { if (this.fresh(ev)) await onEvent(ev); };
     while (!signal.aborted) {
       const url = this.urls[link % this.urls.length] ?? this.url;
       try {
         if (this.urls.length > 1 && !(await this.sameInbox(url))) throw new Error('another inbox');
         this.url = url;
-        if (transport === 'ws') await this.overSocket(url, agent, deliver, signal);
-        else if (transport === 'poll') await this.overPoll(url, agent, deliver, signal);
-        else await this.overSse(url, agent, deliver, signal);
+        if (transport === 'poll') await this.overPoll(url, agent, deliver, signal);
+        else if (transport === 'sse' || (transport === 'auto' && noSocket.has(url))) await this.overSse(url, agent, deliver, signal);
+        else {
+          const opened = await this.overSocket(url, agent, deliver, signal);
+          if (!opened && transport === 'auto') { noSocket.add(url); continue; }
+        }
       } catch {
         if (signal.aborted) return;
         link++;
@@ -161,19 +166,20 @@ export class Client {
     }
   }
 
-  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
-    return new Promise((resolve, reject) => {
+  /** Resolves when the socket closes: true if it opened first, false if it never did. */
+  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<boolean> {
+    return new Promise((resolve) => {
+      let opened = false;
       const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}`);
       const stop = (): void => ws.close();
       signal.addEventListener('abort', stop, { once: true });
       // The global WebSocket cannot send headers, so the token goes in the first frame.
-      ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'auth', token: this.token })));
+      ws.addEventListener('open', () => { opened = true; ws.send(JSON.stringify({ type: 'auth', token: this.token })); });
       ws.addEventListener('message', (m) => {
         const ev = JSON.parse(String(m.data)) as { type: string };
         if (ev.type !== 'pong' && ev.type !== 'error') void deliver(ev as AgentEvent);
       });
-      ws.addEventListener('error', () => reject(new Error('websocket failed')));
-      ws.addEventListener('close', () => { signal.removeEventListener('abort', stop); resolve(); });
+      ws.addEventListener('close', () => { signal.removeEventListener('abort', stop); resolve(opened); });
     });
   }
 

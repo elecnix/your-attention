@@ -180,7 +180,8 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       relay?.stop();
       watcher?.close();
       await ad?.stop();
-      for (const ws of wss.clients) ws.terminate();
+      // Let each socket's close handler update presence before the database closes.
+      await Promise.all([...wss.clients].map((ws) => new Promise<void>((r) => { ws.once('close', () => r()); ws.terminate(); })));
       wss.close();
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));

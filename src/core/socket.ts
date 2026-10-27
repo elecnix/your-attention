@@ -15,6 +15,8 @@ export interface AgentSocket {
   message(text: string): Promise<void>;
   close(): void;
   readonly authenticated: boolean;
+  /** The client, once it authenticated, so a platform can keep it with a hibernating socket. */
+  readonly caller: Caller | undefined;
 }
 
 export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller): AgentSocket {
@@ -45,6 +47,9 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
     },
     get authenticated() {
       return me !== undefined;
+    },
+    get caller() {
+      return me;
     },
   };
 }

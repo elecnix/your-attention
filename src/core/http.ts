@@ -60,7 +60,7 @@ function eventStream(start: (send: (event: string, data: unknown) => void) => ()
       beat = setInterval(() => send('beat', { type: 'beat', at: Date.now() }), heartbeatMs);
     },
     cancel() {
-      clearInterval(beat);
+      if (beat !== undefined) clearInterval(beat);
       stop();
     },
   });
@@ -149,7 +149,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } });
       let timer: ReturnType<typeof setTimeout> | undefined;
       if (!events.length) await Promise.race([woken, new Promise<void>((r) => { timer = setTimeout(r, wait); })]);
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
       disconnect();
       return json({ events });
     }
