@@ -35,6 +35,9 @@ describe('widgets', () => {
     assert.match(out, /^a_head = CardHeader\("head and state", "r"\)$/m);
     assert.match(out, /^b_head = CardHeader\("Two", "r"\)$/m);
     assert.match(out, /^b = Card\(\[b_head, b_state\], "sunk"\)$/m);
+    const inbox = new Inbox(new MemoryStorage());
+    inbox.saveWidget('pull-request', PR);
+    assert.deepEqual(inbox.postCard({ token: 'ta', role: 'agent' }, { agent: 's1', title: 'Two', body }).widgets, [{ name: 'pull-request', version: 1 }]);
   });
 
   it('place widgets inside widgets, and refuse a widget that places itself', () => {
@@ -74,5 +77,24 @@ describe('a patched card with widgets', () => {
     const patched = inbox.patchCard(agent, 'p1', [{ old: 'Tag("running"', new: 'Tag("green"' }], 'body');
     assert.match(patched.body ?? '', /pr_state = Tag\("green"/);
     assert.deepEqual(inbox.getCard('p1').widgets, [{ name: 'pull-request', version: 1 }]);
+  });
+});
+
+describe('widget limits and records', () => {
+  it('refuse a card whose widgets fan out past 100 placements', () => {
+    const fan = (next: string) => `root = Card([${Array.from({ length: 10 }, (_, i) => `p${i}`).join(', ')}])\n${Array.from({ length: 10 }, (_, i) => `p${i} = widget ${next} {}`).join('\n')}`;
+    const sources = { a: fan('b'), b: fan('c'), c: fan('d'), d: 'root = TextContent("leaf")' };
+    assert.throws(() => expandWidgets('root = Card([x])\nx = widget a {}', find(sources)), (e: InboxError) => e.status === 400 && /at most 100 widgets/.test(e.message));
+    assert.doesNotThrow(() => expandWidgets('root = Card([x])\nx = widget c {}', find(sources)));
+  });
+
+  it('keep the earlier widgets on record when a patch places another one', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const agent = { token: 'ta', role: 'agent' as const };
+    inbox.saveWidget('pull-request', PR);
+    inbox.saveWidget('note', 'root = TextContent({{text}})');
+    inbox.postCard(agent, { id: 'p2', agent: 's1', title: 'Merge?', body: 'root = Card([pr])\npr = widget pull-request {"title": "T", "repo": "r", "ci": "green"}' });
+    inbox.patchCard(agent, 'p2', [{ old: 'root = Card([pr])', new: 'root = Card([pr, n])\nn = widget note {"text": "Ready."}' }], 'body');
+    assert.deepEqual(inbox.getCard('p2').widgets, [{ name: 'pull-request', version: 1 }, { name: 'note', version: 1 }]);
   });
 });

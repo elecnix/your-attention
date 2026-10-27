@@ -6,7 +6,7 @@ import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
-import { expandWidgets, fill, type WidgetSource } from './widgets.ts';
+import { distinctWidgets, expandWidgets, fill, type WidgetSource } from './widgets.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import type {
   AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, PageEvent, Pairing, Presence,
@@ -237,7 +237,7 @@ export class Inbox {
     if (body !== undefined) {
       const expanded = expandWidgets(String(body), (name, version) => this.widgetVersion(name, version));
       body = expanded.body;
-      widgets = expanded.used.length ? expanded.used : undefined;
+      widgets = expanded.used.length ? distinctWidgets(expanded.used) : undefined;
     }
     let attachments = before?.attachments;
     if (input.attachments !== undefined) {
@@ -502,9 +502,9 @@ export class Inbox {
     }
     const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, widgets: _w, ...rest } = card;
     const next = this.postCard(caller, { ...rest, [f]: text });
-    // A patch edits the body the widgets already filled, so the card still shows them.
-    if (!card.widgets || next.widgets) return next;
-    const kept = { ...next, widgets: card.widgets };
+    // A patch edits the body the widgets already filled, so the card still shows them, and any the patch placed.
+    if (!card.widgets) return next;
+    const kept = { ...next, widgets: distinctWidgets([...card.widgets, ...(next.widgets ?? [])]) };
     this.store.put('cards', kept.id, kept);
     return kept;
   }
