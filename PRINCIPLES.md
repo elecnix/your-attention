@@ -1,6 +1,6 @@
 # Design principles
 
-Each principle states what Your Attention does, with its reason below it. The priority line says when the code must follow the principle. Decide now means the architecture depends on it. Decide soon means before the first release, and can wait means a later refinement.
+Each principle states what Your Attention does, with its reason below it.
 
 Every change to this repo is checked against these principles. A change that breaks one either changes the code or amends the principle in the same pull request.
 
@@ -12,15 +12,11 @@ The agent picks the widgets that fit the question. A code review gets a diff, a 
 
 The right widget makes a card fast to answer, and some cards need more than the library offers, under a sandbox you choose to allow.
 
-Priority: decide now.
-
 ### Agents keep card templates and revise them from your feedback
 
 An agent saves a card format that works as a template. When you comment on a format, the agent writes a new template version and records your feedback with it. Agents manage templates first. Browsing them in the inbox is possible, but it comes later.
 
 Cards get easier to answer over time, and agents do that work for you.
-
-Priority: decide soon.
 
 ### Open pages update themselves
 
@@ -28,15 +24,11 @@ When a card, a template or the page code changes, the inbox pushes the change to
 
 You should never have to reload.
 
-Priority: decide now.
-
 ### A follow-up is a new card, linked both ways to the one before
 
 When an agent revises a card or needs you again, it sends a new card. The new card links back to the card it follows, and the old card links forward to its follow-up, so you can walk the chain in both directions. The card just before appears collapsed below the new one, with your answer, in the layout you answered it in.
 
 Cards stay short-lived, and the links let you trace a decision without a chat thread.
-
-Priority: decide soon.
 
 ### A new card never replaces the one you are reading
 
@@ -44,15 +36,11 @@ The card you have open remains on screen until you move on from it, by answering
 
 A card that changes under you loses your place and your train of thought.
 
-Priority: decide now.
-
 ### Cards link to other cards in their text
 
 A card can link to one or many other cards inside its question, as hypertext. A link always reads as the linked card full title, never a bare id. Hovering a link shows a preview of the card, or at least its title, and a click opens it in place. The inbox shows which cards link to the one you have open, and the follow-up chain is one kind of link among these.
 
 Decisions depend on each other, and a link you can read and preview costs less attention than one you must open.
-
-Priority: decide soon.
 
 ### Agents edit a card with small patches
 
@@ -60,15 +48,11 @@ To change a card, an agent sends edits against the card source, the way a coding
 
 Resending a large card for each small edit wastes tokens and hides what changed.
 
-Priority: decide soon.
-
 ### Secrets go to the agent sealed, and never into the conversation
 
 A secret card requests one value, such as an API key. The card contains a public key. The matching private key stays in the memory of the session that posted the card. Your browser encrypts the value with it before it leaves the page, so the inbox stores ciphertext only. The agent opens the value into a file that only your user account can read, and the model gets the path of the file. The value itself never appears in a transcript or a log.
 
 Agents need keys to finish their work, and a key typed into a chat remains in its transcript after the session ends.
-
-Priority: decide soon.
 
 ## Card quality
 
@@ -78,15 +62,11 @@ Triage is a pluggable extension that checks each card for a goal, the options th
 
 Your attention is the scarce input, and onboarding must be easy. Triage must never stand between you and a card when it is down.
 
-Priority: decide soon.
-
 ### Each card includes a recommendation
 
 The agent says what it would do and why. You accept it as it is, or say what to change.
 
 Reacting to a proposal is faster than writing an answer from a blank page.
-
-Priority: decide soon.
 
 ### Agents choose the answer options, guided by you
 
@@ -94,15 +74,11 @@ The agent picks the answer options for each card from your guidance. Choices suc
 
 Fixed buttons fit few questions, and guidance that is too precise turns into fixed buttons again.
 
-Priority: decide soon.
-
 ### Cards show a priority and come one at a time
 
 The inbox shows one card at a time, highest priority first. It comes with default priority levels and definitions, such as decide now, decide soon and can wait. Agents can rename the levels and change their definitions. A level can also be a rule written as a JavaScript expression. The inbox evaluates it in a sandbox, using card properties such as blocked work and wait time, the agent rating, and tags.
 
 A long list is hard to work through, and what counts as urgent differs by project.
-
-Priority: decide soon.
 
 ### Past answers are searchable, so agents ask once
 
@@ -110,23 +86,17 @@ The inbox keeps each card and its answer, and search over them returns in well u
 
 The same question from ten sessions should cost you one answer, and a slow search would push agents to ask again.
 
-Priority: can wait.
-
 ### Card guidance is shared, and you approve each broadcast
 
 The inbox keeps the guidance agents follow when they write cards: answer options, tone, what context to include. You ask an agent to change it. Agents fetch the current guidance, and a broadcast sends a change to agents that have no open card. Each broadcast first appears to you as a system card. There you pick the agents that receive it, and all agents are picked by default. It goes out only when you approve it.
 
 Guidance should change in one place, and nothing should reach all your agents without your approval.
 
-Priority: decide soon.
-
 ### Cards group by any property agents provide
 
 The queue has no grouping by default. The inbox offers grouping by priority and by agent first. You can also group by any property that agents attach to their cards, such as topic or tag. The set of groupings follows the properties that cards actually carry, and nobody has to declare them in advance.
 
 With 100 sessions, one long queue hides which work a set of cards belongs to.
-
-Priority: decide soon.
 
 ## Delivery
 
@@ -136,15 +106,11 @@ A card made from a harness blocker, such as an approval prompt, blocks the agent
 
 Most cards are voluntary, so blocking on them would stall the agent for no reason.
 
-Priority: decide now.
-
 ### You see how far your answer got
 
 Each answer shows its delivery state: stored, delivered to the harness, or read by the model. An answer queued behind a running tool call shows as delivered but unread. Until the model reads it, the answer waits in an outbox where you can force-send it.
 
 You need to know whether the model has your answer yet, and a way to push it through.
-
-Priority: decide now.
 
 ### Each card shows if its agent is listening, busy or offline
 
@@ -152,15 +118,11 @@ The card shows one of three states, updated in near real time: listening, busy (
 
 A fixed number of seconds cannot be guaranteed.
 
-Priority: decide now.
-
 ### An answer to an offline agent is kept, and agents can find it
 
 If the agent goes offline, the inbox stores your answer. It delivers the answer when the session resumes, or to a successor agent you pick. An unclaimed answer goes to a dead-letter queue, which agents can query and claim.
 
 Agents crash and sessions end. Your effort should outlast them, and a new session should be able to pick up what an old one missed.
-
-Priority: decide now.
 
 ### Each card has one clear state
 
@@ -168,15 +130,11 @@ A card is in one state at a time, shown on the card and in the list. The inbox s
 
 Your workflow will need states nobody listed here, and the agent that posted a card has the facts about where it stands.
 
-Priority: decide now.
-
 ### An agent can retract its card or answer it itself
 
 When an agent no longer needs an answer, it retracts the card or closes it with its own answer and a one-line outcome. The card changes state in the inbox at once, and the outcome stays on the card. You can still reply to a closed card, and the agent receives your reply. An answer from an agent is always marked as the agent's, and it is never shown as yours.
 
 Agents often find the answer on their own, and you must always see who answered.
-
-Priority: decide now.
 
 ### Cards change in front of you, with a trace
 
@@ -184,23 +142,17 @@ When a card changes or closes while you are looking at it, you see what happened
 
 A card that changes without a trace confuses you, and the presentation should be free to change.
 
-Priority: decide soon.
-
 ### Answered cards go to an outbox, then to sent
 
 When you answer a card, it leaves the queue and goes to the outbox. It moves to the sent list, newest first, once the model has read your answer. You can open a card in either list to read or change your answer.
 
 The top of the queue is for what needs you next, and the outbox shows what has not gone through yet.
 
-Priority: decide soon.
-
 ### Most cards are short-lived requests, and the conversation stays in the session
 
 Most cards ask for one thing and goes away once it is answered. It is never a chat. When an agent needs you again, it sends a new card, and it puts any explanation in the card text. A longer conversation happens in the session, one click away through the card origin. The inbox also handles long cards, such as a rich design spec.
 
 Short cards stay quick to answer. The inbox is flexible, but it does not replace documents or artifacts.
-
-Priority: decide now.
 
 ## Extensions
 
@@ -210,15 +162,11 @@ The core handles cards, answers, presence, delivery and templates. Triage, notif
 
 A small core runs anywhere, and the front-end is one client of the protocol among others.
 
-Priority: decide now.
-
 ### Extensions attach at named hook points, in process or out
 
 Each hook has one contract, whatever the deployment. The extension can be bundled into the build or run as a sidecar on localhost. It can also be an external service over HTTPS or WebSocket. Adding or moving an extension changes configuration, never the core. Each hook declares what a remote extension may do, which can be less than an in-process one. Extensions use their own message schema, separate from the messages agents and cards exchange.
 
 The triage filter may run in process on a laptop and as a separate service in the cloud. Remote code deserves fewer powers, and the extension contract should change without touching the agent protocol.
-
-Priority: decide now.
 
 ### Each hook declares its extension failure policy
 
@@ -226,15 +174,11 @@ A hook has a timeout and a declared policy: fail-open passes the card on, fail-c
 
 A slow or broken triage model must not freeze your inbox, or pass poor cards to you unless you chose that.
 
-Priority: decide soon.
-
 ### Cards can embed hosted documents, edited live
 
 An extension can embed a cloud document inside a card, such as a Google Doc or a Notion page. You edit it live in the card. The document stays in its own service, and the card contains the link and the question about it. When you edited the document before you answer, your answer carries the document version you submitted against. The agent can still add its own fields to the card, next to the document.
 
 A question about a document is easier to answer next to it, and the agent must know which version you approved.
-
-Priority: can wait.
 
 ## Integration
 
@@ -244,15 +188,11 @@ The inbox runs as one small process on a laptop, or as a Worker with Durable Obj
 
 Cards contain code, plans and secrets from your sessions, and self-hosting comes before any public service.
 
-Priority: decide soon.
-
 ### A hosted inbox works without an account and costs almost nothing to run
 
 On the hosted service, an inbox is created without a login, and its unguessable URL is the key to it: you bookmark it, and agents pair to it. Each inbox is one Durable Object that hibernates when idle, so an inbox nobody is using costs only its storage.
 
 No sign-up keeps onboarding to one step, and near-zero idle cost makes a free public service possible.
-
-Priority: can wait.
 
 ## Runs anywhere
 
@@ -262,15 +202,11 @@ The core uses fetch Request and Response, WebSocket, Web Crypto and JSON. The sa
 
 Web standards are the API that all these hosts share. A browser page can host the inbox for agents that reach it through an extension or a relay, since a page cannot accept connections.
 
-Priority: decide now.
-
 ### All state is in storage, and memory is a cache
 
 The inbox writes every card, answer and connection to disk, or to Durable Object storage, before it reports success. It does not keep anything important only in memory. So when a laptop crashes or a Durable Object goes to sleep, the inbox resumes exactly where it was. Timeouts use the platform alarm, which a restart keeps, never a timer inside the process.
 
 A laptop process can crash and a Durable Object can hibernate. Both must resume with no lost card.
-
-Priority: decide now.
 
 ### Each inbox has one writer
 
@@ -278,15 +214,11 @@ All changes to one inbox go through one place, one at a time. On a laptop that p
 
 This is how Durable Objects work, and one process on a laptop works the same way. Code that assumes many writers would need locks on both.
 
-Priority: decide now.
-
 ### Presence comes from connections, and it survives hibernation
 
 Each agent connection stores its agent id and last-seen time in the socket attachment and in storage, so a hibernated inbox still has the list of connected agents. When a connection misses its heartbeats, the inbox marks the agent offline in near real time.
 
 Hibernation clears memory while the sockets remain open. Presence must not depend on memory.
-
-Priority: decide now.
 
 ### Platform details sit behind small adapter interfaces
 
@@ -294,15 +226,11 @@ Storage, sockets, alarms, discovery and identity are adapters. The laptop build 
 
 Adding a platform means writing adapters, and nobody changes the core.
 
-Priority: decide now.
-
 ### One documented message model, with pluggable encodings
 
 Agents, pages and extensions exchange the same versioned messages. The encoding and the transport are plugins: JSON over WebSocket is the default, with server-sent events and long-poll for clients that cannot keep a socket. A binary encoding such as gRPC with protobuf can be added as a plugin, with no change to the core.
 
 One message model keeps every client compatible, and pluggable encodings let fast or constrained clients pick what fits.
-
-Priority: decide now.
 
 ### On a local network, the inbox advertises itself
 
@@ -310,15 +238,11 @@ The inbox advertises its address on a LAN with DNS-SD over mDNS, the protocol th
 
 Pairing makes the announcement safe: it tells the network only that an inbox exists. Agents on your machines then find it without a URL.
 
-Priority: decide soon.
-
 ### Every client proves who it is, even on a LAN
 
 Discovery only tells a client where the inbox is. A new agent or device pairs once. Its request appears to you as a system card with a code, and after you confirm it the client gets its own token. You can revoke each token.
 
 Anyone on the network can see an mDNS announcement, so finding the inbox must not grant access to it.
-
-Priority: decide soon.
 
 ### Agents connect to the inbox from wherever they run
 
@@ -326,23 +250,17 @@ Agents run in many places: your shell, containers, cloud sandboxes, CI, and remo
 
 Agents run in many places, and the inbox should come to them when they cannot come to it.
 
-Priority: decide now.
-
 ### The protocol and card lifecycle are a specification first, and code second
 
 The messages, card states and delivery rules are written down as a specification, with a conformance test suite. The reference inbox runs on Linux, macOS and Windows. A separate small build, written in Rust or C, can run a client or a minimal inbox on a microcontroller such as an ESP32.
 
 An ESP32 cannot run a JavaScript runtime, so the specification, not one codebase, is what keeps each build compatible.
 
-Priority: decide now.
-
 ### Many links to one inbox act as a mesh
 
 An inbox has one stable identity across all its links, whether direct, relayed, tunnelled over SSH, or offered by a bridge. Each message has a unique id, so a message that arrives over two links is delivered once. The inbox and each bridge send over the best working link, and switch when it fails.
 
 Several links make the inbox reachable, but they must never show you a card twice or lose an answer.
-
-Priority: decide soon.
 
 ## Where cards go
 
@@ -352,13 +270,9 @@ Cards from all sessions, harnesses and machines go to one inbox. You never open 
 
 You run about 100 sessions. A view per session does not work at that count.
 
-Priority: decide now.
-
 ### Each card shows where it came from, and one click takes you there
 
 A card shows the session name and id, the harness, and where the session runs. That place is a host name, cloud or local, plus the tmux, cmux or herdr pane. Clicking the origin opens that session, wherever it runs. The origin and the link are optional. An agent that cannot be linked still posts cards, and its cards show the facts it has.
 
 Sometimes you need the session itself, and some agents run where no link can go.
-
-Priority: decide soon.
 

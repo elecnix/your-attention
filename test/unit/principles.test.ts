@@ -21,10 +21,13 @@ describe('principles', () => {
     assert.doesNotMatch(read('inbox.ts'), /set(Timeout|Interval)\(/);
   });
 
-  it('every principle in PRINCIPLES.md has a reason and a priority', () => {
+  it('every principle in PRINCIPLES.md has a statement and a reason', () => {
     const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);
     assert.ok(sections.length >= 40, `found ${sections.length} principles`);
-    for (const s of sections) assert.match(s, /\nPriority: (decide now|decide soon|can wait)\.\n/, `principle "${s.split('\n')[0]}" lacks a priority line`);
+    for (const s of sections) {
+      const paragraphs = s.split('\n## ')[0]!.split('\n\n').slice(1).filter((p) => p.trim());
+      assert.ok(paragraphs.length >= 2, `principle "${s.split('\n')[0]}" needs a statement and a reason`);
+    }
   });
 });
