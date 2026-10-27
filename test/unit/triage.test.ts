@@ -58,6 +58,11 @@ describe('services', () => {
     assert.match(linux.content, /Restart=always/);
     assert.match(linux.content, /ExecStart=.* \/opt\/ya\/bin\/your-attention\.js serve/);
   });
+
+  it('stops each service through its service manager, which would restart a process that exits', () => {
+    assert.equal(serviceFile('serve', [], 'darwin').stop, 'launchctl bootout gui/$(id -u)/dev.your-attention.serve');
+    assert.equal(serviceFile('serve', [], 'linux').stop, 'systemctl --user stop your-attention-serve');
+  });
 });
 
 describe('triage under load', () => {

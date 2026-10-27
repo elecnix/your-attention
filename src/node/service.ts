@@ -10,6 +10,8 @@ export interface ServiceFile {
   path: string;
   content: string;
   start: string;
+  /** Stops the service until the next login. Exiting is not enough: the service manager would restart it. */
+  stop: string;
 }
 
 export function serviceFile(name: string, args: string[], platform: NodeJS.Platform = process.platform, bin = process.argv[1] ?? 'your-attention'): ServiceFile {
@@ -23,6 +25,7 @@ export function serviceFile(name: string, args: string[], platform: NodeJS.Platf
     return {
       path: file,
       start: `launchctl bootstrap gui/$(id -u) ${file}`,
+      stop: `launchctl bootout gui/$(id -u)/${label}`,
       content: `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -51,6 +54,7 @@ ${exec.map((a) => `    <string>${esc(a)}</string>`).join('\n')}
   return {
     path: file,
     start: `systemctl --user daemon-reload && systemctl --user enable --now your-attention-${name}`,
+    stop: `systemctl --user stop your-attention-${name}`,
     content: `[Unit]
 Description=your-attention ${name}
 

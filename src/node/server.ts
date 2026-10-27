@@ -39,6 +39,8 @@ export interface ServeOptions {
   /** Dial out to a relay and offer the inbox there. */
   relay?: { url: string; key: string };
   log?: (...args: unknown[]) => void;
+  /** Runs when the owner asks the inbox to stop. The default closes the server. */
+  onShutdown?: () => void;
 }
 
 export interface RunningServer {
@@ -90,6 +92,15 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const server = http.createServer(async (req, res) => {
     const pathname = (req.url ?? '/').split('?')[0] ?? '/';
     if (req.method === 'GET' && !pathname.startsWith('/v1/') && serveStatic(pathname, res)) return;
+    // `your-attention stop` asks here. Only the owner may stop the inbox, and only on this build.
+    if (req.method === 'POST' && pathname === '/v1/shutdown') {
+      const caller = await inbox.authenticate(/^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1]);
+      const status = !caller ? 401 : caller.role !== 'owner' ? 403 : 202;
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(status === 202 ? { ok: true } : { error: status === 401 ? 'Sign in first.' : 'Only the owner can stop the inbox.' }));
+      if (status === 202) setImmediate(opts.onShutdown ?? (() => void running.close()));
+      return;
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const headers = new Headers();
@@ -170,7 +181,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const relay = opts.relay ? relayClient({ relay: opts.relay.url, key: opts.relay.key, inboxId: inbox.id(), local: url, log }) : undefined;
   log(`inbox on ${url}${opts.mdns ? ', advertised over mDNS' : ''}`);
 
-  return {
+  const running: RunningServer = {
     url,
     port,
     ownerToken: secret,
@@ -186,6 +197,10 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       store.close();
+      // Forget the address, unless another server has written its own since.
+      const info = path.join(home, 'server.json');
+      try { if ((JSON.parse(fs.readFileSync(info, 'utf8')) as { pid?: number }).pid === process.pid) fs.rmSync(info); } catch {}
     },
   };
+  return running;
 }

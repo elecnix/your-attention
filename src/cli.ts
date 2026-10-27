@@ -1,5 +1,5 @@
 // your-attention <command>. Run it with no command for the list.
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,7 @@ import { serve } from './node/server.ts';
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
   serve [--port 4815] [--host 0.0.0.0] [--no-mdns]   run the inbox
+  stop                                                stop the inbox, or its service when one is installed
   open                                                open the inbox page in a browser
   login-url                                           print the page address with its sign-in token
   discover [--seconds 3]                              list inboxes on the LAN
@@ -59,10 +60,35 @@ switch (command) {
   case 'serve': {
     const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '0.0.0.0' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
     const relayKey = values.relay ? process.env[String(values['relay-key-env'])] ?? fail(`--relay needs the relay key in $${values['relay-key-env']}`) : '';
-    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined });
     const stop = async (): Promise<void> => { await server.close(); process.exit(0); };
+    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop() });
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
+    break;
+  }
+  case 'stop': {
+    // A service restarts the inbox when it exits, so stop the service itself when there is one.
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      const { serviceFile } = await import('./node/service.ts');
+      const unit = serviceFile('serve', []);
+      if (fs.existsSync(unit.path) && spawnSync('sh', ['-c', unit.stop], { stdio: 'ignore' }).status === 0) {
+        console.log(`Stopped the inbox service. It starts again at login, or now with: ${unit.start}`);
+        break;
+      }
+    }
+    const { url, owner } = localServer();
+    const res = await fetch(`${url}/v1/shutdown`, { method: 'POST', headers: { authorization: `Bearer ${owner}` } }).catch(() => undefined);
+    if (!res) {
+      fs.rmSync(path.join(homeDir(), 'server.json'), { force: true });
+      fail('No inbox runs on this machine. Start one with `your-attention serve`.');
+    }
+    if (res.status !== 202) fail(`The inbox on ${url} refused to stop: ${((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.status}`);
+    const end = Date.now() + 10_000;
+    while (await fetch(`${url}/v1/info`).then(() => true, () => false)) {
+      if (Date.now() > end) fail(`The inbox on ${url} is still running after 10 seconds.`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    console.log(`Stopped the inbox on ${url}.`);
     break;
   }
   case 'login-url': {

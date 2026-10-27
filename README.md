@@ -21,6 +21,7 @@ git clone https://github.com/elecnix/your-attention ~/Source/your-attention
 cd ~/Source/your-attention && npm ci && npm link
 your-attention serve &          # keep it running, for example as a launchd or systemd unit
 your-attention open             # opens the inbox page, signed in
+your-attention stop             # stops it, or its launchd or systemd service
 ```
 
 Claude Code: add the channel, then start sessions with it and confirm the development-channel warning.
