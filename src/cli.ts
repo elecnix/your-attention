@@ -22,7 +22,7 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
                                                       post a card, and with --wait print the answer
   claude-channel                                      the MCP channel server for Claude Code
-  claude-hook ask-pre|ask-post                        the AskUserQuestion hooks for Claude Code
+  claude-hook ask-pre|ask-post|ask-cancel             the AskUserQuestion hooks for Claude Code
   herdr-blocked                                       post a card for each herdr agent that is blocked
   triage [--judge-cmd "claude -p" | --judge-url URL --judge-model M --judge-key-env VAR]
                                                       check each card before you see it (OpenRouter by default)

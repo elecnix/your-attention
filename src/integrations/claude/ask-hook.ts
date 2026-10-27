@@ -3,12 +3,15 @@
 //           dialog opens too. The first answer wins: an answer on the card
 //           reaches the session through the channel.
 // ask-post: the terminal answered first, so the card closes with that outcome.
+// ask-cancel: the dialog ended without an answer: the person pressed Escape, the
+//           tool failed, the next prompt arrived, or the session ended. The card
+//           closes unless the person answered it on the card.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Client, loadConfig } from '../../client.ts';
 import { randomId } from '../../core/crypto.ts';
-import type { AskQuestion } from '../../core/types.ts';
+import type { AskQuestion, CloseKind } from '../../core/types.ts';
 import { homeDir } from '../../node/home.ts';
 
 interface HookInput {
@@ -37,11 +40,20 @@ export async function main(mode: string): Promise<void> {
   const sid = input.session_id;
   const config = loadConfig();
   // A hook must never stop the session, so every failure exits quietly.
-  if (input.tool_name !== 'AskUserQuestion' || !sid || !config) return;
+  // UserPromptSubmit and SessionEnd carry no tool name, and run ask-cancel for whatever is still pending.
+  if (!sid || !config || (input.tool_name ?? (mode === 'ask-cancel' ? 'AskUserQuestion' : '')) !== 'AskUserQuestion') return;
   const inbox = new Client(config);
   const pendingFile = path.join(homeDir(), 'claude', `${sid}.pending`);
+  // The inbox refuses each close when the person already answered on the card.
+  const closePending = async (kind: CloseKind, outcome: string): Promise<void> => {
+    let id: string;
+    try { id = fs.readFileSync(pendingFile, 'utf8').trim(); } catch { return; }
+    fs.rmSync(pendingFile, { force: true });
+    await inbox.close(id, kind, outcome, true).catch(() => {});
+  };
 
   if (mode === 'ask-pre') {
+    await closePending('resolved', 'The agent asked a new question in the terminal.');
     const questions = input.tool_input?.questions ?? [];
     const id = `ask-${randomId(4)}`;
     try {
@@ -59,11 +71,6 @@ export async function main(mode: string): Promise<void> {
     return;
   }
 
-  if (mode === 'ask-post') {
-    let id: string;
-    try { id = fs.readFileSync(pendingFile, 'utf8').trim(); } catch { return; }
-    fs.rmSync(pendingFile, { force: true });
-    // The inbox refuses this when the person already answered on the card.
-    await inbox.close(id, 'answered-in-terminal', terminalOutcome(input.tool_response), true).catch(() => {});
-  }
+  if (mode === 'ask-post') await closePending('answered-in-terminal', terminalOutcome(input.tool_response));
+  if (mode === 'ask-cancel') await closePending('resolved', 'The question was cancelled in the terminal.');
 }

@@ -24,19 +24,23 @@ your-attention open             # opens the inbox page, signed in
 your-attention stop             # stops it, or its launchd or systemd service
 ```
 
-Claude Code: add the channel, then start sessions with it and confirm the development-channel warning.
+Claude Code: add the channel, then start sessions with it and confirm the development-channel warning. Claude Code takes the channel only as a launch flag. To load it in every session, wrap `claude` in a shell function that adds the flag to interactive starts. Keep the `=` form: the flag takes a list, and would take a prompt after it as a second server.
 
 ```sh
 claude mcp add -s user your-attention -- your-attention claude-channel
 claude --dangerously-load-development-channels=server:your-attention
 ```
 
-To show `AskUserQuestion` questions as cards too, add two hooks to `~/.claude/settings.json`. Answer in either place. Your terminal answer closes the card, and a card answer goes to the session. In herdr, the terminal dialog closes too.
+To show `AskUserQuestion` questions as cards too, add these hooks to `~/.claude/settings.json`. Answer in either place. Your terminal answer closes the card, and a card answer goes to the session. In herdr, the terminal dialog closes too. When you cancel the dialog, or the session moves on without an answer, `ask-cancel` closes the card.
 
 ```json
 { "hooks": {
-  "PreToolUse":  [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "your-attention claude-hook ask-pre", "timeout": 10 }] }],
-  "PostToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "your-attention claude-hook ask-post", "timeout": 10 }] }]
+  "PreToolUse":         [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "your-attention claude-hook ask-pre", "timeout": 10 }] }],
+  "PostToolUse":        [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "your-attention claude-hook ask-post", "timeout": 10 }] }],
+  "PostToolUseFailure": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "your-attention claude-hook ask-cancel", "timeout": 10 }] }],
+  "PermissionDenied":   [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "your-attention claude-hook ask-cancel", "timeout": 10 }] }],
+  "UserPromptSubmit":   [{ "hooks": [{ "type": "command", "command": "your-attention claude-hook ask-cancel", "timeout": 10 }] }],
+  "SessionEnd":         [{ "hooks": [{ "type": "command", "command": "your-attention claude-hook ask-cancel", "timeout": 10 }] }]
 } }
 ```
 
