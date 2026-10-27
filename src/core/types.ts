@@ -163,6 +163,8 @@ export interface Card {
   attachments?: Attachment[];
   /** The template the body came from. */
   template?: { name: string; version: number };
+  /** The widgets the body placed, each at the version it used. */
+  widgets?: { name: string; version: number }[];
   priority: Priority;
   /** A state label the agent sets, such as "waiting on CI". */
   status?: string;

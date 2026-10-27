@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { startInbox, type TestInbox } from './inbox.ts';
 
@@ -243,4 +245,19 @@ test('opening the inbox selects a card waiting for you, never one you already se
   } finally {
     await own.close();
   }
+});
+
+test('a card shows each widget its body placed, filled with its own values', async ({ page }) => {
+  await inbox.agent.saveWidget('pull-request', fs.readFileSync(path.join(import.meta.dirname, '../../examples/widgets/pull-request.openui'), 'utf8'));
+  await inbox.agent.post({ id: 'prs', agent: 's-prs', title: 'Merge these two?', priority: 'now', options: [{ id: 'yes', label: 'Merge both' }], body: [
+    'root = Card([a, b])',
+    'a = widget pull-request {"title": "Add stop", "subtitle": "#12", "state": "CI green", "url": "https://github.com/elecnix/your-attention/pull/12"}',
+    'b = widget pull-request {"title": "Name agents", "subtitle": "#13", "state": "CI running", "url": "https://github.com/elecnix/your-attention/pull/13"}',
+  ].join('\n') });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Merge these two?' }).click();
+  await expect(page.locator('.focus-card').getByText('Add stop')).toBeVisible();
+  await expect(page.locator('.focus-card').getByText('CI running')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open the pull request' })).toHaveCount(2);
+  await expect(page.getByText('Merge both')).toBeVisible();
 });

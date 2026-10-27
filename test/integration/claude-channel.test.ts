@@ -35,7 +35,7 @@ after(async () => {
 describe('the Claude Code channel', () => {
   it('offers the card tools', async () => {
     const { tools } = await mcp.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_reply', 'card_search', 'card_status', 'card_template_save']);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_reply', 'card_search', 'card_status', 'card_template_save', 'card_widget_save']);
   });
 
   it('posts a card, pushes the answer into the session, and marks it read from the transcript', async () => {
@@ -105,6 +105,10 @@ describe('the batch of card model tools', () => {
     await mcp.callTool({ name: 'card_status', arguments: { card_id: 'cc-files', status: 'drafting' } });
     assert.match(JSON.stringify((await mcp.callTool({ name: 'card_template_save', arguments: { name: 'plan', source: 'root = Card([TextContent({{x}})])' } })).content), /version 1/);
     assert.match(JSON.stringify((await mcp.callTool({ name: 'card_guidance', arguments: {} })).content), /version 1/);
+    assert.match(JSON.stringify((await mcp.callTool({ name: 'card_widget_save', arguments: { name: 'pr', source: 'root = Card([head])\nhead = CardHeader({{title}}, {{repo}})' } })).content), /widget pr version 1/);
+    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-widget', title: 'Merge it?', body: 'root = Card([one])\none = widget pr {"title": "Add stop", "repo": "your-attention"}' } });
+    const placed = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-widget');
+    assert.match(placed?.body ?? '', /one_head = CardHeader\("Add stop", "your-attention"\)/);
     const after = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-files');
     assert.equal(after?.text, 'Draft two');
     assert.equal(after?.status, 'drafting');

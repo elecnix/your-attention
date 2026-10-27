@@ -1,6 +1,8 @@
 import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, SecretForm, cardSource } from '../components.js';
 import { h } from '../env.js';
 import { PNG, card, dataUrl, mount } from './render.js';
+import { expandWidgets } from '../../src/core/widgets.ts';
+import PULL_REQUEST from '../../examples/widgets/pull-request.openui?raw';
 
 export default { title: 'Cards' };
 
@@ -50,4 +52,17 @@ export const ClosedByAgent = {
 
 export const GuidanceBroadcast = {
   render: () => mount(h(BroadcastForm, { card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: 'Attach a screenshot to every UI card.', agents: ['claude:3239ab8e', 'pi:01a17c01', 'herdr:w1:p2'] } }), onDone: () => {} })),
+};
+
+// A saved widget, placed twice in one card. The inbox expands the placing lines when the card is posted.
+export const PullRequestWidgets = {
+  render: () => {
+    const body = expandWidgets([
+      'root = Card([intro, first, second])',
+      'intro = TextContent("Both pull requests pass CI. Merge them in this order?")',
+      'first = widget pull-request {"title": "Add your-attention stop", "subtitle": "elecnix/your-attention · #12", "state": "CI green · 1 approval", "url": "https://github.com/elecnix/your-attention"}',
+      'second = widget pull-request {"title": "Name agents by session", "subtitle": "elecnix/your-attention · #13", "state": "CI green · review requested", "url": "https://github.com/elecnix/your-attention"}',
+    ].join('\n'), () => ({ name: 'pull-request', version: 1, source: PULL_REQUEST })).body;
+    return mount(view(card({ title: 'Merge these two?', body, options: [{ id: 'yes', label: 'Merge both' }, { id: 'first', label: 'Only the first' }] })));
+  },
 };

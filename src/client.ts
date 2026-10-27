@@ -116,6 +116,7 @@ export class Client {
   patch(id: string, edits: { old: string; new: string }[], field?: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/patch`, { edits, field }); }
   status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
   saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
+  saveWidget(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback }); }
   guidance(): Promise<Guidance> { return this.call('GET', '/v1/guidance'); }
   proposeGuidance(text: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text }); }
   reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }

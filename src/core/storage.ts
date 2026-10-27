@@ -2,7 +2,7 @@
 // of a Durable Object, so each inbox change runs to completion before the next
 // one starts and needs no lock.
 
-export type Collection = 'cards' | 'answers' | 'tokens' | 'pairings' | 'presence' | 'meta' | 'templates' | 'messages';
+export type Collection = 'cards' | 'answers' | 'tokens' | 'pairings' | 'presence' | 'meta' | 'templates' | 'widgets' | 'messages';
 
 export interface SearchHit {
   card: string;

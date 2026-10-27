@@ -139,6 +139,18 @@ The inbox keeps the bytes of each `data:` attachment in its blob store, R2 in th
 
 `POST /v1/templates {name, source, feedback}` saves a new version of a template. `GET /v1/templates` lists them, and `GET /v1/templates/<name>` returns one with every version and the feedback each version answers.
 
+## Widgets
+
+A widget is a reusable part of a card, such as a pull request. Its source is OpenUI Lang with `{{name}}` placeholders, and it must define `root`. `POST /v1/widgets {name, source, feedback}` saves a new version, and `GET /v1/widgets` and `GET /v1/widgets/<name>` read them, as for templates. `card_widget_save` saves one from a coding agent.
+
+A card body or a template places a widget with a line of its own:
+
+```
+pr = widget pull-request {"title": "Add stop", "subtitle": "#12", "state": "CI green", "url": "https://github.com/elecnix/your-attention/pull/12"}
+```
+
+`pull-request@2` picks a version, and the latest is the default. When the card is posted, the inbox replaces the line with the widget's statements, and fills each placeholder with the JSON string of its value. The widget's `root` statement takes the placed name. Every other statement in the widget gets the placed name as a prefix, so a card can place one widget several times. Widgets can place widgets, up to 8 deep. The inbox answers 400 for a widget that places itself, and 404 for an unknown widget or version. The card records each widget it used, with its version, in `widgets`. A widget gets its values when the card is posted, and has no network access, so the agent revises the card when the pull request changes. `examples/widgets/pull-request.openui` is a pull request widget.
+
 ## Priority levels
 
 `GET /v1/priorities` returns the levels as `{id, label, definition, rule}`. Agents and the owner replace them with `PUT /v1/priorities`. A `rule` is an expression over the card: `kind`, `agent`, `priority`, `status`, `rating`, `tags`, `blocked`, `answered`, `waitMinutes` and `harness`. The grammar has comparisons, `&&`, `||`, `!`, arithmetic and `in`, and `src/core/expr.ts` parses it without `eval`. A card shows the first level whose rule matches it. Without a match, it shows the level that the agent gave. `GET /v1/state` returns that level per card in `priorities`.

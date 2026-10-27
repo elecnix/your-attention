@@ -35,7 +35,7 @@ const state = async () => (await (await h.owner('GET', '/v1/state')).json()) as 
 describe('the pi extension', () => {
   it('registers the card tools and connects on session start', async () => {
     yourAttention(pi as never);
-    assert.deepEqual([...tools.keys()].sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_reply', 'card_search', 'card_status', 'card_template_save']);
+    assert.deepEqual([...tools.keys()].sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_reply', 'card_search', 'card_status', 'card_template_save', 'card_widget_save']);
     await handlers.get('session_start')?.({}, ctx);
     await until(async () => (await state()).presence['pi:pi-session-1']?.online);
   });

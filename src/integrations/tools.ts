@@ -20,7 +20,7 @@ export const cardTools: CardTool[] = [
         multiple: { type: 'boolean', description: 'Allow more than one option.' },
         priority: { type: 'string', enum: ['now', 'soon', 'later'], description: 'now: blocks your work. soon: needed before you finish. later: can wait.' },
         follows: { type: 'string', description: 'The id of the card this one follows up on.' },
-        body: { type: 'string', description: 'Optional OpenUI Lang source for a card that needs other widgets.' },
+        body: { type: 'string', description: 'Optional OpenUI Lang source for a card that needs other components. Place a saved widget with a line of its own: `pr = widget pull-request {"title": "Add stop"}`, or `widget pull-request@2` for one version.' },
         tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Properties for grouping, such as topic.' },
         id: { type: 'string', description: 'Reuse an id to revise your own card.' },
         attachments: {
@@ -59,6 +59,11 @@ export const cardTools: CardTool[] = [
   {
     name: 'card_template_save',
     description: 'Save a card format that works as a template, in OpenUI Lang with {{name}} placeholders. Saving the same name again makes a new version; give the feedback the new version answers.',
+    schema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string' }, feedback: { type: 'string' } }, required: ['name', 'source'] },
+  },
+  {
+    name: 'card_widget_save',
+    description: 'Save a reusable part of a card, such as a pull request, in OpenUI Lang with {{name}} placeholders and a root statement. Cards and templates place it with a line `name = widget <widget> {json values}`, as often as they need. Saving the same name again makes a new version; give the feedback the new version answers.',
     schema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string' }, feedback: { type: 'string' } }, required: ['name', 'source'] },
   },
   {

@@ -6,6 +6,7 @@ import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
+import { expandWidgets, fill, type WidgetSource } from './widgets.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import type {
   AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, PageEvent, Pairing, Presence,
@@ -229,9 +230,14 @@ export class Inbox {
       const t = this.getTemplate(String(input.template.name));
       const v = input.template.version === undefined ? t.versions.at(-1) : t.versions.find((x) => x.version === input.template?.version);
       if (!v) throw new InboxError(404, 'unknown template version');
-      const vars = input.template.vars ?? {};
-      body = v.source.replace(/\{\{(\w+)\}\}/g, (_, k: string) => JSON.stringify(String(vars[k] ?? '')));
+      body = fill(v.source, input.template.vars ?? {});
       template = { name: t.name, version: v.version };
+    }
+    let widgets = before?.widgets;
+    if (body !== undefined) {
+      const expanded = expandWidgets(String(body), (name, version) => this.widgetVersion(name, version));
+      body = expanded.body;
+      widgets = expanded.used.length ? expanded.used : undefined;
     }
     let attachments = before?.attachments;
     if (input.attachments !== undefined) {
@@ -267,6 +273,7 @@ export class Inbox {
       html: input.html,
       attachments: attachments?.length ? attachments : undefined,
       template: template ?? before?.template,
+      widgets,
       priority,
       status: input.status ?? before?.status,
       expiresAt: input.expiresAt,
@@ -493,8 +500,13 @@ export class Inbox {
       if (count !== 1) throw new InboxError(409, `edit ${i + 1}: the old text occurs ${count} times in ${f}, and it must occur once`);
       text = text.replace(old, () => String(e.new ?? ''));
     }
-    const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, ...rest } = card;
-    return this.postCard(caller, { ...rest, [f]: text });
+    const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, widgets: _w, ...rest } = card;
+    const next = this.postCard(caller, { ...rest, [f]: text });
+    // A patch edits the body the widgets already filled, so the card still shows them.
+    if (!card.widgets || next.widgets) return next;
+    const kept = { ...next, widgets: card.widgets };
+    this.store.put('cards', kept.id, kept);
+    return kept;
   }
 
   /** The agent sets a state label on its own card. An empty label clears it. */
@@ -510,13 +522,42 @@ export class Inbox {
   // ---- templates ----
 
   saveTemplate(name: string, source: string, feedback?: string): Template {
-    if (!/^[\w.-]{1,60}$/.test(String(name ?? ''))) throw new InboxError(400, 'template name must be 1 to 60 letters, digits, dots, dashes or underscores');
+    return this.saveVersion('templates', 'template', name, source, feedback);
+  }
+
+  /** Templates and widgets keep every version, with the feedback each one answers. */
+  private saveVersion(kind: 'templates' | 'widgets', label: string, name: string, source: string, feedback?: string): Template {
+    if (!/^[\w.-]{1,60}$/.test(String(name ?? ''))) throw new InboxError(400, `${label} name must be 1 to 60 letters, digits, dots, dashes or underscores`);
     if (!String(source ?? '').trim()) throw new InboxError(400, 'source is required');
-    const before = this.store.get<Template>('templates', name);
+    const before = this.store.get<Template>(kind, name);
     const versions = before?.versions ?? [];
     const next: Template = { name, versions: [...versions, { version: versions.length + 1, source: String(source), feedback: feedback ? String(feedback) : undefined, at: this.now() }] };
-    this.store.put('templates', name, next);
+    this.store.put(kind, name, next);
     return next;
+  }
+
+  // ---- widgets ----
+
+  saveWidget(name: string, source: string, feedback?: string): Template {
+    if (!/^\s*root\s*=/m.test(String(source ?? ''))) throw new InboxError(400, 'a widget must define root, the part a card places');
+    return this.saveVersion('widgets', 'widget', name, source, feedback);
+  }
+
+  getWidget(name: string): Template {
+    const w = this.store.get<Template>('widgets', name);
+    if (!w) throw new InboxError(404, `unknown widget ${name}`);
+    return w;
+  }
+
+  listWidgets(): Template[] {
+    return this.store.list<Template>('widgets');
+  }
+
+  private widgetVersion(name: string, version?: number): WidgetSource {
+    const w = this.getWidget(name);
+    const v = version === undefined ? w.versions.at(-1) : w.versions.find((x) => x.version === version);
+    if (!v) throw new InboxError(404, `unknown version ${version} of widget ${name}`);
+    return { name, version: v.version, source: v.source };
   }
 
   getTemplate(name: string): Template {

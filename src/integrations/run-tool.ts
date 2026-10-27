@@ -72,6 +72,10 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const t = await inbox.saveTemplate(String(args['name'] ?? ''), String(args['source'] ?? ''), str(args['feedback']));
       return `Saved template ${t.name} version ${t.versions.length}. Use it with card_post, template "${t.name}" and vars.`;
     }
+    case 'card_widget_save': {
+      const w = await inbox.saveWidget(String(args['name'] ?? ''), String(args['source'] ?? ''), str(args['feedback']));
+      return `Saved widget ${w.name} version ${w.versions.length}. Place it in a card body or a template with a line: part = widget ${w.name} {"name": "value"}.`;
+    }
     case 'card_guidance': {
       if (args['propose']) {
         const card = await inbox.proposeGuidance(String(args['propose']));

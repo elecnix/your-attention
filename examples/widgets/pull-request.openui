@@ -1,0 +1,6 @@
+root = Card([line, head, state, open])
+line = Separator()
+head = CardHeader({{title}}, {{subtitle}})
+state = TextContent({{state}}, "small")
+open = Buttons([link], "row")
+link = Button("Open the pull request", @OpenUrl({{url}}), "secondary")

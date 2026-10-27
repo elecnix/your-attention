@@ -184,6 +184,15 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         return json(inbox.saveTemplate(String(t.name ?? ''), String(t.source ?? ''), t.feedback), 201);
       }
     }
+    if (a === 'widgets') {
+      if (method === 'GET' && !b) return json(inbox.listWidgets());
+      if (method === 'GET' && b) return json(inbox.getWidget(b));
+      if (method === 'POST' && !b) {
+        if (me.role === 'extension') throw new InboxError(403, 'extensions cannot change widgets');
+        const w = await readJson<{ name?: string; source?: string; feedback?: string }>(req);
+        return json(inbox.saveWidget(String(w.name ?? ''), String(w.source ?? ''), w.feedback), 201);
+      }
+    }
     if (a === 'priorities') {
       if (method === 'GET') return json(inbox.priorities());
       if (method === 'PUT') {
