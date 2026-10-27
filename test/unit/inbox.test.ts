@@ -358,3 +358,19 @@ describe('clearing the inbox', () => {
     assert.ok(inbox.getTemplate('t'));
   });
 });
+
+describe('an answer delivered to two processes of one agent at once', () => {
+  it('goes to neither of them again when they reconnect', async () => {
+    const { inbox, agentA } = setup();
+    inbox.postCard(agentA, { id: 'two', agent: 's1', title: 'q' });
+    const closeA = inbox.connect(agentA, 's1', () => {}, 'proc-a');
+    const closeB = inbox.connect(agentA, 's1', () => {}, 'proc-b');
+    await inbox.answer('two', {});
+    closeA(); closeB();
+    for (const instance of ['proc-a', 'proc-b']) {
+      const got: AgentEvent[] = [];
+      inbox.connect(agentA, 's1', (e) => got.push(e), instance)();
+      assert.equal(got.filter((e) => e.type === 'answer').length, 0, instance);
+    }
+  });
+});

@@ -203,8 +203,8 @@ export interface Answer {
   delivery: Delivery;
   savedAt: number;
   deliveredAt: number | null;
-  /** The agent process the answer went to last, so a restarted process gets an answer its earlier one never read. */
-  deliveredTo?: string;
+  /** The agent processes the answer went to, so a restarted process gets an answer its earlier ones never read. */
+  deliveredTo?: string[];
   readAt: number | null;
   forcedAt: number | null;
   previous: Omit<Answer, 'previous'>[];

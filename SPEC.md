@@ -194,7 +194,7 @@ If all three hold, the sidecar sends the choice's number with `herdr agent send-
 
 `POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
 
-`POST /v1/reset {"confirm": "reset"}` removes every card, answer and attached file, and it cannot be undone. Tokens, templates, widgets, settings and guidance stay. `your-attention reset --yes` calls it.
+`POST /v1/reset {"confirm": "reset"}` removes every card, answer and attached file, and it cannot be undone. Tokens, templates, widgets, settings and guidance stay. Only the owner can reset, and `your-attention reset --yes` calls it.
 
 ## Delivery
 
@@ -212,7 +212,7 @@ Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST 
 
 ## Pages
 
-`GET /v1/state` returns every card, answer, presence record and card state. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`.
+`GET /v1/state` returns every card except the cleared ones, answer, presence record and card state. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`.
 
 The tab icon is the ✋ emoji, `web/favicon.svg`. While a card waits for you, the page switches it to `web/favicon-waiting.svg`, which adds a red dot.
 

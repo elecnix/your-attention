@@ -893,11 +893,11 @@ export class Inbox {
   /** Send a new agent process each answer an earlier process received but never read, such as one a session got before it restarted. */
   private resend(token: string, agent: string, send: AgentSend, instance: string): void {
     for (const answer of this.store.list<Answer>('answers')) {
-      if (!answer.deliveredAt || answer.readAt || answer.deliveredTo === instance) continue;
+      if (!answer.deliveredAt || answer.readAt || answer.deliveredTo?.includes(instance)) continue;
       const card = this.store.get<Card>('cards', answer.card);
       if (!card || card.agent !== agent || (card.token ?? '') !== token || card.deliver !== 'stream') continue;
       if (cardState(card, answer) === 'closed') continue;
-      const next: Answer = { ...answer, deliveredTo: instance };
+      const next: Answer = { ...answer, deliveredTo: [...(answer.deliveredTo ?? []), instance] };
       this.store.put('answers', answer.card, next);
       send({ type: 'answer', id: randomId(6), card: publicCard(card), answer: next });
     }
@@ -912,8 +912,8 @@ export class Inbox {
       if (cardState(card, answer) === 'closed') continue;
       const subs = this.agents.get(this.key(card.token ?? '', agent));
       if (!subs || subs.size === 0) continue;
-      const to = [...subs].map((f) => this.instances.get(f)).find(Boolean);
-      const next: Answer = { ...answer, deliveredAt: this.now(), ...(to ? { deliveredTo: to } : {}) };
+      const to = [...subs].map((f) => this.instances.get(f)).filter((x): x is string => !!x);
+      const next: Answer = { ...answer, deliveredAt: this.now(), ...(to.length ? { deliveredTo: to } : {}) };
       this.store.put('answers', answer.card, next);
       const ev: AgentEvent = { type: 'answer', id: randomId(6), card: publicCard(card), answer: next };
       for (const send of subs) send(ev);
