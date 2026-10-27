@@ -14,8 +14,8 @@ export const cardTools: CardTool[] = [
       type: 'object',
       properties: {
         title: { type: 'string', description: 'The question, in one line.' },
-        text: { type: 'string', description: 'Context: the goal, the options you weighed, and the evidence.' },
-        recommendation: { type: 'string', description: 'What you would do, and why.' },
+        text: { type: 'string', description: 'Context: the goal, the options you weighed, and the evidence. Markdown: [label](https://...) links, lists, **bold**, `code`, tables. A bare https address becomes a link, and [[card-id]] links to another card.' },
+        recommendation: { type: 'string', description: 'What you would do, and why. Markdown, like text.' },
         options: { type: 'array', items: { type: 'string' }, description: 'Answer options shaped to this question. Every option is optional to the person.' },
         multiple: { type: 'boolean', description: 'Allow more than one option.' },
         priority: { type: 'string', enum: ['now', 'soon', 'later'], description: 'now: blocks your work. soon: needed before you finish. later: can wait.' },

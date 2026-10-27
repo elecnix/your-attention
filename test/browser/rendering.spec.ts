@@ -261,3 +261,27 @@ test('a card shows each widget its body placed, filled with its own values', asy
   await expect(page.getByRole('button', { name: 'Open the pull request' })).toHaveCount(2);
   await expect(page.getByText('Merge both')).toBeVisible();
 });
+
+test('card text renders Markdown links, lists and bare addresses, and keeps its line breaks and card links', async ({ page }) => {
+  await inbox.agent.post({ id: 'md-target', agent: 's-md', title: 'The earlier decision', priority: 'later' });
+  await inbox.agent.post({ id: 'md-text', agent: 's-md', title: 'Merge order?', priority: 'now', text: [
+    'Goal: merge **three** pull requests.',
+    'Second line of the goal.',
+    '',
+    '1. [#12, fix the build](https://github.com/example/repo/pull/12). Ready.',
+    '2. Ticket https://example.com/T-4, see [[md-target]].',
+    '',
+    'A [bad link](javascript:alert(1)) stays text.',
+  ].join('\n') });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Merge order?' }).click();
+  const text = page.locator('.card-text');
+  await expect(text.locator('a[href="https://github.com/example/repo/pull/12"]')).toHaveText('#12, fix the build');
+  await expect(text.locator('a[href="https://example.com/T-4"]')).toHaveText('https://example.com/T-4');
+  await expect(text.locator('ol li')).toHaveCount(2);
+  await expect(text.locator('strong')).toHaveText('three');
+  await expect(text.locator('p').first()).toHaveText('Goal: merge three pull requests.\nSecond line of the goal.');
+  await expect(text.locator('li a.card-link')).toHaveText('The earlier decision');
+  await expect(text.locator('a[href^="javascript"]')).toHaveCount(0);
+  await expect(text).toContainText('bad link');
+});

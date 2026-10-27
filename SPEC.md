@@ -127,7 +127,7 @@ The inbox refuses any other value on a secret card, so plain text never reaches 
 
 `POST /v1/cards/<id>/status {status}` sets the agent's state label. An empty label clears it.
 
-Text in `text` links to another card with `[[card-id]]`. The page shows the title of the linked card and previews its text on hover. Below the card you have open, it lists the cards that link to it.
+The page renders `text` as Markdown: headings, lists, block quotes, fenced code, tables, inline code, bold, italic, and links to http, https and mailto addresses. A bare http or https address becomes a link, and a line break stays a line break. A link with any other scheme shows its label only. OpenUI renders `recommendation`, and reads Markdown there too. Text in `text` links to another card with `[[card-id]]`. The page shows the title of the linked card and previews its text on hover. Below the card you have open, it lists the cards that link to it.
 
 ## Attachments
 

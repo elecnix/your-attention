@@ -146,16 +146,15 @@ export function SecretForm({ card, onSent, onSkip }) {
 }
 
 // Card text with [[card-id]] links. A link shows the linked card title, and its text on hover.
+// Card text is Markdown, and [[card-id]] links to another card by its title.
 export function LinkedText({ text, byId, open }) {
-  const parts = String(text).split(/(\[\[[\w.:-]+\]\])/);
-  return h('div', { className: 'card-text' }, parts.map((p, i) => {
-    const m = /^\[\[([\w.:-]+)\]\]$/.exec(p);
-    if (!m) return h(React.Fragment, { key: i }, p);
-    const target = byId[m[1]];
-    if (!target) return h('span', { key: i, className: 'dead-link', title: 'This card is not in the inbox' }, m[1]);
+  const cardLink = (id, key) => {
+    const target = byId[id];
+    if (!target) return h('span', { key, className: 'dead-link', title: 'This card is not in the inbox' }, id);
     const preview = [target.title, target.text].filter(Boolean).join('\n\n').slice(0, 400);
-    return h('a', { key: i, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
-  }));
+    return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
+  };
+  return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true }));
 }
 
 export const isImage = (t) => /^image\/(png|jpeg|gif|webp)$/.test(t);

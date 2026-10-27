@@ -114,6 +114,8 @@
   .status { font-size: calc(12px * var(--text-scale)); padding: 2px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
   .status.warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
   .card-text { white-space: pre-wrap; margin: 0 0 12px; }
+  .card-text > :first-child { margin-top: 0; }
+  .card-text p, .card-text ul, .card-text ol { margin: 0 0 8px; }
   .card-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
   .dead-link { color: var(--muted); text-decoration: line-through; }
   .attachments { display: grid; gap: 12px; margin: 0 0 12px; }
