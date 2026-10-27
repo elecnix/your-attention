@@ -18,7 +18,7 @@ export function App() {
   const seenRef = React.useRef(null);
   const reportedFocus = React.useRef(undefined);
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
-  const [queueWidth, setQueueWidth] = React.useState(() => store.get('queueWidth') || QUEUE_WIDTH);
+  const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
 
   const refresh = React.useCallback(() => fetch(BASE + 'v1/state').then((r) => {
     if (r.status === 401) { setAuth('needed'); return null; }

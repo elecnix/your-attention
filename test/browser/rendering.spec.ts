@@ -126,3 +126,10 @@ test('the top bar links to the project on GitHub', async ({ page }) => {
   await expect(link).toHaveAttribute('href', 'https://github.com/elecnix/your-attention');
   await expect(link.locator('svg')).toBeVisible();
 });
+
+test('a queue width saved on a wider window shrinks to fit a narrower one', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('queueWidth', '2000'));
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await inbox.open(page);
+  expect((await page.locator('.queue').boundingBox())!.width).toBeLessThanOrEqual(640);
+});
