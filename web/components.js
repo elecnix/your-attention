@@ -159,7 +159,8 @@ export function LinkedText({ text, byId, open }) {
 }
 
 export const isImage = (t) => /^image\/(png|jpeg|gif|webp)$/.test(t);
-export const fileUrl = (f) => f.url || `${BASE}v1/attachments/${encodeURIComponent(f.id)}`;
+// An agent's URL is used only when it is https: a javascript: or data: link must never reach an href.
+export const fileUrl = (f) => (f.id ? `${BASE}v1/attachments/${encodeURIComponent(f.id)}` : /^https:\/\//i.test(String(f.url || '')) ? f.url : 'about:blank');
 export const sizeText = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
 // One attached file, rendered by its type: Markdown, CSV and JSON in place, PDF in a frame, anything else as a download.

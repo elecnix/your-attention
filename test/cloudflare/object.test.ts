@@ -9,7 +9,7 @@ class FakeSocket {
   sent: string[] = [];
   attachment: unknown;
   closed: number | undefined;
-  lastPong = new Date();
+  lastPong: Date | null = new Date();
   send(t: string) { this.sent.push(t); }
   close(code: number) { this.closed = code; }
   serializeAttachment(a: unknown) { this.attachment = structuredClone(a); }
@@ -99,6 +99,18 @@ describe('the inbox Durable Object', () => {
     obj = rt.make();
     await call(obj, 'POST', '/v1/cards/c2/answer', owner, {});
     assert.ok(server.events().some((e) => e.type === 'answer'));
+  });
+
+  it('closes a socket that never pinged, counting from when it opened', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    await obj.fetch(new Request('https://inbox/v1/ws?agent=quiet', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
+    const server = rt.sockets[0]! as FakeSocket & { lastPong: Date | null };
+    server.lastPong = null;
+    (server.attachment as { connectedAt: number }).connectedAt = Date.now() - 120_000;
+    await obj.alarm();
+    assert.equal(server.closed, 1001);
   });
 
   it('closes a socket that stopped answering heartbeats, and the agent goes offline', async () => {

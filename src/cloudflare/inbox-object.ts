@@ -13,12 +13,36 @@ interface SocketAttachment {
   agent: string;
   token?: string;
   role?: Role;
+  /** When the socket opened, the start of its heartbeat clock until its first ping. */
+  connectedAt?: number;
 }
 
 /** A socket closes when it has not answered a heartbeat for this long. */
 const HEARTBEAT_LIMIT_MS = 60_000;
 /** How often the alarm checks heartbeats while agent sockets are open. */
 const HEARTBEAT_CHECK_MS = 30_000;
+
+/** Redeems invite codes one at a time, so a code with one use left creates one inbox, however many requests race.
+ * The operator sets the uses in KV; this object counts the uses taken. */
+export class RegistryObject {
+  private readonly ctx: DurableObjectState;
+  private readonly env: Env;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    this.ctx = ctx;
+    this.env = env;
+  }
+
+  async fetch(req: Request): Promise<Response> {
+    const { code } = (await req.json()) as { code?: string };
+    const allowed = Number(await this.env.INVITES.get(`invite:${String(code ?? '')}`)) || 0;
+    // Durable Object storage calls queue behind each other, so this read and write cannot interleave with another request's.
+    const used = (await this.ctx.storage.get<number>(`used:${code}`)) ?? 0;
+    if (!code || used >= allowed) return Response.json({ ok: false });
+    await this.ctx.storage.put(`used:${code}`, used + 1);
+    return Response.json({ ok: true, left: allowed - used - 1 });
+  }
+}
 
 export class InboxObject {
   private readonly ctx: DurableObjectState;
@@ -73,7 +97,7 @@ export class InboxObject {
       const pair = new WebSocketPair();
       const server = pair[1];
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ agent, token: token?.id, role: token?.role } satisfies SocketAttachment);
+      server.serializeAttachment({ agent, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
       this.attach(server);
       await this.schedule();
       return new Response(null, { status: 101, webSocket: pair[0] });
@@ -110,7 +134,7 @@ export class InboxObject {
     this.inbox.sweep();
     const now = Date.now();
     for (const ws of this.ctx.getWebSockets()) {
-      const last = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? now;
+      const last = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? (ws.deserializeAttachment() as SocketAttachment).connectedAt ?? now;
       if (now - last > HEARTBEAT_LIMIT_MS) {
         this.sockets.get(ws)?.close();
         this.sockets.delete(ws);

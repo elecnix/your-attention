@@ -2,10 +2,11 @@
 // deploys their own. MODE "hosted" serves many: each inbox is created with an
 // invite code, lives at an unguessable /i/<id>/ address, and is one Durable
 // Object that hibernates when nobody uses it.
-import { InboxObject } from './inbox-object.ts';
+import { InboxObject, RegistryObject } from './inbox-object.ts';
 
 export interface Env {
   INBOX: DurableObjectNamespace;
+  REGISTRY: DurableObjectNamespace;
   FILES: R2Bucket;
   ASSETS: Fetcher;
   /** Invite codes for the hosted service: "invite:<code>" holds the uses left. Inbox ids: "inbox:<id>". */
@@ -55,10 +56,8 @@ export default {
     if (url.pathname === '/new' && req.method === 'POST') {
       const { invite } = (await req.json().catch(() => ({}))) as { invite?: string };
       const code = String(invite ?? '').trim();
-      const left = code ? Number(await env.INVITES.get(`invite:${code}`)) : 0;
-      if (!left) return json({ error: 'That invite code is not valid.' }, 403);
-      if (left <= 1) await env.INVITES.delete(`invite:${code}`);
-      else await env.INVITES.put(`invite:${code}`, String(left - 1));
+      const redeemed = code ? (await (await env.REGISTRY.get(env.REGISTRY.idFromName('invites')).fetch('https://registry/redeem', { method: 'POST', body: JSON.stringify({ code }) })).json()) as { ok: boolean } : { ok: false };
+      if (!redeemed.ok) return json({ error: 'That invite code is not valid.' }, 403);
       const id = hex(16);
       await env.INVITES.put(`inbox:${id}`, String(Date.now()));
       const res = await env.INBOX.get(env.INBOX.idFromName(id)).fetch('https://inbox/_init', { method: 'POST', body: '{}' });
@@ -69,7 +68,9 @@ export default {
     const m = /^\/i\/([0-9a-f]{32})(\/.*)?$/.exec(url.pathname);
     if (!m) return json({ error: 'not found' }, 404);
     const id = m[1] ?? '';
-    const rest = m[2] ?? '/';
+    // The page finds the API next to its own address, so the address must end with a slash.
+    if (m[2] === undefined) return Response.redirect(`${url.origin}/i/${id}/${url.search}`, 301);
+    const rest = m[2];
     // An address nobody created reaches no Durable Object, so guessing costs nothing to run.
     if (!(await env.INVITES.get(`inbox:${id}`))) return json({ error: 'no inbox at this address' }, 404);
     if (rest.startsWith('/v1/')) return toInbox(env, id, req, rest, url.search);
@@ -77,4 +78,4 @@ export default {
   },
 };
 
-export { InboxObject };
+export { InboxObject, RegistryObject };

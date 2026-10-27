@@ -310,3 +310,21 @@ describe('fixes from the dogfood run', () => {
     assert.deepEqual(inbox.search('cache', 20, true).map((r) => r.card.id), ['a2']);
   });
 });
+
+describe('fixes from the last review', () => {
+  it('lets a message id be applied again after a reservation goes stale', () => {
+    let t = 0;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    inbox.rememberMessage('k', 0, '');
+    assert.equal(inbox.recallMessage('k')?.status, 0);
+    t = 31_000;
+    assert.equal(inbox.recallMessage('k'), undefined);
+  });
+
+  it('leaves an answered card out of the next deadline', async () => {
+    const inbox = new Inbox(new MemoryStorage(), () => 1000);
+    inbox.postCard({ token: 'ta', role: 'agent' }, { id: 'c1', agent: 's1', title: 'q', expiresAt: 5000 });
+    await inbox.answer('c1', {});
+    assert.equal(inbox.nextDeadline(), undefined);
+  });
+});

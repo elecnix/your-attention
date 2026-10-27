@@ -34,6 +34,8 @@ const HISTORY_LIMIT = 20;
 export const PRESENCE_GRACE_MS = 2000;
 /** How long the inbox remembers a message id, to apply a message once however many links bring it. */
 export const MESSAGE_MEMORY_MS = 24 * 60 * 60 * 1000;
+/** How long a message id stays reserved while its first copy is applied. */
+export const MESSAGE_RESERVATION_MS = 30_000;
 /** An open card whose agent has been offline this long is orphaned. */
 export const ORPHAN_MS = 60 * 60 * 1000;
 export const DEFAULT_PRIORITIES: PriorityLevel[] = [
@@ -109,7 +111,7 @@ export class Inbox {
     for (const p of this.store.list<Pairing>('pairings')) if (p.status === 'pending') times.push(p.createdAt + PAIRING_TTL_MS);
     for (const c of this.store.list<Card>('cards')) {
       if (c.triage?.state === 'pending' && c.triage.deadline) times.push(c.triage.deadline);
-      if (c.expiresAt && !c.closed) times.push(c.expiresAt);
+      if (c.expiresAt && !c.closed && !this.store.get('answers', c.id)) times.push(c.expiresAt);
     }
     return times.length ? Math.min(...times) : undefined;
   }
@@ -796,7 +798,10 @@ export class Inbox {
 
   /** The stored result of a message this client sent before, by its id. */
   recallMessage(key: string): { status: number; body: string } | undefined {
-    return this.store.get<{ status: number; body: string }>('messages', key);
+    const m = this.store.get<{ status: number; body: string; at: number }>('messages', key);
+    // A reservation whose request died, such as in a crash, lets the message be applied again.
+    if (m && m.status === 0 && this.now() - m.at > MESSAGE_RESERVATION_MS) return undefined;
+    return m;
   }
 
   rememberMessage(key: string, status: number, body: string): void {

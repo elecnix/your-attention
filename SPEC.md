@@ -7,7 +7,7 @@ This file specifies the messages, card states and delivery rules that every inbo
 Messages are JSON over HTTP. Agents receive events in whichever of three ways their environment allows:
 
 - `GET /v1/stream?agent=<id>`: server-sent events, the default. Pages use `GET /v1/events` the same way.
-- `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The inbox pings every 15 seconds and drops a socket that misses a pong.
+- `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The client sends `{"type":"ping"}` every 20 seconds and gets `{"type":"pong"}`. An inbox closes a socket that sends nothing for 60 seconds, and the laptop build also sends WebSocket ping frames every 15 seconds.
 - `GET /v1/poll?agent=<id>&wait=25`: a long-poll that returns `{events}` at the first answer, or after `wait` seconds.
 
 Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one. The inbox reports an agent offline 2 seconds after its last connection closes, so a reconnect or the next poll does not flicker its presence.
@@ -200,7 +200,7 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 
 With `MODE` set to `single`, the Worker serves one inbox, whose owner token is the `OWNER_TOKEN` secret. With `MODE` set to `hosted`, it serves many:
 
-- `POST /new {invite}` takes one use of an invite code, stored in KV as `invite:<code>` with the uses left, and returns the address of a new inbox and its owner sign-in link.
+- `POST /new {invite}` takes one use of an invite code and returns the address of a new inbox and its owner sign-in link. KV keeps `invite:<code>` with the number of uses the operator allows, and a registry Durable Object counts the uses taken, one request at a time.
 - Each inbox is at `/i/<id>/`, where `id` is 32 random hex digits. Whoever knows the address can sign in with its token, so the person bookmarks the address and keeps it private. The Worker checks KV for `inbox:<id>` first, so an address nobody created reaches no Durable Object.
 - The operator manages invites with `wrangler kv key put invite:<code> <uses> --binding INVITES --remote`.
 

@@ -23,10 +23,12 @@ const freePort = (): Promise<number> => new Promise((r) => {
 
 before(async () => {
   // An invite code with two uses, as the operator would add with `wrangler kv key put`.
-  const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:test-code', '2', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8' });
+  // A .cmd file runs only through a shell on Windows.
+  const shell = process.platform === 'win32';
+  const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:test-code', '2', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell });
   assert.equal(seed.status, 0, seed.stderr);
   const port = await freePort();
-  dev = spawn(WRANGLER, ['dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--var', 'MODE:hosted', '--persist-to', persist, '--show-interactive-dev-session=false'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  dev = spawn(WRANGLER, ['dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--var', 'MODE:hosted', '--persist-to', persist, '--show-interactive-dev-session=false'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell });
   let out = '';
   dev.stdout?.on('data', (d) => { out += String(d); });
   dev.stderr?.on('data', (d) => { out += String(d); });
@@ -72,7 +74,18 @@ describe('the hosted Cloudflare build', () => {
     assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'test-code' }) })).status, 403, 'the code had two uses');
   });
 
+  it('redeems a one-use code once when requests race for it', async () => {
+    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:race', '1', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
+    assert.equal(seed.status, 0, seed.stderr);
+    // The running dev server reads KV from the same folder, so it sees the new code.
+    const all = await Promise.all(Array.from({ length: 6 }, () => fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'race' }) })));
+    assert.equal(all.filter((r) => r.status === 201).length, 1);
+  });
+
   it('serves the page under the inbox address, and nothing at an address nobody created', async () => {
+    const bare = await fetch(inbox, { redirect: 'manual' });
+    assert.equal(bare.status, 301);
+    assert.equal(bare.headers.get('location'), `${inbox}/`);
     assert.match(await (await fetch(`${inbox}/`)).text(), /<title>Your Attention<\/title>/);
     assert.equal((await fetch(`${inbox}/vendor/openui-bundle.min.js`)).status, 200);
     assert.equal((await fetch(`${base}/i/${'0'.repeat(32)}/v1/info`)).status, 404);

@@ -184,13 +184,19 @@ export class Client {
       const stop = (): void => ws.close();
       signal.addEventListener('abort', stop, { once: true });
       // The global WebSocket cannot send headers, so the token goes in the first frame.
-      ws.addEventListener('open', () => { opened = true; ws.send(JSON.stringify({ type: 'auth', token: this.token })); });
+      // The client pings every 20 seconds. A Durable Object answers without waking, and closes a socket that stops.
+      let beat: ReturnType<typeof setInterval> | undefined;
+      ws.addEventListener('open', () => {
+        opened = true;
+        ws.send(JSON.stringify({ type: 'auth', token: this.token }));
+        beat = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send('{"type":"ping"}'); }, 20_000);
+      });
       ws.addEventListener('message', (m) => {
         let ev: { type?: string } | null;
         try { ev = JSON.parse(String(m.data)) as { type?: string } | null; } catch { return ws.close(); }
         if (ev && typeof ev === 'object' && ev.type !== 'pong' && ev.type !== 'error') deliver(ev as AgentEvent).catch(() => ws.close());
       });
-      ws.addEventListener('close', () => { signal.removeEventListener('abort', stop); resolve(opened); });
+      ws.addEventListener('close', () => { if (beat !== undefined) clearInterval(beat); signal.removeEventListener('abort', stop); resolve(opened); });
     });
   }
 
