@@ -1,9 +1,10 @@
 name: deploy-cloudflare
 
-# Run by hand from the Actions tab. It needs, in the "cloudflare" environment:
-#   secrets   CLOUDFLARE_API_TOKEN (Workers, Durable Objects, R2 and KV edit) and CLOUDFLARE_ACCOUNT_ID
-#   variable  KV_NAMESPACE_ID, the namespace for invite codes and inbox ids (`wrangler kv namespace create INVITES`)
-# In single mode, also set the OWNER_TOKEN secret on the Worker: `wrangler secret put OWNER_TOKEN`.
+# Run by hand from the Actions tab. `cloudflare/main.tf` creates the KV namespace, the R2 bucket and the
+# deploy token. The workflow needs, in the "cloudflare" environment:
+#   secrets   CLOUDFLARE_API_TOKEN (the deploy token: Workers Scripts Write, Account Settings Read) and CLOUDFLARE_ACCOUNT_ID
+#   variable  KV_NAMESPACE_ID, the namespace for invite codes and inbox ids
+#   secret    OWNER_TOKEN, in single mode: the owner token the Worker gets as its OWNER_TOKEN secret
 on:
   workflow_dispatch:
     inputs:
@@ -56,6 +57,14 @@ jobs:
           MODE: ${{ inputs.mode }}
         run: |
           sed -i "s/REPLACE_WITH_KV_NAMESPACE_ID/${KV_NAMESPACE_ID}/" wrangler.jsonc
-          npx wrangler r2 bucket create your-attention-files || echo "the bucket exists already"
           npm run cloudflare:build
           npx wrangler deploy --var "MODE:${MODE}"
+      - name: set the owner token
+        if: inputs.mode == 'single'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OWNER_TOKEN: ${{ secrets.OWNER_TOKEN }}
+        run: |
+          if [ -z "$OWNER_TOKEN" ]; then echo "::error::single mode needs the OWNER_TOKEN secret"; exit 1; fi
+          printf %s "$OWNER_TOKEN" | npx wrangler secret put OWNER_TOKEN

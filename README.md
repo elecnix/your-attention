@@ -73,13 +73,18 @@ your-attention offer ssh build-box
 YOUR_ATTENTION_RELAY_KEY=... your-attention serve --relay https://relay.example
 ```
 
-On Cloudflare, one Durable Object per inbox hibernates when idle. Create a KV namespace, add the secrets that `deploy-cloudflare.yml` lists, then run that workflow from the Actions tab:
+On Cloudflare, one Durable Object per inbox hibernates when idle. `cloudflare/main.tf` creates the KV namespace, the R2 bucket and a deploy token that can change Workers only. Its state contains that token, so it stays outside the repo. Put the outputs in the repo's `cloudflare` environment, as `deploy-cloudflare.yml` lists, then run that workflow from the Actions tab:
 
 ```sh
-npx wrangler kv namespace create INVITES        # its id goes in the KV_NAMESPACE_ID variable
-npx wrangler secret put OWNER_TOKEN             # single mode: your owner token
+export CLOUDFLARE_API_TOKEN=...                  # an account token that can create tokens, KV and R2
+terraform -chdir=cloudflare init -backend-config="path=$HOME/.your-attention/cloudflare.tfstate"
+terraform -chdir=cloudflare apply -var account_id=<account id>
+terraform -chdir=cloudflare output -raw deploy_token | gh secret set CLOUDFLARE_API_TOKEN --env cloudflare
+gh variable set KV_NAMESPACE_ID --env cloudflare --body "$(terraform -chdir=cloudflare output -raw kv_namespace_id)"
 npx wrangler kv key put invite:<code> 5 --binding INVITES --remote   # hosted mode: an invite with 5 uses
 ```
+
+Single mode also needs `CLOUDFLARE_ACCOUNT_ID` and an `OWNER_TOKEN` secret in that environment. The account needs R2 enabled once in the dashboard, and a workers.dev subdomain.
 
 Another machine on the LAN finds the inbox and pairs with it. Approve the card that shows the same code.
 
