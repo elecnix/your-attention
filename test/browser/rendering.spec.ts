@@ -286,7 +286,7 @@ test('card text renders Markdown links, lists and bare addresses, and keeps its 
   await expect(text).toContainText('bad link');
 });
 
-test('the tab icon is the amber hand, with a red dot while a card waits for you', async ({ page }) => {
+test('the tab icon is the ✋ emoji, with a red dot while a card waits for you', async ({ page }) => {
   const own = await startInbox();
   try {
     const icon = page.locator('link[rel="icon"]');

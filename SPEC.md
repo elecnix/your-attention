@@ -194,7 +194,7 @@ Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST 
 
 `GET /v1/state` returns every card, answer, presence record and card state. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`.
 
-The tab icon is an amber raised hand, `web/favicon.svg`. While a card waits for you, the page switches it to `web/favicon-waiting.svg`, which adds a red dot.
+The tab icon is the ✋ emoji, `web/favicon.svg`. While a card waits for you, the page switches it to `web/favicon-waiting.svg`, which adds a red dot.
 
 ## Search
 
