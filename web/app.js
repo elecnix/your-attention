@@ -153,7 +153,7 @@ export function App() {
 
   async function onAction(c, ev) {
     if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return next();
-    if (c.kind === 'blocked') return api(`${BASE}v1/cards/${c.id}/open`, {});
+    if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
     const { values, comment } = formValues(ev.formState);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version });
     store.del(`draft:${c.id}:${c.version}`);

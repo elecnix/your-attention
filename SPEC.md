@@ -178,6 +178,18 @@ pr = widget pull-request {"title": "Add stop", "subtitle": "#12", "state": "CI g
 
 An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered.
 
+## Blocked agents in herdr
+
+`your-attention herdr-blocked` posts a `blocked` card for each agent herdr reports as blocked, and closes the card once the agent moves on. The card shows the agent's screen. When the screen shows numbered choices, such as a permission prompt or a question, the card's `text` is the question and its `options` are the choices. A choice that opens a text box is left out.
+
+You pick a choice and press **Press it in the session**. The sidecar receives the answer on the card's stream, then checks three things before it sends a key to that pane:
+
+1. The agent is still blocked.
+2. The answer is for the card's current version. The sidecar posts a new version when the dialog changes.
+3. The screen still matches the card, apart from which choice is selected.
+
+If all three hold, the sidecar sends the choice's number with `herdr agent send-keys`. If the screen then still shows the same dialog, the number only moved the selection, so it sends Enter. If a check fails, no key goes out, and the card closes with the reason. The sidecar sends keys only to the card's own pane.
+
 ## Clearing the inbox
 
 `POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.

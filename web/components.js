@@ -8,6 +8,21 @@ const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 export function cardSource(c) {
   // A body without a form of its own gets the generated answer form below it, so the card stays answerable.
   if (c.body && (/\bForm\(/.test(c.body) || (!c.options?.length && !c.questions?.length))) return c.body;
+  if (c.kind === 'blocked' && c.options && c.options.length) {
+    // The sidecar read these choices from the agent's dialog, and presses the one you pick in that pane.
+    return [
+      'root = Card([screen, form])',
+      `screen = CodeBlock("text", ${J(c.screen || '(screen unavailable)')})`,
+      `form = Form(${J(c.id)}, buttons, [fcChoice])`,
+      'fcChoice = FormControl("Your answer", choice)',
+      `choice = OptionCards("choice", "single", [${c.options.map((_, j) => `c${j}`).join(', ')}])`,
+      ...c.options.map((o, j) => `c${j} = OptionCard(${J(o.id)}, ${J(o.label)}, "")`),
+      'buttons = Buttons([save, go, skip], "row")',
+      'save = Button("Press it in the session", @ToAssistant("send answer"), "primary")',
+      'go = Button("Open session", @ToAssistant("open session"), "secondary")',
+      'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+    ].join('\n');
+  }
   if (c.kind === 'blocked') {
     return [
       'root = Card([screen, buttons])',

@@ -51,7 +51,7 @@ pi:
 pi install git:github.com/elecnix/your-attention
 ```
 
-herdr, for a card per blocked agent of any harness:
+herdr, for a card per blocked agent of any harness. When the agent shows numbered choices, such as a permission prompt, you can pick one on the card and the sidecar presses it in that agent's pane:
 
 ```sh
 your-attention herdr-blocked &

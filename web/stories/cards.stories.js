@@ -16,6 +16,7 @@ export const AskUserQuestion = {
   render: () => mount(view(card({ title: 'Which port?', questions: [{ question: 'Which port?', options: [{ label: '4815', description: 'The default' }, { label: '8080' }] }, { question: 'Advertise over mDNS?', options: [{ label: 'Yes' }, { label: 'No' }] }] }))),
 };
 
+export const BlockedAgentWithChoices = { render: () => mount(view(card({ kind: 'blocked', title: 'api-tests is waiting for you', text: 'Do you want to proceed?', options: [{ id: 'o1', label: 'Yes' }, { id: 'o2', label: 'No, and tell Claude what to do differently (esc)' }], screen: 'Bash command\n  npm run test:e2e\nDo you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do differently (esc)' }))) };
 export const BlockedAgent = { render: () => mount(view(card({ kind: 'blocked', deliver: 'none', title: 'api-tests is waiting for you', screen: 'Bash command\n  npm run test:e2e\nDo you want to proceed?\n❯ 1. Yes\n  2. No' }))) };
 
 export const WithLinks = {

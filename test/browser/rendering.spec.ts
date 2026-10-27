@@ -319,3 +319,18 @@ test('the queue clears answered and closed cards in one click, and keeps the wai
     await expect(page.locator('.q', { hasText: 'Keep me waiting' })).toBeVisible();
   } finally { await own.close(); }
 });
+
+test('a blocked agent card offers the dialog choices, and saves the one you pick', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    await own.agent.post({ id: 'blk', agent: 'herdr:w9:p1', kind: 'blocked', title: 'build is waiting for you', priority: 'now', text: 'Do you want to proceed?',
+      options: [{ id: 'o1', label: 'Yes' }, { id: 'o2', label: 'No, and tell Claude what to do differently (esc)' }],
+      screen: 'Bash command\n  npm run build\nDo you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do differently (esc)', origin: { harness: 'claude', herdrPane: 'w9:p1', name: 'build' } });
+    await own.open(page);
+    const frame = page.locator('.focus-card');
+    await expect(frame.getByText('npm run build')).toBeVisible();
+    await frame.getByText('No, and tell Claude what to do differently (esc)', { exact: true }).last().click();
+    await frame.getByRole('button', { name: 'Press it in the session' }).click();
+    await expect.poll(async () => (await own.state()).answers['blk']?.values['choice']).toBe('o2');
+  } finally { await own.close(); }
+});
