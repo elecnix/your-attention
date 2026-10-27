@@ -85,3 +85,13 @@ describe('triage under load', () => {
     await assert.rejects(judgeWithRetry(async () => { throw new Error('judge answered 400'); }, 'p', Date.now() + 60_000, async () => {}), /400/, 'only a busy judge is retried');
   });
 });
+
+describe('triage prompts by card kind', () => {
+  it('tells the judge that a secret card needs only a reason, and shows it an HTML card form', () => {
+    const secret = triagePrompt({ ...card, kind: 'secret', secret: { name: 'DEMO_KEY', publicKey: { kty: 'RSA' } }, text: 'To call the demo API.' }, '', []);
+    assert.match(secret, /"secret": "DEMO_KEY"/);
+    assert.match(secret, /secret card .* pass it when it names the value and says why/);
+    const html = triagePrompt({ ...card, html: '<button>Ship it (recommended)</button>' }, '', []);
+    assert.match(html, /Ship it \(recommended\)/);
+  });
+});
