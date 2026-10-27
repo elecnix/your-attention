@@ -126,8 +126,10 @@ switch (command) {
       fail('No inbox runs on this machine. Start one with `your-attention serve`.');
     }
     if (res.status !== 202) fail(`The inbox on ${url} refused to stop: ${((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.status}`);
+    // The inbox stops answering before it closes its database, and removes its address file after.
+    const before = readServerInfo()?.pid;
     const end = Date.now() + 10_000;
-    while (await answers(url)) {
+    while ((await answers(url)) || (before !== undefined && readServerInfo()?.pid === before)) {
       if (Date.now() > end) fail(`The inbox on ${url} is still running after 10 seconds.`);
       await new Promise((r) => setTimeout(r, 100));
     }

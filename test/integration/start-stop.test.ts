@@ -1,6 +1,6 @@
 // `your-attention start` runs the inbox in the background, and `your-attention stop` ends it.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,6 +79,11 @@ describe('your-attention stop', () => {
   });
 });
 
+// The other server runs in this process, so the CLI must run without blocking it.
+const run = (args: string[], env: NodeJS.ProcessEnv): Promise<{ status: number; stdout: string; stderr: string }> => new Promise((resolve) => {
+  execFile(process.execPath, [...CLI, ...args], { env, encoding: 'utf8', timeout: 20_000 }, (err, stdout, stderr) => resolve({ status: err ? Number((err as { code?: number }).code ?? 1) : 0, stdout, stderr }));
+});
+
 describe('your-attention start next to another server', () => {
   it('starts the inbox when its old address now belongs to a server that is not an inbox', async () => {
     const { home, env, inbox } = sandbox();
@@ -89,11 +94,11 @@ describe('your-attention start next to another server', () => {
     try {
       fs.mkdirSync(inbox, { recursive: true });
       fs.writeFileSync(path.join(inbox, 'server.json'), JSON.stringify({ url: `http://127.0.0.1:${port}`, port, pid: 1 }));
-      const start = spawnSync(process.execPath, [...CLI, 'start', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, encoding: 'utf8', timeout: 20_000 });
+      const start = await run(['start', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], env);
       assert.equal(start.status, 0, start.stderr);
       assert.match(start.stdout, /Started the inbox/);
     } finally {
-      spawnSync(process.execPath, [...CLI, 'stop'], { env });
+      await run(['stop'], env);
       other.close();
       fs.rmSync(home, { recursive: true, force: true });
     }
