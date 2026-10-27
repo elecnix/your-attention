@@ -228,3 +228,19 @@ test('Escape clears the card pane until you pick a card, and back brings the car
   await page.locator('.q', { hasText: 'Arrives while cleared' }).click();
   await expect(title).toHaveText('Arrives while cleared');
 });
+
+test('opening the inbox selects a card waiting for you, never one you already sent', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    await own.agent.post({ id: 'sent-1', agent: 's-sent', title: 'Already answered' });
+    await own.agent.post({ id: 'wait-1', agent: 's-sent', title: 'Still waiting' });
+    await own.open(page);
+    await page.locator('.q', { hasText: 'Already answered' }).click();
+    await own.server.inbox.answer('sent-1', { comment: 'done' });
+    await expect(page.locator('.queue')).toContainText('Outbox');
+    await page.goto(`${own.server.url}/`);
+    await expect(page.locator('.focus-card .card-title')).toHaveText('Still waiting');
+  } finally {
+    await own.close();
+  }
+});

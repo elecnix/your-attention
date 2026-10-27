@@ -9,7 +9,9 @@ export function App() {
   const [state, setState] = React.useState(null);
   const [auth, setAuth] = React.useState('checking');
   const [up, setUp] = React.useState(false);
-  const [focus, setFocus] = React.useState(() => cardInAddress() || store.get('focus:current'));
+  // A card in the address is one the person asked for. The card from the last visit comes back only while it waits for them.
+  const [focus, setFocus] = React.useState(() => cardInAddress());
+  const lastVisitRef = React.useRef(cardInAddress() ? null : store.get('focus:current'));
   const [closing, setClosing] = React.useState({});
   const [fresh, setFresh] = React.useState({});
   const pinnedRef = React.useRef(null);
@@ -48,7 +50,8 @@ export function App() {
     // Escape in a field belongs to the field, so a half-typed answer stays on screen.
     const escape = (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented || (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]'))) return;
-      if (!(history.state && history.state.cleared)) history.pushState({ cleared: true }, '', location.pathname);
+      // The sign-in token stays in the address until the sign-in request has used it.
+      if (!(history.state && history.state.cleared)) history.pushState({ cleared: true }, '', /token=/.test(location.hash) ? location.href : location.pathname);
       pinnedRef.current = null;
       setFocus(null);
       setCleared(true);
@@ -121,8 +124,10 @@ export function App() {
   const outbox = visible.filter((c) => ['answered', 'delivered'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
   const sent = visible.filter((c) => ['read', 'closed'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
   const pinned = pending.find((c) => c.id === pinnedRef.current);
-  const current = cleared ? null : byId[focus] || pinned || replied[0] || pending[0] || null;
+  const lastVisit = pending.find((c) => c.id === lastVisitRef.current);
+  const current = cleared ? null : byId[focus] || pinned || lastVisit || replied[0] || pending[0] || null;
   pinnedRef.current = current ? current.id : null;
+  lastVisitRef.current = null;
   focusRef.current = current ? current.id : null;
   if (current && store.get('focus:current') !== current.id) store.set('focus:current', current.id);
   if (reportedFocus.current !== (current ? current.id : null)) {
