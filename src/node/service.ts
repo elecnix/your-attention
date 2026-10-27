@@ -1,7 +1,10 @@
 // Runs the inbox or an extension as a service that starts at login and
 // restarts after a crash: a launchd agent on macOS, a systemd user unit on Linux.
 import os from 'node:os';
-import path from 'node:path';
+import nodePath from 'node:path';
+
+// The files are for macOS and Linux, so their paths use slashes on every platform that writes them.
+const path = nodePath.posix;
 
 export interface ServiceFile {
   path: string;
