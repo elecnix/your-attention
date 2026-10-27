@@ -1,0 +1,20 @@
+name: review
+
+# pull_request_target takes this file from the default branch, so a pull
+# request cannot change its own review. The job checks nothing out, which
+# is why zizmor's dangerous-triggers finding is ignored here.
+on: pull_request_target  # zizmor: ignore[dangerous-triggers]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  models: read
+
+jobs:
+  cite:
+    # Forks are not reviewed.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: elecnix/cite@db01467aae47c33f16ec6b404d3cdbd13ec94f12  # v0.15.1

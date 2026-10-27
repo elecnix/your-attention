@@ -1,0 +1,15 @@
+herdr
+tmux
+cmux
+mDNS
+DNS-SD
+Avahi
+OpenUI
+OpenRouter
+SQLite
+FTS5
+ESP32
+tsgo
+tsc-rs
+fail-open
+fail-closed
