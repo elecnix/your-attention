@@ -248,3 +248,18 @@ describe('the platform alarm', () => {
     await assert.rejects(inbox.adoptToken('short.token', 'x', 'owner'), /12 hex digits/);
   });
 });
+
+describe('search over tags and files', () => {
+  it('finds a card by a tag value and by a file name', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const agent: Caller = { token: 'ta', role: 'agent' };
+    await inbox.postCardWithFiles(agent, { id: 't1', agent: 's1', title: 'q', tags: { topic: 'release' }, attachments: [{ src: 'data:text/plain;base64,aGk=', name: 'rollout-notes.txt' }] });
+    assert.equal(inbox.search('release')[0]?.card.id, 't1');
+    assert.equal(inbox.search('rollout')[0]?.card.id, 't1');
+  });
+
+  it('names the file that is too large', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    await assert.rejects(inbox.postCardWithFiles({ token: 'ta', role: 'agent' }, { agent: 's1', title: 'q', attachments: [{ src: `data:application/pdf;base64,${'A'.repeat(12_000_000)}`, name: 'huge.pdf' }] }), /\(huge\.pdf\) is 9000000 bytes/);
+  });
+});

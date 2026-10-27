@@ -284,7 +284,7 @@ export class Inbox {
       replies: before?.replies ?? [],
     };
     this.store.put('cards', id, card);
-    this.store.index(id, [card.title, card.text, card.recommendation, card.body].filter(Boolean).join('\n'));
+    this.store.index(id, searchText(card));
     if (card.follows && card.follows !== id) {
       const prev = this.store.get<Card>('cards', card.follows);
       if (prev) {
@@ -698,7 +698,7 @@ export class Inbox {
     };
     for (const p of answer.previous) delete (p as Partial<Answer>).previous;
     this.store.put('answers', id, answer);
-    this.store.index(id, [card.title, card.text, card.recommendation, card.body, answer.comment].filter(Boolean).join('\n'));
+    this.store.index(id, `${searchText(card)}\n${answer.comment}`);
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
@@ -931,6 +931,12 @@ const TYPES_BY_EXTENSION: Record<string, string> = {
 
 const index = (i: number): number => i + 1;
 
+/** The text search matches: the card's words, its tags, and its file names. */
+function searchText(card: Card): string {
+  return [card.title, card.text, card.recommendation, card.body, card.status, ...Object.entries(card.tags ?? {}).map(([k, v]) => `${k} ${v}`), ...(card.attachments ?? []).map((a) => a.name)]
+    .filter(Boolean).join('\n');
+}
+
 function cleanName(name: unknown): string {
   return name ? String(name).replace(/[\\/\x00-\x1f]/g, '_').slice(0, 120) : '';
 }
@@ -939,7 +945,8 @@ function decodeDataUrl(i: number, f: NewAttachment): { type: string; bytes: Uint
   const m = /^data:([\w.+-]+\/[\w.+-]+)(?:;[\w=.+-]+)*;base64,([A-Za-z0-9+/=\s]+)$/.exec(String(f.src));
   if (!m) throw new InboxError(400, `attachment ${i + 1}: src must be an https URL or a base64 data: URL`);
   const data = (m[2] ?? '').replace(/\s/g, '');
-  if (Math.floor((data.length * 3) / 4) > MAX_ATTACHMENT_BYTES + 2) throw new InboxError(413, `attachment ${i + 1}: at most ${MAX_ATTACHMENT_BYTES} bytes`);
+  const size = Math.floor((data.length * 3) / 4);
+  if (size > MAX_ATTACHMENT_BYTES + 2) throw new InboxError(413, `attachment ${i + 1}${f.name ? ` (${cleanName(f.name)})` : ''} is ${size} bytes, over the limit of ${MAX_ATTACHMENT_BYTES}`);
   let raw: string;
   try { raw = atob(data); } catch { throw new InboxError(400, `attachment ${i + 1}: the base64 data is malformed`); }
   return { type: (m[1] ?? '').toLowerCase(), bytes: Uint8Array.from(raw, (c) => c.charCodeAt(0)) };
