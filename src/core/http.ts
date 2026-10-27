@@ -141,6 +141,12 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     };
 
     if (method === 'GET' && a === 'state') { owner(); return json(inbox.state()); }
+    if (method === 'POST' && a === 'archive' && !b) return json(inbox.archive(me));
+    if (method === 'POST' && a === 'reset' && !b) {
+      // A reset cannot be undone, so the request must say so.
+      if ((await readJson<{ confirm?: string }>(req)).confirm !== 'reset') throw new InboxError(400, 'send {"confirm": "reset"} to remove every card');
+      return json(await inbox.reset(me));
+    }
     if (method === 'GET' && a === 'events') {
       owner();
       return eventStream((send) => {

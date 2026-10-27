@@ -14,7 +14,7 @@ export interface Storage {
   put<T>(collection: Collection, id: string, value: T): void;
   delete(collection: Collection, id: string): void;
   list<T>(collection: Collection): T[];
-  /** Replace the searchable text of a card. */
+  /** Replace the searchable text of a card. Empty text removes the card from search. */
   index(card: string, text: string): void;
   search(query: string, limit: number): SearchHit[];
   close(): void;
@@ -49,7 +49,8 @@ export class MemoryStorage implements Storage {
   }
 
   index(card: string, text: string): void {
-    this.text.set(card, text.toLowerCase());
+    if (text) this.text.set(card, text.toLowerCase());
+    else this.text.delete(card);
   }
 
   search(query: string, limit: number): SearchHit[] {

@@ -177,6 +177,8 @@ export function App() {
   const tagKeys = [...new Set(visible.flatMap((c) => Object.keys(c.tags || {})))].sort();
   const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? agentName(c.agent, visible) : groupBy.startsWith('tag:') ? String((c.tags || {})[groupBy.slice(4)] || '').trim() || `No ${groupBy.slice(4)}` : 'Waiting for you');
   const rest = pending.filter((c) => st(c) !== 'reply');
+  // The cards the inbox clears: answered or closed, with no agent reply you have not seen. Search still finds them.
+  const dealt = visible.filter((c) => ['closed', 'answered', 'delivered', 'read'].includes(st(c)));
   const groups = groupBy === 'none' ? [['Waiting for you', rest]] : [...rest.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];
   const queue = h('nav', { className: 'queue' },
     h('label', { className: 'group-by' }, 'Group by ',
@@ -187,7 +189,9 @@ export function App() {
     groups.length ? groups.map(([title, items]) => group(title, items, 'Nothing waiting')) : group('Waiting for you', [], 'Nothing waiting'),
     checking.length > 0 && group('Being checked by triage', checking, ''),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent'),
-    group('Sent, newest first', sent, 'Nothing sent yet', 'sent'));
+    group('Sent, newest first', sent, 'Nothing sent yet', 'sent'),
+    dealt.length > 0 && h('button', { className: 'btn clear-dealt', onClick: () => api(`${BASE}v1/archive`, {}) },
+      `Clear ${dealt.length} answered or closed card${dealt.length === 1 ? '' : 's'}`));
 
   let main;
   if (!current) {

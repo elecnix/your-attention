@@ -187,6 +187,8 @@ export interface Card {
   version: number;
   createdAt: number;
   updatedAt: number;
+  /** When the owner cleared it from the inbox. Search still finds it, and a revision or a reply brings it back. */
+  archivedAt?: number;
   closed?: Closure;
   replies: Reply[];
 }

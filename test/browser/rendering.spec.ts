@@ -303,3 +303,19 @@ test('the tab icon is the ✋ emoji, with a red dot while a card waits for you',
     }
   } finally { await own.close(); }
 });
+
+test('the queue clears answered and closed cards in one click, and keeps the waiting ones', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    await own.agent.post({ id: 'cl-wait', agent: 's-clear', title: 'Keep me waiting', priority: 'now' });
+    await own.agent.post({ id: 'cl-gone', agent: 's-clear', title: 'Retract me', priority: 'later' });
+    await own.agent.close('cl-gone', 'retracted', 'Not needed.');
+    await own.open(page);
+    const button = page.locator('button.clear-dealt');
+    await expect(button).toHaveText('Clear 1 answered or closed card');
+    await button.click();
+    await expect(button).toHaveCount(0);
+    await expect(page.locator('.q', { hasText: 'Retract me' })).toHaveCount(0);
+    await expect(page.locator('.q', { hasText: 'Keep me waiting' })).toBeVisible();
+  } finally { await own.close(); }
+});

@@ -199,3 +199,4 @@
   .resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; border-radius: 1px; }
   .resizer:hover::after, .resizer:focus-visible::after, .resizer.dragging::after { background: var(--accent); }
   .resizer:focus-visible { outline: none; }
+  .clear-dealt { display: block; margin: 16px 0 4px; }

@@ -178,6 +178,12 @@ pr = widget pull-request {"title": "Add stop", "subtitle": "#12", "state": "CI g
 
 An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered.
 
+## Clearing the inbox
+
+`POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
+
+`POST /v1/reset {"confirm": "reset"}` removes every card, answer and attached file, and it cannot be undone. Tokens, templates, widgets, settings and guidance stay. `your-attention reset --yes` calls it.
+
 ## Delivery
 
 An agent opens `GET /v1/stream?agent=<id>`, and the inbox reports the agent online until the last such stream closes. The inbox sends each undelivered answer for that agent and that token as an `answer` event:

@@ -41,7 +41,7 @@ export class SqliteStorage implements Storage {
 
   index(card: string, text: string): void {
     this.db.prepare('DELETE FROM search WHERE card = ?').run(card);
-    this.db.prepare('INSERT INTO search (card, text) VALUES (?, ?)').run(card, text);
+    if (text) this.db.prepare('INSERT INTO search (card, text) VALUES (?, ?)').run(card, text);
   }
 
   search(query: string, limit: number): SearchHit[] {

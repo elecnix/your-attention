@@ -725,7 +725,7 @@ export class Inbox {
     const card = this.owned(caller, id);
     const clean = String(text || '').trim();
     if (!clean) throw new InboxError(400, 'text is required');
-    const next = { ...card, replies: [...card.replies, { text: clean, at: this.now(), seenAt: null }] };
+    const next: Card = { ...card, archivedAt: undefined, replies: [...card.replies, { text: clean, at: this.now(), seenAt: null }] };
     this.store.put('cards', id, next);
     this.emit({ type: 'change', card: id });
     return next;
@@ -1010,12 +1010,45 @@ export class Inbox {
   }
 
   /** Everything a page needs to draw the inbox. */
+  /** Clear the cards you dealt with: answered, retracted or closed, with no reply you have not seen. Search still finds them. */
+  archive(caller: Caller): { archived: number } {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner clears the inbox');
+    const now = this.now();
+    let archived = 0;
+    for (const card of this.store.list<Card>('cards')) {
+      if (card.archivedAt) continue;
+      const answer = this.store.get<Answer>('answers', card.id);
+      const s = cardState(card, answer);
+      if (!['closed', 'answered', 'delivered', 'read'].includes(s)) continue;
+      if (card.replies.some((r) => !r.seenAt && (!answer || r.at > answer.savedAt))) continue;
+      this.store.put('cards', card.id, { ...card, archivedAt: now });
+      archived++;
+    }
+    if (archived) this.emit({ type: 'change', card: '' });
+    return { archived };
+  }
+
+  /** Remove every card, answer and attached file. Tokens, templates, widgets, settings and guidance stay. */
+  async reset(caller: Caller): Promise<{ removed: number }> {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner resets the inbox');
+    const cards = this.store.list<Card>('cards');
+    for (const card of cards) {
+      await Promise.all((card.attachments ?? []).filter((f) => f.id).map((f) => this.blobs.delete(f.id ?? '')));
+      this.store.delete('answers', card.id);
+      this.store.delete('cards', card.id);
+      this.store.index(card.id, '');
+    }
+    this.emit({ type: 'change', card: '' });
+    return { removed: cards.length };
+  }
+
   state(): {
     cards: Card[]; answers: Record<string, Answer>; presence: Record<string, Presence>; states: Record<string, CardState>;
     priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance;
   } {
-    const cards = this.store.list<Card>('cards').map(publicCard).sort((a, b) => a.createdAt - b.createdAt);
-    const answers = Object.fromEntries(this.store.list<Answer>('answers').map((a) => [a.card, a]));
+    const cards = this.store.list<Card>('cards').filter((c) => !c.archivedAt).map(publicCard).sort((a, b) => a.createdAt - b.createdAt);
+    const shown = new Set(cards.map((c) => c.id));
+    const answers = Object.fromEntries(this.store.list<Answer>('answers').filter((a) => shown.has(a.card)).map((a) => [a.card, a]));
     const presence = Object.fromEntries(this.store.list<Presence>('presence').map((p) => [p.agent, p]));
     const now = this.now();
     const states = Object.fromEntries(cards.map((c) => {

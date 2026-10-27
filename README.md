@@ -22,6 +22,7 @@ cd ~/Source/your-attention && npm ci && npm link
 your-attention start            # runs the inbox in the background; `service serve --write` makes it a login service
 your-attention open             # opens the inbox page, signed in
 your-attention stop             # stops it, or its launchd or systemd service
+your-attention clear            # clears the cards you answered or that closed; search still finds them
 ```
 
 Claude Code: add the channel, then start sessions with it and confirm the development-channel warning. Claude Code takes the channel only as a launch flag. To load it in every session, wrap `claude` in a shell function that adds the flag to interactive starts. Keep the `=` form: the flag takes a list, and would take a prompt after it as a second server.

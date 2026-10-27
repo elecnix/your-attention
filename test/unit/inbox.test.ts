@@ -312,3 +312,49 @@ describe('an answer delivered to a process that never read it', () => {
     assert.equal(later.filter((e) => e.type === 'answer').length, 0, 'a read answer is never sent again');
   });
 });
+
+describe('clearing the inbox', () => {
+  const owner: Caller = { token: 'o', role: 'owner' };
+  it('archives the cards you dealt with, keeps the waiting ones, and search still finds the archived ones', async () => {
+    const { inbox, agentA } = setup();
+    inbox.postCard(agentA, { id: 'waits', agent: 's1', title: 'Still waiting' });
+    inbox.postCard(agentA, { id: 'done', agent: 's1', title: 'Answered elephant' });
+    inbox.postCard(agentA, { id: 'gone', agent: 's1', title: 'Retracted' });
+    inbox.postCard(agentA, { id: 'replied', agent: 's1', title: 'Has a new reply' });
+    await inbox.answer('done', { values: { choice: 'o1' } });
+    await inbox.answer('replied', {});
+    inbox.close(agentA, 'gone', 'retracted', 'Not needed.');
+    inbox.reply(agentA, 'replied', 'One more thing.');
+    assert.deepEqual(inbox.archive(owner), { archived: 2 });
+    assert.deepEqual(inbox.state().cards.map((c) => c.id).sort(), ['replied', 'waits']);
+    assert.equal(inbox.search('elephant')[0]?.card.id, 'done');
+    assert.ok(inbox.state().answers['replied']);
+    assert.equal(inbox.state().answers['done'], undefined);
+    assert.throws(() => inbox.archive(agentA), (e: InboxError) => e.status === 403);
+  });
+
+  it('brings an archived card back when its agent revises it or replies', async () => {
+    const { inbox, agentA } = setup();
+    inbox.postCard(agentA, { id: 'a1', agent: 's1', title: 'v1' });
+    inbox.postCard(agentA, { id: 'a2', agent: 's1', title: 'other' });
+    await inbox.answer('a1', {});
+    await inbox.answer('a2', {});
+    inbox.archive(owner);
+    inbox.postCard(agentA, { id: 'a1', agent: 's1', title: 'v2' });
+    inbox.reply(agentA, 'a2', 'A question about your answer.');
+    assert.deepEqual(inbox.state().cards.map((c) => c.id).sort(), ['a1', 'a2']);
+  });
+
+  it('reset removes every card and answer, and keeps tokens, templates and settings', async () => {
+    const { inbox, agentA } = setup();
+    inbox.saveTemplate('t', 'root = TextContent("x")');
+    inbox.postCard(agentA, { id: 'r1', agent: 's1', title: 'Reset me' });
+    await inbox.answer('r1', {});
+    await assert.rejects(inbox.reset(agentA), (e: InboxError) => e.status === 403);
+    assert.deepEqual(await inbox.reset(owner), { removed: 1 });
+    assert.equal(inbox.state().cards.length, 0);
+    assert.equal(Object.keys(inbox.state().answers).length, 0);
+    assert.equal(inbox.search('Reset').length, 0);
+    assert.ok(inbox.getTemplate('t'));
+  });
+});

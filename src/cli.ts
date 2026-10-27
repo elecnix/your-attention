@@ -16,6 +16,8 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   start [options for serve]                           run the inbox in the background
   stop                                                stop the inbox, or its service when one is installed
   open                                                open the inbox page in a browser
+  clear                                               clear the cards you answered or that closed; search still finds them
+  reset --yes                                         remove every card, answer and file; tokens and templates stay
   login-url                                           print the page address with its sign-in token
   discover [--seconds 3]                              list inboxes on the LAN
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
@@ -139,6 +141,17 @@ switch (command) {
   case 'login-url': {
     const { url, owner } = localServer();
     console.log(`${url}/#token=${owner}`);
+    break;
+  }
+  case 'clear':
+  case 'reset': {
+    if (command === 'reset' && !rest.includes('--yes')) fail('reset removes every card, answer and file, and cannot be undone. Run `your-attention reset --yes` to confirm, or `your-attention clear` to clear only the cards you dealt with.');
+    const { url, owner } = localServer();
+    const res = await fetch(`${url}/v1/${command === 'clear' ? 'archive' : 'reset'}`, { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json' }, body: JSON.stringify(command === 'reset' ? { confirm: 'reset' } : {}) }).catch(() => undefined);
+    if (!res) fail('No inbox runs on this machine. Start one with `your-attention start`.');
+    const body = (await res.json().catch(() => ({}))) as { archived?: number; removed?: number; error?: string };
+    if (!res.ok) fail(`The inbox refused: ${body.error ?? res.status}`);
+    console.log(command === 'clear' ? `Cleared ${body.archived} cards. Search still finds them.` : `Removed ${body.removed} cards and their answers.`);
     break;
   }
   case 'open': {

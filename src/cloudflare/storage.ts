@@ -43,7 +43,7 @@ export class DurableSqlStorage implements Storage {
 
   index(card: string, text: string): void {
     this.sql.exec('DELETE FROM search WHERE card = ?', card);
-    this.sql.exec('INSERT INTO search (card, text) VALUES (?, ?)', card, text);
+    if (text) this.sql.exec('INSERT INTO search (card, text) VALUES (?, ?)', card, text);
   }
 
   search(query: string, limit: number): SearchHit[] {
