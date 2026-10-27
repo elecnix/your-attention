@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import { SqliteStorage } from '../../src/adapters/sqlite.ts';
 import { describeAnswer } from '../../src/client.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
@@ -91,8 +91,11 @@ describe('card tools', () => {
 });
 
 describe('the Claude Code session name', () => {
+  const roots: string[] = [];
+  after(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });
   const transcript = (lines: unknown[]) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-cc-'));
+    roots.push(root);
     fs.mkdirSync(path.join(root, '-Users-me-Source-app'));
     fs.writeFileSync(path.join(root, '-Users-me-Source-app', 'sid-1.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
     return root;
