@@ -19,7 +19,7 @@ These steps are for a coding agent to run. It needs Node 22.18 or later.
 ```sh
 git clone https://github.com/elecnix/your-attention ~/Source/your-attention
 cd ~/Source/your-attention && npm ci && npm link
-your-attention serve &          # keep it running, for example as a launchd or systemd unit
+your-attention start            # runs the inbox in the background; `service serve --write` makes it a login service
 your-attention open             # opens the inbox page, signed in
 your-attention stop             # stops it, or its launchd or systemd service
 ```

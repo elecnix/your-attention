@@ -1,4 +1,4 @@
-// `your-attention stop` ends the inbox that `your-attention serve` started on this machine.
+// `your-attention start` runs the inbox in the background, and `your-attention stop` ends it.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -33,6 +33,36 @@ describe('your-attention stop', () => {
       await assert.rejects(fetch(`${info.url}/v1/info`));
     } finally {
       serve.kill();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('starts the inbox in the background and returns to the shell, once', async () => {
+    const { home, env, inbox } = sandbox();
+    try {
+      const start = spawnSync(process.execPath, [...CLI, 'start', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, encoding: 'utf8', timeout: 20_000 });
+      assert.equal(start.status, 0, start.stderr);
+      const { url } = JSON.parse(fs.readFileSync(path.join(inbox, 'server.json'), 'utf8')) as { url: string };
+      assert.match(start.stdout, new RegExp(`Started the inbox on ${url}`));
+      assert.equal(((await (await fetch(`${url}/v1/info`)).json()) as { name: string }).name, 'your-attention');
+      const again = spawnSync(process.execPath, [...CLI, 'start', '--no-mdns'], { env, encoding: 'utf8', timeout: 20_000 });
+      assert.equal(again.status, 0, again.stderr);
+      assert.match(again.stdout, new RegExp(`already runs on ${url}`));
+      assert.equal(spawnSync(process.execPath, [...CLI, 'stop'], { env, encoding: 'utf8' }).status, 0);
+      await assert.rejects(fetch(`${url}/v1/info`));
+    } finally {
+      spawnSync(process.execPath, [...CLI, 'stop'], { env });
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('shows why the inbox did not start', () => {
+    const { home, env } = sandbox();
+    try {
+      const start = spawnSync(process.execPath, [...CLI, 'start', '--relay', 'ws://127.0.0.1:9/', '--relay-key-env', 'YA_NO_SUCH_KEY'], { env, encoding: 'utf8', timeout: 20_000 });
+      assert.equal(start.status, 1);
+      assert.match(start.stderr, /--relay needs the relay key/);
+    } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });

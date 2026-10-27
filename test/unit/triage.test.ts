@@ -62,6 +62,8 @@ describe('services', () => {
   it('stops each service through its service manager, which would restart a process that exits', () => {
     assert.equal(serviceFile('serve', [], 'darwin').stop, 'launchctl bootout gui/$(id -u)/dev.your-attention.serve');
     assert.equal(serviceFile('serve', [], 'linux').stop, 'systemctl --user stop your-attention-serve');
+    assert.equal(serviceFile('serve', [], 'darwin').running, 'launchctl print gui/$(id -u)/dev.your-attention.serve');
+    assert.equal(serviceFile('serve', [], 'linux').running, 'systemctl --user is-active --quiet your-attention-serve');
   });
 });
 

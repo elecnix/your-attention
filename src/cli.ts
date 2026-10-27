@@ -1,5 +1,5 @@
 // your-attention <command>. Run it with no command for the list.
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,7 @@ import { serve } from './node/server.ts';
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
   serve [--port 4815] [--host 0.0.0.0] [--no-mdns]   run the inbox
+  start [options for serve]                           run the inbox in the background
   stop                                                stop the inbox, or its service when one is installed
   open                                                open the inbox page in a browser
   login-url                                           print the page address with its sign-in token
@@ -47,6 +48,20 @@ function client(): Client {
   return new Client(config);
 }
 
+function readServerInfo(): { url: string; pid: number } | undefined {
+  try { return JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string; pid: number }; } catch { return undefined; }
+}
+
+/** Whether an inbox answers at this address. */
+const answers = (url: string): Promise<boolean> => fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(2000) })
+  .then(async (r) => r.ok && ((await r.json()) as { name?: string }).name === 'your-attention', () => false);
+
+/** The address of the inbox this machine runs, when one answers there. */
+async function runningUrl(): Promise<string | undefined> {
+  const info = readServerInfo();
+  return info && (await answers(info.url)) ? info.url : undefined;
+}
+
 function localServer(): { url: string; owner: string } {
   try {
     const { url } = JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string };
@@ -66,12 +81,38 @@ switch (command) {
     process.on('SIGTERM', stop);
     break;
   }
+  case 'start': {
+    // `serve` in the background, with the same options. The shell gets its prompt back once the inbox answers.
+    const home = homeDir();
+    const already = await runningUrl();
+    if (already) { console.log(`The inbox already runs on ${already}.`); break; }
+    const log = path.join(home, 'serve.log');
+    fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+    const out = fs.openSync(log, 'a', 0o600);
+    const from = fs.statSync(log).size;
+    const child = spawn(process.execPath, [...process.execArgv, process.argv[1] ?? '', 'serve', ...rest], { detached: true, stdio: ['ignore', out, out], windowsHide: true });
+    child.unref();
+    const end = Date.now() + 15_000;
+    for (;;) {
+      const info = readServerInfo();
+      if (info && info.pid === child.pid && (await answers(info.url))) {
+        console.log(`Started the inbox on ${info.url}. Its log is ${log}. Stop it with: your-attention stop`);
+        break;
+      }
+      const tail = () => fs.readFileSync(log, 'utf8').slice(from).trim().split('\n').slice(-10).join('\n');
+      if (child.exitCode !== null || child.signalCode !== null) fail(`The inbox did not start:\n${tail()}`);
+      if (Date.now() > end) fail(`The inbox did not answer within 15 seconds. Its log is ${log}:\n${tail()}`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    process.exit(0);
+  }
   case 'stop': {
     // A service restarts the inbox when it exits, so stop the service itself when there is one.
     if (process.platform === 'darwin' || process.platform === 'linux') {
       const { serviceFile } = await import('./node/service.ts');
       const unit = serviceFile('serve', []);
-      if (fs.existsSync(unit.path) && spawnSync('sh', ['-c', unit.stop], { stdio: 'ignore' }).status === 0) {
+      const sh = (cmd: string) => spawnSync('sh', ['-c', cmd], { stdio: 'ignore' }).status === 0;
+      if (fs.existsSync(unit.path) && sh(unit.running) && sh(unit.stop)) {
         console.log(`Stopped the inbox service. It starts again at login, or now with: ${unit.start}`);
         break;
       }
@@ -84,7 +125,7 @@ switch (command) {
     }
     if (res.status !== 202) fail(`The inbox on ${url} refused to stop: ${((await res.json().catch(() => ({}))) as { error?: string }).error ?? res.status}`);
     const end = Date.now() + 10_000;
-    while (await fetch(`${url}/v1/info`).then(() => true, () => false)) {
+    while (await answers(url)) {
       if (Date.now() > end) fail(`The inbox on ${url} is still running after 10 seconds.`);
       await new Promise((r) => setTimeout(r, 100));
     }

@@ -163,7 +163,8 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : opts.port;
   const url = `http://${opts.host === '0.0.0.0' || opts.host === '::' ? '127.0.0.1' : opts.host}:${port}`;
-  writePrivate(path.join(home, 'server.json'), JSON.stringify({ url, port, pid: process.pid }));
+  const serverInfo = JSON.stringify({ url, port, pid: process.pid });
+  writePrivate(path.join(home, 'server.json'), serverInfo);
 
   // The platform alarm for this build.
   // The platform alarm for this build: presence grace and hook timeouts need about a second.
@@ -199,7 +200,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       store.close();
       // Forget the address, unless another server has written its own since.
       const info = path.join(home, 'server.json');
-      try { if ((JSON.parse(fs.readFileSync(info, 'utf8')) as { pid?: number }).pid === process.pid) fs.rmSync(info); } catch {}
+      try { if (fs.readFileSync(info, 'utf8') === serverInfo) fs.rmSync(info); } catch {}
     },
   };
   return running;
