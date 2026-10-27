@@ -173,7 +173,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (!agent) return json({ error: 'agent is required' }, 400);
       return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev)), heartbeatMs);
     }
-    if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Number(url.searchParams.get('limit') ?? 20)));
+    if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, 100), url.searchParams.get('answered') === '1'));
     if (method === 'GET' && a === 'dead-letters') return json(inbox.deadLetters());
     if (a === 'templates') {
       if (method === 'GET' && !b) return json(inbox.listTemplates());
@@ -188,7 +188,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET') return json(inbox.priorities());
       if (method === 'PUT') {
         if (me.role === 'extension') throw new InboxError(403, 'extensions cannot change priority levels');
-        return json(inbox.setPriorities(await readJson<PriorityLevel[]>(req)));
+        // The owner changes them at once. An agent proposes them, and the person approves on a system card.
+        if (me.role === 'owner') return json(inbox.setPriorities(await readJson<PriorityLevel[]>(req)));
+        return json({ proposed: publicCard(inbox.proposePriorities(await readJson<PriorityLevel[]>(req))) }, 202);
       }
     }
     if (a === 'guidance') {

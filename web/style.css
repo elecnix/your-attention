@@ -131,3 +131,6 @@
   .broadcast .agents { display: grid; gap: 4px; margin: 8px 0; font-size: 14px; }
   .markdown a, .card-text a { color: var(--accent); }
   .card-title { font-size: 18px; margin: 4px 0 8px; }
+  details.changes .step { margin: 6px 0; }
+  details.changes .step-head { font-weight: 600; }
+  details.changes .field { color: var(--muted); margin-top: 2px; }

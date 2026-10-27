@@ -135,7 +135,11 @@ describe('http routes for the card model', () => {
     assert.equal((await call('POST', '/v1/templates', { token: agent, body: { name: 't1', source: 'root = Card([])' } })).status, 201);
     assert.equal(((await (await call('GET', '/v1/templates/t1', { token: agent })).json()) as { versions: unknown[] }).versions.length, 1);
     const levels = [{ id: 'now', label: 'Now', definition: '' }, { id: 'later', label: 'Later', definition: '' }];
-    assert.equal((await call('PUT', '/v1/priorities', { token: agent, body: levels })).status, 200);
+    const proposed = await call('PUT', '/v1/priorities', { token: agent, body: levels });
+    assert.equal(proposed.status, 202, 'an agent proposes, and the person approves');
+    assert.equal(((await (await call('GET', '/v1/priorities', { token: agent })).json()) as unknown[]).length, 3, 'nothing changes before approval');
+    const card = ((await proposed.json()) as { proposed: { id: string } }).proposed;
+    await call('POST', `/v1/cards/${card.id}/answer`, { token: owner, body: { values: { choice: 'approve' } } });
     assert.equal(((await (await call('GET', '/v1/priorities', { token: agent })).json()) as unknown[]).length, 2);
     assert.equal((await call('POST', '/v1/guidance', { token: agent, body: { text: 'Show diffs.' } })).status, 201);
     assert.equal((await call('PUT', '/v1/settings', { token: agent, body: { allowHtml: true } })).status, 403);

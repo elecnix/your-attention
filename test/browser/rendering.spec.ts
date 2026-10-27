@@ -59,3 +59,32 @@ test('the queue groups by agent or by a tag when asked, and by nothing at first'
   await page.locator('.group-by select').selectOption('tag:topic');
   await expect(page.locator('.queue h3', { hasText: 'release' })).toBeVisible();
 });
+
+test('a card with its own body and options still has an answer form', async ({ page }) => {
+  await inbox.agent.post({ id: 'tpl', agent: 's-tpl', title: 'Which port?', priority: 'now', body: 'root = Card([CardHeader("Port choice", "From a template")])', options: [{ id: 'o1', label: '8080' }, { id: 'o2', label: '9090' }] });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Which port?' }).click();
+  await expect(page.getByText('Port choice')).toBeVisible();
+  await expect(page.getByText('9090', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send answer' })).toBeVisible();
+});
+
+test('"What changed" lists every edit, field by field', async ({ page }) => {
+  await inbox.agent.post({ id: 'multi', agent: 's-multi', title: 'Edited often', text: 'one', recommendation: 'A', priority: 'now' });
+  await inbox.agent.patch('multi', [{ old: 'one', new: 'two' }]);
+  await inbox.agent.patch('multi', [{ old: 'A', new: 'B' }], 'recommendation');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Edited often' }).click();
+  await page.locator('details.changes summary').click();
+  await expect(page.locator('details.changes summary')).toContainText('2 edits');
+  await expect(page.locator('details.changes .field')).toContainText(['Recommendation', 'Text']);
+});
+
+test('a PDF from the inbox shows in a frame without a sandbox', async ({ page }) => {
+  await inbox.agent.post({ id: 'pdf', agent: 's-pdf', title: 'Read the PDF', priority: 'now', attachments: [{ src: `data:application/pdf;base64,${Buffer.from('%PDF-1.4\n%%EOF\n').toString('base64')}`, name: 'doc.pdf' }] });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Read the PDF' }).click();
+  const frame = page.locator('iframe.pdf');
+  await expect(frame).toBeVisible();
+  expect(await frame.getAttribute('sandbox')).toBeNull();
+});

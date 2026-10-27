@@ -246,7 +246,7 @@ export class Inbox {
       });
     }
     const history: CardVersion[] = before
-      ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, body: before.body, html: before.html, at: before.updatedAt }].slice(-HISTORY_LIMIT)
+      ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, recommendation: before.recommendation, body: before.body, html: before.html, at: before.updatedAt }].slice(-HISTORY_LIMIT)
       : [];
     const card: Card = {
       id,
@@ -280,7 +280,8 @@ export class Inbox {
       version: (before?.version ?? 0) + 1,
       createdAt: before?.createdAt ?? now,
       updatedAt: now,
-      closed: before?.closed,
+      // A card triage sent back opens again when the agent revises it.
+      closed: before?.closed?.kind === 'returned' ? undefined : before?.closed,
       replies: before?.replies ?? [],
     };
     this.store.put('cards', id, card);
@@ -484,6 +485,8 @@ export class Inbox {
     let text = String((card as unknown as Record<string, unknown>)[f] ?? '');
     for (const [i, e] of edits.entries()) {
       const old = String(e?.old ?? '');
+      // An empty old text fills a field that is empty.
+      if (!old && !text) { text = String(e.new ?? ''); continue; }
       const count = old ? text.split(old).length - 1 : 0;
       if (count !== 1) throw new InboxError(409, `edit ${i + 1}: the old text occurs ${count} times in ${f}, and it must occur once`);
       text = text.replace(old, () => String(e.new ?? ''));
@@ -541,7 +544,36 @@ export class Inbox {
     return this.store.get<PriorityLevel[]>('meta', 'priorities') ?? DEFAULT_PRIORITIES;
   }
 
+  /** An agent proposes new priority levels. They reorder the whole queue, so the person approves them on a system card. */
+  proposePriorities(levels: PriorityLevel[]): Card {
+    const clean = this.checkPriorities(levels);
+    const id = `priorities-${randomId(4)}`;
+    this.postCard({ token: '', role: 'owner' }, {
+      id, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
+      title: 'Change the priority levels?',
+      text: `An agent proposes these levels. They apply to every card in the queue.\n\n${clean.map((l) => `- ${l.label} (${l.id})${l.definition ? `: ${l.definition}` : ''}${l.rule ? `\n  rule: ${l.rule}` : ''}`).join('\n')}`,
+      options: [{ id: 'approve', label: 'Apply them' }, { id: 'reject', label: 'Keep the current levels' }],
+    });
+    this.store.put('meta', `proposal:${id}`, clean);
+    return this.getCard(id);
+  }
+
+  private resolvePriorityProposal(card: Card, answer: Answer): void {
+    const levels = this.store.get<PriorityLevel[]>('meta', `proposal:${card.id}`);
+    this.store.delete('meta', `proposal:${card.id}`);
+    if (!levels || [answer.values['choice']].flat()[0] !== 'approve') { this.closeAs(card, 'resolved', 'Kept the current priority levels.'); return; }
+    this.setPriorities(levels);
+    this.closeAs(card, 'resolved', `Applied ${levels.length} priority levels.`);
+  }
+
   setPriorities(levels: PriorityLevel[]): PriorityLevel[] {
+    const clean = this.checkPriorities(levels);
+    this.store.put('meta', 'priorities', clean);
+    this.emit({ type: 'change', card: '' });
+    return clean;
+  }
+
+  private checkPriorities(levels: PriorityLevel[]): PriorityLevel[] {
     if (!Array.isArray(levels) || !levels.length || levels.length > 10) throw new InboxError(400, 'give 1 to 10 priority levels');
     const seen = new Set<string>();
     const clean = levels.map((l, i) => {
@@ -556,8 +588,6 @@ export class Inbox {
       }
       return { id, label, definition: String(l.definition ?? ''), rule };
     });
-    this.store.put('meta', 'priorities', clean);
-    this.emit({ type: 'change', card: '' });
     return clean;
   }
 
@@ -628,7 +658,10 @@ export class Inbox {
   }
 
   private closeAs(card: Card, kind: CloseKind, outcome: string): Card {
-    const closed: Card = { ...this.getCard(card.id), closed: { kind, outcome, at: this.now() } };
+    const current = this.getCard(card.id);
+    // A card closed while triage checks it needs no verdict any more.
+    const triage = current.triage?.state === 'pending' ? { ...current.triage, state: 'skipped' as const, waiting: [], reason: 'The card closed before triage answered.' } : current.triage;
+    const closed: Card = { ...current, triage, closed: { kind, outcome, at: this.now() } };
     this.store.put('cards', card.id, closed);
     this.emit({ type: 'change', card: card.id });
     return closed;
@@ -703,6 +736,7 @@ export class Inbox {
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
+    else if (card.kind === 'system' && card.id.startsWith('priorities-')) this.resolvePriorityProposal(card, answer);
     else this.flush(card.agent);
     if (card.kind !== 'system' && card.kind !== 'secret') this.observeAnswer(card, this.store.get<Answer>('answers', id) ?? answer);
     return this.store.get<Answer>('answers', id) ?? answer;
@@ -742,8 +776,12 @@ export class Inbox {
       .filter(({ card }) => card.deliver === 'stream' && cardState(card, this.store.get('answers', card.id)) !== 'closed' && !this.isOnline(card.agent));
   }
 
-  search(query: string, limit = 20): { card: Card; answer?: Answer }[] {
-    return this.store.search(String(query || ''), limit)
+  /** Cards that match the words, best first. `answered` keeps only cards the person answered. */
+  search(query: string, limit = 20, answered = false): { card: Card; answer?: Answer }[] {
+    const hits = this.store.search(String(query || ''), answered ? Math.max(limit * 5, 100) : limit);
+    return hits
+      .filter((h) => !answered || this.store.get('answers', h.card))
+      .slice(0, limit)
       .map((h) => ({ card: this.store.get<Card>('cards', h.card), answer: this.store.get<Answer>('answers', h.card) }))
       .filter((r): r is { card: Card; answer: Answer | undefined } => !!r.card)
       .map(({ card, answer }) => (answer ? { card: publicCard(card), answer } : { card: publicCard(card) }));

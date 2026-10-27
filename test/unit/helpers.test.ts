@@ -80,3 +80,11 @@ describe('FileBlobs', () => {
     fs.rmSync(dir, { recursive: true });
   });
 });
+
+describe('card tools', () => {
+  it('reports an argument the tool does not take', async () => {
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    const ctx = { inbox: {} as never, secrets: {} as never, agent: 's1', origin: undefined, arrival: 'as a test' };
+    await assert.rejects(runTool(ctx, 'card_guidance', { text: 'x' }), /card_guidance does not take text\. It takes propose/);
+  });
+});

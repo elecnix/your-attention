@@ -6,7 +6,8 @@ const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
-  if (c.body) return c.body;
+  // A body without a form of its own gets the generated answer form below it, so the card stays answerable.
+  if (c.body && (/\bForm\(/.test(c.body) || (!c.options?.length && !c.questions?.length))) return c.body;
   if (c.kind === 'blocked') {
     return [
       'root = Card([screen, buttons])',
@@ -19,6 +20,7 @@ export function cardSource(c) {
   // The page shows the title above the text and attachments, so a generated card has no header.
   const parts = [];
   const L = [];
+  if (c.body) { parts.push('custom'); L.push(c.body.replace(/^\s*root\s*=/m, 'custom =')); }
   if (c.recommendation) { parts.push('rec'); L.push(`rec = TextContent(${J(`Recommendation: ${c.recommendation}`)})`); }
   const controls = [];
   (c.questions || []).forEach((q, i) => {
@@ -170,8 +172,9 @@ export function FileView({ file }) {
   }, [file.id, file.url]);
   const download = h('a', { className: 'file-name', href: file.id ? `${fileUrl(file)}?download=1` : file.url, download: file.name, target: '_blank', rel: 'noopener' }, file.name);
   let body = null;
-  // Only the inbox's own copy of a PDF goes in a frame. Its response blocks scripts. A PDF elsewhere stays a link.
-  if (file.type === 'application/pdf' && file.id) body = h('iframe', { className: 'pdf', src: fileUrl(file), title: file.name, sandbox: 'allow-downloads' });
+  // Only the inbox's own copy of a PDF goes in a frame: the inbox serves it as application/pdf with nosniff,
+  // so the browser can only show it as a PDF. A sandboxed frame cannot run the PDF viewer. A PDF elsewhere stays a link.
+  if (file.type === 'application/pdf' && file.id) body = h('iframe', { className: 'pdf', src: fileUrl(file), title: file.name });
   else if (textual && text != null) {
     if (file.type === 'text/markdown') body = h('div', { className: 'markdown' }, renderMarkdown(h, text));
     else if (file.type === 'text/csv') {
@@ -197,6 +200,8 @@ export function Attachments({ files }) {
 
 // A card that brings its own HTML runs in a frame with scripts but no access to the inbox.
 // The frame answers by posting a message: yourAttention.answer(values, comment).
+// The frame may not load or send anything over the network: the card shows only what it brings.
+export const FRAME_POLICY = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
 export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){parent.postMessage({yourAttention:"answer",values:v||{},comment:c||""},"*")}};<\/script>';
 export function HtmlCard({ card, allowed, onAnswer }) {
   const ref = React.useRef(null);
@@ -209,23 +214,35 @@ export function HtmlCard({ card, allowed, onAnswer }) {
     return () => window.removeEventListener('message', listen);
   }, [card.id, card.version]);
   if (!allowed) return h('div', { className: 'note warn' }, 'This card brings its own HTML and scripts. Turn on "Allow HTML cards" in the bar to show it in a sandboxed frame.');
-  return h('iframe', { ref, className: 'html-card', sandbox: 'allow-scripts allow-forms', srcDoc: FRAME_BRIDGE + card.html, title: card.title });
+  return h('iframe', { ref, className: 'html-card', sandbox: 'allow-scripts allow-forms', srcDoc: FRAME_POLICY + FRAME_BRIDGE + card.html, title: card.title });
 }
 
 // What changed since the version before, line by line.
+// Every revision, newest first: for each one, the lines it removed and added in each field.
+const FIELDS = [['title', 'Title'], ['text', 'Text'], ['recommendation', 'Recommendation'], ['body', 'Body'], ['html', 'HTML']];
+function diff(before, after) {
+  const b = String(before ?? '').split('\n');
+  const a = String(after ?? '').split('\n');
+  return { removed: b.filter((l) => l && !a.includes(l)), added: a.filter((l) => l && !b.includes(l)) };
+}
 export function Changes({ card }) {
-  const prev = (card.history || []).at(-1);
-  if (!prev) return null;
-  const before = String(prev.text ?? prev.body ?? prev.html ?? '').split('\n');
-  const after = String(card.text ?? card.body ?? card.html ?? '').split('\n');
-  const removed = before.filter((l) => !after.includes(l));
-  const added = after.filter((l) => !before.includes(l));
-  if (prev.title === card.title && !removed.length && !added.length) return null;
+  const versions = [...(card.history || []), card];
+  const steps = [];
+  for (let i = versions.length - 1; i > 0; i--) {
+    const before = versions[i - 1];
+    const after = versions[i];
+    const fields = FIELDS.map(([k, label]) => ({ label, ...diff(before[k], after[k]) })).filter((f) => f.removed.length || f.added.length);
+    if (fields.length) steps.push({ version: after.version, fields });
+  }
+  if (!steps.length) return null;
   return h('details', { className: 'changes' },
-    h('summary', null, 'What changed since the agent last edited this card'),
-    prev.title !== card.title && h('div', { className: 'del' }, `Title was: ${prev.title}`),
-    removed.map((l, i) => h('div', { key: `r${i}`, className: 'del' }, `− ${l}`)),
-    added.map((l, i) => h('div', { key: `a${i}`, className: 'add' }, `+ ${l}`)));
+    h('summary', null, steps.length === 1 ? 'What changed in the last edit' : `What changed, edit by edit (${steps.length} edits)`),
+    steps.map((s) => h('div', { key: s.version, className: 'step' },
+      h('div', { className: 'step-head' }, `Version ${s.version}`),
+      s.fields.map((f) => h('div', { key: f.label },
+        h('div', { className: 'field' }, f.label),
+        f.removed.map((l, i) => h('div', { key: `r${i}`, className: 'del' }, `− ${l}`)),
+        f.added.map((l, i) => h('div', { key: `a${i}`, className: 'add' }, `+ ${l}`)))))));
 }
 
 // The system card for new guidance: the person picks the agents, all of them at first.

@@ -263,3 +263,50 @@ describe('search over tags and files', () => {
     await assert.rejects(inbox.postCardWithFiles({ token: 'ta', role: 'agent' }, { agent: 's1', title: 'q', attachments: [{ src: `data:application/pdf;base64,${'A'.repeat(12_000_000)}`, name: 'huge.pdf' }] }), /\(huge\.pdf\) is 9000000 bytes/);
   });
 });
+
+describe('fixes from the dogfood run', () => {
+  it('opens a returned card again when the agent revises it', () => {
+    const { inbox, agent } = setup();
+    const ext: Caller = { token: 'tx', role: 'extension' };
+    const calls: { id: string }[] = [];
+    inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'] }, (e) => calls.push(e));
+    inbox.postCard(agent, { id: 'r1', agent: 's1', title: 'Thoughts?' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'return', 'Say what you recommend.');
+    assert.equal(inbox.getCard('r1').closed?.kind, 'returned');
+    inbox.postCard(agent, { id: 'r1', agent: 's1', title: 'Ship today?', recommendation: 'Yes.' });
+    assert.equal(inbox.getCard('r1').closed, undefined);
+    inbox.hookVerdict(ext, calls[1]!.id, 'pass', '');
+    assert.equal(inbox.state().states['r1'], 'open');
+  });
+
+  it('ends a pending triage when the agent closes the card', () => {
+    const { inbox, agent } = setup();
+    inbox.connectExtension({ token: 'tx', role: 'extension' }, { name: 'triage', hooks: ['card.created'] }, () => {});
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
+    inbox.close(agent, 'c1', 'retracted', 'Not needed.');
+    assert.equal(inbox.getCard('c1').triage?.state, 'skipped');
+  });
+
+  it('fills an empty field with a patch whose old text is empty', () => {
+    const { inbox, agent } = setup();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
+    assert.equal(inbox.patchCard(agent, 'c1', [{ old: '', new: 'Now with context.' }], 'text').text, 'Now with context.');
+  });
+
+  it('applies priority levels an agent proposes only after the person approves', async () => {
+    const { inbox } = setup();
+    const card = inbox.proposePriorities([{ id: 'only', label: 'Only', definition: '' }]);
+    assert.equal(inbox.priorities().length, 3);
+    await inbox.answer(card.id, { values: { choice: 'approve' } });
+    assert.deepEqual(inbox.priorities().map((l) => l.id), ['only']);
+  });
+
+  it('searches answered cards only, when asked', async () => {
+    const { inbox, agent } = setup();
+    inbox.postCard(agent, { id: 'a1', agent: 's1', title: 'cache size question' });
+    inbox.postCard(agent, { id: 'a2', agent: 's1', title: 'cache policy question' });
+    await inbox.answer('a2', { comment: 'LRU' });
+    assert.equal(inbox.search('cache').length, 2);
+    assert.deepEqual(inbox.search('cache', 20, true).map((r) => r.card.id), ['a2']);
+  });
+});

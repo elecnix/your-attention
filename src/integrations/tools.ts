@@ -30,6 +30,7 @@ export const cardTools: CardTool[] = [
         },
         html: { type: 'string', description: 'Your own HTML and scripts, shown in a sandboxed frame if the person allows it. The frame answers with yourAttention.answer(values, comment).' },
         template: { type: 'string', description: 'A saved template to fill the body from.' },
+        template_version: { type: 'number', description: 'The template version to use. The latest by default.' },
         vars: { type: 'object', additionalProperties: { type: 'string' }, description: 'Values for the template, by {{name}}.' },
         rating: { type: 'number', description: 'How much the card matters, from 1 to 5.' },
         expires_in_minutes: { type: 'number', description: 'Stop waiting for an answer after this many minutes.' },
@@ -95,7 +96,7 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_search',
-    description: 'Search earlier cards and the person\'s answers, from every session. Search before you post, so you never ask the same thing twice.',
-    schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    description: 'Search the cards the person answered, from every session. Search before you post, so you never ask the same thing twice.',
+    schema: { type: 'object', properties: { query: { type: 'string' }, include_open: { type: 'boolean', description: 'Also return cards nobody answered yet.' }, limit: { type: 'number', description: 'At most this many results, 20 by default.' } }, required: ['query'] },
   },
 ];

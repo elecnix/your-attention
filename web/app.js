@@ -144,7 +144,7 @@ export function App() {
 
   // No grouping by default. The choices follow the properties the cards carry.
   const tagKeys = [...new Set(visible.flatMap((c) => Object.keys(c.tags || {})))].sort();
-  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? c.agent : groupBy.startsWith('tag:') ? (c.tags || {})[groupBy.slice(4)] || 'No value' : '');
+  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? c.agent : groupBy.startsWith('tag:') ? String((c.tags || {})[groupBy.slice(4)] || '').trim() || `No ${groupBy.slice(4)}` : 'Waiting for you');
   const rest = pending.filter((c) => st(c) !== 'reply');
   const groups = groupBy === 'none' ? [['Waiting for you', rest]] : [...rest.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];
   const queue = h('nav', { className: 'queue' },
@@ -176,6 +176,7 @@ export function App() {
         current.status && h('span', { className: 'status' }, current.status),
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && h('span', { className: `pill small ${pres[0]}` }, pres[1])),
+      current.triage && current.triage.state === 'passed' && /did not answer|failed/.test(current.triage.reason || '') && h('div', { className: 'note' }, `Triage did not check this card: ${current.triage.reason}`),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,
         current.triage.state === 'held' && h('button', { className: 'btn', style: { marginLeft: 8 }, onClick: () => api(`${BASE}v1/cards/${current.id}/release`, {}) }, 'Release')),

@@ -121,7 +121,9 @@ export class Client {
   reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
-  search(q: string): Promise<{ card: Card; answer?: Answer }[]> { return this.call('GET', `/v1/search?q=${encodeURIComponent(q)}`); }
+  search(q: string, opts: { answered?: boolean; limit?: number } = {}): Promise<{ card: Card; answer?: Answer }[]> {
+    return this.call('GET', `/v1/search?q=${encodeURIComponent(q)}&limit=${opts.limit ?? 20}${opts.answered ? '&answered=1' : ''}`);
+  }
   deadLetters(): Promise<{ card: Card; answer: Answer }[]> { return this.call('GET', '/v1/dead-letters'); }
 
   /** Receive answers for one agent until `signal` aborts. Reconnects after a drop, over the next link when one fails.

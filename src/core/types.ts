@@ -66,6 +66,7 @@ export interface CardVersion {
   version: number;
   title: string;
   text?: string;
+  recommendation?: string;
   body?: string;
   html?: string;
   at: number;

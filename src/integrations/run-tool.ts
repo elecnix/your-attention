@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
 import type { CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
+import { cardTools } from './tools.ts';
 
 export interface ToolContext {
   inbox: Client;
@@ -31,6 +32,10 @@ const str = (v: unknown): string | undefined => (v === undefined || v === null ?
 
 export async function runTool(ctx: ToolContext, name: string, args: Record<string, unknown>): Promise<string> {
   const { inbox, agent, origin } = ctx;
+  // An argument the tool does not take is a mistake to report, not to drop.
+  const known = cardTools.find((t) => t.name === name)?.schema['properties'] as Record<string, unknown> | undefined;
+  const unknown = known ? Object.keys(args).filter((k) => !(k in known)) : [];
+  if (unknown.length) throw new Error(`${name} does not take ${unknown.join(', ')}. It takes ${Object.keys(known ?? {}).join(', ')}.`);
   switch (name) {
     case 'card_post': {
       const minutes = Number(args['expires_in_minutes'] ?? 0);
@@ -45,7 +50,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         body: str(args['body']),
         html: str(args['html']),
         attachments: (args['attachments'] as { path?: string; url?: string; name?: string; alt?: string }[] | undefined)?.map(toAttachment),
-        template: args['template'] ? { name: String(args['template']), vars: args['vars'] as Record<string, string> | undefined } : undefined,
+        template: args['template'] ? { name: String(args['template']), version: args['template_version'] === undefined ? undefined : Number(args['template_version']), vars: args['vars'] as Record<string, string> | undefined } : undefined,
         priority: str(args['priority']),
         rating: args['rating'] === undefined ? undefined : Number(args['rating']),
         expiresAt: minutes > 0 ? Date.now() + minutes * 60_000 : undefined,
@@ -86,7 +91,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));
       return 'Closed.';
     case 'card_search':
-      return JSON.stringify((await inbox.search(String(args['query'] ?? ''))).map((r) => ({ id: r.card.id, title: r.card.title, answer: r.answer ? describeAnswer(r.card, r.answer) : null })), null, 2);
+      return JSON.stringify((await inbox.search(String(args['query'] ?? ''), { answered: args['include_open'] !== true, limit: args['limit'] === undefined ? undefined : Number(args['limit']) })).map((r) => ({ id: r.card.id, title: r.card.title, answer: r.answer ? describeAnswer(r.card, r.answer) : null })), null, 2);
   }
   throw new Error(`unknown tool ${name}`);
 }

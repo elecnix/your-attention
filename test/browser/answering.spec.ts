@@ -73,6 +73,7 @@ test('an HTML card stays hidden until the owner allows it, then answers from its
   await page.locator('.q', { hasText: 'Pick a colour' }).click();
   await expect(page.locator('.note.warn')).toContainText('Allow HTML cards');
   await page.getByLabel('Allow HTML cards').check();
+  expect(await page.locator('iframe.html-card').getAttribute('srcdoc')).toContain("default-src 'none'");
   const frame = page.frameLocator('iframe.html-card');
   await frame.locator('#b').click();
   await expect.poll(async () => (await inbox.state()).answers['html']?.values).toEqual({ colour: 'blue' });
