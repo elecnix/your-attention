@@ -78,3 +78,24 @@ describe('your-attention stop', () => {
     }
   });
 });
+
+describe('your-attention start next to another server', () => {
+  it('starts the inbox when its old address now belongs to a server that is not an inbox', async () => {
+    const { home, env, inbox } = sandbox();
+    const http = await import('node:http');
+    const other = http.createServer((_q, r) => { r.writeHead(200, { 'content-type': 'text/html' }); r.end('<html></html>'); });
+    await new Promise<void>((r) => other.listen(0, '127.0.0.1', r));
+    const port = (other.address() as { port: number }).port;
+    try {
+      fs.mkdirSync(inbox, { recursive: true });
+      fs.writeFileSync(path.join(inbox, 'server.json'), JSON.stringify({ url: `http://127.0.0.1:${port}`, port, pid: 1 }));
+      const start = spawnSync(process.execPath, [...CLI, 'start', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, encoding: 'utf8', timeout: 20_000 });
+      assert.equal(start.status, 0, start.stderr);
+      assert.match(start.stdout, /Started the inbox/);
+    } finally {
+      spawnSync(process.execPath, [...CLI, 'stop'], { env });
+      other.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

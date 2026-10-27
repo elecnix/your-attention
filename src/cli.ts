@@ -54,7 +54,8 @@ function readServerInfo(): { url: string; pid: number } | undefined {
 
 /** Whether an inbox answers at this address. */
 const answers = (url: string): Promise<boolean> => fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(2000) })
-  .then(async (r) => r.ok && ((await r.json()) as { name?: string }).name === 'your-attention', () => false);
+  .then(async (r) => r.ok && ((await r.json()) as { name?: string } | null)?.name === 'your-attention')
+  .catch(() => false);
 
 /** The address of the inbox this machine runs, when one answers there. */
 async function runningUrl(): Promise<string | undefined> {
@@ -112,7 +113,8 @@ switch (command) {
       const { serviceFile } = await import('./node/service.ts');
       const unit = serviceFile('serve', []);
       const sh = (cmd: string) => spawnSync('sh', ['-c', cmd], { stdio: 'ignore' }).status === 0;
-      if (fs.existsSync(unit.path) && sh(unit.running) && sh(unit.stop)) {
+      if (fs.existsSync(unit.path) && sh(unit.running)) {
+        if (!sh(unit.stop)) fail(`The inbox service runs, and \`${unit.stop}\` did not stop it.`);
         console.log(`Stopped the inbox service. It starts again at login, or now with: ${unit.start}`);
         break;
       }
