@@ -9,9 +9,8 @@ Your Attention is one inbox where coding agents ask a person questions as cards,
 1. Before you write code, find the principles your change touches.
 2. If the change would break a principle, stop. Either change the design, or amend the principle in the same pull request and say why in the body.
 3. When you build something the SPEC.md table lists as missing, delete its row in the same pull request.
-4. In the pull request body, list each principle you touched under a `## Principles` heading, with one line on how the change follows it. A change that touches none says so in one line.
 
-Reviewers, human or automated, read that section first and block a pull request whose claims the diff contradicts. `test/unit/principles.test.ts` checks the principles that a test can read off the source. Add a check there when you find another one.
+Reviewers, human or automated, check the diff against PRINCIPLES.md and block a change that breaks one. `test/unit/principles.test.ts` checks the principles that a test can read off the source. Add a check there when you find another one.
 
 ## Layout
 
