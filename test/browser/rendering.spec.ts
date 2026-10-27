@@ -285,3 +285,21 @@ test('card text renders Markdown links, lists and bare addresses, and keeps its 
   await expect(text.locator('a[href^="javascript"]')).toHaveCount(0);
   await expect(text).toContainText('bad link');
 });
+
+test('the tab icon is the amber hand, with a red dot while a card waits for you', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    const icon = page.locator('link[rel="icon"]');
+    await own.open(page);
+    await expect(page.locator('.focus-card.done')).toBeVisible();
+    await expect(icon).toHaveAttribute('href', 'favicon.svg');
+    await own.agent.post({ id: 'icon-wait', agent: 's-icon', title: 'Pick a color?', priority: 'now' });
+    await expect(icon).toHaveAttribute('href', 'favicon-waiting.svg');
+    await own.agent.close('icon-wait', 'resolved', 'Picked it myself.');
+    await expect(icon).toHaveAttribute('href', 'favicon.svg');
+    for (const f of ['favicon.svg', 'favicon-waiting.svg']) {
+      const res = await page.request.get(new URL(f, page.url()).href);
+      expect(res.headers()['content-type']).toBe('image/svg+xml');
+    }
+  } finally { await own.close(); }
+});

@@ -120,6 +120,10 @@ export function App() {
   const pending = visible.filter((c) => waiting(st(c)))
     .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
   const checking = visible.filter((c) => st(c) === 'in-triage');
+  // The tab icon gets a red dot while a card waits for you.
+  const icon = document.querySelector('link[rel="icon"]');
+  const iconHref = pending.length ? 'favicon-waiting.svg' : 'favicon.svg';
+  if (icon && icon.getAttribute('href') !== iconHref) icon.setAttribute('href', iconHref);
   const replied = pending.filter((c) => st(c) === 'reply').sort((a, b) => lastReply(b) - lastReply(a));
   const sentAt = (c) => (c.closed ? c.closed.at : answers[c.id] ? answers[c.id].savedAt : 0);
   const outbox = visible.filter((c) => ['answered', 'delivered'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
