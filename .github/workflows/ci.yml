@@ -47,3 +47,7 @@ jobs:
         run: npm run test:unit
       - name: integration tests
         run: npm run test:integration
+        env:
+          # GitHub's macOS runners drop multicast, so the mDNS test finds
+          # nothing there. It runs on Linux and Windows, and on a real Mac.
+          YOUR_ATTENTION_SKIP_MDNS: ${{ matrix.os == 'macos-latest' && '1' || '' }}

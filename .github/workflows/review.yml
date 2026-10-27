@@ -9,7 +9,6 @@ permissions:
   contents: read
   pull-requests: write
   checks: write
-  models: read
 
 jobs:
   cite:
@@ -18,3 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: elecnix/cite@db01467aae47c33f16ec6b404d3cdbd13ec94f12  # v0.15.1
+        with:
+          # Ollama Cloud reads the schema from a forced tool call.
+          model_api_key: ${{ secrets.OLLAMA_API_KEY }}
+          model_base_url: https://ollama.com/v1
+          model_id: deepseek-v4.1-flash
+          fallback_model_ids: glm-5.2,kimi-k2.6
+          structured_output: tools

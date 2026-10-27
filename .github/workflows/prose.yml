@@ -20,4 +20,7 @@ jobs:
           version: 3.20.0
           files: '["README.md", "AGENTS.md", "PRINCIPLES.md", "SPEC.md"]'
           fail_on_error: true
+          # Warnings are advice. Reporting them all passes GitHub's limit on
+          # annotations, so CI reports errors only.
+          min_alert_level: error
           filter_mode: nofilter

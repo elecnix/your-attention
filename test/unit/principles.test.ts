@@ -22,7 +22,7 @@ describe('principles', () => {
   });
 
   it('every principle in PRINCIPLES.md has a reason and a priority', () => {
-    const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8');
+    const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);
     assert.ok(sections.length >= 40, `found ${sections.length} principles`);
     for (const s of sections) assert.match(s, /\nPriority: (decide now|decide soon|can wait)\.\n/, `principle "${s.split('\n')[0]}" lacks a priority line`);
