@@ -10,6 +10,21 @@ import { homeDir } from './node/home.ts';
 export interface ClientConfig {
   url: string;
   token: string;
+  /** More links to the same inbox: a relay, a bridge, or an SSH tunnel. The client switches when one fails. */
+  urls?: string[];
+}
+
+/** The inbox and token for an extension: YOUR_ATTENTION_URL with YOUR_ATTENTION_TOKEN, or the local extension token. */
+export function loadExtensionConfig(home = homeDir()): ClientConfig | undefined {
+  const url = process.env['YOUR_ATTENTION_URL'];
+  const token = process.env['YOUR_ATTENTION_TOKEN'];
+  if (url && token) return { url, token };
+  try {
+    const server = JSON.parse(fs.readFileSync(path.join(home, 'server.json'), 'utf8')) as { url: string };
+    return { url: server.url, token: fs.readFileSync(path.join(home, 'extension-token'), 'utf8').trim() };
+  } catch {
+    return undefined;
+  }
 }
 
 export function loadConfig(home = homeDir()): ClientConfig | undefined {
@@ -27,24 +42,61 @@ export function loadConfig(home = homeDir()): ClientConfig | undefined {
   return undefined;
 }
 
+export type Transport = 'sse' | 'ws' | 'poll';
+
 export class Client {
-  readonly url: string;
+  /** The link in use. */
+  url: string;
+  /** Every link to the same inbox, tried in order. */
+  readonly urls: string[];
   private readonly token: string;
+  private inboxId: string | undefined;
+  /** Answers already handed to the agent, so one that arrives over two links counts once. */
+  private readonly seen = new Set<string>();
 
   constructor(config: ClientConfig) {
-    this.url = config.url.replace(/\/$/, '');
+    this.urls = [config.url, ...(config.urls ?? [])].map((u) => u.replace(/\/$/, ''));
+    this.url = this.urls[0] ?? '';
     this.token = config.token;
   }
 
+  /** Check that a link reaches the same inbox as the others. A link to another inbox is skipped. */
+  private async sameInbox(url: string): Promise<boolean> {
+    const info = (await (await fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(5000) })).json()) as { id?: string };
+    if (!info.id) return true;
+    this.inboxId ??= info.id;
+    return info.id === this.inboxId;
+  }
+
   private async call<T>(method: string, route: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${this.url}${route}`, {
-      method,
-      headers: { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new Error(`${method} ${route}: ${res.status} ${data.error ?? ''}`.trim());
-    return data;
+    // The same message id on every try, so the inbox applies the message once whichever link brings it.
+    const headers: Record<string, string> = { authorization: `Bearer ${this.token}`, 'content-type': 'application/json' };
+    if (method !== 'GET') headers['x-message-id'] = crypto.randomUUID();
+    let lastError: unknown;
+    for (const url of [this.url, ...this.urls.filter((u) => u !== this.url)]) {
+      let res: Response;
+      try {
+        if (url !== this.url && !(await this.sameInbox(url))) continue;
+        res = await fetch(`${url}${route}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      } catch (e) {
+        lastError = e;
+        continue;
+      }
+      this.url = url;
+      const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+      if (!res.ok) throw new Error(`${method} ${route}: ${res.status} ${data.error ?? ''}`.trim());
+      return data;
+    }
+    throw new Error(`${method} ${route}: no link answered (${(lastError as Error)?.message ?? 'none tried'})`);
+  }
+
+  /** True the first time an answer is seen, false for a copy from another link or a replay. */
+  private fresh(ev: AgentEvent): boolean {
+    if (ev.type !== 'answer') return true;
+    const key = `${ev.card.id}:${ev.answer.savedAt}:${ev.answer.forcedAt ?? 0}`;
+    if (this.seen.has(key)) return false;
+    this.seen.add(key);
+    return true;
   }
 
   post(card: NewCard): Promise<Card> { return this.call('POST', '/v1/cards', card); }
@@ -64,36 +116,72 @@ export class Client {
   search(q: string): Promise<{ card: Card; answer?: Answer }[]> { return this.call('GET', `/v1/search?q=${encodeURIComponent(q)}`); }
   deadLetters(): Promise<{ card: Card; answer: Answer }[]> { return this.call('GET', '/v1/dead-letters'); }
 
-  /** Receive answers for one agent until `signal` aborts. Reconnects after a drop. */
-  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal): Promise<void> {
+  /** Receive answers for one agent until `signal` aborts. Reconnects after a drop, over the next link when one fails.
+   * `sse` is the default, `ws` uses a WebSocket, and `poll` long-polls for clients that cannot keep a connection. */
+  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'sse'): Promise<void> {
+    let link = 0;
+    const deliver = async (ev: AgentEvent): Promise<void> => { if (this.fresh(ev)) await onEvent(ev); };
     while (!signal.aborted) {
+      const url = this.urls[link % this.urls.length] ?? this.url;
       try {
-        const res = await fetch(`${this.url}/v1/stream?agent=${encodeURIComponent(agent)}`, {
-          headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
-          signal,
-        });
-        if (!res.ok || !res.body) throw new Error(`stream: ${res.status}`);
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let buf = '';
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          let end: number;
-          while ((end = buf.indexOf('\n\n')) >= 0) {
-            const frame = buf.slice(0, end);
-            buf = buf.slice(end + 2);
-            const data = frame.split('\n').find((l) => l.startsWith('data: '));
-            if (!data) continue;
-            const ev = JSON.parse(data.slice(6)) as AgentEvent | { type: 'beat' };
-            if (ev.type !== 'beat') await onEvent(ev);
-          }
-        }
+        if (this.urls.length > 1 && !(await this.sameInbox(url))) throw new Error('another inbox');
+        this.url = url;
+        if (transport === 'ws') await this.overSocket(url, agent, deliver, signal);
+        else if (transport === 'poll') await this.overPoll(url, agent, deliver, signal);
+        else await this.overSse(url, agent, deliver, signal);
       } catch {
         if (signal.aborted) return;
+        link++;
       }
-      await new Promise((r) => setTimeout(r, 1000));
+      if (!signal.aborted) await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+
+  private async overSse(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
+    const res = await fetch(`${url}/v1/stream?agent=${encodeURIComponent(agent)}`, {
+      headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
+      signal,
+    });
+    if (!res.ok || !res.body) throw new Error(`stream: ${res.status}`);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buf += dec.decode(value, { stream: true });
+      let end: number;
+      while ((end = buf.indexOf('\n\n')) >= 0) {
+        const data = buf.slice(0, end).split('\n').find((l) => l.startsWith('data: '));
+        buf = buf.slice(end + 2);
+        if (!data) continue;
+        const ev = JSON.parse(data.slice(6)) as AgentEvent | { type: 'beat' };
+        if (ev.type !== 'beat') await deliver(ev);
+      }
+    }
+  }
+
+  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}`);
+      const stop = (): void => ws.close();
+      signal.addEventListener('abort', stop, { once: true });
+      // The global WebSocket cannot send headers, so the token goes in the first frame.
+      ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'auth', token: this.token })));
+      ws.addEventListener('message', (m) => {
+        const ev = JSON.parse(String(m.data)) as { type: string };
+        if (ev.type !== 'pong' && ev.type !== 'error') void deliver(ev as AgentEvent);
+      });
+      ws.addEventListener('error', () => reject(new Error('websocket failed')));
+      ws.addEventListener('close', () => { signal.removeEventListener('abort', stop); resolve(); });
+    });
+  }
+
+  private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
+    while (!signal.aborted) {
+      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
+      if (!res.ok) throw new Error(`poll: ${res.status}`);
+      for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }
   }
 }

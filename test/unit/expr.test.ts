@@ -20,6 +20,10 @@ describe('priority rules', () => {
     assert.equal(test('tags.__proto__', card), false);
   });
 
+  it('reports where an unexpected character is', () => {
+    assert.throws(() => parse('kind == "x" @'), /at 13/);
+  });
+
   it('refuses anything outside the grammar', () => {
     for (const bad of ['process.exit()', 'kind = "x"', 'a ? b : c', '`x`', 'kind ==', 'x'.repeat(501)]) {
       assert.throws(() => parse(bad), Error, bad.slice(0, 20));

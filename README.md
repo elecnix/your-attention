@@ -51,6 +51,22 @@ herdr, for a card per blocked agent of any harness:
 your-attention herdr-blocked &
 ```
 
+Triage checks each card before you see it, and sends back a card that lacks a goal, options, evidence or a recommendation. It bills your own OpenRouter account, or runs a coding harness in print mode:
+
+```sh
+your-attention triage login                         # once, for OpenRouter
+your-attention service triage --write               # a launchd or systemd unit
+your-attention triage --judge-cmd "claude -p"       # or a harness instead
+```
+
+Agents in containers, CI or other machines connect through a bridge, an SSH tunnel or a relay:
+
+```sh
+your-attention bridge --upstream https://inbox.example
+your-attention offer ssh build-box
+YOUR_ATTENTION_RELAY_KEY=... your-attention serve --relay https://relay.example
+```
+
 Another machine on the LAN finds the inbox and pairs with it. Approve the card that shows the same code.
 
 ```sh

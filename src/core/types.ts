@@ -79,6 +79,10 @@ export interface Triage {
   reason?: string;
   deadline?: number;
   policy?: 'fail-open' | 'fail-closed';
+  /** The id of the hook call the extensions answer. */
+  request?: string;
+  /** The extensions that have not answered yet. */
+  waiting?: string[];
   at: number;
 }
 
@@ -219,10 +223,25 @@ export interface Pairing {
   createdAt: number;
 }
 
+/** Whether the person is at the inbox, from the pages they have open. Extensions read it to time their decisions. */
+export interface PersonPresence {
+  /** Pages connected right now. */
+  pages: number;
+  /** Whether a page is visible on a screen. */
+  visible: boolean;
+  /** The last keypress, click or scroll on any page, in epoch milliseconds. */
+  activeAt: number | null;
+  /** The card on the screen of the most recently active visible page. */
+  focus: string | null;
+  at: number;
+}
+
 export interface Presence {
   agent: string;
   online: boolean;
   lastSeen: number;
+  /** When the last connection closed. The agent goes offline after a short grace, so a reconnect or the next long-poll keeps it online. */
+  leftAt?: number;
 }
 
 /** What an agent stream receives for each answer. */

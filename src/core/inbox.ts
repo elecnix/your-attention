@@ -4,11 +4,12 @@
 // returns, and memory holds only the open connections.
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
+import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import type {
   AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PriorityLevel, Role, Settings, Template, Token,
+  Attachment, NewAttachment, PersonPresence, PriorityLevel, Role, Settings, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -29,6 +30,10 @@ const PAIRING_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_PAIRINGS = 5;
 const CLOSE_KINDS = new Set<CloseKind>(['retracted', 'self-answered', 'answered-in-terminal', 'resolved']);
 const HISTORY_LIMIT = 20;
+/** How long an agent stays online after its last connection closes, so a reconnect or the next long-poll keeps it online. */
+export const PRESENCE_GRACE_MS = 2000;
+/** How long the inbox remembers a message id, to apply a message once however many links bring it. */
+export const MESSAGE_MEMORY_MS = 24 * 60 * 60 * 1000;
 /** An open card whose agent has been offline this long is orphaned. */
 export const ORPHAN_MS = 60 * 60 * 1000;
 export const DEFAULT_PRIORITIES: PriorityLevel[] = [
@@ -69,6 +74,11 @@ export class Inbox {
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly pages = new Set<PageSend>();
+  /** What each open page reports about the person, by page id. */
+  private readonly viewers = new Map<string, { visible: boolean; activeAt: number | null; focus: string | null }>();
+  private readonly extensions = new Map<string, { reg: ExtensionRegistration; token: string; send: (ev: HookEvent) => void }>();
+  /** Webhook deliveries still running, so tests and shutdown can wait for them. */
+  readonly deliveries = new Set<Promise<boolean>>();
 
   constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs()) {
     this.store = store;
@@ -112,7 +122,7 @@ export class Inbox {
   requestPairing(name: string, role: Role): Pairing {
     const clean = String(name || '').trim().slice(0, 80);
     if (!clean) throw new InboxError(400, 'name is required');
-    if (role !== 'agent' && role !== 'owner') throw new InboxError(400, 'role must be agent or owner');
+    if (role !== 'agent' && role !== 'owner' && role !== 'extension') throw new InboxError(400, 'role must be agent, owner or extension');
     const pending = this.store.list<Pairing>('pairings').filter((p) => p.status === 'pending');
     if (pending.length >= MAX_PENDING_PAIRINGS) throw new InboxError(429, 'too many pairing requests are waiting');
     const pairing: Pairing = { id: randomId(8), name: clean, role, code: pairingCode(), status: 'pending', createdAt: this.now() };
@@ -121,8 +131,8 @@ export class Inbox {
       id: `pair-${pairing.id}`,
       agent: SYSTEM_AGENT,
       kind: 'system',
-      title: `Pair ${role === 'owner' ? 'a front-end' : 'an agent client'}: ${clean}`,
-      text: `A client asks for ${role === 'owner' ? 'full access, as a front-end' : 'agent access'}. It shows the code ${pairing.code}. Approve only if the client shows the same code.`,
+      title: `Pair ${role === 'owner' ? 'a front-end' : role === 'extension' ? 'an extension' : 'an agent client'}: ${clean}`,
+      text: `A client asks for ${role === 'owner' ? 'full access, as a front-end' : role === 'extension' ? 'extension access: it reads every card and can hold or return them' : 'agent access'}. It shows the code ${pairing.code}. Approve only if the client shows the same code.`,
       options: [
         { id: 'approve', label: 'Approve', description: `The client shows ${pairing.code}` },
         { id: 'deny', label: 'Deny' },
@@ -201,10 +211,13 @@ export class Inbox {
     if (input.attachments !== undefined) {
       if (!Array.isArray(input.attachments) || input.attachments.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
       attachments = input.attachments.map((f, i) => {
-        if ('ref' in f && f.ref) return f.ref;
-        const src = String(f?.src ?? '');
+        if (!f || typeof f !== 'object') throw new InboxError(400, `attachment ${index(i)}: must be an object with src`);
+        if (f.ref) return f.ref;
+        const src = String(f.src ?? '');
         if (!/^https:\/\//.test(src)) throw new InboxError(400, `attachment ${index(i)}: src must be an https URL, or a data: URL posted through postCardWithFiles`);
-        const name = cleanName(f.name) || decodeURIComponent(new URL(src).pathname.split('/').pop() || 'file');
+        let last: string;
+        try { last = decodeURIComponent(new URL(src).pathname.split('/').pop() || 'file'); } catch { throw new InboxError(400, `attachment ${index(i)}: src is not a valid URL`); }
+        const name = cleanName(f.name) || last;
         return { url: src, name, type: typeFromName(name), alt: f.alt ? String(f.alt).slice(0, 300) : undefined };
       });
     }
@@ -256,7 +269,130 @@ export class Inbox {
       }
     }
     this.emit({ type: 'change', card: id });
+    // Agent cards go through the card.created hook before the person sees them.
+    if ((kind === 'ask' || kind === 'secret') && caller.token !== '') return this.requestTriage(card);
     return card;
+  }
+
+  // ---- extensions and hooks ----
+
+  /** An extension dials in for the hooks it names. A second connection with the same name replaces the first. */
+  connectExtension(caller: Caller, reg: Partial<ExtensionRegistration>, send: (ev: HookEvent) => void): () => void {
+    const entry = { reg: this.checkExtension(caller, reg), token: caller.token, send };
+    const name = entry.reg.name;
+    this.extensions.set(name, entry);
+    // Screen the cards that came in while no extension was there.
+    if (entry.reg.hooks.includes('card.created')) {
+      for (const card of this.store.list<Card>('cards')) {
+        if ((card.kind !== 'ask' && card.kind !== 'secret') || card.closed || this.store.get('answers', card.id)) continue;
+        const t = card.triage;
+        if (t?.state === 'pending' && t.request && t.deadline && t.waiting?.includes(name)) {
+          // A call this extension missed while it reconnected.
+          send({ type: 'hook', version: HOOK_VERSION, id: t.request, hook: 'card.created', card: publicCard(card), deadline: t.deadline, person: this.person() });
+        } else if (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length)) this.requestTriage(card);
+      }
+    }
+    return () => { if (this.extensions.get(name) === entry) this.extensions.delete(name); };
+  }
+
+  /** Check and complete an extension registration without connecting it. */
+  checkExtension(caller: Caller, reg: Partial<ExtensionRegistration>): ExtensionRegistration {
+    if (caller.role === 'agent') throw new InboxError(403, 'only an extension or owner token can register hooks');
+    const name = String(reg.name ?? '').trim();
+    if (!/^[\w.-]{1,40}$/.test(name)) throw new InboxError(400, 'name must be 1 to 40 letters, digits, dots, dashes or underscores');
+    const hooks = (reg.hooks ?? []).map(String);
+    if (!hooks.length || !hooks.every(isHook)) throw new InboxError(400, `hooks must name some of ${Object.keys(HOOKS).join(', ')}`);
+    const policy = reg.policy === 'fail-closed' ? 'fail-closed' : 'fail-open';
+    const timeoutMs = Math.min(Math.max(Number(reg.timeoutMs ?? HOOKS['card.created'].defaultTimeoutMs), 1000), 600_000);
+    return { name, hooks: hooks as HookName[], policy, timeoutMs };
+  }
+
+  private requestTriage(card: Card): Card {
+    const targets = [...this.extensions.values()].filter((e) => e.reg.hooks.includes('card.created'));
+    const now = this.now();
+    if (!targets.length) {
+      // Fail-open when triage is down: the card goes straight to the person, and a returning extension screens it.
+      const next = { ...card, triage: { state: 'skipped' as const, reason: 'No triage extension was connected.', at: now } };
+      this.store.put('cards', card.id, next);
+      return next;
+    }
+    const request = randomId(8);
+    const deadline = now + Math.max(...targets.map((t) => t.reg.timeoutMs));
+    const policy = targets.some((t) => t.reg.policy === 'fail-closed') ? 'fail-closed' as const : 'fail-open' as const;
+    const next: Card = { ...card, triage: { state: 'pending', by: targets.map((t) => t.reg.name).join(', '), request, waiting: targets.map((t) => t.reg.name), deadline, policy, at: now } };
+    this.store.put('cards', card.id, next);
+    this.emit({ type: 'change', card: card.id });
+    const person = this.person();
+    for (const t of targets) t.send({ type: 'hook', version: HOOK_VERSION, id: request, hook: 'card.created', card: publicCard(next), deadline, person });
+    return next;
+  }
+
+  /** An extension answers a card.created call. */
+  hookVerdict(caller: Caller, request: string, verdict: Verdict, reason: string): Card {
+    const card = this.store.list<Card>('cards').find((c) => c.triage?.request === request);
+    if (!card?.triage) throw new InboxError(404, 'unknown hook call');
+    const ext = [...this.extensions.values()].find((e) => e.token === caller.token && card.triage?.waiting?.includes(e.reg.name));
+    if (!ext) throw new InboxError(403, 'this hook call does not wait for this extension');
+    if (!(HOOKS['card.created'].verdicts as readonly string[]).includes(verdict)) throw new InboxError(400, 'verdict must be pass, hold or return');
+    if (card.triage.state !== 'pending') return card;
+    const clean = String(reason ?? '').slice(0, 1000);
+    const waiting = (card.triage.waiting ?? []).filter((n) => n !== ext.reg.name);
+    const now = this.now();
+    if (verdict === 'return') {
+      this.store.put('cards', card.id, { ...card, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], at: now } });
+      this.closeAs(card, 'returned', clean || 'Triage sent the card back.');
+      for (const [k, subs] of this.agents) {
+        if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send({ type: 'returned', id: randomId(6), card: publicCard(card), reason: clean || 'Triage sent the card back.' });
+      }
+      return this.getCard(card.id);
+    }
+    const triage = verdict === 'hold'
+      ? { ...card.triage, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
+      : { ...card.triage, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, at: now };
+    const next = { ...card, triage };
+    this.store.put('cards', card.id, next);
+    this.emit({ type: 'change', card: card.id });
+    return next;
+  }
+
+  /** The owner lets a held card through. */
+  release(id: string): Card {
+    const card = this.getCard(id);
+    if (!card.triage || card.triage.state !== 'held') return card;
+    const next = { ...card, triage: { ...card.triage, state: 'passed' as const, reason: `Released by you. ${card.triage.reason ?? ''}`.trim(), at: this.now() } };
+    this.store.put('cards', id, next);
+    this.emit({ type: 'change', card: id });
+    return next;
+  }
+
+  addWebhook(hook: string, url: string, secret: string): Webhook {
+    if (!isHook(hook)) throw new InboxError(400, `hook must be one of ${Object.keys(HOOKS).join(', ')}`);
+    if (!/^https:\/\//.test(String(url))) throw new InboxError(400, 'url must be https');
+    const w: Webhook = { id: randomId(6), hook, url: String(url), secret };
+    this.store.put('meta', `webhook:${w.id}`, w);
+    return w;
+  }
+
+  private webhooks(): Webhook[] {
+    return this.store.list<unknown>('meta').filter((m): m is Webhook => typeof m === 'object' && m !== null && 'url' in m && 'secret' in m);
+  }
+
+  listWebhooks(): Omit<Webhook, 'secret'>[] {
+    return this.webhooks().map(({ secret: _s, ...w }) => w);
+  }
+
+  deleteWebhook(id: string): void {
+    this.store.delete('meta', `webhook:${id}`);
+  }
+
+  private observeAnswer(card: Card, answer: Answer): void {
+    const event: HookEvent = { type: 'hook', version: HOOK_VERSION, id: randomId(8), hook: 'answer.saved', card: publicCard(card), answer };
+    for (const e of this.extensions.values()) if (e.reg.hooks.includes('answer.saved')) e.send(event);
+    for (const w of this.webhooks().filter((x) => x.hook === 'answer.saved')) {
+      const p = deliverWebhook(w, event);
+      this.deliveries.add(p);
+      void p.finally(() => this.deliveries.delete(p));
+    }
   }
 
   getCard(id: string): Card {
@@ -272,8 +408,11 @@ export class Inbox {
     if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input);
     if (files.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
     const id = input.id ? String(input.id) : randomId(8);
+    // Check the id before it goes into a blob key.
+    if (!/^[\w.:-]{1,80}$/.test(id)) throw new InboxError(400, 'id must be 1 to 80 letters, digits, dots, colons, dashes or underscores');
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
+    if (files.some((f) => !f || typeof f !== 'object')) throw new InboxError(400, 'each attachment must be an object with src');
     const decoded = files.map((f, i) => (/^data:/.test(String(f?.src ?? '')) ? decodeDataUrl(i, f) : undefined));
     const stored: Attachment[] = [];
     const resolved = await Promise.all(files.map(async (f, i) => {
@@ -286,20 +425,24 @@ export class Inbox {
       return { src: '', ref };
     }));
     let card: Card;
+    let prior: Card | undefined;
     try {
+      // Read the card again right before the commit, with no await between: another update may have landed meanwhile.
+      prior = this.store.get<Card>('cards', id);
       card = this.postCard(caller, { ...input, id, attachments: resolved });
     } catch (e) {
       await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
       throw e;
     }
     const kept = new Set(card.attachments?.map((f) => f.id));
-    await Promise.all((before?.attachments ?? []).filter((f) => f.id && !kept.has(f.id)).map((f) => this.blobs.delete(f.id ?? '')));
+    await Promise.all((prior?.attachments ?? []).filter((f) => f.id && !kept.has(f.id)).map((f) => this.blobs.delete(f.id ?? '')));
     return card;
   }
 
   /** The bytes of a file, for the owner, an extension, or the client that posted its card. */
   async attachment(caller: Caller, id: string): Promise<{ file: Attachment; bytes: Uint8Array<ArrayBuffer> }> {
-    const card = this.getCard(id.slice(0, id.indexOf('.')) || id);
+    // A key is <card id>.<index>.<random>, and a card id may contain dots.
+    const card = this.getCard(id.split('.').slice(0, -2).join('.') || id);
     if (caller.role === 'agent' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
     const file = card.attachments?.find((f) => f.id === id);
     const blob = file ? await this.blobs.get(id) : undefined;
@@ -536,6 +679,7 @@ export class Inbox {
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
     else this.flush(card.agent);
+    if (card.kind !== 'system' && card.kind !== 'secret') this.observeAnswer(card, this.store.get<Answer>('answers', id) ?? answer);
     return this.store.get<Answer>('answers', id) ?? answer;
   }
 
@@ -580,6 +724,22 @@ export class Inbox {
       .map(({ card, answer }) => (answer ? { card: publicCard(card), answer } : { card: publicCard(card) }));
   }
 
+  /** This inbox's stable identity, the same over every link to it. */
+  id(): string {
+    let id = this.store.get<string>('meta', 'inbox-id');
+    if (!id) { id = randomId(8); this.store.put('meta', 'inbox-id', id); }
+    return id;
+  }
+
+  /** The stored result of a message this client sent before, by its id. */
+  recallMessage(key: string): { status: number; body: string } | undefined {
+    return this.store.get<{ status: number; body: string }>('messages', key);
+  }
+
+  rememberMessage(key: string, status: number, body: string): void {
+    this.store.put('messages', key, { key, status, body, at: this.now() });
+  }
+
   // ---- connections ----
 
   private key(token: string, agent: string): string {
@@ -604,7 +764,7 @@ export class Inbox {
       if (!s?.delete(send)) return;
       if (s.size === 0) this.agents.delete(k);
       const stillOpen = [...this.agents.keys()].some((x) => x.endsWith(`\n${agent}`));
-      if (!stillOpen) this.setPresence(agent, false);
+      if (!stillOpen) this.store.put<Presence>('presence', agent, { agent, online: true, lastSeen: this.now(), leftAt: this.now() });
     };
   }
 
@@ -630,9 +790,46 @@ export class Inbox {
     }
   }
 
-  subscribePage(send: PageSend): () => void {
+  /** A page opens its event stream. `viewer` is the page's own id, for its presence reports. */
+  subscribePage(send: PageSend, viewer?: string): () => void {
     this.pages.add(send);
-    return () => { this.pages.delete(send); };
+    if (viewer) { this.viewers.set(viewer, this.viewers.get(viewer) ?? { visible: true, activeAt: this.now(), focus: null }); this.personChanged(); }
+    return () => {
+      this.pages.delete(send);
+      if (viewer && this.viewers.delete(viewer)) this.personChanged();
+    };
+  }
+
+  /** A page reports whether it is visible, that the person did something, and the card on its screen. */
+  reportViewer(viewer: string, report: { visible?: boolean; active?: boolean; focus?: string | null }): PersonPresence {
+    if (!/^[\w-]{4,64}$/.test(String(viewer))) throw new InboxError(400, 'viewer must be 4 to 64 letters, digits, dashes or underscores');
+    const before = this.viewers.get(viewer) ?? { visible: true, activeAt: null, focus: null };
+    const next = {
+      visible: typeof report.visible === 'boolean' ? report.visible : before.visible,
+      activeAt: report.active ? this.now() : before.activeAt,
+      focus: report.focus === undefined ? before.focus : report.focus ? String(report.focus) : null,
+    };
+    this.viewers.set(viewer, next);
+    // Extensions hear about a change in what the person sees, not about every keypress.
+    if (next.visible !== before.visible || next.focus !== before.focus) return this.personChanged();
+    const person = this.person();
+    this.store.put('meta', 'person', person);
+    return person;
+  }
+
+  person(): PersonPresence {
+    const views = [...this.viewers.values()];
+    const shown = views.filter((v) => v.visible).sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0));
+    const activeAt = views.reduce<number | null>((m, v) => (v.activeAt !== null && (m === null || v.activeAt > m) ? v.activeAt : m), null);
+    return { pages: views.length, visible: shown.length > 0, activeAt, focus: shown[0]?.focus ?? null, at: this.now() };
+  }
+
+  private personChanged(): PersonPresence {
+    const person = this.person();
+    this.store.put('meta', 'person', person);
+    const event: HookEvent = { type: 'hook', version: HOOK_VERSION, id: randomId(8), hook: 'person.changed', person };
+    for (const e of this.extensions.values()) if (e.reg.hooks.includes('person.changed')) e.send(event);
+    return person;
   }
 
   /** The page code changed: open pages reload and keep their drafts. */
@@ -644,10 +841,31 @@ export class Inbox {
     for (const send of this.pages) send(ev);
   }
 
-  /** Called by the platform alarm: expires old pairing requests and cards past their expiry. */
+  /** Called by the platform alarm: ends presence after its grace, forgets old message ids,
+   * resolves late hook calls, and expires pairing requests and cards. */
   sweep(): void {
     const now = this.now();
+    for (const p of this.store.list<Presence>('presence')) {
+      const open = [...this.agents.keys()].some((x) => x.endsWith(`\n${p.agent}`));
+      if (p.online && p.leftAt !== undefined && now - p.leftAt >= PRESENCE_GRACE_MS && !open) {
+        // The agent was last seen when its connection closed, not when the alarm noticed.
+        this.store.put<Presence>('presence', p.agent, { agent: p.agent, online: false, lastSeen: p.leftAt });
+        this.emit({ type: 'presence', agent: p.agent, online: false });
+      }
+    }
+    for (const m of this.store.list<{ key: string; at: number }>('messages')) {
+      if (now - m.at > MESSAGE_MEMORY_MS) this.store.delete('messages', m.key);
+    }
     for (const card of this.store.list<Card>('cards')) {
+      const t = card.triage;
+      if (t?.state === 'pending' && t.deadline && t.deadline <= now) {
+        const late = (t.waiting ?? []).join(', ') || 'triage';
+        const triage = t.policy === 'fail-closed'
+          ? { ...t, state: 'held' as const, reason: `${late} did not answer in time, and its policy holds the card.`, waiting: [], at: now }
+          : { ...t, state: 'passed' as const, reason: `${late} did not answer in time, so the card went through.`, waiting: [], at: now };
+        this.store.put('cards', card.id, { ...card, triage });
+        this.emit({ type: 'change', card: card.id });
+      }
       if (card.expiresAt && card.expiresAt <= now && !card.closed && !this.store.get('answers', card.id)) {
         this.closeAs(card, 'expired', 'The agent stopped waiting for an answer.');
       }
@@ -698,7 +916,9 @@ function decodeDataUrl(i: number, f: NewAttachment): { type: string; bytes: Uint
   if (!m) throw new InboxError(400, `attachment ${i + 1}: src must be an https URL or a base64 data: URL`);
   const data = (m[2] ?? '').replace(/\s/g, '');
   if (Math.floor((data.length * 3) / 4) > MAX_ATTACHMENT_BYTES + 2) throw new InboxError(413, `attachment ${i + 1}: at most ${MAX_ATTACHMENT_BYTES} bytes`);
-  return { type: (m[1] ?? '').toLowerCase(), bytes: Uint8Array.from(atob(data), (c) => c.charCodeAt(0)) };
+  let raw: string;
+  try { raw = atob(data); } catch { throw new InboxError(400, `attachment ${i + 1}: the base64 data is malformed`); }
+  return { type: (m[1] ?? '').toLowerCase(), bytes: Uint8Array.from(raw, (c) => c.charCodeAt(0)) };
 }
 
 function typeFromName(name: string): string {

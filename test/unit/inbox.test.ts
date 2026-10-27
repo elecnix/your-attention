@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Inbox, InboxError, cardState, type Caller } from '../../src/core/inbox.ts';
+import { Inbox, InboxError, PRESENCE_GRACE_MS, cardState, type Caller } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, PageEvent } from '../../src/core/types.ts';
 
@@ -110,14 +110,32 @@ describe('delivery', () => {
     assert.equal(got.filter((e) => e.type === 'answer').length, 1);
   });
 
-  it('marks an agent offline when its last stream closes', () => {
-    const { inbox, agentA } = setup();
+  it('marks an agent offline a short grace after its last stream closes', () => {
+    let t = 0;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const agentA: Caller = { token: 'ta', role: 'agent' };
     const close1 = inbox.connect(agentA, 's1', () => {});
     const close2 = inbox.connect(agentA, 's1', () => {});
     close1();
-    assert.equal(inbox.isOnline('s1'), true);
     close2();
+    t += PRESENCE_GRACE_MS - 1;
+    inbox.sweep();
+    assert.equal(inbox.isOnline('s1'), true, 'a reconnect inside the grace keeps the agent online');
+    t += 1;
+    inbox.sweep();
     assert.equal(inbox.isOnline('s1'), false);
+  });
+
+  it('keeps an agent online across a quick reconnect, such as the next long-poll', () => {
+    let t = 0;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const agentA: Caller = { token: 'ta', role: 'agent' };
+    inbox.connect(agentA, 's1', () => {})();
+    t += 500;
+    inbox.connect(agentA, 's1', () => {});
+    t += PRESENCE_GRACE_MS * 2;
+    inbox.sweep();
+    assert.equal(inbox.isOnline('s1'), true);
   });
 
   it('force-sends an unread answer again', async () => {

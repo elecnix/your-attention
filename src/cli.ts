@@ -22,6 +22,14 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   claude-channel                                      the MCP channel server for Claude Code
   claude-hook ask-pre|ask-post                        the AskUserQuestion hooks for Claude Code
   herdr-blocked                                       post a card for each herdr agent that is blocked
+  triage [--judge-cmd "claude -p" | --judge-url URL --judge-model M --judge-key-env VAR]
+                                                      check each card before you see it (OpenRouter by default)
+  triage login                                        sign in to OpenRouter for the default judge
+  service serve|triage [--write]                      print or write a launchd or systemd unit
+  bridge [--upstream URL] [--port 4815] [--mdns]      offer a remote inbox on this machine
+  offer ssh <host> [--remote-port 4815]               offer this inbox on another machine over SSH
+  relay [--port 4900] [--key-env VAR]                 run a relay that inboxes dial out to
+  serve --relay URL [--relay-key-env VAR]             also offer this inbox through a relay
 
 Files live in ${homeDir()} (set YOUR_ATTENTION_HOME to move them).`;
 
@@ -49,8 +57,9 @@ function localServer(): { url: string; owner: string } {
 
 switch (command) {
   case 'serve': {
-    const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '0.0.0.0' }, 'no-mdns': { type: 'boolean', default: false } } });
-    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'] });
+    const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '0.0.0.0' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
+    const relayKey = values.relay ? process.env[String(values['relay-key-env'])] ?? fail(`--relay needs the relay key in $${values['relay-key-env']}`) : '';
+    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined });
     const stop = async (): Promise<void> => { await server.close(); process.exit(0); };
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
@@ -108,6 +117,60 @@ switch (command) {
       await c.ack(card.id);
       stop.abort();
     }, stop.signal);
+    break;
+  }
+  case 'triage': {
+    const triage = await import('./extensions/triage.ts');
+    if (rest[0] === 'login') {
+      const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+      await triage.openRouterLogin((u) => { console.log(`Opening ${u}`); execFile(opener, [u]); });
+      console.log(`Signed in. The key is in ${triage.OPENROUTER_KEY_FILE()}.`);
+      break;
+    }
+    const { values } = parseArgs({ args: rest, options: { 'judge-cmd': { type: 'string' }, 'judge-url': { type: 'string' }, 'judge-model': { type: 'string' }, 'judge-key-env': { type: 'string' }, name: { type: 'string', default: 'triage' } } });
+    const { loadExtensionConfig } = await import('./client.ts');
+    const config = loadExtensionConfig() ?? fail('No inbox found: start one, or set YOUR_ATTENTION_URL and YOUR_ATTENTION_TOKEN to an extension token.');
+    const judge = values['judge-cmd'] ? triage.commandJudge(values['judge-cmd'])
+      : values['judge-url'] ? triage.chatJudge({ baseUrl: values['judge-url'], model: values['judge-model'] ?? fail('--judge-model is required with --judge-url'), apiKey: process.env[values['judge-key-env'] ?? ''] ?? '' })
+      : triage.defaultJudge(values['judge-model']);
+    const stop = new AbortController();
+    process.on('SIGTERM', () => stop.abort());
+    process.on('SIGINT', () => stop.abort());
+    await triage.runTriage({ ...config, judge, name: values.name }, stop.signal);
+    break;
+  }
+  case 'service': {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, strict: false, options: { write: { type: 'boolean', default: false } } });
+    const [name, ...args] = positionals;
+    if (name !== 'serve' && name !== 'triage') fail('Usage: your-attention service serve|triage [--write] [options for the command]');
+    const { serviceFile } = await import('./node/service.ts');
+    const unit = serviceFile(name, [name, ...args]);
+    if (!values.write) { console.log(`# ${unit.path}\n${unit.content}\n# then: ${unit.start}`); break; }
+    fs.mkdirSync(path.dirname(unit.path), { recursive: true });
+    fs.writeFileSync(unit.path, unit.content);
+    console.log(`Wrote ${unit.path}. Start it with: ${unit.start}`);
+    break;
+  }
+  case 'bridge': {
+    const { values } = parseArgs({ args: rest, options: { upstream: { type: 'string' }, port: { type: 'string', default: '4815' }, host: { type: 'string', default: '127.0.0.1' }, mdns: { type: 'boolean', default: false } } });
+    const config = loadConfig() ?? fail('Pair this machine first: `your-attention pair <url>`.');
+    const upstream = values.upstream ?? config.url;
+    const b = await (await import('./node/links.ts')).bridge({ upstream, token: config.token, port: Number(values.port), host: values.host, mdns: values.mdns });
+    console.error(`[bridge] ${b.url} leads to ${upstream}`);
+    break;
+  }
+  case 'offer': {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'remote-port': { type: 'string', default: '4815' } } });
+    if (positionals[0] !== 'ssh' || !positionals[1]) fail('Usage: your-attention offer ssh <host> [--remote-port 4815]');
+    const { url } = localServer();
+    (await import('./node/links.ts')).offerOverSsh({ host: positionals[1], localPort: Number(new URL(url).port), remotePort: Number(values['remote-port']) });
+    break;
+  }
+  case 'relay': {
+    const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4900' }, host: { type: 'string', default: '0.0.0.0' }, 'key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
+    const key = process.env[String(values['key-env'])] ?? fail(`The relay needs its key in $${values['key-env']}.`);
+    const r = await (await import('./node/links.ts')).relayServer({ port: Number(values.port), host: values.host, key });
+    console.error(`[relay] listening on ${r.url}; inboxes are at /i/<inbox id>/`);
     break;
   }
   case 'claude-channel':

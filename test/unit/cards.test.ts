@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Inbox, InboxError, ORPHAN_MS, type Caller } from '../../src/core/inbox.ts';
-import { MemoryStorage } from '../../src/core/storage.ts';
+import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 
 function setup() {
@@ -66,6 +66,7 @@ describe('card states', () => {
     inbox.connect(agent, 's1', () => {})();
     assert.equal(inbox.state().states['c1'], 'open');
     clock.advance(ORPHAN_MS + 1);
+    inbox.sweep();
     assert.equal(inbox.state().states['c1'], 'orphaned');
   });
 });
@@ -187,5 +188,39 @@ describe('attachments', () => {
     const big = `data:application/pdf;base64,${'A'.repeat(12_000_000)}`;
     await assert.rejects(inbox.postCardWithFiles(agent, { agent: 's1', title: 'q', attachments: [{ src: big }] }), (e: unknown) => e instanceof InboxError && e.status === 413);
     await assert.rejects(inbox.postCardWithFiles(agent, { agent: 's1', title: ' ', attachments: [{ src: png }] }), /title/);
+  });
+});
+
+describe('attachment edge cases from review', () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  it('serves an attachment on a card whose id contains a dot', async () => {
+    const { inbox, agent } = setup();
+    const card = await inbox.postCardWithFiles(agent, { id: 'v1.2.review', agent: 's1', title: 'q', attachments: [{ src: png }] });
+    assert.equal((await inbox.attachment(agent, card.attachments![0]!.id!)).file.type, 'image/png');
+  });
+
+  it('answers 400 to every malformed attachment, never a crash', async () => {
+    const { inbox, agent } = setup();
+    for (const bad of [null, 'x', { src: 'https://' }, { src: 'https://example.com/%E0%A4%A' }, { src: 'data:image/png;base64,A' }]) {
+      await assert.rejects(inbox.postCardWithFiles(agent, { agent: 's1', title: 'q', attachments: [bad as never] }), (e: unknown) => e instanceof InboxError && e.status === 400, JSON.stringify(bad));
+    }
+    await assert.rejects(inbox.postCardWithFiles(agent, { id: '../../x', agent: 's1', title: 'q', attachments: [{ src: png }] }), /id must be/);
+  });
+
+  it('deletes the files a concurrent update replaced', async () => {
+    const store = new MemoryStorage();
+    const blobs = new MemoryBlobs();
+    const inbox = new Inbox(store, Date.now, blobs);
+    const agent: Caller = { token: 'ta', role: 'agent' };
+    const first = await inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [{ src: png }] });
+    const [a, b] = await Promise.all([
+      inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [{ src: png }] }),
+      inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [{ src: png }] }),
+    ]);
+    const finalId = inbox.getCard('c1').attachments![0]!.id!;
+    for (const id of [first.attachments![0]!.id!, a.attachments![0]!.id!, b.attachments![0]!.id!].filter((x) => x !== finalId)) {
+      assert.equal(await blobs.get(id), undefined, `${id} should be gone`);
+    }
   });
 });

@@ -4,16 +4,59 @@ This file specifies the messages, card states and delivery rules that every inbo
 
 ## Transport and encoding
 
-Messages are JSON over HTTP. Agents and pages receive events as server-sent events. Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one.
+Messages are JSON over HTTP. Agents receive events in whichever of three ways their environment allows:
 
-`GET /v1/info` returns `{"name":"your-attention","protocol":1,"pair":"/v1/pair"}`.
+- `GET /v1/stream?agent=<id>`: server-sent events, the default. Pages use `GET /v1/events` the same way.
+- `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The inbox pings every 15 seconds and drops a socket that misses a pong.
+- `GET /v1/poll?agent=<id>&wait=25`: a long-poll that returns `{events}` at the first answer, or after `wait` seconds.
+
+Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one. The inbox reports an agent offline 2 seconds after its last connection closes, so a reconnect or the next poll does not flicker its presence.
+
+`GET /v1/info` returns `{"name":"your-attention","protocol":1,"id":"<inbox id>","pair":"/v1/pair"}`. The id stays the same over every link to the inbox.
+
+## One message over several links
+
+A client may use several links to one inbox, such as a direct link and a relay. It checks that each link reports the same `id`.
+
+A write may include an `x-message-id` header of 8 to 64 characters from `[A-Za-z0-9_-]`. The inbox applies the first request with that id from that client, and answers every later one with the stored result and `x-message-id-replayed: 1`. It forgets an id after 24 hours. The client in `src/client.ts` sends one id per write and keeps it across retries, and it counts an answer once when two links deliver it.
+
+## Links
+
+- `your-attention bridge --upstream <url>` runs a proxy on another machine. A caller on that machine may omit its token, and the bridge adds its own. A caller from the LAN brings its own token. With `--mdns`, the bridge advertises the upstream inbox id.
+- `your-attention offer ssh <host>` opens a reverse SSH tunnel, so agents on that host connect to `http://127.0.0.1:4815`.
+- `your-attention relay` runs a relay on a public machine. `your-attention serve --relay <url>` dials out to it over a WebSocket, so the inbox is at `<relay>/i/<inbox id>/` with no open port. The relay key in `YOUR_ATTENTION_RELAY_KEY` only registers inboxes. Every request through the relay still needs the inbox's own token.
+
+## Hooks and extensions
+
+An extension dials in like an agent: `GET /v1/extensions/stream?name=<name>&hooks=<a,b>&timeoutMs=<ms>&policy=fail-open|fail-closed`, with an `extension` or `owner` token. Hook calls use their own messages, version 1, separate from the agent messages:
+
+| Hook | When | What an extension may do |
+| -- | -- | -- |
+| `card.created` | Before the person sees a new or revised agent card. The call includes the card and the presence of the person. | Answer `POST /v1/hooks/<call id> {verdict, reason}` with `pass`, `hold` or `return`. |
+| `answer.saved` | After the person saves an answer. | Observe only. |
+| `person.changed` | When a page opens, closes, hides or shows another card. | Observe only. |
+
+While an extension checks a card, the card is `in-triage` and the person does not see it. Every extension on the hook must pass the card. `return` closes the card as `returned` and sends the agent a `returned` event with the reason. `hold` keeps the card `held` until the owner releases it with `POST /v1/cards/<id>/release`.
+
+A hook call without a verdict by its deadline follows the policy: `fail-open` passes the card, and `fail-closed` holds it. The card shows the extension and the reason. With no extension on `card.created`, cards go straight to the person, and an extension that connects later screens the cards still waiting. The platform alarm resolves deadlines, so the inbox itself doesn't set timers.
+
+`POST /v1/webhooks {hook, url}` sends observe-only hook calls to an https service. Each call has the header `x-your-attention-signature: sha256=<HMAC-SHA256 of the body>`, keyed with the secret that the create call returns once.
+
+## The triage extension
+
+`your-attention triage` checks that each card states a goal, the options that the agent weighed, evidence, and a recommendation. It also searches earlier answers, and returns a card that an earlier answer covers. By default it uses OpenRouter, with the key from `your-attention triage login`, an OAuth PKCE sign-in. `--judge-cmd "claude -p"` uses a coding harness in print mode instead, and `--judge-url` uses any OpenAI-compatible endpoint. A judge that fails or answers in an unreadable form passes the card. `your-attention service triage` writes a launchd or systemd unit for it.
+
+## Person presence
+
+Each page opens `GET /v1/events?viewer=<page id>` and reports `POST /v1/person/<page id> {visible, active, focus}`. The inbox combines the pages into `{pages, visible, activeAt, focus}` at `GET /v1/person`, for the owner and extensions. With two people on one inbox, each page counts.
 
 ## Clients and tokens
 
-Each client sends `Authorization: Bearer <token>`. A token has one of two roles:
+Each client sends `Authorization: Bearer <token>`. A token has one of three roles:
 
 - `owner` reads every card and answers them. The built-in page and other front-ends use it.
 - `agent` posts cards and receives the answers to them. It can also search past answers.
+- `extension` reads every card and the presence of the person, and answers hook calls. Triage uses it.
 
 The inbox stores a SHA-256 hash of each token, never the token. The page signs in with `POST /v1/login {token}`, which sets an `HttpOnly`, `SameSite=Strict` cookie. A write that uses the cookie must also send the `x-your-attention: 1` header, which a cross-site form can't set.
 
@@ -153,11 +196,6 @@ The table lists what version 1 still lacks, by principle. The pull request that 
 
 | Principle | What is missing |
 | -- | -- |
-| One documented message model, with pluggable encodings | WebSocket and long-poll transports. Version 1 has server-sent events only. |
 | Platform details sit behind small adapter interfaces | The Cloudflare build, with Durable Object storage, hibernatable WebSockets and alarms. |
 | Presence comes from connections, and it survives hibernation | Socket attachments, planned for the Cloudflare version. |
-| Triage checks cards before you see them | The triage extension and its hook point. |
-| Extensions attach at named hook points, in process or out | Hook points and their failure policies. |
-| Agents connect to the inbox from wherever they run | Outbound links to a remote server, and bridges. |
-| Many links to one inbox act as a mesh | Message dedupe across links. |
 | A hosted inbox works without an account | The hosted service. |

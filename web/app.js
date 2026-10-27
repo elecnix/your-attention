@@ -14,6 +14,24 @@ const store = {
 const api = (path, body) => fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J(body) });
 const time = (t) => new Date(t).toLocaleTimeString();
 
+// This tab's id for presence reports. Two tabs, or two people, count as two pages.
+const VIEWER = (() => {
+  try {
+    const id = sessionStorage.getItem('viewer') || `v-${crypto.getRandomValues(new Uint32Array(2)).join('')}`;
+    sessionStorage.setItem('viewer', id);
+    return id;
+  } catch { return `v-${Math.random().toString(36).slice(2)}`; }
+})();
+let lastReport = 0;
+function report(fields) {
+  const now = Date.now();
+  if (!('visible' in fields) && !('focus' in fields) && now - lastReport < 20000) return;
+  lastReport = now;
+  fetch(`/v1/person/${VIEWER}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J(fields) }).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => report({ visible: document.visibilityState === 'visible', active: true }));
+for (const ev of ['keydown', 'pointerdown', 'scroll']) window.addEventListener(ev, () => report({ active: true }), { passive: true });
+
 // Browser notifications, only after you turn them on.
 const notifyOn = () => store.get('notify:on') === true && 'Notification' in window && Notification.permission === 'granted';
 function notify(title, body) {
@@ -201,7 +219,8 @@ function FileView({ file }) {
   }, [file.id, file.url]);
   const download = h('a', { className: 'file-name', href: file.id ? `${fileUrl(file)}?download=1` : file.url, download: file.name, target: '_blank', rel: 'noopener' }, file.name);
   let body = null;
-  if (file.type === 'application/pdf') body = h('iframe', { className: 'pdf', src: fileUrl(file), title: file.name });
+  // Only the inbox's own copy of a PDF goes in a frame. Its response blocks scripts. A PDF elsewhere stays a link.
+  if (file.type === 'application/pdf' && file.id) body = h('iframe', { className: 'pdf', src: fileUrl(file), title: file.name, sandbox: 'allow-downloads' });
   else if (textual && text != null) {
     if (file.type === 'text/markdown') body = h('div', { className: 'markdown' }, window.renderMarkdown(h, text));
     else if (file.type === 'text/csv') {
@@ -311,6 +330,7 @@ function App() {
   const focusRef = React.useRef(null);
   const knownRef = React.useRef(null);
   const seenRef = React.useRef(null);
+  const reportedFocus = React.useRef(undefined);
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
 
   const refresh = React.useCallback(() => fetch('/v1/state').then((r) => {
@@ -347,7 +367,7 @@ function App() {
     const connect = () => signIn().then(() => {
       if (es) es.close();
       refreshRef.current();
-      es = new EventSource('/v1/events');
+      es = new EventSource(`/v1/events?viewer=${encodeURIComponent(VIEWER)}`);
       es.onopen = () => refreshRef.current();
       // A stream that fails may mean a revoked token: the state request tells.
       es.onerror = () => refreshRef.current();
@@ -385,12 +405,13 @@ function App() {
   };
   const visible = state.cards;
   const levels = state.levels || [];
-  const levelOf = (c) => state.priorities[c.id] || c.priority;
+  const levelOf = (c) => (state.priorities || {})[c.id] || c.priority;
   const rank = (c) => { const i = levels.findIndex((l) => l.id === levelOf(c)); return i < 0 ? levels.length : i; };
   const label = (id) => (levels.find((l) => l.id === id) || {}).label || id;
   const waiting = (s) => ['open', 'reply', 'orphaned', 'held'].includes(s);
   const pending = visible.filter((c) => waiting(st(c)))
     .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
+  const checking = visible.filter((c) => st(c) === 'in-triage');
   const replied = pending.filter((c) => st(c) === 'reply').sort((a, b) => lastReply(b) - lastReply(a));
   const sentAt = (c) => (c.closed ? c.closed.at : answers[c.id] ? answers[c.id].savedAt : 0);
   const outbox = visible.filter((c) => ['answered', 'delivered'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
@@ -400,6 +421,10 @@ function App() {
   pinnedRef.current = current ? current.id : null;
   focusRef.current = current ? current.id : null;
   if (current && store.get('focus:current') !== current.id) store.set('focus:current', current.id);
+  if (reportedFocus.current !== (current ? current.id : null)) {
+    reportedFocus.current = current ? current.id : null;
+    report({ focus: reportedFocus.current, active: true });
+  }
   const seenKey = current ? `${current.id}:${current.replies.length}` : null;
   if (current && current.replies.some((r) => !r.seenAt) && seenRef.current !== seenKey) {
     seenRef.current = seenKey;
@@ -443,6 +468,7 @@ function App() {
         tagKeys.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
     replied.length > 0 && group('Agent replied', replied, ''),
     groups.length ? groups.map(([title, items]) => group(title, items, 'Nothing waiting')) : group('Waiting for you', [], 'Nothing waiting'),
+    checking.length > 0 && group('Being checked by triage', checking, ''),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent'),
     group('Sent, newest first', sent, 'Nothing sent yet', 'sent'));
 
@@ -464,7 +490,9 @@ function App() {
         current.status && h('span', { className: 'status' }, current.status),
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && h('span', { className: `pill small ${pres[0]}` }, pres[1])),
-      current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' }, `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`),
+      current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
+        `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,
+        current.triage.state === 'held' && h('button', { className: 'btn', style: { marginLeft: 8 }, onClick: () => api(`/v1/cards/${current.id}/release`, {}) }, 'Release')),
       (o.harness || o.host) && h('div', { className: 'origin' },
         h('span', null, [o.name, o.harness, o.host, o.cwd].filter(Boolean).join(' · ')),
         o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`/v1/cards/${current.id}/open`, {}) }, 'Open session')),

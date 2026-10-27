@@ -1,12 +1,16 @@
 // The HTTP protocol, with fetch Request and Response only, so the same handler
 // runs on Node, Bun, Deno and Workers. SPEC.md lists each route.
+import { randomId } from './crypto.ts';
+import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
 import { Inbox, InboxError, publicCard, type Caller } from './inbox.ts';
-import type { Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
+import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
 import { PROTOCOL_VERSION } from './types.ts';
 
 export const COOKIE = 'ya_token';
 /** Cookie-authenticated writes must carry this header, which a cross-site form cannot set. */
 export const CSRF_HEADER = 'x-your-attention';
+/** A client-chosen id that makes a write idempotent across links and retries. */
+export const MESSAGE_HEADER = 'x-message-id';
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json']);
 
@@ -84,7 +88,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const method = req.method;
 
     // Routes open to any client on the network.
-    if (method === 'GET' && a === 'info') return json({ name: 'your-attention', protocol: PROTOCOL_VERSION, pair: '/v1/pair' });
+    if (method === 'GET' && a === 'info') return json({ name: 'your-attention', protocol: PROTOCOL_VERSION, id: inbox.id(), pair: '/v1/pair' });
     if (method === 'POST' && a === 'pair' && !b) {
       const body = await readJson<{ name?: string; role?: Role }>(req);
       const p = inbox.requestPairing(String(body.name ?? ''), body.role ?? 'agent');
@@ -103,6 +107,25 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (!who) return json({ error: 'pair first: POST /v1/pair' }, 401);
     if (who.viaCookie && method !== 'GET' && req.headers.get(CSRF_HEADER) !== '1') return json({ error: `missing ${CSRF_HEADER} header` }, 403);
     const me: Caller = { token: who.token.id, role: who.token.role };
+    // A message that arrives over two links, or again after a retry, is applied once: the inbox
+    // keeps the first result for each x-message-id, per client.
+    const messageId = method === 'GET' ? null : req.headers.get(MESSAGE_HEADER);
+    if (messageId !== null) {
+      if (!/^[\w-]{8,64}$/.test(messageId)) return json({ error: `${MESSAGE_HEADER} must be 8 to 64 letters, digits, dashes or underscores` }, 400);
+      const key = `${me.token}:${messageId}`;
+      const seen = inbox.recallMessage(key);
+      if (seen) return new Response(seen.body, { status: seen.status, headers: { 'content-type': 'application/json', [`${MESSAGE_HEADER}-replayed`]: '1' } });
+      const res = await routeAuthed(req, url, me);
+      if (res.status < 500 && (res.headers.get('content-type') ?? '').startsWith('application/json')) inbox.rememberMessage(key, res.status, await res.clone().text());
+      return res;
+    }
+    return routeAuthed(req, url, me);
+  }
+
+  async function routeAuthed(req: Request, url: URL, me: Caller): Promise<Response> {
+    const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    const [, a, b, c] = parts;
+    const method = req.method;
     const owner = (): void => {
       if (me.role !== 'owner') throw new InboxError(403, 'only the owner can do this');
     };
@@ -112,8 +135,28 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       owner();
       return eventStream((send) => {
         send('beat', { type: 'beat', at: Date.now() });
-        return inbox.subscribePage((ev) => send(ev.type, ev));
+        return inbox.subscribePage((ev) => send(ev.type, ev), url.searchParams.get('viewer') ?? undefined);
       }, heartbeatMs);
+    }
+    if (method === 'GET' && a === 'poll') {
+      // Long-poll for clients that cannot keep a stream: returns at the first answer, or after `wait` seconds.
+      const agent = url.searchParams.get('agent');
+      if (!agent) return json({ error: 'agent is required' }, 400);
+      const wait = Math.min(Math.max(Number(url.searchParams.get('wait') ?? 25), 0), 55) * 1000;
+      const events: AgentEvent[] = [];
+      let wake: () => void = () => {};
+      const woken = new Promise<void>((r) => { wake = r; });
+      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (!events.length) await Promise.race([woken, new Promise<void>((r) => { timer = setTimeout(r, wait); })]);
+      clearTimeout(timer);
+      disconnect();
+      return json({ events });
+    }
+    if (a === 'person') {
+      if (me.role === 'agent') throw new InboxError(403, 'only the owner and extensions read where the person is');
+      if (method === 'GET') return json(inbox.person());
+      if (method === 'POST' && b) { owner(); return json(inbox.reportViewer(b, await readJson<{ visible?: boolean; active?: boolean; focus?: string | null }>(req))); }
     }
     if (method === 'GET' && a === 'stream') {
       const agent = url.searchParams.get('agent');
@@ -145,6 +188,32 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (a === 'settings') {
       if (method === 'GET') return json(inbox.settings());
       if (method === 'PUT') { owner(); return json(inbox.setSettings(await readJson<Partial<Settings>>(req))); }
+    }
+    if (method === 'GET' && a === 'extensions' && b === 'stream') {
+      const reg = {
+        name: url.searchParams.get('name') ?? '',
+        hooks: (url.searchParams.get('hooks') ?? '').split(',').filter(Boolean) as HookName[],
+        timeoutMs: Number(url.searchParams.get('timeoutMs') ?? 0) || undefined,
+        policy: (url.searchParams.get('policy') ?? 'fail-open') as FailurePolicy,
+      };
+      // Validate before the stream opens, so a bad registration gets a plain error.
+      inbox.checkExtension(me, reg);
+      return eventStream((send) => inbox.connectExtension(me, reg, (ev) => send(ev.type, ev)), heartbeatMs);
+    }
+    if (method === 'POST' && a === 'hooks' && b) {
+      const v = await readJson<{ verdict?: Verdict; reason?: string }>(req);
+      return json(publicCard(inbox.hookVerdict(me, b, v.verdict as Verdict, String(v.reason ?? ''))));
+    }
+    if (a === 'webhooks') {
+      owner();
+      if (method === 'GET') return json(inbox.listWebhooks());
+      if (method === 'POST') {
+        const w = await readJson<{ hook?: string; url?: string }>(req);
+        const secret = randomId(24);
+        const hook = inbox.addWebhook(String(w.hook ?? ''), String(w.url ?? ''), secret);
+        return json({ ...hook, secret }, 201);
+      }
+      if (method === 'DELETE' && b) { inbox.deleteWebhook(b); return json({ ok: true }); }
     }
     if (method === 'GET' && a === 'attachments' && b) {
       const { file, bytes } = await inbox.attachment(me, b);
@@ -201,6 +270,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           owner(); inbox.seen(b); return json({ ok: true });
         case 'force':
           owner(); return json(inbox.force(b));
+        case 'release':
+          owner(); return json(publicCard(inbox.release(b)));
         case 'open': {
           owner();
           if (!options.openOrigin) return json({ error: 'this inbox cannot open sessions' }, 501);

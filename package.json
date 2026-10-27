@@ -5,10 +5,23 @@
   "license": "MIT",
   "type": "module",
   "repository": "github:elecnix/your-attention",
-  "keywords": ["pi-package", "claude-code", "coding-agents", "inbox"],
-  "engines": { "node": ">=22.18" },
-  "bin": { "your-attention": "bin/your-attention.js" },
-  "pi": { "extensions": ["./src/integrations/pi/extension.ts"] },
+  "keywords": [
+    "pi-package",
+    "claude-code",
+    "coding-agents",
+    "inbox"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "your-attention": "bin/your-attention.js"
+  },
+  "pi": {
+    "extensions": [
+      "./src/integrations/pi/extension.ts"
+    ]
+  },
   "scripts": {
     "typecheck": "npm run typecheck:tsgo && npm run typecheck:tsc-rs",
     "typecheck:tsgo": "tsgo --noEmit -p .",
@@ -22,10 +35,12 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "@openuidev/browser-bundle": "0.2.1",
     "bonjour-service": "1.4.4",
-    "typebox": "1.4.3"
+    "typebox": "1.4.3",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "tsc-rs": "0.8.0"
   }

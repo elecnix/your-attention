@@ -28,8 +28,10 @@ function tokenize(src: string): string[] {
   TOKEN.lastIndex = 0;
   while (TOKEN.lastIndex < src.length) {
     if (/^\s*$/.test(src.slice(TOKEN.lastIndex))) break;
+    // A failed sticky match resets lastIndex, so keep the position first.
+    const at = TOKEN.lastIndex;
     const m = TOKEN.exec(src);
-    if (!m) throw new Error(`unexpected character at ${TOKEN.lastIndex + 1}`);
+    if (!m) throw new Error(`unexpected character at ${at + (/^\s*/.exec(src.slice(at))?.[0].length ?? 0) + 1}`);
     out.push(m[1] ?? m[2] ?? m[3] ?? m[4] ?? '');
   }
   return out;
