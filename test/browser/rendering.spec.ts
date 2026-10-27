@@ -168,3 +168,9 @@ test('the browser back and forward buttons move between the cards you opened', a
   await page.reload();
   await expect(title).toHaveText('Second card, linking back');
 });
+
+test('a malformed card id in the address opens the inbox as usual', async ({ page }) => {
+  await page.goto(`${inbox.server.url}/#token=${inbox.server.ownerToken}&card=%`);
+  await page.locator('.bar .pill.on').waitFor();
+  await expect(page.locator('.queue')).toBeVisible();
+});
