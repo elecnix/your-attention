@@ -2,12 +2,13 @@
 
 export const PROTOCOL_VERSION = 1;
 
-export type Priority = 'now' | 'soon' | 'later';
+/** The id of a priority level. The defaults are now, soon and later. */
+export type Priority = string;
 export type CardKind = 'ask' | 'blocked' | 'system' | 'secret';
-export type CloseKind = 'retracted' | 'self-answered' | 'answered-in-terminal' | 'resolved';
-export type CardState = 'open' | 'answered' | 'delivered' | 'read' | 'closed';
+export type CloseKind = 'retracted' | 'self-answered' | 'answered-in-terminal' | 'resolved' | 'expired' | 'returned';
+export type CardState = 'in-triage' | 'held' | 'open' | 'orphaned' | 'answered' | 'delivered' | 'read' | 'closed';
 export type Delivery = 'default' | 'steer' | 'followUp' | 'force';
-export type Role = 'owner' | 'agent';
+export type Role = 'owner' | 'agent' | 'extension';
 
 export interface Option {
   id: string;
@@ -60,6 +61,80 @@ export interface SecretRequest {
   publicKey: JsonWebKey;
 }
 
+/** An earlier version of a card, kept when the agent revises it. */
+export interface CardVersion {
+  version: number;
+  title: string;
+  text?: string;
+  body?: string;
+  html?: string;
+  at: number;
+}
+
+/** Where a card stands with the extensions on the card.created hook. */
+export interface Triage {
+  state: 'pending' | 'passed' | 'held' | 'returned' | 'skipped';
+  /** The extension that decided, or that the inbox waited for. */
+  by?: string;
+  reason?: string;
+  deadline?: number;
+  policy?: 'fail-open' | 'fail-closed';
+  at: number;
+}
+
+export interface PriorityLevel {
+  id: string;
+  label: string;
+  definition: string;
+  /** A rule in the language of src/core/expr.ts. A card it matches takes this level. */
+  rule?: string;
+}
+
+export interface TemplateVersion {
+  version: number;
+  source: string;
+  /** The feedback this version answers. */
+  feedback?: string;
+  at: number;
+}
+
+export interface Template {
+  name: string;
+  versions: TemplateVersion[];
+}
+
+export interface Guidance {
+  text: string;
+  version: number;
+  at: number;
+}
+
+export interface Settings {
+  /** Lets cards carry their own HTML and scripts, in a sandboxed frame. */
+  allowHtml: boolean;
+}
+
+/** A file on a card, such as an image, a PDF or a Markdown document.
+ * The bytes are at GET /v1/attachments/<id>, or at an https URL. */
+export interface Attachment {
+  id?: string;
+  url?: string;
+  name: string;
+  type: string;
+  size?: number;
+  /** A text description, for images. */
+  alt?: string;
+}
+
+/** A file as an agent sends it: a data: URL with base64 bytes, or an https URL. */
+export interface NewAttachment {
+  src: string;
+  name?: string;
+  alt?: string;
+  /** Set by the inbox once the bytes are stored. */
+  ref?: Attachment;
+}
+
 export interface Card {
   id: string;
   /** The agent that receives the answer. One agent is one harness session. */
@@ -78,7 +153,22 @@ export interface Card {
   /** The terminal screen of a blocked agent. */
   screen?: string;
   secret?: SecretRequest;
+  /** Raw HTML with scripts, shown in a sandboxed frame when the settings allow it. */
+  html?: string;
+  attachments?: Attachment[];
+  /** The template the body came from. */
+  template?: { name: string; version: number };
   priority: Priority;
+  /** A state label the agent sets, such as "waiting on CI". */
+  status?: string;
+  /** When the card stops waiting for an answer, in epoch milliseconds. */
+  expiresAt?: number;
+  /** How much the agent thinks the card matters, from 1 to 5. */
+  rating?: number;
+  triage?: Triage;
+  history?: CardVersion[];
+  /** On a system card that proposes new guidance: the text and the agents it would reach. */
+  broadcast?: { text: string; agents: string[] };
   origin?: Origin;
   /** Other properties the agent attaches, for grouping. */
   tags?: Record<string, string>;
@@ -143,7 +233,11 @@ export interface AnswerEvent {
   answer: Answer;
 }
 
-export type AgentEvent = { type: 'hello'; agent: string; version: number } | AnswerEvent;
+export type AgentEvent =
+  | { type: 'hello'; agent: string; version: number; guidance: number }
+  | AnswerEvent
+  | { type: 'guidance'; id: string; guidance: Guidance }
+  | { type: 'returned'; id: string; card: Card; reason: string };
 
 /** What pages receive. They refetch state on "change". */
 export type PageEvent =
@@ -165,7 +259,14 @@ export interface NewCard {
   questions?: AskQuestion[];
   screen?: string;
   secret?: SecretRequest;
+  html?: string;
+  attachments?: NewAttachment[];
+  /** Fill the body from a template: each {{name}} takes the value in vars. */
+  template?: { name: string; version?: number; vars?: Record<string, string> };
   priority?: Priority;
+  status?: string;
+  expiresAt?: number;
+  rating?: number;
   origin?: Origin;
   tags?: Record<string, string>;
   follows?: string;

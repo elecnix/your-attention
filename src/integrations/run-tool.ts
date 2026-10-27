@@ -1,0 +1,92 @@
+// Runs a card tool for any harness integration, so Claude Code and pi offer the same tools.
+import fs from 'node:fs';
+import path from 'node:path';
+import { describeAnswer, type Client } from '../client.ts';
+import type { CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
+import type { SecretRequests } from './secrets.ts';
+
+export interface ToolContext {
+  inbox: Client;
+  secrets: SecretRequests;
+  agent: string;
+  origin: Origin | undefined;
+  /** How the answer reaches this harness, for the tool result: "as a channel event". */
+  arrival: string;
+}
+
+const TYPES: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf',
+  md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', csv: 'text/csv', json: 'application/json',
+};
+
+/** A file the agent names by path or URL, as the inbox takes it. */
+export function toAttachment(a: { path?: string; url?: string; name?: string; alt?: string }): NewAttachment {
+  if (a.url) return { src: a.url, name: a.name, alt: a.alt };
+  if (!a.path) throw new Error('each attachment needs a path or a url');
+  const type = TYPES[path.extname(a.path).slice(1).toLowerCase()] ?? 'application/octet-stream';
+  return { src: `data:${type};base64,${fs.readFileSync(a.path).toString('base64')}`, name: a.name ?? path.basename(a.path), alt: a.alt };
+}
+
+const str = (v: unknown): string | undefined => (v === undefined || v === null ? undefined : String(v));
+
+export async function runTool(ctx: ToolContext, name: string, args: Record<string, unknown>): Promise<string> {
+  const { inbox, agent, origin } = ctx;
+  switch (name) {
+    case 'card_post': {
+      const minutes = Number(args['expires_in_minutes'] ?? 0);
+      const card: NewCard = {
+        id: str(args['id']),
+        agent,
+        title: String(args['title'] ?? ''),
+        text: str(args['text']),
+        recommendation: str(args['recommendation']),
+        options: (args['options'] as string[] | undefined)?.map((label, i): Option => ({ id: `o${i + 1}`, label })),
+        multiple: args['multiple'] as boolean | undefined,
+        body: str(args['body']),
+        html: str(args['html']),
+        attachments: (args['attachments'] as { path?: string; url?: string; name?: string; alt?: string }[] | undefined)?.map(toAttachment),
+        template: args['template'] ? { name: String(args['template']), vars: args['vars'] as Record<string, string> | undefined } : undefined,
+        priority: str(args['priority']),
+        rating: args['rating'] === undefined ? undefined : Number(args['rating']),
+        expiresAt: minutes > 0 ? Date.now() + minutes * 60_000 : undefined,
+        follows: str(args['follows']),
+        tags: args['tags'] as Record<string, string> | undefined,
+        origin,
+      };
+      const posted = await inbox.post(card);
+      return `Posted card ${posted.id}. The answer arrives ${ctx.arrival}; keep working meanwhile.`;
+    }
+    case 'card_patch': {
+      const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']));
+      return `Card ${card.id} is now version ${card.version}.`;
+    }
+    case 'card_status':
+      await inbox.status(String(args['card_id']), String(args['status'] ?? ''));
+      return 'Set.';
+    case 'card_template_save': {
+      const t = await inbox.saveTemplate(String(args['name'] ?? ''), String(args['source'] ?? ''), str(args['feedback']));
+      return `Saved template ${t.name} version ${t.versions.length}. Use it with card_post, template "${t.name}" and vars.`;
+    }
+    case 'card_guidance': {
+      if (args['propose']) {
+        const card = await inbox.proposeGuidance(String(args['propose']));
+        return `Proposed the guidance on card ${card.id}. It changes only if the person approves it.`;
+      }
+      const g = await inbox.guidance();
+      return `Card guidance, version ${g.version}:\n${g.text}`;
+    }
+    case 'card_ask_secret': {
+      const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin });
+      return `Asked for the secret on card ${id}. The answer arrives ${ctx.arrival} with the path of a file, never the value.`;
+    }
+    case 'card_reply':
+      await inbox.reply(String(args['card_id']), String(args['text'] ?? ''));
+      return 'Replied.';
+    case 'card_close':
+      await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));
+      return 'Closed.';
+    case 'card_search':
+      return JSON.stringify((await inbox.search(String(args['query'] ?? ''))).map((r) => ({ id: r.card.id, title: r.card.title, answer: r.answer ? describeAnswer(r.card, r.answer) : null })), null, 2);
+  }
+  throw new Error(`unknown tool ${name}`);
+}

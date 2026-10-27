@@ -23,9 +23,47 @@ export const cardTools: CardTool[] = [
         body: { type: 'string', description: 'Optional OpenUI Lang source for a card that needs other widgets.' },
         tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Properties for grouping, such as topic.' },
         id: { type: 'string', description: 'Reuse an id to revise your own card.' },
+        attachments: {
+          type: 'array',
+          description: 'Files to show on the card: images, PDF, Markdown, text, CSV, JSON, or any file to download. At most 10, 8 MB each.',
+          items: { type: 'object', properties: { path: { type: 'string', description: 'A local file.' }, url: { type: 'string', description: 'An https URL.' }, name: { type: 'string' }, alt: { type: 'string', description: 'What an image shows.' } } },
+        },
+        html: { type: 'string', description: 'Your own HTML and scripts, shown in a sandboxed frame if the person allows it. The frame answers with yourAttention.answer(values, comment).' },
+        template: { type: 'string', description: 'A saved template to fill the body from.' },
+        vars: { type: 'object', additionalProperties: { type: 'string' }, description: 'Values for the template, by {{name}}.' },
+        rating: { type: 'number', description: 'How much the card matters, from 1 to 5.' },
+        expires_in_minutes: { type: 'number', description: 'Stop waiting for an answer after this many minutes.' },
       },
       required: ['title'],
     },
+  },
+  {
+    name: 'card_patch',
+    description: 'Edit one of your cards with exact replacements, the way you edit a file: each old text must occur exactly once. Cheaper than posting a long card again, and the person sees what changed.',
+    schema: {
+      type: 'object',
+      properties: {
+        card_id: { type: 'string' },
+        edits: { type: 'array', items: { type: 'object', properties: { old: { type: 'string' }, new: { type: 'string' } }, required: ['old', 'new'] } },
+        field: { type: 'string', enum: ['text', 'body', 'html', 'title', 'recommendation'], description: 'The body when the card has one, else the text.' },
+      },
+      required: ['card_id', 'edits'],
+    },
+  },
+  {
+    name: 'card_status',
+    description: 'Show a short state on one of your cards, such as "waiting on CI". An empty status clears it.',
+    schema: { type: 'object', properties: { card_id: { type: 'string' }, status: { type: 'string' } }, required: ['card_id', 'status'] },
+  },
+  {
+    name: 'card_template_save',
+    description: 'Save a card format that works as a template, in OpenUI Lang with {{name}} placeholders. Saving the same name again makes a new version; give the feedback the new version answers.',
+    schema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string' }, feedback: { type: 'string' } }, required: ['name', 'source'] },
+  },
+  {
+    name: 'card_guidance',
+    description: 'Read the shared guidance for writing cards, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it.',
+    schema: { type: 'object', properties: { propose: { type: 'string', description: 'The new guidance text. Leave it out to read the current guidance.' } } },
   },
   {
     name: 'card_ask_secret',

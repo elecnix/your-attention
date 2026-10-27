@@ -4,8 +4,9 @@
 import os from 'node:os';
 import { Type } from 'typebox';
 import { Client, describeAnswer, loadConfig } from '../../client.ts';
-import type { CloseKind, NewCard, Option } from '../../core/types.ts';
+import type { NewCard } from '../../core/types.ts';
 import { SecretRequests } from '../secrets.ts';
+import { runTool } from '../run-tool.ts';
 import { cardTools } from '../tools.ts';
 
 // The parts of pi's ExtensionAPI this extension uses.
@@ -52,6 +53,14 @@ export default function yourAttention(pi: PiApi): void {
     stop = new AbortController();
     const client = inbox;
     void client.stream(agent, async (ev) => {
+      if (ev.type === 'guidance' || ev.type === 'returned') {
+        const note = ev.type === 'guidance'
+          ? `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`
+          : `[your-attention] Triage sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`;
+        if (ctx.isIdle()) pi.sendUserMessage(note);
+        else pi.sendUserMessage(note, { deliverAs: 'followUp' });
+        return;
+      }
       if (ev.type !== 'answer') return;
       pending.set(ev.id, ev.card.id);
       const what = ev.card.kind === 'secret' ? await secrets.receive(ev.card, ev.answer) : `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer)}`;
@@ -89,40 +98,7 @@ export default function yourAttention(pi: PiApi): void {
       description: tool.description,
       parameters: Type.Unsafe(tool.schema),
       async execute(_id, args) {
-        const c = need();
-        switch (tool.name) {
-          case 'card_post': {
-            const card = await c.post({
-              id: args['id'] as string | undefined,
-              agent,
-              title: String(args['title'] ?? ''),
-              text: args['text'] as string | undefined,
-              recommendation: args['recommendation'] as string | undefined,
-              options: (args['options'] as string[] | undefined)?.map((label, i): Option => ({ id: `o${i + 1}`, label })),
-              multiple: args['multiple'] as boolean | undefined,
-              body: args['body'] as string | undefined,
-              priority: args['priority'] as NewCard['priority'],
-              follows: args['follows'] as string | undefined,
-              tags: args['tags'] as Record<string, string> | undefined,
-              origin,
-            });
-            return result(`Posted card ${card.id}. The answer arrives as a user message; keep working meanwhile.`);
-          }
-          case 'card_ask_secret': {
-            const id = await secrets.ask(c, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: args['text'] as string | undefined, priority: (args['priority'] as NewCard['priority']) ?? 'now', origin });
-            return result(`Asked for the secret on card ${id}. The answer arrives as a user message with the path of a file, never the value.`);
-          }
-          case 'card_reply':
-            await c.reply(String(args['card_id']), String(args['text'] ?? ''));
-            return result('Replied.');
-          case 'card_close':
-            await c.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));
-            return result('Closed.');
-          default: {
-            const hits = await c.search(String(args['query'] ?? ''));
-            return result(JSON.stringify(hits.map((r) => ({ id: r.card.id, title: r.card.title, answer: r.answer ? describeAnswer(r.card, r.answer) : null })), null, 2));
-          }
-        }
+        return result(await runTool({ inbox: need(), secrets, agent, origin, arrival: 'as a user message' }, tool.name, args));
       },
     });
   }

@@ -35,7 +35,7 @@ after(async () => {
 describe('the Claude Code channel', () => {
   it('offers the card tools', async () => {
     const { tools } = await mcp.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_ask_secret', 'card_close', 'card_post', 'card_reply', 'card_search']);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_reply', 'card_search', 'card_status', 'card_template_save']);
   });
 
   it('posts a card, pushes the answer into the session, and marks it read from the transcript', async () => {
@@ -86,5 +86,35 @@ describe('the Claude Code channel', () => {
   it('searches earlier answers', async () => {
     const res = await mcp.callTool({ name: 'card_search', arguments: { query: 'agreed' } });
     assert.match(JSON.stringify(res.content), /cc-1/);
+  });
+});
+
+describe('the batch of card model tools', () => {
+  it('posts a card with a local file, patches it, labels it, and saves a template', async () => {
+    const file = path.join(h.home, 'plan.md');
+    fs.writeFileSync(file, '# Plan\n\n- ship the bridge');
+    const res = await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-files', title: 'Read the plan', text: 'Draft one', attachments: [{ path: file }] } });
+    assert.match(JSON.stringify(res.content), /Posted card cc-files/);
+    const s = (await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] };
+    const card = s.cards.find((c) => c.id === 'cc-files');
+    assert.equal(card?.attachments?.[0]?.name, 'plan.md');
+    assert.equal(card?.attachments?.[0]?.type, 'text/markdown');
+    const bytes = await (await h.owner('GET', `/v1/attachments/${card!.attachments![0]!.id}`)).text();
+    assert.equal(bytes, '# Plan\n\n- ship the bridge');
+    assert.match(JSON.stringify((await mcp.callTool({ name: 'card_patch', arguments: { card_id: 'cc-files', edits: [{ old: 'one', new: 'two' }] } })).content), /version 2/);
+    await mcp.callTool({ name: 'card_status', arguments: { card_id: 'cc-files', status: 'drafting' } });
+    assert.match(JSON.stringify((await mcp.callTool({ name: 'card_template_save', arguments: { name: 'plan', source: 'root = Card([TextContent({{x}})])' } })).content), /version 1/);
+    assert.match(JSON.stringify((await mcp.callTool({ name: 'card_guidance', arguments: {} })).content), /version 1/);
+    const after = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-files');
+    assert.equal(after?.text, 'Draft two');
+    assert.equal(after?.status, 'drafting');
+  });
+
+  it('tells the session about guidance the person approved', async () => {
+    const proposed = await mcp.callTool({ name: 'card_guidance', arguments: { propose: 'Attach a screenshot to every UI card.' } });
+    const id = /card (\S+)\./.exec(JSON.stringify(proposed.content))?.[1];
+    await h.owner('POST', `/v1/cards/${id}/answer`, { values: { choice: 'approve' } });
+    const note = await until(() => notes.find((n) => n.content.includes('Attach a screenshot')));
+    assert.match(note.content, /version 2/);
   });
 });

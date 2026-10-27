@@ -65,3 +65,18 @@ describe('SqliteStorage', () => {
     fs.rmSync(dir, { recursive: true });
   });
 });
+
+describe('FileBlobs', () => {
+  it('keeps bytes and type per key, with a colon in the key', async () => {
+    const { FileBlobs } = await import('../../src/adapters/files.ts');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-blobs-'));
+    const blobs = new FileBlobs(dir);
+    await blobs.put('claude:s1.0.ab', new Uint8Array([1, 2, 3]), 'application/pdf');
+    const got = await blobs.get('claude:s1.0.ab');
+    assert.deepEqual([...(got?.bytes ?? [])], [1, 2, 3]);
+    assert.equal(got?.type, 'application/pdf');
+    await blobs.delete('claude:s1.0.ab');
+    assert.equal(await blobs.get('claude:s1.0.ab'), undefined);
+    fs.rmSync(dir, { recursive: true });
+  });
+});

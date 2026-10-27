@@ -3,10 +3,12 @@
 // before the next starts. Every change is written to storage before a method
 // returns, and memory holds only the open connections.
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
+import { parse, test as testRule, type Value } from './expr.ts';
 import { isSealed } from './sealed.ts';
-import type { Storage } from './storage.ts';
+import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import type {
-  AgentEvent, Answer, Card, CardState, CloseKind, Delivery, NewCard, PageEvent, Pairing, Presence, Role, Token,
+  AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, PageEvent, Pairing, Presence,
+  Attachment, NewAttachment, PriorityLevel, Role, Settings, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -25,14 +27,33 @@ export interface Caller {
 export const SYSTEM_AGENT = 'system';
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_PAIRINGS = 5;
-const PRIORITIES = new Set(['now', 'soon', 'later']);
 const CLOSE_KINDS = new Set<CloseKind>(['retracted', 'self-answered', 'answered-in-terminal', 'resolved']);
+const HISTORY_LIMIT = 20;
+/** An open card whose agent has been offline this long is orphaned. */
+export const ORPHAN_MS = 60 * 60 * 1000;
+export const DEFAULT_PRIORITIES: PriorityLevel[] = [
+  { id: 'now', label: 'Decide now', definition: 'The agent cannot go on without the answer.' },
+  { id: 'soon', label: 'Decide soon', definition: 'The agent needs the answer before it finishes.' },
+  { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
+];
+export const DEFAULT_GUIDANCE = [
+  'Write each card so the person can answer it without opening the session.',
+  'State the goal, the options you weighed, the evidence, and your recommendation.',
+  'Shape the answer options to the question. The person may leave any field empty.',
+  'Search earlier answers before you post, and never ask the same thing twice.',
+].join('\n');
+export const MAX_ATTACHMENTS = 10;
+export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']);
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
 
 /** A card's state follows from its closure and its answer. */
 export function cardState(card: Card, answer: Answer | undefined): CardState {
   // An answer saved after the agent closed the card still goes to the agent.
   if (card.closed && !(answer && answer.savedAt > card.closed.at)) return 'closed';
+  if (!answer && card.triage?.state === 'pending') return 'in-triage';
+  if (!answer && card.triage?.state === 'held') return 'held';
   if (!answer) return 'open';
   if (answer.readAt) return 'read';
   if (answer.deliveredAt) return 'delivered';
@@ -44,13 +65,15 @@ type PageSend = (ev: PageEvent) => void;
 
 export class Inbox {
   private readonly store: Storage;
+  private readonly blobs: BlobStore;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly pages = new Set<PageSend>();
 
-  constructor(store: Storage, now: () => number = Date.now) {
+  constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs()) {
     this.store = store;
     this.now = now;
+    this.blobs = blobs;
     // Connections do not survive a restart, so nobody is online at start.
     for (const p of store.list<Presence>('presence')) {
       if (p.online) store.put('presence', p.agent, { ...p, online: false });
@@ -146,8 +169,10 @@ export class Inbox {
     const agent = String(input.agent ?? '').trim();
     if (!agent) throw new InboxError(400, 'agent is required');
     if (agent === SYSTEM_AGENT && caller.token !== '') throw new InboxError(403, 'the system agent is reserved');
-    const priority = input.priority ?? 'soon';
-    if (!PRIORITIES.has(priority)) throw new InboxError(400, 'priority must be now, soon or later');
+    const levels = this.priorities();
+    const priority = input.priority ?? (levels.some((l) => l.id === 'soon') ? 'soon' : levels[0]?.id ?? 'soon');
+    if (!levels.some((l) => l.id === priority)) throw new InboxError(400, `priority must be one of ${levels.map((l) => l.id).join(', ')}`);
+    if (input.rating !== undefined && !(Number.isInteger(input.rating) && input.rating >= 1 && input.rating <= 5)) throw new InboxError(400, 'rating must be 1 to 5');
     const id = input.id ? String(input.id) : randomId(8);
     if (!/^[\w.:-]{1,80}$/.test(id)) throw new InboxError(400, 'id must be 1 to 80 letters, digits, dots, colons, dashes or underscores');
 
@@ -162,6 +187,30 @@ export class Inbox {
     const now = this.now();
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
+    let body = input.body;
+    let template: Card['template'];
+    if (input.template) {
+      const t = this.getTemplate(String(input.template.name));
+      const v = input.template.version === undefined ? t.versions.at(-1) : t.versions.find((x) => x.version === input.template?.version);
+      if (!v) throw new InboxError(404, 'unknown template version');
+      const vars = input.template.vars ?? {};
+      body = v.source.replace(/\{\{(\w+)\}\}/g, (_, k: string) => JSON.stringify(String(vars[k] ?? '')));
+      template = { name: t.name, version: v.version };
+    }
+    let attachments = before?.attachments;
+    if (input.attachments !== undefined) {
+      if (!Array.isArray(input.attachments) || input.attachments.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
+      attachments = input.attachments.map((f, i) => {
+        if ('ref' in f && f.ref) return f.ref;
+        const src = String(f?.src ?? '');
+        if (!/^https:\/\//.test(src)) throw new InboxError(400, `attachment ${index(i)}: src must be an https URL, or a data: URL posted through postCardWithFiles`);
+        const name = cleanName(f.name) || decodeURIComponent(new URL(src).pathname.split('/').pop() || 'file');
+        return { url: src, name, type: typeFromName(name), alt: f.alt ? String(f.alt).slice(0, 300) : undefined };
+      });
+    }
+    const history: CardVersion[] = before
+      ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, body: before.body, html: before.html, at: before.updatedAt }].slice(-HISTORY_LIMIT)
+      : [];
     const card: Card = {
       id,
       agent,
@@ -170,13 +219,22 @@ export class Inbox {
       title,
       text: input.text,
       recommendation: input.recommendation,
-      body: input.body,
+      body,
       options: input.options,
       multiple: input.multiple,
       questions: input.questions,
       screen: input.screen,
       secret: kind === 'secret' ? { name: String(input.secret?.name), publicKey: input.secret?.publicKey ?? {} } : undefined,
+      html: input.html,
+      attachments: attachments?.length ? attachments : undefined,
+      template: template ?? before?.template,
       priority,
+      status: input.status ?? before?.status,
+      expiresAt: input.expiresAt,
+      rating: input.rating,
+      triage: before?.triage,
+      history: history.length ? history : undefined,
+      broadcast: before?.broadcast,
       origin: input.origin,
       tags: input.tags,
       follows: input.follows ?? before?.follows,
@@ -205,6 +263,187 @@ export class Inbox {
     const card = this.store.get<Card>('cards', id);
     if (!card) throw new InboxError(404, 'unknown card');
     return card;
+  }
+
+  /** Post a card whose attachments include data: URLs. The bytes go to the blob store first,
+   * then the card commits in one synchronous step, and the files it replaced are deleted. */
+  async postCardWithFiles(caller: Caller, input: NewCard): Promise<Card> {
+    const files = input.attachments;
+    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input);
+    if (files.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
+    const id = input.id ? String(input.id) : randomId(8);
+    const before = this.store.get<Card>('cards', id);
+    if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
+    const decoded = files.map((f, i) => (/^data:/.test(String(f?.src ?? '')) ? decodeDataUrl(i, f) : undefined));
+    const stored: Attachment[] = [];
+    const resolved = await Promise.all(files.map(async (f, i) => {
+      const d = decoded[i];
+      if (!d) return f;
+      const key = `${id}.${i}.${randomId(6)}`;
+      await this.blobs.put(key, d.bytes, d.type);
+      const ref: Attachment = { id: key, name: cleanName(f.name) || `attachment-${i + 1}`, type: d.type, size: d.bytes.length, alt: f.alt ? String(f.alt).slice(0, 300) : undefined };
+      stored.push(ref);
+      return { src: '', ref };
+    }));
+    let card: Card;
+    try {
+      card = this.postCard(caller, { ...input, id, attachments: resolved });
+    } catch (e) {
+      await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
+      throw e;
+    }
+    const kept = new Set(card.attachments?.map((f) => f.id));
+    await Promise.all((before?.attachments ?? []).filter((f) => f.id && !kept.has(f.id)).map((f) => this.blobs.delete(f.id ?? '')));
+    return card;
+  }
+
+  /** The bytes of a file, for the owner, an extension, or the client that posted its card. */
+  async attachment(caller: Caller, id: string): Promise<{ file: Attachment; bytes: Uint8Array<ArrayBuffer> }> {
+    const card = this.getCard(id.slice(0, id.indexOf('.')) || id);
+    if (caller.role === 'agent' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
+    const file = card.attachments?.find((f) => f.id === id);
+    const blob = file ? await this.blobs.get(id) : undefined;
+    if (!file || !blob) throw new InboxError(404, 'unknown attachment');
+    return { file, bytes: blob.bytes };
+  }
+
+  /** Edit a card the way a coding agent edits a file: each edit replaces text that occurs exactly once. */
+  patchCard(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string): Card {
+    const card = this.owned(caller, id);
+    const f = field ?? (card.body !== undefined ? 'body' : card.html !== undefined ? 'html' : 'text');
+    if (!PATCH_FIELDS.has(f)) throw new InboxError(400, `field must be one of ${[...PATCH_FIELDS].join(', ')}`);
+    if (!Array.isArray(edits) || !edits.length) throw new InboxError(400, 'edits must be a list of {old, new}');
+    let text = String((card as unknown as Record<string, unknown>)[f] ?? '');
+    for (const [i, e] of edits.entries()) {
+      const old = String(e?.old ?? '');
+      const count = old ? text.split(old).length - 1 : 0;
+      if (count !== 1) throw new InboxError(409, `edit ${i + 1}: the old text occurs ${count} times in ${f}, and it must occur once`);
+      text = text.replace(old, () => String(e.new ?? ''));
+    }
+    const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, ...rest } = card;
+    return this.postCard(caller, { ...rest, [f]: text });
+  }
+
+  /** The agent sets a state label on its own card. An empty label clears it. */
+  setStatus(caller: Caller, id: string, status: string): Card {
+    const card = this.owned(caller, id);
+    const clean = String(status ?? '').trim().slice(0, 60);
+    const next = { ...card, status: clean || undefined };
+    this.store.put('cards', id, next);
+    this.emit({ type: 'change', card: id });
+    return next;
+  }
+
+  // ---- templates ----
+
+  saveTemplate(name: string, source: string, feedback?: string): Template {
+    if (!/^[\w.-]{1,60}$/.test(String(name ?? ''))) throw new InboxError(400, 'template name must be 1 to 60 letters, digits, dots, dashes or underscores');
+    if (!String(source ?? '').trim()) throw new InboxError(400, 'source is required');
+    const before = this.store.get<Template>('templates', name);
+    const versions = before?.versions ?? [];
+    const next: Template = { name, versions: [...versions, { version: versions.length + 1, source: String(source), feedback: feedback ? String(feedback) : undefined, at: this.now() }] };
+    this.store.put('templates', name, next);
+    return next;
+  }
+
+  getTemplate(name: string): Template {
+    const t = this.store.get<Template>('templates', name);
+    if (!t) throw new InboxError(404, 'unknown template');
+    return t;
+  }
+
+  listTemplates(): Template[] {
+    return this.store.list<Template>('templates');
+  }
+
+  // ---- settings, priority levels and guidance ----
+
+  settings(): Settings {
+    return this.store.get<Settings>('meta', 'settings') ?? { allowHtml: false };
+  }
+
+  setSettings(input: Partial<Settings>): Settings {
+    const next: Settings = { ...this.settings(), ...(typeof input.allowHtml === 'boolean' ? { allowHtml: input.allowHtml } : {}) };
+    this.store.put('meta', 'settings', next);
+    this.emit({ type: 'change', card: '' });
+    return next;
+  }
+
+  priorities(): PriorityLevel[] {
+    return this.store.get<PriorityLevel[]>('meta', 'priorities') ?? DEFAULT_PRIORITIES;
+  }
+
+  setPriorities(levels: PriorityLevel[]): PriorityLevel[] {
+    if (!Array.isArray(levels) || !levels.length || levels.length > 10) throw new InboxError(400, 'give 1 to 10 priority levels');
+    const seen = new Set<string>();
+    const clean = levels.map((l, i) => {
+      const id = String(l?.id ?? '');
+      if (!/^[\w-]{1,30}$/.test(id) || seen.has(id)) throw new InboxError(400, `level ${i + 1}: id must be unique, 1 to 30 letters, digits, dashes or underscores`);
+      seen.add(id);
+      const label = String(l.label ?? '').trim();
+      if (!label) throw new InboxError(400, `level ${i + 1}: label is required`);
+      const rule = l.rule ? String(l.rule) : undefined;
+      if (rule) {
+        try { parse(rule); } catch (e) { throw new InboxError(400, `level ${i + 1}: ${(e as Error).message}`); }
+      }
+      return { id, label, definition: String(l.definition ?? ''), rule };
+    });
+    this.store.put('meta', 'priorities', clean);
+    this.emit({ type: 'change', card: '' });
+    return clean;
+  }
+
+  /** The level a card shows: the first level whose rule matches it, or the level the agent gave. */
+  effectivePriority(card: Card, levels = this.priorities()): string {
+    const answer = this.store.get<Answer>('answers', card.id);
+    const scope: Record<string, Value> = {
+      kind: card.kind, agent: card.agent, priority: card.priority, status: card.status ?? null, rating: card.rating ?? null,
+      tags: card.tags ?? {}, blocked: card.kind === 'blocked', answered: !!answer,
+      waitMinutes: Math.floor((this.now() - card.createdAt) / 60000), harness: card.origin?.harness ?? null,
+    };
+    for (const l of levels) {
+      if (!l.rule) continue;
+      try { if (testRule(l.rule, scope)) return l.id; } catch { /* stored rules always parse */ }
+    }
+    return levels.some((l) => l.id === card.priority) ? card.priority : levels[0]?.id ?? card.priority;
+  }
+
+  guidance(): Guidance {
+    return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: 1, at: 0 };
+  }
+
+  /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. */
+  proposeGuidance(text: string): Card {
+    const clean = String(text ?? '').trim();
+    if (!clean) throw new InboxError(400, 'text is required');
+    const agents = this.store.list<Presence>('presence').map((p) => p.agent).filter((a) => a !== SYSTEM_AGENT);
+    const id = `guidance-${randomId(4)}`;
+    this.postCard({ token: '', role: 'owner' }, {
+      id, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
+      title: 'Send new card guidance to agents?',
+      text: `An agent proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`,
+      options: [{ id: 'approve', label: 'Approve and send' }, { id: 'reject', label: 'Reject' }],
+    });
+    const card = { ...this.getCard(id), broadcast: { text: clean, agents } };
+    this.store.put('cards', id, card);
+    this.emit({ type: 'change', card: id });
+    return card;
+  }
+
+  private resolveBroadcast(card: Card, answer: Answer): void {
+    if (!card.broadcast) return;
+    if ([answer.values['choice']].flat()[0] !== 'approve') { this.closeAs(card, 'resolved', 'Rejected: the guidance did not change.'); return; }
+    const picked = Array.isArray(answer.values['agents']) ? (answer.values['agents'] as unknown[]).map(String) : card.broadcast.agents;
+    const guidance: Guidance = { text: card.broadcast.text, version: this.guidance().version + 1, at: this.now() };
+    this.store.put('meta', 'guidance', guidance);
+    let sent = 0;
+    for (const [k, subs] of this.agents) {
+      const agent = k.slice(k.indexOf('\n') + 1);
+      if (!picked.includes(agent)) continue;
+      for (const send of subs) send({ type: 'guidance', id: randomId(6), guidance });
+      sent++;
+    }
+    this.closeAs(card, 'resolved', `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`);
   }
 
   /** The cards a client may read, with their states: all of them for the owner. */
@@ -295,6 +534,7 @@ export class Inbox {
     this.store.index(id, [card.title, card.text, card.recommendation, card.body, answer.comment].filter(Boolean).join('\n'));
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
+    else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
     else this.flush(card.agent);
     return this.store.get<Answer>('answers', id) ?? answer;
   }
@@ -357,7 +597,7 @@ export class Inbox {
     if (!set) this.agents.set(k, (set = new Set()));
     set.add(send);
     this.setPresence(agent, true);
-    send({ type: 'hello', agent, version: 1 });
+    send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     this.flush(agent);
     return () => {
       const s = this.agents.get(k);
@@ -404,9 +644,14 @@ export class Inbox {
     for (const send of this.pages) send(ev);
   }
 
-  /** Called by the platform alarm: expires old pairing requests. */
+  /** Called by the platform alarm: expires old pairing requests and cards past their expiry. */
   sweep(): void {
     const now = this.now();
+    for (const card of this.store.list<Card>('cards')) {
+      if (card.expiresAt && card.expiresAt <= now && !card.closed && !this.store.get('answers', card.id)) {
+        this.closeAs(card, 'expired', 'The agent stopped waiting for an answer.');
+      }
+    }
     for (const p of this.store.list<Pairing>('pairings')) {
       if (p.status !== 'pending' || now - p.createdAt < PAIRING_TTL_MS) continue;
       this.store.put<Pairing>('pairings', p.id, { ...p, status: 'denied' });
@@ -416,13 +661,48 @@ export class Inbox {
   }
 
   /** Everything a page needs to draw the inbox. */
-  state(): { cards: Card[]; answers: Record<string, Answer>; presence: Record<string, Presence>; states: Record<string, CardState> } {
+  state(): {
+    cards: Card[]; answers: Record<string, Answer>; presence: Record<string, Presence>; states: Record<string, CardState>;
+    priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance;
+  } {
     const cards = this.store.list<Card>('cards').map(publicCard).sort((a, b) => a.createdAt - b.createdAt);
     const answers = Object.fromEntries(this.store.list<Answer>('answers').map((a) => [a.card, a]));
     const presence = Object.fromEntries(this.store.list<Presence>('presence').map((p) => [p.agent, p]));
-    const states = Object.fromEntries(cards.map((c) => [c.id, cardState(c, answers[c.id])]));
-    return { cards, answers, presence, states };
+    const now = this.now();
+    const states = Object.fromEntries(cards.map((c) => {
+      const s = cardState(c, answers[c.id]);
+      const p = presence[c.agent];
+      // An open card whose agent left long ago is orphaned: another session can claim it.
+      const orphaned = s === 'open' && c.deliver === 'stream' && p && !p.online && now - p.lastSeen > ORPHAN_MS;
+      return [c.id, orphaned ? 'orphaned' : s];
+    }));
+    const levels = this.priorities();
+    const priorities = Object.fromEntries(cards.map((c) => [c.id, this.effectivePriority(c, levels)]));
+    return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance() };
   }
+}
+
+const TYPES_BY_EXTENSION: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf',
+  md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', csv: 'text/csv', json: 'application/json',
+};
+
+const index = (i: number): number => i + 1;
+
+function cleanName(name: unknown): string {
+  return name ? String(name).replace(/[\\/\x00-\x1f]/g, '_').slice(0, 120) : '';
+}
+
+function decodeDataUrl(i: number, f: NewAttachment): { type: string; bytes: Uint8Array<ArrayBuffer> } {
+  const m = /^data:([\w.+-]+\/[\w.+-]+)(?:;[\w=.+-]+)*;base64,([A-Za-z0-9+/=\s]+)$/.exec(String(f.src));
+  if (!m) throw new InboxError(400, `attachment ${i + 1}: src must be an https URL or a base64 data: URL`);
+  const data = (m[2] ?? '').replace(/\s/g, '');
+  if (Math.floor((data.length * 3) / 4) > MAX_ATTACHMENT_BYTES + 2) throw new InboxError(413, `attachment ${i + 1}: at most ${MAX_ATTACHMENT_BYTES} bytes`);
+  return { type: (m[1] ?? '').toLowerCase(), bytes: Uint8Array.from(atob(data), (c) => c.charCodeAt(0)) };
+}
+
+function typeFromName(name: string): string {
+  return TYPES_BY_EXTENSION[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream';
 }
 
 /** A card without the id of the token that posted it. */

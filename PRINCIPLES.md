@@ -8,7 +8,7 @@ Every change to this repo is checked against these principles. A change that bre
 
 ### Each card body is free-form widgets that fit its question
 
-The agent picks the widgets that fit the question. A code review gets a diff, a comparison gets a table, numbers get a chart, and a choice gets option cards or a slider. Cards are generative UI written in OpenUI Lang, and by default the renderer accepts only widgets from the library. If you turn on the option, an agent can also send its own scripts and raw HTML. These run in a sandboxed frame that cannot read the inbox or your other cards.
+The agent picks the widgets that fit the question. A code review gets a diff, a comparison gets a table, numbers get a chart, and a choice gets option cards or a slider. Cards are generative UI written in OpenUI Lang, and by default the renderer accepts only widgets from the library. If you turn on the option, an agent can also send its own scripts and raw HTML. These run in a sandboxed frame that cannot read the inbox or your other cards. A card can also come with up to 10 files, such as images or PDF documents. The inbox shows each file with a renderer for its type.
 
 The right widget makes a card fast to answer, and some cards need more than the library offers, under a sandbox you choose to allow.
 
@@ -173,12 +173,6 @@ The triage filter may run in process on a laptop and as a separate service in th
 A hook has a timeout and a declared policy: fail-open passes the card on, fail-closed holds it. The card shows the extension that stopped it, with the reason.
 
 A slow or broken triage model must not freeze your inbox, or pass poor cards to you unless you chose that.
-
-### Cards can embed hosted documents, edited live
-
-An extension can embed a cloud document inside a card, such as a Google Doc or a Notion page. You edit it live in the card. The document stays in its own service, and the card contains the link and the question about it. When you edited the document before you answer, your answer carries the document version you submitted against. The agent can still add its own fields to the card, next to the document.
-
-A question about a document is easier to answer next to it, and the agent must know which version you approved.
 
 ## Integration
 

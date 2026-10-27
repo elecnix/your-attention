@@ -11,8 +11,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Client, describeAnswer, loadConfig } from '../../client.ts';
-import type { CloseKind, NewCard, Option } from '../../core/types.ts';
 import { SecretRequests } from '../secrets.ts';
+import { runTool } from '../run-tool.ts';
 import { cardTools } from '../tools.ts';
 
 const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
@@ -47,39 +47,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const args = (req.params.arguments ?? {}) as Record<string, unknown>;
   const text = (t: unknown) => ({ content: [{ type: 'text' as const, text: typeof t === 'string' ? t : JSON.stringify(t, null, 2) }] });
   try {
-    switch (req.params.name) {
-      case 'card_post': {
-        const card: NewCard = {
-          id: args['id'] as string | undefined,
-          agent,
-          title: String(args['title'] ?? ''),
-          text: args['text'] as string | undefined,
-          recommendation: args['recommendation'] as string | undefined,
-          options: (args['options'] as string[] | undefined)?.map((label, i): Option => ({ id: `o${i + 1}`, label })),
-          multiple: args['multiple'] as boolean | undefined,
-          body: args['body'] as string | undefined,
-          priority: args['priority'] as NewCard['priority'],
-          follows: args['follows'] as string | undefined,
-          tags: args['tags'] as Record<string, string> | undefined,
-          origin,
-        };
-        const posted = await inbox.post(card);
-        return text(`Posted card ${posted.id}. The answer arrives as a channel event; keep working meanwhile.`);
-      }
-      case 'card_ask_secret': {
-        const id = await secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: args['text'] as string | undefined, priority: (args['priority'] as NewCard['priority']) ?? 'now', origin });
-        return text(`Asked for the secret on card ${id}. The answer arrives as a channel event with the path of a file, never the value.`);
-      }
-      case 'card_reply':
-        await inbox.reply(String(args['card_id']), String(args['text'] ?? ''));
-        return text('Replied.');
-      case 'card_close':
-        await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));
-        return text('Closed.');
-      case 'card_search':
-        return text((await inbox.search(String(args['query'] ?? ''))).map((r) => ({ id: r.card.id, title: r.card.title, answer: r.answer ? describeAnswer(r.card, r.answer) : null })));
-    }
-    return { ...text(`unknown tool ${req.params.name}`), isError: true };
+    return text(await runTool({ inbox, secrets, agent, origin, arrival: 'as a channel event' }, req.params.name, args));
   } catch (e) {
     return { ...text(String((e as Error).message)), isError: true };
   }
@@ -145,6 +113,14 @@ setInterval(scanTranscript, 500);
 log('connected to', inbox.url, 'as', agent);
 
 void inbox.stream(agent, async (ev) => {
+  if (ev.type === 'guidance') {
+    await mcp.notification({ method: 'notifications/claude/channel', params: { content: `The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`, meta: { guidance: String(ev.guidance.version) } } });
+    return;
+  }
+  if (ev.type === 'returned') {
+    await mcp.notification({ method: 'notifications/claude/channel', params: { content: `Triage sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`, meta: { card_id: ev.card.id } } });
+    return;
+  }
   if (ev.type !== 'answer') return;
   const { card, answer } = ev;
   const dismissed = card.questions ? await closeOwnDialog(card.origin?.herdrPane) : false;

@@ -55,7 +55,8 @@ export async function main(): Promise<void> {
         // Keep the screen on the card current while the agent waits.
         if (screen && screen !== known.screen) {
           known.screen = screen;
-          known.card = await inbox.post({ ...known.card, screen });
+          const { attachments: _attachments, ...card } = known.card;
+          known.card = await inbox.post({ ...card, screen });
         }
         continue;
       }

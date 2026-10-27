@@ -2,7 +2,7 @@
 // of a Durable Object, so each inbox change runs to completion before the next
 // one starts and needs no lock.
 
-export type Collection = 'cards' | 'answers' | 'tokens' | 'pairings' | 'presence' | 'meta';
+export type Collection = 'cards' | 'answers' | 'tokens' | 'pairings' | 'presence' | 'meta' | 'templates' | 'messages';
 
 export interface SearchHit {
   card: string;
@@ -62,4 +62,19 @@ export class MemoryStorage implements Storage {
   }
 
   close(): void {}
+}
+
+/** Where file bytes go: R2 in the Cloudflare build, files on disk on a laptop.
+ * Calls are asynchronous, so the inbox stores the bytes before it commits the card. */
+export interface BlobStore {
+  put(key: string, bytes: Uint8Array<ArrayBuffer>, type: string): Promise<void>;
+  get(key: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; type: string } | undefined>;
+  delete(key: string): Promise<void>;
+}
+
+export class MemoryBlobs implements BlobStore {
+  private readonly data = new Map<string, { bytes: Uint8Array<ArrayBuffer>; type: string }>();
+  async put(key: string, bytes: Uint8Array<ArrayBuffer>, type: string): Promise<void> { this.data.set(key, { bytes, type }); }
+  async get(key: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; type: string } | undefined> { return this.data.get(key); }
+  async delete(key: string): Promise<void> { this.data.delete(key); }
 }

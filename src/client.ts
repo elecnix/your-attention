@@ -4,7 +4,7 @@
 // 3. the inbox running on this machine, with its local agent token
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent, Answer, Card, CloseKind, NewCard } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 
 export interface ClientConfig {
@@ -53,6 +53,11 @@ export class Client {
   close(id: string, kind: CloseKind, outcome: string, ifUnanswered = false): Promise<Card> {
     return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/close`, { kind, outcome, ifUnanswered });
   }
+  patch(id: string, edits: { old: string; new: string }[], field?: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/patch`, { edits, field }); }
+  status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
+  saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
+  guidance(): Promise<Guidance> { return this.call('GET', '/v1/guidance'); }
+  proposeGuidance(text: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text }); }
   reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }

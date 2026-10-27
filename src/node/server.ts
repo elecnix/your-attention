@@ -5,6 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FileBlobs } from '../adapters/files.ts';
 import { advertise, type Advertisement } from '../adapters/mdns.ts';
 import { SqliteStorage } from '../adapters/sqlite.ts';
 import { randomId } from '../core/crypto.ts';
@@ -74,7 +75,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store);
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')));
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   const handle = createHandler(inbox, { openOrigin: focusHerdrPane });

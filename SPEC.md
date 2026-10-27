@@ -41,8 +41,14 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `options`, `multiple` | Answer options as `{id, label, description}`. The person picks with the `choice` field. |
 | `questions` | Claude Code `AskUserQuestion` questions. Field `q0` answers the first one. |
 | `body` | OpenUI Lang source for a card that brings its own widgets. |
+| `html` | The agent's own HTML and scripts. The page shows it in a frame with `sandbox="allow-scripts allow-forms"`, only after the owner turns on `allowHtml` in the settings. A script in the frame sends the answer with `yourAttention.answer(values, comment)`. |
+| `attachments` | Up to 10 files, each `{src, name, alt}`. `src` is an https URL or a base64 `data:` URL of at most 8 MB. |
+| `template` | `{name, version, vars}`: the inbox fills the body from a saved template, replacing each `{{name}}` with the JSON string of its value. |
+| `status` | A state label the agent sets, such as `waiting on CI`. |
+| `expiresAt` | When the card stops waiting, in epoch milliseconds. The alarm closes it as `expired`. |
+| `rating` | How much the card matters to the agent, from 1 to 5. Priority rules can read it. |
 | `screen` | The terminal screen of a blocked agent. |
-| `priority` | `now`, `soon` (the default) or `later`. |
+| `priority` | The id of a priority level: `now`, `soon` (the default) or `later` unless the levels changed. |
 | `origin` | Where the session runs: `harness`, `session`, `name`, `host`, `cwd`, `herdrPane`. |
 | `tags` | String properties for grouping. |
 | `follows` | The card this one follows up on. The inbox sets `followedBy` on that card. |
@@ -72,6 +78,36 @@ To seal the value, the page encrypts it with a new AES-256-GCM key, then wraps t
 
 The inbox refuses any other value on a secret card, so plain text never reaches storage. An answer without `values.sealed` declines the request. A page on plain HTTP from another machine cannot seal, because browsers give Web Crypto to secure origins only.
 
+## Editing cards
+
+`POST /v1/cards/<id>/patch {edits: [{old, new}], field}` edits one field, `text` by default or `body` when the card has one. Each `old` must occur exactly once, or the inbox refuses the whole patch with 409. A revision, by patch or by posting the same id, adds 1 to `version` and keeps the version before it in `history`, up to 20 versions.
+
+`POST /v1/cards/<id>/status {status}` sets the agent's state label. An empty label clears it.
+
+Text in `text` links to another card with `[[card-id]]`. The page shows the title of the linked card and previews its text on hover. Below the card you have open, it lists the cards that link to it.
+
+## Attachments
+
+The inbox keeps the bytes of each `data:` attachment in its blob store, R2 in the Cloudflare build and files on disk on a laptop, and the card keeps a reference `{id, name, type, size, alt}`. It stores the bytes before it commits the card, so the card changes in one step. Replacing a card's attachments deletes the old files.
+
+`GET /v1/attachments/<id>` serves the bytes to owner and extension tokens, and to the client that posted the card. Images, PDF, Markdown, text, CSV and JSON come back inline, and every other type as a download with `content-type: application/octet-stream`. Each response has `x-content-type-options: nosniff` and a Content Security Policy that blocks scripts.
+
+## Templates
+
+`POST /v1/templates {name, source, feedback}` saves a new version of a template. `GET /v1/templates` lists them, and `GET /v1/templates/<name>` returns one with every version and the feedback each version answers.
+
+## Priority levels
+
+`GET /v1/priorities` returns the levels as `{id, label, definition, rule}`. Agents and the owner replace them with `PUT /v1/priorities`. A `rule` is an expression over the card: `kind`, `agent`, `priority`, `status`, `rating`, `tags`, `blocked`, `answered`, `waitMinutes` and `harness`. The grammar has comparisons, `&&`, `||`, `!`, arithmetic and `in`, and `src/core/expr.ts` parses it without `eval`. A card shows the first level whose rule matches it. Without a match, it shows the level that the agent gave. `GET /v1/state` returns that level per card in `priorities`.
+
+## Card guidance
+
+`GET /v1/guidance` returns `{text, version}`. `POST /v1/guidance {text}` proposes new guidance: the inbox posts a system card that lists the agents it knows, all picked. An owner client approves with `choice: approve` and the `agents` to reach. The inbox then stores the new version and sends `guidance` events to the picked agents that are online. The `hello` event carries the current guidance version, so an agent that was offline can fetch it.
+
+## Settings
+
+`GET /v1/settings` returns `{allowHtml}`. Only the owner changes it, with `PUT /v1/settings`.
+
 ## Card states
 
 | State | Meaning |
@@ -80,7 +116,10 @@ The inbox refuses any other value on a secret card, so plain text never reaches 
 | `answered` | The inbox stored the answer. Its agent is offline or has not received it yet. |
 | `delivered` | The harness received the answer. |
 | `read` | The model has the answer in its context: the agent called `POST /v1/cards/<id>/ack`. |
-| `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`. |
+| `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`, or the card expired. |
+| `in-triage` | An extension on the `card.created` hook is checking the card. |
+| `held` | A fail-closed hook timed out, or an extension stopped the card. The card shows which extension and why. |
+| `orphaned` | The card is open, and its agent has been offline for more than an hour. Another session can claim it. |
 
 An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered.
 
@@ -119,15 +158,6 @@ The table lists what version 1 still lacks, by principle. The pull request that 
 | Presence comes from connections, and it survives hibernation | Socket attachments, planned for the Cloudflare version. |
 | Triage checks cards before you see them | The triage extension and its hook point. |
 | Extensions attach at named hook points, in process or out | Hook points and their failure policies. |
-| Agents keep card templates and revise them from your feedback | Template storage and versions. |
-| Agents edit a card with small patches | Patch edits. Version 1 replaces the whole card. |
-| Card guidance is shared, and you approve each broadcast | Guidance storage and broadcast cards. |
-| Cards show a priority and come one at a time | Editable priority levels and rules written as expressions. |
-| Cards group by any property agents provide | Grouping in the page. Cards carry `tags` already. |
-| Each card has one clear state | States that agents add, such as in triage, expired and orphaned. |
-| Cards link to other cards in their text | Hypertext links with previews. Version 1 links follow-ups only. |
-| Each card body is free-form widgets that fit its question | The sandboxed frame for scripts and raw HTML. |
 | Agents connect to the inbox from wherever they run | Outbound links to a remote server, and bridges. |
 | Many links to one inbox act as a mesh | Message dedupe across links. |
-| Cards can embed hosted documents, edited live | Document embeds. |
 | A hosted inbox works without an account | The hosted service. |

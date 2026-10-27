@@ -104,3 +104,41 @@ describe('http', () => {
     assert.equal((await call('GET', '/v1/dead-letters', { token: done.token })).status, 200);
   });
 });
+
+describe('http routes for the card model', () => {
+  it('patches a card, labels it, and serves its image', async () => {
+    const { call, agent } = await setup();
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const posted = (await (await call('POST', '/v1/cards', { token: agent, body: { id: 'c1', agent: 's1', title: 'q', text: 'old', attachments: [{ src: png, alt: 'x' }] } })).json()) as { attachments: { id: string }[] };
+    const patched = (await (await call('POST', '/v1/cards/c1/patch', { token: agent, body: { edits: [{ old: 'old', new: 'new' }] } })).json()) as { text: string };
+    assert.equal(patched.text, 'new');
+    assert.equal((await call('POST', '/v1/cards/c1/patch', { token: agent, body: { edits: [{ old: 'gone', new: 'x' }] } })).status, 409);
+    assert.equal(((await (await call('POST', '/v1/cards/c1/status', { token: agent, body: { status: 'testing' } })).json()) as { status: string }).status, 'testing');
+    const img = await call('GET', `/v1/attachments/${posted.attachments[0]!.id}`, { token: agent });
+    assert.equal(img.headers.get('content-type'), 'image/png');
+    assert.equal(img.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(img.headers.get('content-security-policy') ?? '', /^sandbox/);
+    assert.match(img.headers.get('content-disposition') ?? '', /^inline/);
+  });
+
+  it('serves a file type the page cannot render as a download, never as HTML', async () => {
+    const { call, agent } = await setup();
+    const html = `data:text/html;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`;
+    const posted = (await (await call('POST', '/v1/cards', { token: agent, body: { id: 'c2', agent: 's1', title: 'q', attachments: [{ src: html, name: 'page.html' }] } })).json()) as { attachments: { id: string }[] };
+    const res = await call('GET', `/v1/attachments/${posted.attachments[0]!.id}`, { token: agent });
+    assert.equal(res.headers.get('content-type'), 'application/octet-stream');
+    assert.match(res.headers.get('content-disposition') ?? '', /^attachment; filename\*=UTF-8''page\.html/);
+  });
+
+  it('saves templates, changes priority levels, proposes guidance, and keeps settings for the owner', async () => {
+    const { call, agent, owner } = await setup();
+    assert.equal((await call('POST', '/v1/templates', { token: agent, body: { name: 't1', source: 'root = Card([])' } })).status, 201);
+    assert.equal(((await (await call('GET', '/v1/templates/t1', { token: agent })).json()) as { versions: unknown[] }).versions.length, 1);
+    const levels = [{ id: 'now', label: 'Now', definition: '' }, { id: 'later', label: 'Later', definition: '' }];
+    assert.equal((await call('PUT', '/v1/priorities', { token: agent, body: levels })).status, 200);
+    assert.equal(((await (await call('GET', '/v1/priorities', { token: agent })).json()) as unknown[]).length, 2);
+    assert.equal((await call('POST', '/v1/guidance', { token: agent, body: { text: 'Show diffs.' } })).status, 201);
+    assert.equal((await call('PUT', '/v1/settings', { token: agent, body: { allowHtml: true } })).status, 403);
+    assert.equal(((await (await call('PUT', '/v1/settings', { token: owner, body: { allowHtml: true } })).json()) as { allowHtml: boolean }).allowHtml, true);
+  });
+});

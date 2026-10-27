@@ -102,3 +102,32 @@
   .secret-title { font-size: 18px; margin: 4px 0 8px; }
   .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn:disabled { opacity: .5; cursor: default; }
+  .group-by { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); padding: 4px 8px; }
+  .group-by select { font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
+  .prio.small { font-size: 11px; padding: 0 6px; margin-left: 6px; }
+  .prio:not(.now):not(.soon):not(.later) { color: var(--info); background: var(--info-bg); }
+  .status { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
+  .status.warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+  .card-text { white-space: pre-wrap; margin: 0 0 12px; }
+  .card-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  .dead-link { color: var(--muted); text-decoration: line-through; }
+  .attachments { display: grid; gap: 12px; margin: 0 0 12px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .gallery img { width: 100%; height: 140px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+  .file { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .file-head { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; background: var(--bg); font-size: 13px; }
+  .file-name { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
+  .file-size { color: var(--muted); }
+  .file pre, .file .markdown, .file table { margin: 0; padding: 10px; max-height: 420px; overflow: auto; }
+  .file iframe.pdf { width: 100%; height: 520px; border: 0; display: block; }
+  .markdown table, .file table.csv { border-collapse: collapse; }
+  .markdown th, .markdown td, .file table.csv th, .file table.csv td { border: 1px solid var(--line); padding: 4px 8px; }
+  .markdown blockquote { margin: 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+  .html-card { width: 100%; min-height: 360px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  details.changes { margin: 0 0 12px; font-size: 13px; }
+  details.changes .del { color: var(--bad); white-space: pre-wrap; }
+  details.changes .add { color: var(--ok); white-space: pre-wrap; }
+  .broadcast pre { white-space: pre-wrap; background: var(--bg); padding: 10px; border-radius: 8px; }
+  .broadcast .agents { display: grid; gap: 4px; margin: 8px 0; font-size: 14px; }
+  .markdown a, .card-text a { color: var(--accent); }
+  .card-title { font-size: 18px; margin: 4px 0 8px; }

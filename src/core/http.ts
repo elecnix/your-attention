@@ -1,12 +1,14 @@
 // The HTTP protocol, with fetch Request and Response only, so the same handler
 // runs on Node, Bun, Deno and Workers. SPEC.md lists each route.
 import { Inbox, InboxError, publicCard, type Caller } from './inbox.ts';
-import type { Card, CloseKind, Delivery, NewCard, Role, Token } from './types.ts';
+import type { Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
 import { PROTOCOL_VERSION } from './types.ts';
 
 export const COOKIE = 'ya_token';
 /** Cookie-authenticated writes must carry this header, which a cross-site form cannot set. */
 export const CSRF_HEADER = 'x-your-attention';
+/** File types the page shows in place. Any other file is served as a download. */
+const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json']);
 
 export interface HandlerOptions {
   /** Opens the session a card came from, such as a herdr pane. */
@@ -20,7 +22,7 @@ const json = (data: unknown, status = 200, headers: Record<string, string> = {})
 
 async function readJson<T>(req: Request): Promise<T> {
   const text = await req.text();
-  if (text.length > 1_000_000) throw new InboxError(413, 'body over 1 MB');
+  if (text.length > 16_000_000) throw new InboxError(413, 'body over 16 MB');
   try {
     return (text ? JSON.parse(text) : {}) as T;
   } catch {
@@ -120,11 +122,51 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     }
     if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Number(url.searchParams.get('limit') ?? 20)));
     if (method === 'GET' && a === 'dead-letters') return json(inbox.deadLetters());
+    if (a === 'templates') {
+      if (method === 'GET' && !b) return json(inbox.listTemplates());
+      if (method === 'GET' && b) return json(inbox.getTemplate(b));
+      if (method === 'POST' && !b) {
+        if (me.role === 'extension') throw new InboxError(403, 'extensions cannot change templates');
+        const t = await readJson<{ name?: string; source?: string; feedback?: string }>(req);
+        return json(inbox.saveTemplate(String(t.name ?? ''), String(t.source ?? ''), t.feedback), 201);
+      }
+    }
+    if (a === 'priorities') {
+      if (method === 'GET') return json(inbox.priorities());
+      if (method === 'PUT') {
+        if (me.role === 'extension') throw new InboxError(403, 'extensions cannot change priority levels');
+        return json(inbox.setPriorities(await readJson<PriorityLevel[]>(req)));
+      }
+    }
+    if (a === 'guidance') {
+      if (method === 'GET') return json(inbox.guidance());
+      if (method === 'POST') return json(publicCard(inbox.proposeGuidance(String((await readJson<{ text?: string }>(req)).text ?? ''))), 201);
+    }
+    if (a === 'settings') {
+      if (method === 'GET') return json(inbox.settings());
+      if (method === 'PUT') { owner(); return json(inbox.setSettings(await readJson<Partial<Settings>>(req))); }
+    }
+    if (method === 'GET' && a === 'attachments' && b) {
+      const { file, bytes } = await inbox.attachment(me, b);
+      // Only types the page renders go inline. Everything else downloads, and nothing served here runs scripts.
+      const inline = INLINE_TYPES.has(file.type) && url.searchParams.get('download') !== '1';
+      const name = encodeURIComponent(file.name);
+      return new Response(bytes, {
+        headers: {
+          'content-type': INLINE_TYPES.has(file.type) ? file.type : 'application/octet-stream',
+          'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${name}`,
+          // Browsers refuse to show a PDF in a sandboxed document, so a PDF gets the other limits without sandbox.
+          'content-security-policy': `${file.type === 'application/pdf' ? '' : 'sandbox; '}default-src 'none'; img-src 'self'; style-src 'unsafe-inline'`,
+          'x-content-type-options': 'nosniff',
+          'cache-control': 'private, max-age=86400',
+        },
+      });
+    }
     if (method === 'GET' && a === 'tokens') { owner(); return json(inbox.listTokens()); }
     if (method === 'DELETE' && a === 'tokens' && b) { owner(); inbox.revokeToken(b); return json({ ok: true }); }
 
     if (a === 'cards') {
-      if (method === 'POST' && !b) return json(publicCard(inbox.postCard(me, await readJson<NewCard>(req))), 201);
+      if (method === 'POST' && !b) return json(publicCard(await inbox.postCardWithFiles(me, await readJson<NewCard>(req))), 201);
       if (method === 'GET' && !b) return json(inbox.listCards(me));
       if (!b) return json({ error: 'not found' }, 404);
       if (method === 'GET' && !c) {
@@ -149,6 +191,10 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(publicCard(inbox.reply(me, b, String(body['text'] ?? ''))));
         case 'ack':
           return json(inbox.ack(me, b));
+        case 'patch':
+          return json(publicCard(inbox.patchCard(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined)));
+        case 'status':
+          return json(publicCard(inbox.setStatus(me, b, String(body['status'] ?? ''))));
         case 'claim':
           return json(publicCard(inbox.claim(me, b, String(body['agent'] ?? ''))));
         case 'seen':
