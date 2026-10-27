@@ -6,6 +6,7 @@ import { after, before, describe, it } from 'node:test';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Card } from '../../src/core/types.ts';
+import { seal } from '../../web/sealed.js';
 import { ROOT, start, until, type Harness } from './harness.ts';
 
 let h: Harness;
@@ -34,7 +35,7 @@ after(async () => {
 describe('the Claude Code channel', () => {
   it('offers the card tools', async () => {
     const { tools } = await mcp.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_close', 'card_post', 'card_reply', 'card_search']);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_ask_secret', 'card_close', 'card_post', 'card_reply', 'card_search']);
   });
 
   it('posts a card, pushes the answer into the session, and marks it read from the transcript', async () => {
@@ -64,6 +65,22 @@ describe('the Claude Code channel', () => {
     await mcp.callTool({ name: 'card_close', arguments: { card_id: 'cc-2', kind: 'self-answered', outcome: 'Found it in the README.' } });
     const s = (await (await h.owner('GET', '/v1/state')).json()) as { states: Record<string, string> };
     assert.equal(s.states['cc-2'], 'closed');
+  });
+
+  it('asks for a secret, and hands the model a file path, never the value', async () => {
+    const res = await mcp.callTool({ name: 'card_ask_secret', arguments: { name: 'DEMO_API_KEY', title: 'Need the demo key', text: 'To set the CI secret.' } });
+    const id = /card (\S+)\./.exec(JSON.stringify(res.content))?.[1];
+    assert.ok(id);
+    const card = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === id);
+    assert.equal(card?.kind, 'secret');
+    const sealed = await seal(card!.secret!.publicKey, 'demo-value-not-real');
+    await h.owner('POST', `/v1/cards/${id}/answer`, { values: { sealed } });
+    const note = await until(() => notes.find((n) => n.meta.card_id === id));
+    assert.doesNotMatch(note.content, /demo-value-not-real/);
+    const file = /It is in (\S+), which/.exec(note.content)?.[1];
+    assert.ok(file, note.content);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'demo-value-not-real');
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   });
 
   it('searches earlier answers', async () => {

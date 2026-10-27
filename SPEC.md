@@ -60,6 +60,18 @@ An owner client sends the answer with `POST /v1/cards/<id>/answer {values, comme
 
 A new answer replaces the old one and keeps it in `previous`.
 
+## Secret cards
+
+A card with `kind: "secret"` asks for one value. It carries `secret: {name, publicKey}`, where `name` is a variable name and `publicKey` is an RSA-OAEP public key as a JWK. The agent keeps the private key in memory.
+
+To seal the value, the page encrypts it with a new AES-256-GCM key, then wraps that key with the public key. The answer contains `values.sealed`:
+
+```json
+{ "alg": "RSA-OAEP-256+A256GCM", "key": "<wrapped AES key, base64>", "iv": "<base64>", "data": "<ciphertext, base64>" }
+```
+
+The inbox refuses any other value on a secret card, so plain text never reaches storage. An answer without `values.sealed` declines the request. A page on plain HTTP from another machine cannot seal, because browsers give Web Crypto to secure origins only.
+
 ## Card states
 
 | State | Meaning |

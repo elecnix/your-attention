@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 .github/vale/styles/ai-tells/
 .github/vale/styles/ai-tells-experimental/
 *.sqlite

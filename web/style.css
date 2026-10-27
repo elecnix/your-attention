@@ -95,3 +95,10 @@
   .chain a { color: var(--accent); cursor: pointer; text-decoration: underline; }
   .signin { max-width: 560px; margin: 64px auto; padding: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
   .signin code { background: var(--bg); padding: 2px 6px; border-radius: 4px; }
+  .secret { display: grid; gap: 12px; margin-top: 8px; }
+  .secret label { display: grid; gap: 4px; font-size: 14px; font-weight: 600; }
+  .secret input, .secret textarea { font: inherit; font-weight: 400; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .secret .hint { margin: 0; font-size: 13px; color: var(--muted); }
+  .secret-title { font-size: 18px; margin: 4px 0 8px; }
+  .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: default; }

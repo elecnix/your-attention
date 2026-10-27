@@ -3,7 +3,7 @@
 export const PROTOCOL_VERSION = 1;
 
 export type Priority = 'now' | 'soon' | 'later';
-export type CardKind = 'ask' | 'blocked' | 'system';
+export type CardKind = 'ask' | 'blocked' | 'system' | 'secret';
 export type CloseKind = 'retracted' | 'self-answered' | 'answered-in-terminal' | 'resolved';
 export type CardState = 'open' | 'answered' | 'delivered' | 'read' | 'closed';
 export type Delivery = 'default' | 'steer' | 'followUp' | 'force';
@@ -44,6 +44,22 @@ export interface Closure {
   at: number;
 }
 
+/** A secret the page encrypted for one agent. SPEC.md describes the format. */
+export interface Sealed {
+  alg: string;
+  key: string;
+  iv: string;
+  data: string;
+}
+
+/** What an agent asks for on a secret card. */
+export interface SecretRequest {
+  /** The name the agent uses for the value, such as OLLAMA_API_KEY. */
+  name: string;
+  /** The RSA-OAEP public key the page seals the value with. */
+  publicKey: JsonWebKey;
+}
+
 export interface Card {
   id: string;
   /** The agent that receives the answer. One agent is one harness session. */
@@ -61,6 +77,7 @@ export interface Card {
   questions?: AskQuestion[];
   /** The terminal screen of a blocked agent. */
   screen?: string;
+  secret?: SecretRequest;
   priority: Priority;
   origin?: Origin;
   /** Other properties the agent attaches, for grouping. */
@@ -147,6 +164,7 @@ export interface NewCard {
   multiple?: boolean;
   questions?: AskQuestion[];
   screen?: string;
+  secret?: SecretRequest;
   priority?: Priority;
   origin?: Origin;
   tags?: Record<string, string>;

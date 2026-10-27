@@ -5,6 +5,7 @@ import os from 'node:os';
 import { Type } from 'typebox';
 import { Client, describeAnswer, loadConfig } from '../../client.ts';
 import type { CloseKind, NewCard, Option } from '../../core/types.ts';
+import { SecretRequests } from '../secrets.ts';
 import { cardTools } from '../tools.ts';
 
 // The parts of pi's ExtensionAPI this extension uses.
@@ -38,6 +39,7 @@ export default function yourAttention(pi: PiApi): void {
   let stop: AbortController | undefined;
   // Receipt id -> card id, for answers sent but not yet in the model context.
   const pending = new Map<string, string>();
+  const secrets = new SecretRequests();
 
   pi.on('session_start', (_event, ctx) => {
     const config = loadConfig();
@@ -49,10 +51,11 @@ export default function yourAttention(pi: PiApi): void {
     stop?.abort();
     stop = new AbortController();
     const client = inbox;
-    void client.stream(agent, (ev) => {
+    void client.stream(agent, async (ev) => {
       if (ev.type !== 'answer') return;
       pending.set(ev.id, ev.card.id);
-      const text = `[your-attention answer ${ev.id}] The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer)}`;
+      const what = ev.card.kind === 'secret' ? await secrets.receive(ev.card, ev.answer) : `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer)}`;
+      const text = `[your-attention answer ${ev.id}] ${what}`;
       // Steer by default; start a new turn when the agent is idle.
       if (ctx.isIdle()) pi.sendUserMessage(text);
       else pi.sendUserMessage(text, { deliverAs: ev.answer.delivery === 'followUp' ? 'followUp' : 'steer' });
@@ -104,6 +107,10 @@ export default function yourAttention(pi: PiApi): void {
               origin,
             });
             return result(`Posted card ${card.id}. The answer arrives as a user message; keep working meanwhile.`);
+          }
+          case 'card_ask_secret': {
+            const id = await secrets.ask(c, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: args['text'] as string | undefined, priority: (args['priority'] as NewCard['priority']) ?? 'now', origin });
+            return result(`Asked for the secret on card ${id}. The answer arrives as a user message with the path of a file, never the value.`);
           }
           case 'card_reply':
             await c.reply(String(args['card_id']), String(args['text'] ?? ''));

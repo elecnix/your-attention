@@ -12,6 +12,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Client, describeAnswer, loadConfig } from '../../client.ts';
 import type { CloseKind, NewCard, Option } from '../../core/types.ts';
+import { SecretRequests } from '../secrets.ts';
 import { cardTools } from '../tools.ts';
 
 const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
@@ -24,6 +25,7 @@ const inbox = new Client(config);
 const session = process.env['CLAUDE_CODE_SESSION_ID'] ?? `pid-${process.ppid}`;
 const agent = `claude:${session}`;
 const pane = process.env['HERDR_PANE_ID'];
+const secrets = new SecretRequests();
 const origin = { harness: 'claude-code', session, host: os.hostname(), cwd: process.env['CLAUDE_PROJECT_DIR'] ?? process.cwd(), herdrPane: pane };
 
 const mcp = new Server(
@@ -63,6 +65,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         };
         const posted = await inbox.post(card);
         return text(`Posted card ${posted.id}. The answer arrives as a channel event; keep working meanwhile.`);
+      }
+      case 'card_ask_secret': {
+        const id = await secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: args['text'] as string | undefined, priority: (args['priority'] as NewCard['priority']) ?? 'now', origin });
+        return text(`Asked for the secret on card ${id}. The answer arrives as a channel event with the path of a file, never the value.`);
       }
       case 'card_reply':
         await inbox.reply(String(args['card_id']), String(args['text'] ?? ''));
@@ -148,9 +154,10 @@ void inbox.stream(agent, async (ev) => {
     ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
     : `The person answered card "${card.title}":`;
   const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
+  const body = card.kind === 'secret' ? await secrets.receive(card, answer) : `${head}${urgency}\n${describeAnswer(card, answer)}`;
   await mcp.notification({
     method: 'notifications/claude/channel',
-    params: { content: `${head}${urgency}\n${describeAnswer(card, answer)}`, meta: { card_id: card.id, receipt } },
+    params: { content: body, meta: { card_id: card.id, receipt } },
   });
   log('pushed', card.id, receipt);
 }, stop.signal);

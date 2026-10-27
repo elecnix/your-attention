@@ -95,6 +95,8 @@ export class Client {
 
 /** Plain text for an answer, as an agent reads it. */
 export function describeAnswer(card: Card, answer: Answer): string {
+  // A sealed secret is never written out: the integration opens it.
+  if (card.kind === 'secret') return answer.comment ? `(a sealed secret)\nComment: ${answer.comment}` : '(a sealed secret)';
   const lines: string[] = [];
   if (card.questions?.length) {
     card.questions.forEach((q, i) => {

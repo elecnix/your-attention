@@ -28,6 +28,20 @@ export const cardTools: CardTool[] = [
     },
   },
   {
+    name: 'card_ask_secret',
+    description: 'Ask the person for a secret, such as an API key, without it ever entering the conversation. Their browser encrypts it for this session only. The answer arrives later with the path of a file that contains the value: use the file inside a command and never print it.',
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'The variable name for the value, such as OLLAMA_API_KEY.' },
+        title: { type: 'string', description: 'The request, in one line.' },
+        text: { type: 'string', description: 'Why you need it, and what you will do with it.' },
+        priority: { type: 'string', enum: ['now', 'soon', 'later'] },
+      },
+      required: ['name', 'title'],
+    },
+  },
+  {
     name: 'card_reply',
     description: 'Reply to the person on one of your cards. Use it only when they asked you a question there.',
     schema: { type: 'object', properties: { card_id: { type: 'string' }, text: { type: 'string' } }, required: ['card_id', 'text'] },

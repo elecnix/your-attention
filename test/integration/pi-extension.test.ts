@@ -1,7 +1,10 @@
 // Loads the pi extension against a stand-in for pi's ExtensionAPI.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import fs from 'node:fs';
 import yourAttention from '../../src/integrations/pi/extension.ts';
+import type { Card } from '../../src/core/types.ts';
+import { seal } from '../../web/sealed.js';
 import { start, until, type Harness } from './harness.ts';
 
 let h: Harness;
@@ -32,7 +35,7 @@ const state = async () => (await (await h.owner('GET', '/v1/state')).json()) as 
 describe('the pi extension', () => {
   it('registers the card tools and connects on session start', async () => {
     yourAttention(pi as never);
-    assert.deepEqual([...tools.keys()].sort(), ['card_close', 'card_post', 'card_reply', 'card_search']);
+    assert.deepEqual([...tools.keys()].sort(), ['card_ask_secret', 'card_close', 'card_post', 'card_reply', 'card_search']);
     await handlers.get('session_start')?.({}, ctx);
     await until(async () => (await state()).presence['pi:pi-session-1']?.online);
   });
@@ -46,6 +49,17 @@ describe('the pi extension', () => {
     assert.match(msg.text, /choice: No/);
     await handlers.get('context')?.({ messages: [{ role: 'user', content: msg.text }] }, ctx);
     await until(async () => (await state()).states['pi-1'] === 'read' || undefined);
+  });
+
+  it('opens a sealed secret into a private file, and tells the agent only the path', async () => {
+    const res = await tools.get('card_ask_secret')!.execute('call-s', { name: 'PI_KEY', title: 'Need the pi key' }, undefined, undefined, ctx);
+    const id = /card (\S+)\./.exec(res.content[0]!.text)?.[1];
+    const card = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === id);
+    await h.owner('POST', `/v1/cards/${id}/answer`, { values: { sealed: await seal(card!.secret!.publicKey, 'pi-value-not-real') } });
+    const msg = await until(() => sent.find((m) => m.text.includes(String(id))));
+    assert.doesNotMatch(msg.text, /pi-value-not-real/);
+    const file = /It is in (\S+), which/.exec(msg.text)?.[1];
+    assert.equal(fs.readFileSync(String(file), 'utf8'), 'pi-value-not-real');
   });
 
   it('steers a busy agent, and queues an answer marked as a follow-up', async () => {

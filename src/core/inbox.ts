@@ -3,6 +3,7 @@
 // before the next starts. Every change is written to storage before a method
 // returns, and memory holds only the open connections.
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
+import { isSealed } from './sealed.ts';
 import type { Storage } from './storage.ts';
 import type {
   AgentEvent, Answer, Card, CardState, CloseKind, Delivery, NewCard, PageEvent, Pairing, Presence, Role, Token,
@@ -150,6 +151,14 @@ export class Inbox {
     const id = input.id ? String(input.id) : randomId(8);
     if (!/^[\w.:-]{1,80}$/.test(id)) throw new InboxError(400, 'id must be 1 to 80 letters, digits, dots, colons, dashes or underscores');
 
+    const kind = input.kind ?? 'ask';
+    if (kind === 'secret') {
+      const s = input.secret;
+      if (!s || typeof s !== 'object' || !s.publicKey || typeof s.publicKey !== 'object') throw new InboxError(400, 'a secret card needs secret.name and secret.publicKey');
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(String(s.name ?? ''))) throw new InboxError(400, 'secret.name must be a variable name, such as API_KEY');
+      if (s.publicKey.kty !== 'RSA') throw new InboxError(400, 'secret.publicKey must be an RSA-OAEP key');
+    }
+
     const now = this.now();
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
@@ -157,7 +166,7 @@ export class Inbox {
       id,
       agent,
       token: before?.token ?? caller.token,
-      kind: input.kind ?? 'ask',
+      kind,
       title,
       text: input.text,
       recommendation: input.recommendation,
@@ -166,6 +175,7 @@ export class Inbox {
       multiple: input.multiple,
       questions: input.questions,
       screen: input.screen,
+      secret: kind === 'secret' ? { name: String(input.secret?.name), publicKey: input.secret?.publicKey ?? {} } : undefined,
       priority,
       origin: input.origin,
       tags: input.tags,
@@ -262,11 +272,16 @@ export class Inbox {
     const card = this.getCard(id);
     const delivery = input.delivery ?? 'default';
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
+    const values = input.values && typeof input.values === 'object' ? input.values : {};
+    // The inbox accepts only a sealed value for a secret, so plain text never reaches storage.
+    if (card.kind === 'secret' && (Object.keys(values).some((k) => k !== 'sealed') || ('sealed' in values && !isSealed(values['sealed'])))) {
+      throw new InboxError(400, 'a secret card takes only a sealed value: seal it with the card\'s public key');
+    }
     const before = this.store.get<Answer>('answers', id);
     const answer: Answer = {
       card: id,
       version: Number(input.version ?? card.version),
-      values: input.values && typeof input.values === 'object' ? input.values : {},
+      values,
       comment: String(input.comment ?? '').trim(),
       delivery,
       savedAt: this.now(),

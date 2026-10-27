@@ -8,7 +8,7 @@ One inbox for the questions all your coding agents ask you. An agent posts a car
 
 With 100 sessions open, a question waits in whichever terminal asked it, and you find it late or never. Your Attention puts every question on one queue, sorted by priority, one card at a time. Each card shows whether its agent is listening, busy or offline, and where your answer is: stored, delivered, or read by the model. An answer to an offline agent waits until its session resumes.
 
-Claude Code and pi post cards through tools, and herdr turns any blocked agent into a card. The inbox runs on your laptop and advertises itself over mDNS. Each new client pairs with a code you confirm.
+Claude Code and pi post cards through tools, and herdr turns any blocked agent into a card. A secret card requests a key: your browser encrypts it for that session, and the model sees the path of a private file instead of the value. The inbox runs on your laptop and advertises itself over mDNS. Each new client pairs with a code you confirm.
 
 [PRINCIPLES.md](PRINCIPLES.md) states the design and [SPEC.md](SPEC.md) the protocol.
 

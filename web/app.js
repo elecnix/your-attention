@@ -99,6 +99,7 @@ function formValues(formState) {
 
 function describe(card, a) {
   if (!a) return '';
+  if (card.kind === 'secret') return [a.values && a.values.sealed ? 'Sent sealed' : 'Declined', a.comment].filter(Boolean).join('\n');
   const picks = Object.entries(a.values || {}).map(([k, v]) => {
     const list = [].concat(v);
     if (k === 'choice' && card.options) return list.map((x) => (card.options.find((o) => o.id === x) || {}).label || x).join(', ');
@@ -139,6 +140,43 @@ function ClosedCard({ closed, children, onNext, animate }) {
       h('button', { className: 'btn', onClick: () => setCollapsed((c) => !c) }, collapsed ? 'Reply' : 'Hide card'),
       h('button', { className: 'btn', onClick: onNext }, 'Next card')),
     h('div', { ref, className: 'collapse', style: { maxHeight: collapsed ? 0 : (height || 4000), opacity: collapsed ? 0 : 1 } }, children));
+}
+
+// A secret request. The value is sealed in this browser with the agent's key,
+// so the inbox stores only ciphertext. Drafts are never saved for it.
+function SecretForm({ card, onSent, onSkip }) {
+  const [value, setValue] = React.useState('');
+  const [comment, setComment] = React.useState('');
+  const [error, setError] = React.useState(null);
+  if (!window.isSecureContext || !crypto.subtle) {
+    return h('div', { className: 'note warn' }, 'This page cannot seal a secret over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.');
+  }
+  async function send(withValue) {
+    setError(null);
+    try {
+      const values = {};
+      if (withValue) {
+        const { seal } = await import('/sealed.js');
+        values.sealed = await seal(card.secret.publicKey, value);
+      }
+      const res = await api(`/v1/cards/${card.id}/answer`, { values, comment: comment.trim(), version: card.version });
+      if (!res.ok) throw new Error((await res.json()).error || res.status);
+      setValue('');
+      onSent();
+    } catch (e) {
+      setError(String(e.message || e));
+    }
+  }
+  return h('form', { className: 'secret', onSubmit: (e) => { e.preventDefault(); send(true); } },
+    h('label', null, card.secret.name,
+      h('input', { type: 'password', autoComplete: 'off', spellCheck: false, value, onChange: (e) => setValue(e.target.value) })),
+    h('label', null, 'Comment', h('textarea', { rows: 2, value: comment, onChange: (e) => setComment(e.target.value), placeholder: 'Anything to add?' })),
+    error && h('div', { className: 'note warn' }, error),
+    h('div', { className: 'nav' },
+      h('button', { className: 'btn primary', type: 'submit', disabled: !value }, 'Send sealed'),
+      h('button', { className: 'btn', type: 'button', onClick: () => send(false) }, 'Decline'),
+      h('button', { className: 'btn', type: 'button', onClick: onSkip }, 'Skip for now')),
+    h('p', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the model sees a file path, never the value.'));
 }
 
 function NotifyToggle() {
@@ -314,7 +352,12 @@ function App() {
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), r.text)),
       a && s !== 'reply' && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
-      h(CardView, { key: `${draftKey}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current), onAction: (ev) => onAction(current, ev) }),
+      current.kind === 'secret'
+        ? h(React.Fragment, null,
+          h('h2', { className: 'secret-title' }, current.title),
+          current.text && h('p', null, current.text),
+          h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: next, onSent: () => setTimeout(() => { pinnedRef.current = null; setFocus(null); }, 700) }))
+        : h(CardView, { key: `${draftKey}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current), onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
         h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),
