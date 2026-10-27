@@ -185,8 +185,8 @@ An answer saved after a close moves the card out of `closed` and goes to the age
 You pick a choice and press **Press it in the session**. The sidecar receives the answer on the card's stream, then checks three things before it sends a key to that pane:
 
 1. The agent is still blocked.
-2. The answer is for the card's current version. The sidecar posts a new version when the dialog changes.
-3. The screen still matches the card, apart from which choice is selected.
+2. The answer is for the card's current version. The sidecar posts a new version when the dialog changes, and keeps the version while only the rest of the screen changes, such as a clock.
+3. The dialog on the screen still matches the card. The choices match the card. The sidecar also reads the lines above the choices, up to the dialog's top border, and requires them to equal the lines on the card's screen. The same choices for another command are another question.
 
 If all three hold, the sidecar sends the choice's number with `herdr agent send-keys`. If the screen then still shows the same dialog, the number only moved the selection, so it sends Enter. If a check fails, no key goes out, and the card closes with the reason. The sidecar sends keys only to the card's own pane.
 

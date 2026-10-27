@@ -39,8 +39,17 @@ export function trimScreen(raw: string): string {
     .join('\n');
 }
 
-/** The screen without the marker on the selected choice. */
-const unmarked = (screen: string): string => screen.split('\n').map((l) => l.replace(/^(\s*)[❯›>▶](\s)/, '$1 $2').trimEnd()).join('\n');
+
+/** Whether the pane's screen shows the dialog the card offers: the card's choices, and the same lines above them.
+ * The card keeps its screen trimmed, so the pane's screen is trimmed the same way before both are read.
+ * The lines above count: the same choices for another command are another question. */
+function matchesCard(raw: string, card: Card): boolean {
+  const offered = (card.options ?? []).map((o) => ({ key: o.id.slice(1), label: o.label }));
+  const now = parseDialog(trimScreen(raw));
+  const then = parseDialog(card.screen ?? '');
+  return !!now && !!then && JSON.stringify(now.options) === JSON.stringify(offered) && JSON.stringify(then.options) === JSON.stringify(offered)
+    && JSON.stringify(now.context) === JSON.stringify(then.context);
+}
 
 const sameDialog = (a: Dialog | undefined, b: Dialog | undefined): boolean => JSON.stringify(a) === JSON.stringify(b);
 
@@ -59,7 +68,8 @@ export interface Sidecar {
 }
 
 export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs = 600): Sidecar {
-  const open = new Map<string, { card: Card; screen: string; listen: AbortController }>(); // pane id -> its card
+  // pane id -> its card. An adopted card's dialog is read on the next tick, when it is checked against the card.
+  const open = new Map<string, { card: Card; screen: string; dialog?: Dialog | undefined; adopted?: boolean; listen: AbortController }>();
   const readRaw = (pane: string): Promise<string> => herdr('pane', 'read', pane, '--lines', '60', '--source', 'detection').catch(() => '');
   const agents = async (): Promise<HerdrAgent[]> => (JSON.parse(await herdr('agent', 'list')) as { result: { agents: HerdrAgent[] } }).result.agents;
   let adopted = false;
@@ -85,7 +95,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
         for (const { card, state } of await inbox.list()) {
           const pane = card.origin?.herdrPane;
           if (card.kind !== 'blocked' || !pane || state === 'closed' || state === 'read') continue;
-          open.set(pane, { card, screen: card.screen ?? '', listen: listen(card) });
+          open.set(pane, { card, screen: card.screen ?? '', adopted: true, listen: listen(card) });
         }
       }
       const blocked = (await agents()).filter((a) => a.agent_status === 'blocked');
@@ -98,11 +108,20 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
         const known = open.get(a.pane_id);
         if (!known && askPanes.has(a.pane_id)) continue;
         const raw = await readRaw(a.pane_id);
-        const fields = describe(raw, parseDialog(raw));
+        const dialog = parseDialog(raw);
+        const fields = describe(raw, dialog);
+        if (known?.adopted) {
+          // A sidecar restart keeps the card's version when the pane still shows the dialog the card offers.
+          known.adopted = false;
+          if (dialog && matchesCard(raw, known.card)) { known.dialog = dialog; continue; }
+        }
         if (known) {
-          // Keep the card current while the agent waits. A new dialog makes a new version, so an answer to the old one presses nothing.
-          if (fields.screen && fields.screen !== known.screen) {
+          // A new dialog makes a new version, so an answer to the old one presses nothing. While the same dialog waits,
+          // the rest of the screen can change, such as a clock, and the card keeps its version.
+          const changed = dialog || known.dialog ? !sameDialog(dialog, known.dialog) : fields.screen !== known.screen;
+          if (changed && fields.screen) {
             known.screen = fields.screen ?? '';
+            known.dialog = dialog;
             const { attachments: _attachments, ...card } = known.card;
             known.card = await inbox.post({ ...card, ...fields, ...(fields.options ? {} : { options: undefined, text: undefined }) });
           }
@@ -119,7 +138,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
           priority: 'now',
           origin: { harness: a.agent ?? 'agent', herdrPane: a.pane_id, name: where },
         });
-        open.set(a.pane_id, { card, screen: fields.screen ?? '', listen: listen(card) });
+        open.set(a.pane_id, { card, screen: fields.screen ?? '', dialog, listen: listen(card) });
         log('card', card.id, 'for', a.pane_id);
       }
       const still = new Set(blocked.map((a) => a.pane_id));
@@ -145,18 +164,16 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
       if (answer.version !== card.version) return refuse('The dialog changed after you answered, so no key was pressed. A new card shows the current one.');
       const agent = (await agents()).find((a) => a.pane_id === pane);
       if (agent?.agent_status !== 'blocked') return refuse('The agent was no longer waiting, so no key was pressed.');
-      const before = await readRaw(pane);
-      const dialog = parseDialog(before);
-      const expected = { question: card.text ?? '', options: (card.options ?? []).map((o) => ({ key: o.id.slice(1), label: o.label })) };
-      // The command above the choices counts too: the same choices for another command are another question.
-      if (!sameDialog(dialog, expected) || unmarked(trimScreen(before)) !== unmarked(card.screen ?? '')) return refuse('The dialog changed before your answer arrived, so no key was pressed.');
+      const raw = await readRaw(pane);
+      const dialog = parseDialog(raw);
+      if (!dialog || !matchesCard(raw, card)) return refuse('The dialog changed before your answer arrived, so no key was pressed.');
       const key = dialog?.options.find((o) => o.label === label)?.key;
       if (!key) return refuse('That choice is no longer offered, so no key was pressed.');
       await herdr('agent', 'send-keys', pane, key);
       // Some dialogs act on the number alone, and others only move the selection to it. Confirm only when the same
-      // screen still waits, apart from where the selection marker sits: a new prompt for another command differs.
+      // dialog still waits: a new prompt for another command has other lines above its choices.
       await new Promise((r) => setTimeout(r, settleMs));
-      if (unmarked(await readRaw(pane)) === unmarked(before)) await herdr('agent', 'send-keys', pane, 'enter');
+      if (sameDialog(parseDialog(await readRaw(pane)), dialog)) await herdr('agent', 'send-keys', pane, 'enter');
       await inbox.ack(card.id).catch(() => {});
       await inbox.close(card.id, 'resolved', `Pressed "${label}" in its session.`).catch(() => {});
       forget(pane);

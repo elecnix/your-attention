@@ -63,15 +63,44 @@ describe('the herdr sidecar', () => {
 
   it('presses nothing when another dialog replaced the one you answered', async () => {
     const fake = fakeHerdr('w1:p3', () => {});
+    fake.state.screen = `   rm -rf dist\n${dialog(1)}`;
     const sidecar = createSidecar(new Client({ url: h.server.url, token: h.agentToken }), fake.herdr, 50);
     try {
       await sidecar.tick();
       const card = await cardFor('w1:p3');
-      // The same choices, for another command.
-      fake.state.screen = dialog(1, 'rm -rf dist');
+      // The same choices, for another command whose line already showed above the first prompt.
+      fake.state.screen = `   rm -rf dist\n${dialog(1, 'rm -rf dist')}`;
       await h.owner('POST', `/v1/cards/${card.id}/answer`, { values: { choice: 'o1' }, version: card.version });
       assert.match(await closedOutcome(card.id), /changed before your answer arrived/);
       assert.deepEqual(fake.keys, []);
     } finally { sidecar.stop(); }
+  });
+
+  it('presses the choice of a dialog with a blank line inside it', async () => {
+    const fake = fakeHerdr('w1:p5', (key, s) => { if (key === '1') { s.screen = 'Done.'; s.status = 'working'; } });
+    fake.state.screen = ' Deploy to staging?\n\n Version 4 is ready.\n ❯ 1. Deploy\n   2. Wait';
+    const sidecar = createSidecar(new Client({ url: h.server.url, token: h.agentToken }), fake.herdr, 50);
+    try {
+      await sidecar.tick();
+      const card = await cardFor('w1:p5');
+      await h.owner('POST', `/v1/cards/${card.id}/answer`, { values: { choice: 'o1' }, version: card.version });
+      assert.equal(await closedOutcome(card.id), 'Pressed "Deploy" in its session.');
+      assert.deepEqual(fake.keys, ['1']);
+    } finally { sidecar.stop(); }
+  });
+
+  it('keeps the card version when a restarted sidecar finds the same dialog', async () => {
+    const fake = fakeHerdr('w1:p4', () => {});
+    const client = new Client({ url: h.server.url, token: h.agentToken });
+    const first = createSidecar(client, fake.herdr, 50);
+    await first.tick();
+    const card = await cardFor('w1:p4');
+    first.stop();
+    const second = createSidecar(client, fake.herdr, 50);
+    try {
+      await second.tick();
+      await second.tick();
+      assert.equal((await cardFor('w1:p4')).version, card.version);
+    } finally { second.stop(); }
   });
 });
