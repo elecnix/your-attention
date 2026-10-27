@@ -1,7 +1,7 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
-import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, HtmlToggle, LinkedText, NotifyToggle, SecretForm, cardSource, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, HtmlToggle, LinkedText, NotifyToggle, SecretForm, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -154,7 +154,7 @@ export function App() {
 
   // No grouping by default. The choices follow the properties the cards carry.
   const tagKeys = [...new Set(visible.flatMap((c) => Object.keys(c.tags || {})))].sort();
-  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? c.agent : groupBy.startsWith('tag:') ? String((c.tags || {})[groupBy.slice(4)] || '').trim() || `No ${groupBy.slice(4)}` : 'Waiting for you');
+  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? agentName(c.agent, visible) : groupBy.startsWith('tag:') ? String((c.tags || {})[groupBy.slice(4)] || '').trim() || `No ${groupBy.slice(4)}` : 'Waiting for you');
   const rest = pending.filter((c) => st(c) !== 'reply');
   const groups = groupBy === 'none' ? [['Waiting for you', rest]] : [...rest.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];
   const queue = h('nav', { className: 'queue' },
@@ -201,7 +201,7 @@ export function App() {
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
       current.broadcast && !current.closed
-        ? h(BroadcastForm, { card: current, onDone: next })
+        ? h(BroadcastForm, { card: current, cards: state.cards, onDone: next })
         : current.html !== undefined
         ? h(HtmlCard, { card: current, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
         : current.kind === 'secret'

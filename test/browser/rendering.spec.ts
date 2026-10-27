@@ -174,3 +174,23 @@ test('a malformed card id in the address opens the inbox as usual', async ({ pag
   await page.locator('.bar .pill.on').waitFor();
   await expect(page.locator('.queue')).toBeVisible();
 });
+
+test('a revision marks the words it changed, not only the lines', async ({ page }) => {
+  await inbox.agent.post({ id: 'words', agent: 's-words', title: 'Pick the cache', text: 'Use Redis for the cache layer.', priority: 'now' });
+  await inbox.agent.post({ id: 'words', agent: 's-words', title: 'Pick the cache', text: 'Use SQLite for the cache layer.', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Pick the cache' }).click();
+  await page.locator('details.changes summary').click();
+  await expect(page.locator('details.changes .del mark')).toHaveText(['Redis']);
+  await expect(page.locator('details.changes .add mark')).toHaveText(['SQLite']);
+});
+
+test('the queue names an agent by its session name, and by its id when it has none', async ({ page }) => {
+  await inbox.agent.post({ id: 'named', agent: 'claude:0000-named', title: 'From a named session', origin: { harness: 'claude-code', name: 'Release prep' } });
+  await inbox.agent.post({ id: 'unnamed', agent: 'claude:0000-plain', title: 'From an unnamed session' });
+  await inbox.open(page);
+  await page.locator('.group-by select').selectOption('agent');
+  await expect(page.locator('.queue h3', { hasText: 'Release prep' })).toBeVisible();
+  await expect(page.locator('.queue h3', { hasText: 'claude:0000-plain' })).toBeVisible();
+  await expect(page.locator('.queue h3', { hasText: 'claude:0000-named' })).toHaveCount(0);
+});

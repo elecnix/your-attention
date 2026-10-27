@@ -226,6 +226,29 @@ function diff(before, after) {
   const a = String(after ?? '').split('\n');
   return { removed: b.filter((l) => l && !a.includes(l)), added: a.filter((l) => l && !b.includes(l)) };
 }
+// The words that differ between a removed line and the added line that replaced it,
+// from the longest common run of words. Very long lines get no word marks.
+export function wordDiff(before, after) {
+  const x = before.split(/(\s+)/);
+  const y = after.split(/(\s+)/);
+  if (x.length * y.length > 250000) return null;
+  const t = Array.from({ length: x.length + 1 }, () => new Uint16Array(y.length + 1));
+  for (let i = x.length - 1; i >= 0; i--) for (let j = y.length - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+  const del = [];
+  const add = [];
+  let i = 0;
+  let j = 0;
+  while (i < x.length && j < y.length) {
+    if (x[i] === y[j]) { del.push([x[i++], false]); add.push([y[j++], false]); }
+    else if (t[i + 1][j] >= t[i][j + 1]) del.push([x[i++], true]);
+    else add.push([y[j++], true]);
+  }
+  while (i < x.length) del.push([x[i++], true]);
+  while (j < y.length) add.push([y[j++], true]);
+  return { del, add };
+}
+const marked = (words) => words.map(([w, changed], k) => (changed && w.trim() ? h('mark', { key: k }, w) : w));
+
 export function Changes({ card }) {
   const versions = [...(card.history || []), card];
   const steps = [];
@@ -242,18 +265,25 @@ export function Changes({ card }) {
       h('div', { className: 'step-head' }, `Version ${s.version}`),
       s.fields.map((f) => h('div', { key: f.label },
         h('div', { className: 'field' }, f.label),
-        f.removed.map((l, i) => h('div', { key: `r${i}`, className: 'del' }, `− ${l}`)),
-        f.added.map((l, i) => h('div', { key: `a${i}`, className: 'add' }, `+ ${l}`)))))));
+        f.removed.map((l, i) => { const w = i < f.added.length && wordDiff(l, f.added[i]); return h('div', { key: `r${i}`, className: 'del' }, '− ', w ? marked(w.del) : l); }),
+        f.added.map((l, i) => { const w = i < f.removed.length && wordDiff(f.removed[i], l); return h('div', { key: `a${i}`, className: 'add' }, '+ ', w ? marked(w.add) : l); }))))));
+}
+
+// An agent's name for people: the session name its newest card carries, else its id.
+export function agentName(id, cards) {
+  let best = null;
+  for (const c of cards) if (c.agent === id && c.origin && c.origin.name && (!best || c.createdAt > best.createdAt)) best = c;
+  return best ? best.origin.name : id;
 }
 
 // The system card for new guidance: the person picks the agents, all of them at first.
-export function BroadcastForm({ card, onDone }) {
+export function BroadcastForm({ card, cards = [], onDone }) {
   const [picked, setPicked] = React.useState(() => new Set(card.broadcast.agents));
   const send = (choice) => api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] } }).then(onDone);
   return h('div', { className: 'broadcast' },
     h('pre', null, card.broadcast.text),
     h('div', { className: 'agents' }, card.broadcast.agents.length ? card.broadcast.agents.map((a) => h('label', { key: a },
-      h('input', { type: 'checkbox', checked: picked.has(a), onChange: () => setPicked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), a))
+      h('input', { type: 'checkbox', checked: picked.has(a), onChange: () => setPicked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards)))
       : h('span', null, 'No agent has connected yet. Agents get the guidance when they connect.')),
     h('div', { className: 'nav' },
       h('button', { className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),

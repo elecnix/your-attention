@@ -132,6 +132,9 @@
   details.changes { margin: 0 0 12px; font-size: calc(13px * var(--text-scale)); }
   details.changes .del { color: var(--bad); white-space: pre-wrap; }
   details.changes .add { color: var(--ok); white-space: pre-wrap; }
+  details.changes mark { color: inherit; border-radius: 3px; padding: 0 2px; }
+  details.changes .del mark { background: var(--bad-bg); }
+  details.changes .add mark { background: var(--ok-bg); }
   .broadcast pre { white-space: pre-wrap; background: var(--bg); padding: 10px; border-radius: 8px; }
   .broadcast .agents { display: grid; gap: 4px; margin: 8px 0; font-size: calc(14px * var(--text-scale)); }
   .markdown a, .card-text a { color: var(--accent); }

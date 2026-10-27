@@ -7,6 +7,7 @@ import { SqliteStorage } from '../../src/adapters/sqlite.ts';
 import { describeAnswer } from '../../src/client.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
 import { terminalOutcome } from '../../src/integrations/claude/ask-hook.ts';
+import { claudeSessionName } from '../../src/integrations/claude/session-name.ts';
 import { trimScreen } from '../../src/integrations/herdr/blocked.ts';
 
 const card = (over: Partial<Card> = {}): Card => ({
@@ -86,5 +87,31 @@ describe('card tools', () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     const ctx = { inbox: {} as never, secrets: {} as never, agent: 's1', origin: undefined, arrival: 'as a test' };
     await assert.rejects(runTool(ctx, 'card_guidance', { text: 'x' }), /card_guidance does not take text\. It takes propose/);
+  });
+});
+
+describe('the Claude Code session name', () => {
+  const transcript = (lines: unknown[]) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-cc-'));
+    fs.mkdirSync(path.join(root, '-Users-me-Source-app'));
+    fs.writeFileSync(path.join(root, '-Users-me-Source-app', 'sid-1.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    return root;
+  };
+
+  it('is the latest title Claude Code generated for the session', () => {
+    const root = transcript([{ type: 'user', message: { content: 'hi' } }, { type: 'ai-title', aiTitle: 'Fix login' }, { type: 'ai-title', aiTitle: 'Fix login redirect loop' }]);
+    assert.equal(claudeSessionName('sid-1', root), 'Fix login redirect loop');
+  });
+
+  it('is the name the person gave it, ahead of any generated title', () => {
+    const root = transcript([{ type: 'custom-title', customTitle: 'release prep' }, { type: 'ai-title', aiTitle: 'Bump versions' }]);
+    assert.equal(claudeSessionName('sid-1', root), 'release prep');
+  });
+
+  it('is unknown when the session has no transcript or no title yet', () => {
+    const root = transcript([{ type: 'user', message: { content: 'hi' } }]);
+    assert.equal(claudeSessionName('sid-1', root), undefined);
+    assert.equal(claudeSessionName('sid-2', root), undefined);
+    assert.equal(claudeSessionName('../sid-1', root), undefined);
   });
 });
