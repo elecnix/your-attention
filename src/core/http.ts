@@ -114,9 +114,19 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (!/^[\w-]{8,64}$/.test(messageId)) return json({ error: `${MESSAGE_HEADER} must be 8 to 64 letters, digits, dashes or underscores` }, 400);
       const key = `${me.token}:${messageId}`;
       const seen = inbox.recallMessage(key);
+      if (seen?.status === 0) return json({ error: 'a message with this id is still being applied; send it again shortly' }, 409);
       if (seen) return new Response(seen.body, { status: seen.status, headers: { 'content-type': 'application/json', [`${MESSAGE_HEADER}-replayed`]: '1' } });
-      const res = await routeAuthed(req, url, me);
+      // Reserve the id before the await, so the same message arriving over another link at once waits.
+      inbox.rememberMessage(key, 0, '');
+      let res: Response;
+      try {
+        res = await routeAuthed(req, url, me);
+      } catch (e) {
+        inbox.forgetMessage(key);
+        throw e;
+      }
       if (res.status < 500 && (res.headers.get('content-type') ?? '').startsWith('application/json')) inbox.rememberMessage(key, res.status, await res.clone().text());
+      else inbox.forgetMessage(key);
       return res;
     }
     return routeAuthed(req, url, me);

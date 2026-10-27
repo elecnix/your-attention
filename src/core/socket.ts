@@ -29,8 +29,9 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
   if (me) start(me);
   return {
     async message(text) {
-      let msg: { type?: string; token?: string; card?: string };
+      let msg: { type?: string; token?: string; card?: string } | null;
       try { msg = JSON.parse(text) as typeof msg; } catch { return ws.close(1003, 'frames must be JSON'); }
+      if (!msg || typeof msg !== 'object') return ws.close(1003, 'frames must be JSON objects');
       if (!me) {
         const token = msg.type === 'auth' ? await inbox.authenticate(msg.token) : undefined;
         if (!token) return ws.close(4401, 'send {type: "auth", token} first');

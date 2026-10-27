@@ -7,7 +7,6 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { advertise, type Advertisement } from '../adapters/mdns.ts';
 
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'host', 'content-length']);
-const isLoopback = (addr: string | undefined): boolean => !!addr && /^(127\.|::1$|::ffff:127\.)/.test(addr);
 
 function forwardHeaders(h: http.IncomingHttpHeaders): Record<string, string> {
   const out: Record<string, string> = {};
@@ -45,11 +44,11 @@ export interface Running {
   close(): Promise<void>;
 }
 
-/** A bridge: a local proxy to a remote inbox. Callers on this machine may omit the token,
- * and the bridge adds its own. Callers from the LAN bring their own token. */
-export async function bridge(opts: { upstream: string; token: string; port: number; host?: string; mdns?: boolean }): Promise<Running> {
+/** A bridge: a proxy that offers a remote inbox on this machine, or on its LAN with --mdns.
+ * It forwards each caller's own token, so it grants nothing by itself. */
+export async function bridge(opts: { upstream: string; port: number; host?: string; mdns?: boolean }): Promise<Running> {
   const upstream = opts.upstream.replace(/\/$/, '');
-  const auth = (req: http.IncomingMessage): string | undefined => req.headers.authorization ?? (isLoopback(req.socket.remoteAddress) ? `Bearer ${opts.token}` : undefined);
+  const auth = (req: http.IncomingMessage): string | undefined => req.headers.authorization;
   const server = http.createServer(async (req, res) => {
     try {
       const headers = forwardHeaders(req.headers);
@@ -69,8 +68,8 @@ export async function bridge(opts: { upstream: string; token: string; port: numb
     const up = new WebSocket(`${upstream.replace(/^http/, 'ws')}${req.url ?? '/'}`, { headers: a ? { authorization: a } : {} });
     up.on('error', () => socket.destroy());
     up.on('open', () => wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.on('message', (d) => up.send(String(d)));
-      up.on('message', (d) => ws.send(String(d)));
+      ws.on('message', (d) => { if (up.readyState === WebSocket.OPEN) up.send(String(d)); });
+      up.on('message', (d) => { if (ws.readyState === WebSocket.OPEN) ws.send(String(d)); });
       ws.on('close', () => up.close());
       up.on('close', () => ws.close());
     }));
@@ -99,19 +98,23 @@ export function offerOverSsh(opts: { host: string; localPort: number; remotePort
   const log = opts.log ?? ((...a: unknown[]) => console.error('[offer]', ...a));
   let stopped = false;
   let child: ReturnType<typeof spawn> | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
   const start = (): void => {
+    if (stopped) return;
     // A shared master connection would let ssh exit at once, so the tunnel gets a connection of its own.
     child = spawn('ssh', ['-N', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
       '-R', `127.0.0.1:${opts.remotePort}:127.0.0.1:${opts.localPort}`, opts.host], { stdio: ['ignore', 'ignore', 'inherit'] });
     log(`offering the inbox on ${opts.host} at http://127.0.0.1:${opts.remotePort}`);
-    child.on('exit', (code) => {
+    // A missing ssh binary is reported here, and the tunnel tries again like after any other exit.
+    child.on('error', (e) => log(`ssh did not start: ${e.message}`));
+    child.on('close', (code) => {
       if (stopped) return;
       log(`the tunnel closed (exit ${code}); trying again in 5 seconds`);
-      setTimeout(start, 5000);
+      retry = setTimeout(start, 5000);
     });
   };
   start();
-  return { stop() { stopped = true; child?.kill(); } };
+  return { stop() { stopped = true; clearTimeout(retry); child?.kill(); } };
 }
 
 // ---- relay ----
@@ -132,17 +135,25 @@ type Frame =
 
 export async function relayServer(opts: { port: number; host?: string; key: string }): Promise<Running> {
   const inboxes = new Map<string, WebSocket>();
-  const waiting = new Map<string, { res: http.ServerResponse }>();
+  const waiting = new Map<string, { res: http.ServerResponse; inbox: string }>();
+  const sendTo = (ws: WebSocket, frame: Frame): boolean => {
+    if (ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(frame));
+    return true;
+  };
   let next = 0;
   const server = http.createServer(async (req, res) => {
     const m = /^\/i\/([\w-]+)(\/.*)?$/.exec(req.url ?? '');
     const ws = m ? inboxes.get(m[1] ?? '') : undefined;
     if (!m || !ws) return void res.writeHead(404, { 'content-type': 'application/json' }).end('{"error":"no inbox with this id is connected to the relay"}');
     const id = String(++next);
-    waiting.set(id, { res });
-    res.on('close', () => { if (waiting.delete(id)) ws.send(JSON.stringify({ t: 'cancel', id })); });
+    waiting.set(id, { res, inbox: m[1] ?? '' });
+    res.on('close', () => { if (waiting.delete(id)) sendTo(ws, { t: 'cancel', id }); });
     const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await readBody(req);
-    ws.send(JSON.stringify({ t: 'req', id, method: req.method ?? 'GET', path: m[2] || '/', headers: forwardHeaders(req.headers), body: body?.toString('base64') } satisfies Frame));
+    if (!sendTo(ws, { t: 'req', id, method: req.method ?? 'GET', path: m[2] || '/', headers: forwardHeaders(req.headers), body: body?.toString('base64') })) {
+      waiting.delete(id);
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' }).end('{"error":"the inbox left the relay"}');
+    }
   });
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
@@ -163,7 +174,17 @@ export async function relayServer(opts: { port: number; host?: string; key: stri
         else if (f.t === 'data') w.res.write(Buffer.from(f.chunk, 'base64'));
         else if (f.t === 'end') { waiting.delete(f.id); w.res.end(); }
       });
-      ws.on('close', () => { if (inboxes.get(inbox) === ws) inboxes.delete(inbox); });
+      ws.on('close', () => {
+        if (inboxes.get(inbox) !== ws) return;
+        inboxes.delete(inbox);
+        // Requests in flight to this inbox end now, instead of waiting for nothing.
+        for (const [id, w] of waiting) {
+          if (w.inbox !== inbox) continue;
+          waiting.delete(id);
+          if (!w.res.headersSent) w.res.writeHead(502, { 'content-type': 'application/json' }).end('{"error":"the inbox left the relay"}');
+          else w.res.end();
+        }
+      });
     });
   });
   await new Promise<void>((r) => server.listen(opts.port, opts.host ?? '0.0.0.0', r));
@@ -183,8 +204,10 @@ export function relayClient(opts: { relay: string; key: string; inboxId: string;
   const log = opts.log ?? ((...a: unknown[]) => console.error('[relay]', ...a));
   let stopped = false;
   let ws: WebSocket | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
   const open = new Map<string, AbortController>();
   const connect = (): void => {
+    if (stopped) return;
     ws = new WebSocket(`${opts.relay.replace(/^http/, 'ws').replace(/\/$/, '')}/connect?inbox=${encodeURIComponent(opts.inboxId)}`, { headers: { 'x-relay-key': opts.key } });
     const sock = ws;
     sock.on('open', () => log(`offered at ${opts.relay.replace(/\/$/, '')}/i/${opts.inboxId}`));
@@ -218,9 +241,9 @@ export function relayClient(opts: { relay: string; key: string; inboxId: string;
     sock.on('close', () => {
       for (const c of open.values()) c.abort();
       open.clear();
-      if (!stopped) setTimeout(connect, 2000);
+      if (!stopped) retry = setTimeout(connect, 2000);
     });
   };
   connect();
-  return { stop() { stopped = true; ws?.close(); } };
+  return { stop() { stopped = true; clearTimeout(retry); ws?.close(); } };
 }

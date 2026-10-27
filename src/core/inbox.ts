@@ -327,7 +327,8 @@ export class Inbox {
     const hooks = (reg.hooks ?? []).map(String);
     if (!hooks.length || !hooks.every(isHook)) throw new InboxError(400, `hooks must name some of ${Object.keys(HOOKS).join(', ')}`);
     const policy = reg.policy === 'fail-closed' ? 'fail-closed' : 'fail-open';
-    const timeoutMs = Math.min(Math.max(Number(reg.timeoutMs ?? HOOKS['card.created'].defaultTimeoutMs), 1000), 600_000);
+    const asked = Number(reg.timeoutMs);
+    const timeoutMs = Math.min(Math.max(Number.isFinite(asked) && asked > 0 ? asked : HOOKS['card.created'].defaultTimeoutMs, 1000), 600_000);
     return { name, hooks: hooks as HookName[], policy, timeoutMs };
   }
 
@@ -415,7 +416,7 @@ export class Inbox {
     for (const w of this.webhooks().filter((x) => x.hook === 'answer.saved')) {
       const p = deliverWebhook(w, event);
       this.deliveries.add(p);
-      void p.finally(() => this.deliveries.delete(p));
+      void p.then(() => this.deliveries.delete(p), () => this.deliveries.delete(p));
     }
   }
 
@@ -762,6 +763,10 @@ export class Inbox {
 
   rememberMessage(key: string, status: number, body: string): void {
     this.store.put('messages', key, { key, status, body, at: this.now() });
+  }
+
+  forgetMessage(key: string): void {
+    this.store.delete('messages', key);
   }
 
   // ---- connections ----

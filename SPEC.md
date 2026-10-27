@@ -16,13 +16,13 @@ Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet i
 
 ## One message over several links
 
-A client may use several links to one inbox, such as a direct link and a relay. It checks that each link reports the same `id`.
+A client may use several links to one inbox, such as a direct link and a relay. It checks that each link reports the same `id` as the first link, or as the id that pairing saved, and skips any other.
 
 A write may include an `x-message-id` header of 8 to 64 characters from `[A-Za-z0-9_-]`. The inbox applies the first request with that id from that client, and answers every later one with the stored result and `x-message-id-replayed: 1`. It forgets an id after 24 hours. The client in `src/client.ts` sends one id per write and keeps it across retries, and it counts an answer once when two links deliver it.
 
 ## Links
 
-- `your-attention bridge --upstream <url>` runs a proxy on another machine. A caller on that machine may omit its token, and the bridge adds its own. A caller from the LAN brings its own token. With `--mdns`, the bridge advertises the upstream inbox id.
+- `your-attention bridge --upstream <url>` runs a proxy on another machine. It forwards each caller's own token and grants nothing by itself. With `--mdns`, the bridge advertises the upstream inbox id.
 - `your-attention offer ssh <host>` opens a reverse SSH tunnel, so agents on that host connect to `http://127.0.0.1:4815`.
 - `your-attention relay` runs a relay on a public machine. `your-attention serve --relay <url>` dials out to it over a WebSocket, so the inbox is at `<relay>/i/<inbox id>/` with no open port. The relay key in `YOUR_ATTENTION_RELAY_KEY` only registers inboxes. Every request through the relay still needs the inbox's own token.
 

@@ -142,3 +142,10 @@ describe('the answer.saved hook', () => {
     assert.match(await sign('s3cret', 'x'), /^sha256=[0-9a-f]{64}$/);
   });
 });
+
+describe('registration from review', () => {
+  it('replaces a timeout that is not a number with the default', () => {
+    const { inbox, ext } = setup();
+    assert.equal(inbox.checkExtension(ext, { name: 'x', hooks: ['card.created'], timeoutMs: 'abc' as unknown as number }).timeoutMs, 30_000);
+  });
+});

@@ -142,3 +142,15 @@ describe('http routes for the card model', () => {
     assert.equal(((await (await call('PUT', '/v1/settings', { token: owner, body: { allowHtml: true } })).json()) as { allowHtml: boolean }).allowHtml, true);
   });
 });
+
+describe('message ids from review', () => {
+  it('applies one of several simultaneous copies, and answers the others with the result or a retry', async () => {
+    const { call, agent, inbox } = await setup();
+    const send = () => call('POST', '/v1/cards', { token: agent, body: { agent: 's1', title: 'Same message at once' }, headers: { 'x-message-id': 'simultaneous-1' } });
+    const all = await Promise.all([send(), send(), send(), send()]);
+    for (const r of all) assert.ok([201, 409].includes(r.status), String(r.status));
+    assert.equal(inbox.listCards({ token: 'x', role: 'owner' }).filter((c) => c.card.title === 'Same message at once').length, 1);
+    const again = await send();
+    assert.equal(again.headers.get('x-message-id-replayed'), '1');
+  });
+});

@@ -38,8 +38,13 @@ ${exec.map((a) => `    <string>${esc(a)}</string>`).join('\n')}
 `,
     };
   }
+  if (platform !== 'linux') throw new Error(`your-attention writes services for macOS (launchd) and Linux (systemd), not for ${platform}`);
   const file = path.join(home, '.config', 'systemd', 'user', `your-attention-${name}.service`);
-  const quote = (s: string) => (/[\s"\\]/.test(s) ? `"${s.replace(/(["\\])/g, '\\$1')}"` : s);
+  // systemd expands %-specifiers and $VARIABLES in ExecStart, even inside quotes, so both are doubled.
+  const quote = (s: string) => {
+    const lit = s.replace(/%/g, '%%').replace(/\$/g, '$$$$');
+    return /[\s"\\]/.test(lit) ? `"${lit.replace(/(["\\])/g, '\\$1')}"` : lit;
+  };
   return {
     path: file,
     start: `systemctl --user daemon-reload && systemctl --user enable --now your-attention-${name}`,

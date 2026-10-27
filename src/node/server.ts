@@ -140,7 +140,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
         alive = false;
         ws.ping();
       }, opts.heartbeatMs ?? 15_000);
-      ws.on('message', (d) => void conn.message(String(d)));
+      ws.on('message', (d) => { conn.message(String(d)).catch(() => ws.close(1011, 'the frame could not be handled')); });
       ws.on('close', () => { clearInterval(beat); conn.close(); });
     });
   });

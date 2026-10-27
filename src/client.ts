@@ -12,6 +12,8 @@ export interface ClientConfig {
   token: string;
   /** More links to the same inbox: a relay, a bridge, or an SSH tunnel. The client switches when one fails. */
   urls?: string[];
+  /** The inbox id from GET /v1/info. Pairing saves it. Without it, the client learns it from the first link only. */
+  id?: string;
 }
 
 /** The inbox and token for an extension: YOUR_ATTENTION_URL with YOUR_ATTENTION_TOKEN, or the local extension token. */
@@ -58,14 +60,20 @@ export class Client {
     this.urls = [config.url, ...(config.urls ?? [])].map((u) => u.replace(/\/$/, ''));
     this.url = this.urls[0] ?? '';
     this.token = config.token;
+    this.inboxId = config.id;
   }
 
-  /** Check that a link reaches the same inbox as the others. A link to another inbox is skipped. */
+  /** Check that a link leads to the same inbox as the first link. A link to another inbox is skipped,
+   * and so is every other link while the client does not know which inbox the first one leads to. */
   private async sameInbox(url: string): Promise<boolean> {
-    const info = (await (await fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(5000) })).json()) as { id?: string };
-    if (!info.id) return true;
-    this.inboxId ??= info.id;
-    return info.id === this.inboxId;
+    const idOf = async (u: string): Promise<string | undefined> =>
+      ((await (await fetch(`${u}/v1/info`, { signal: AbortSignal.timeout(5000) })).json()) as { id?: string }).id;
+    if (!this.inboxId) {
+      try { this.inboxId = await idOf(this.urls[0] ?? url); } catch { /* the first link is down */ }
+    }
+    if (url === this.urls[0]) return true;
+    if (!this.inboxId) return false;
+    return (await idOf(url)) === this.inboxId;
   }
 
   private async call<T>(method: string, route: string, body?: unknown): Promise<T> {
@@ -176,8 +184,9 @@ export class Client {
       // The global WebSocket cannot send headers, so the token goes in the first frame.
       ws.addEventListener('open', () => { opened = true; ws.send(JSON.stringify({ type: 'auth', token: this.token })); });
       ws.addEventListener('message', (m) => {
-        const ev = JSON.parse(String(m.data)) as { type: string };
-        if (ev.type !== 'pong' && ev.type !== 'error') void deliver(ev as AgentEvent);
+        let ev: { type?: string } | null;
+        try { ev = JSON.parse(String(m.data)) as { type?: string } | null; } catch { return ws.close(); }
+        if (ev && typeof ev === 'object' && ev.type !== 'pong' && ev.type !== 'error') deliver(ev as AgentEvent).catch(() => ws.close());
       });
       ws.addEventListener('close', () => { signal.removeEventListener('abort', stop); resolve(opened); });
     });

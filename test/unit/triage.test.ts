@@ -95,3 +95,11 @@ describe('triage prompts by card kind', () => {
     assert.match(html, /Ship it \(recommended\)/);
   });
 });
+
+describe('service files from review', () => {
+  it('doubles % and $ for systemd, and refuses a platform it cannot serve', () => {
+    const unit = serviceFile('triage', ['triage', '--judge-cmd', 'echo %h $HOME'], 'linux', '/opt/ya.js');
+    assert.match(unit.content, /"echo %%h \$\$HOME"/);
+    assert.throws(() => serviceFile('serve', ['serve'], 'win32'), /not for win32/);
+  });
+});

@@ -95,7 +95,8 @@ switch (command) {
       const s = (await (await fetch(`${url}/v1/pair/${req.id}`)).json()) as { status: string; token?: string };
       if (s.status === 'denied') fail('The pairing was denied.');
       if (s.token) {
-        writePrivate(path.join(homeDir(), 'client.json'), JSON.stringify({ url, token: s.token }));
+        const info = (await (await fetch(`${url}/v1/info`)).json()) as { id?: string };
+        writePrivate(path.join(homeDir(), 'client.json'), JSON.stringify({ url, token: s.token, id: info.id }));
         console.log(`Paired. The token is in ${path.join(homeDir(), 'client.json')}.`);
         break;
       }
@@ -140,12 +141,14 @@ switch (command) {
     break;
   }
   case 'service': {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, strict: false, options: { write: { type: 'boolean', default: false } } });
-    const [name, ...args] = positionals;
+    // The options after the name go to the service as they were typed, without --write.
+    const [name, ...given] = rest;
+    const write = given.includes('--write');
+    const args = given.filter((a) => a !== '--write');
     if (name !== 'serve' && name !== 'triage') fail('Usage: your-attention service serve|triage [--write] [options for the command]');
     const { serviceFile } = await import('./node/service.ts');
     const unit = serviceFile(name, [name, ...args]);
-    if (!values.write) { console.log(`# ${unit.path}\n${unit.content}\n# then: ${unit.start}`); break; }
+    if (!write) { console.log(`# ${unit.path}\n${unit.content}\n# then: ${unit.start}`); break; }
     fs.mkdirSync(path.dirname(unit.path), { recursive: true });
     fs.writeFileSync(unit.path, unit.content);
     console.log(`Wrote ${unit.path}. Start it with: ${unit.start}`);
@@ -153,9 +156,8 @@ switch (command) {
   }
   case 'bridge': {
     const { values } = parseArgs({ args: rest, options: { upstream: { type: 'string' }, port: { type: 'string', default: '4815' }, host: { type: 'string', default: '127.0.0.1' }, mdns: { type: 'boolean', default: false } } });
-    const config = loadConfig() ?? fail('Pair this machine first: `your-attention pair <url>`.');
-    const upstream = values.upstream ?? config.url;
-    const b = await (await import('./node/links.ts')).bridge({ upstream, token: config.token, port: Number(values.port), host: values.host, mdns: values.mdns });
+    const upstream = values.upstream ?? loadConfig()?.url ?? fail('Give the inbox with --upstream <url>, or pair this machine first.');
+    const b = await (await import('./node/links.ts')).bridge({ upstream, port: Number(values.port), host: values.host, mdns: values.mdns });
     console.error(`[bridge] ${b.url} leads to ${upstream}`);
     break;
   }

@@ -73,15 +73,22 @@ describe('messages over several links', () => {
     assert.equal(card.card.version, 1);
   });
 
-  it('moves to the next link when one is down', async () => {
-    const client = new Client({ url: 'http://127.0.0.1:9', urls: [h.server.url], token: h.agentToken });
+  it('moves to the next link when one is down, only to the same inbox', async () => {
+    const id = ((await (await fetch(`${h.server.url}/v1/info`)).json()) as { id: string }).id;
+    const blind = new Client({ url: 'http://127.0.0.1:9', urls: [h.server.url], token: h.agentToken });
+    await assert.rejects(blind.post({ agent: 's1', title: 'Where does this go?' }), /no link answered/, 'without the inbox id, no alternate is trusted');
+    const other = await start();
+    const wrong = new Client({ url: 'http://127.0.0.1:9', urls: [other.server.url], token: h.agentToken, id });
+    await assert.rejects(wrong.post({ agent: 's1', title: 'To another inbox?' }), /no link answered/);
+    await other.stop();
+    const client = new Client({ url: 'http://127.0.0.1:9', urls: [h.server.url], token: h.agentToken, id });
     const card = await client.post({ agent: 's1', title: 'Through the second link' });
     assert.equal(card.title, 'Through the second link');
     assert.equal(client.url, h.server.url);
   });
 
   it('counts an answer once when two links deliver it', async () => {
-    const b = await bridge({ upstream: h.server.url, token: h.agentToken, port: 0 });
+    const b = await bridge({ upstream: h.server.url, port: 0 });
     const client = new Client({ url: b.url, urls: [h.server.url], token: h.agentToken });
     await client.post({ id: 'twice', agent: 'two-links', title: 'Seen once?' });
     const got: AgentEvent[] = [];
@@ -103,12 +110,12 @@ describe('messages over several links', () => {
 });
 
 describe('a bridge', () => {
-  it('adds its own token for callers on this machine, and passes a caller token through', async () => {
-    const b = await bridge({ upstream: h.server.url, token: h.agentToken, port: 0 });
-    const res = await fetch(`${b.url}/v1/cards`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agent: 'container-1', title: 'From a container' }) });
+  it('forwards the token of each caller and grants nothing by itself', async () => {
+    const b = await bridge({ upstream: h.server.url, port: 0 });
+    const bare = await fetch(`${b.url}/v1/cards`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agent: 'container-1', title: 'From a container' }) });
+    assert.equal(bare.status, 401);
+    const res = await fetch(`${b.url}/v1/cards`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${h.agentToken}` }, body: JSON.stringify({ agent: 'container-1', title: 'From a container' }) });
     assert.equal(res.status, 201);
-    const asOwner = await fetch(`${b.url}/v1/state`, { headers: { authorization: `Bearer ${h.server.ownerToken}` } });
-    assert.equal(asOwner.status, 200, 'the caller token wins over the bridge token');
     const info = (await (await fetch(`${b.url}/v1/info`)).json()) as { id: string };
     const direct = (await (await fetch(`${h.server.url}/v1/info`)).json()) as { id: string };
     assert.equal(info.id, direct.id, 'one inbox, one identity, on every link');
