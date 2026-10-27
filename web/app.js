@@ -17,6 +17,8 @@ export function App() {
   const knownRef = React.useRef(null);
   const seenRef = React.useRef(null);
   const reportedFocus = React.useRef(undefined);
+  // Escape clears the card pane; nothing takes the pane again until the person picks a card.
+  const [cleared, setCleared] = React.useState(false);
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
 
@@ -42,9 +44,18 @@ export function App() {
   refreshRef.current = refresh;
 
   React.useEffect(() => {
-    const back = () => { const id = cardInAddress(); pinnedRef.current = id; setFocus(id); };
+    const back = () => { const id = cardInAddress(); setCleared(!id && !!(history.state && history.state.cleared)); pinnedRef.current = id; setFocus(id); };
+    // Escape in a field belongs to the field, so a half-typed answer stays on screen.
+    const escape = (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]'))) return;
+      if (!(history.state && history.state.cleared)) history.pushState({ cleared: true }, '', location.pathname);
+      pinnedRef.current = null;
+      setFocus(null);
+      setCleared(true);
+    };
     window.addEventListener('popstate', back);
-    return () => window.removeEventListener('popstate', back);
+    window.addEventListener('keydown', escape);
+    return () => { window.removeEventListener('popstate', back); window.removeEventListener('keydown', escape); };
   }, []);
 
   React.useEffect(() => {
@@ -110,7 +121,7 @@ export function App() {
   const outbox = visible.filter((c) => ['answered', 'delivered'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
   const sent = visible.filter((c) => ['read', 'closed'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
   const pinned = pending.find((c) => c.id === pinnedRef.current);
-  const current = byId[focus] || pinned || replied[0] || pending[0] || null;
+  const current = cleared ? null : byId[focus] || pinned || replied[0] || pending[0] || null;
   pinnedRef.current = current ? current.id : null;
   focusRef.current = current ? current.id : null;
   if (current && store.get('focus:current') !== current.id) store.set('focus:current', current.id);
@@ -126,7 +137,7 @@ export function App() {
   }
 
   // Each card you open is a step in the browser's history, so back and forward move between them.
-  const go = (id) => { if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id)); setFocus(id); };
+  const go = (id) => { if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id)); setCleared(false); setFocus(id); };
   const next = () => { pinnedRef.current = null; go((pending.find((c) => c.id !== (current && current.id)) || {}).id || null); };
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
 
@@ -170,7 +181,7 @@ export function App() {
 
   let main;
   if (!current) {
-    main = h('div', { className: 'focus-card done' }, 'Nothing needs you. New cards appear here on their own.');
+    main = h('div', { className: 'focus-card done' }, cleared && pending.length ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.');
   } else {
     const a = answers[current.id];
     const s = st(current);

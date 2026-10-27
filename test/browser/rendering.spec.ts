@@ -205,3 +205,26 @@ test('a line rewritten from scratch shows as removed and added, with no words ma
   await expect(page.locator('details.changes .add')).toHaveText('+ Wait until QA signs off.');
   await expect(page.locator('details.changes mark')).toHaveCount(0);
 });
+
+test('Escape clears the card pane until you pick a card, and back brings the card again', async ({ page }) => {
+  await inbox.agent.post({ id: 'esc-a', agent: 's-esc', title: 'Escape me', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Escape me' }).click();
+  const title = page.locator('.focus-card .card-title');
+  await expect(title).toHaveText('Escape me');
+  await page.locator('.focus-card textarea').first().focus();
+  await page.keyboard.press('Escape');
+  await expect(title).toHaveText('Escape me');
+  await page.locator('body').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press('Escape');
+  await expect(title).toHaveCount(0);
+  await expect(page.locator('.focus-card.done')).toContainText('No card selected');
+  await expect(page.locator('.q.focus')).toHaveCount(0);
+  await inbox.agent.post({ id: 'esc-b', agent: 's-esc', title: 'Arrives while cleared', priority: 'now' });
+  await expect(page.locator('.q', { hasText: 'Arrives while cleared' })).toBeVisible();
+  await expect(title).toHaveCount(0);
+  await page.goBack();
+  await expect(title).toHaveText('Escape me');
+  await page.locator('.q', { hasText: 'Arrives while cleared' }).click();
+  await expect(title).toHaveText('Arrives while cleared');
+});
