@@ -114,6 +114,8 @@ export function commandJudge(command: string, timeoutMs = 120_000): Judge {
     child.stdout.on('data', (d) => { out += String(d); });
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve(out) : reject(new Error(`${command} exited with ${code}`)); });
+    // A command that exits without reading its input closes the pipe: its exit code is the answer, not EPIPE.
+    child.stdin.on('error', () => {});
     child.stdin.end(prompt);
   });
 }
