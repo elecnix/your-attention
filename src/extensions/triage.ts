@@ -23,7 +23,40 @@ export interface TriageConfig {
   judge: Judge;
   name?: string;
   timeoutMs?: number;
+  /** Judge calls at once. A burst of cards waits its turn instead of hitting the judge's rate limit. */
+  concurrency?: number;
   log?: (...a: unknown[]) => void;
+}
+
+/** Run at most `limit` tasks at once, in arrival order. */
+export function limiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return async (task) => {
+    if (active >= limit) await new Promise<void>((r) => queue.push(r));
+    active++;
+    try {
+      return await task();
+    } finally {
+      active--;
+      queue.shift()?.();
+    }
+  };
+}
+
+/** Call the judge, and retry with backoff when it is busy, until `deadline`. */
+export async function judgeWithRetry(judge: Judge, prompt: string, deadline: number, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<string> {
+  let wait = 1000;
+  for (;;) {
+    try {
+      return await judge(prompt);
+    } catch (e) {
+      const busy = /\b(429|50[23])\b/.test((e as Error).message);
+      if (!busy || Date.now() + wait > deadline - 1000) throw e;
+      await sleep(wait);
+      wait = Math.min(wait * 2, 15_000);
+    }
+  }
 }
 
 /** The question the judge answers for one card. */
@@ -139,6 +172,7 @@ export async function runTriage(cfg: TriageConfig, signal: AbortSignal): Promise
   const log = cfg.log ?? ((...a: unknown[]) => console.error(new Date().toISOString(), '[triage]', ...a));
   const base = cfg.url.replace(/\/$/, '');
   const auth = { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' };
+  const run = limiter(cfg.concurrency ?? 3);
   const call = async <T>(route: string, body?: unknown): Promise<T> => {
     const res = await fetch(`${base}${route}`, { method: body === undefined ? 'GET' : 'POST', headers: auth, body: body === undefined ? undefined : JSON.stringify(body) });
     return (await res.json()) as T;
@@ -151,7 +185,7 @@ export async function runTriage(cfg: TriageConfig, signal: AbortSignal): Promise
       const hits = words ? await call<{ card: Card; answer?: { comment: string; values: Record<string, unknown> } }[]>(`/v1/search?q=${encodeURIComponent(words)}`) : [];
       const earlier = hits.filter((h) => h.card.id !== ev.card.id && h.answer).slice(0, 3)
         .map((h) => ({ title: h.card.title, answer: [JSON.stringify(h.answer?.values), h.answer?.comment].filter(Boolean).join(' ') }));
-      ruling = parseRuling(await cfg.judge(triagePrompt(ev.card, guidance, earlier, ev.person)));
+      ruling = parseRuling(await run(() => judgeWithRetry(cfg.judge, triagePrompt(ev.card, guidance, earlier, ev.person), ev.deadline)));
     } catch (e) {
       ruling = { verdict: 'pass', reason: `Triage failed (${(e as Error).message}), so the card went through.` };
     }

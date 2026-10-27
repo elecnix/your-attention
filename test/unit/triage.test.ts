@@ -59,3 +59,29 @@ describe('services', () => {
     assert.match(linux.content, /ExecStart=.* \/opt\/ya\/bin\/your-attention\.js serve/);
   });
 });
+
+describe('triage under load', () => {
+  it('runs at most the limit of judge calls at once', async () => {
+    const { limiter } = await import('../../src/extensions/triage.ts');
+    const run = limiter(2);
+    let active = 0;
+    let peak = 0;
+    await Promise.all(Array.from({ length: 6 }, () => run(async () => {
+      active++; peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 10));
+      active--;
+    })));
+    assert.equal(peak, 2);
+  });
+
+  it('retries a busy judge with backoff, and gives up before the deadline', async () => {
+    const { judgeWithRetry } = await import('../../src/extensions/triage.ts');
+    let calls = 0;
+    const flaky = async () => { calls++; if (calls < 3) throw new Error('judge answered 429'); return '{"verdict":"pass"}'; };
+    const slept: number[] = [];
+    assert.match(await judgeWithRetry(flaky, 'p', Date.now() + 60_000, async (ms) => { slept.push(ms); }), /pass/);
+    assert.deepEqual(slept, [1000, 2000]);
+    await assert.rejects(judgeWithRetry(async () => { throw new Error('judge answered 429'); }, 'p', Date.now() + 1500, async () => {}), /429/);
+    await assert.rejects(judgeWithRetry(async () => { throw new Error('judge answered 400'); }, 'p', Date.now() + 60_000, async () => {}), /400/, 'only a busy judge is retried');
+  });
+});
