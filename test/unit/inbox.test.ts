@@ -286,3 +286,29 @@ describe('pages', () => {
     assert.equal(inbox.search('nothing-like-this').length, 0);
   });
 });
+
+describe('an answer delivered to a process that never read it', () => {
+  it('goes again to the next process of the same agent, and never twice to the same process', async () => {
+    const { inbox, agentA } = setup();
+    inbox.postCard(agentA, { id: 'r1', agent: 's1', title: 'q' });
+    const old: AgentEvent[] = [];
+    const closeOld = inbox.connect(agentA, 's1', (ev) => old.push(ev), 'proc-1');
+    await inbox.answer('r1', { values: { choice: 'o1' } });
+    assert.equal(old.filter((e) => e.type === 'answer').length, 1);
+    closeOld();
+    // The same process reconnects after a network drop: it already has the answer.
+    const again: AgentEvent[] = [];
+    const closeAgain = inbox.connect(agentA, 's1', (ev) => again.push(ev), 'proc-1');
+    assert.equal(again.filter((e) => e.type === 'answer').length, 0);
+    closeAgain();
+    // A restarted session is a new process: it gets the unread answer.
+    const fresh: AgentEvent[] = [];
+    inbox.connect(agentA, 's1', (ev) => fresh.push(ev), 'proc-2');
+    const ev = fresh.find((e) => e.type === 'answer');
+    assert.ok(ev && ev.type === 'answer' && ev.card.id === 'r1');
+    inbox.ack(agentA, 'r1');
+    const later: AgentEvent[] = [];
+    inbox.connect(agentA, 's1', (e) => later.push(e), 'proc-3');
+    assert.equal(later.filter((e) => e.type === 'answer').length, 0, 'a read answer is never sent again');
+  });
+});

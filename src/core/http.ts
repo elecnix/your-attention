@@ -156,7 +156,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       const events: AgentEvent[] = [];
       let wake: () => void = () => {};
       const woken = new Promise<void>((r) => { wake = r; });
-      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } });
+      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } }, url.searchParams.get('instance') ?? undefined);
       let timer: ReturnType<typeof setTimeout> | undefined;
       if (!events.length) await Promise.race([woken, new Promise<void>((r) => { timer = setTimeout(r, wait); })]);
       if (timer !== undefined) clearTimeout(timer);
@@ -171,7 +171,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'stream') {
       const agent = url.searchParams.get('agent');
       if (!agent) return json({ error: 'agent is required' }, 400);
-      return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev)), heartbeatMs);
+      return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined), heartbeatMs);
     }
     if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, 100), url.searchParams.get('answered') === '1'));
     if (method === 'GET' && a === 'dead-letters') return json(inbox.deadLetters());

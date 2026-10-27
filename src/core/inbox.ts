@@ -76,6 +76,7 @@ export class Inbox {
   private readonly blobs: BlobStore;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
+  private readonly instances = new WeakMap<AgentSend, string>();
   private readonly pages = new Set<PageSend>();
   /** What each open page reports about the person, by page id. */
   private readonly viewers = new Map<string, { visible: boolean; activeAt: number | null; focus: string | null }>();
@@ -863,15 +864,18 @@ export class Inbox {
     return this.store.get<Presence>('presence', agent)?.online ?? false;
   }
 
-  /** An agent opens its stream. Returns the function that closes it. */
-  connect(caller: Caller, agent: string, send: AgentSend): () => void {
+  /** An agent opens its stream. `instance` names the agent process, and stays the same across its reconnects.
+   * Returns the function that closes it. */
+  connect(caller: Caller, agent: string, send: AgentSend, instance?: string): () => void {
     const k = this.key(caller.token, agent);
     let set = this.agents.get(k);
     if (!set) this.agents.set(k, (set = new Set()));
     set.add(send);
+    if (instance) this.instances.set(send, instance);
     this.setPresence(agent, true);
     send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     this.flush(agent);
+    if (instance) this.resend(caller.token, agent, send, instance);
     return () => {
       const s = this.agents.get(k);
       if (!s?.delete(send)) return;
@@ -886,6 +890,19 @@ export class Inbox {
     this.emit({ type: 'presence', agent, online });
   }
 
+  /** Send a new agent process each answer an earlier process received but never read, such as one a session got before it restarted. */
+  private resend(token: string, agent: string, send: AgentSend, instance: string): void {
+    for (const answer of this.store.list<Answer>('answers')) {
+      if (!answer.deliveredAt || answer.readAt || answer.deliveredTo === instance) continue;
+      const card = this.store.get<Card>('cards', answer.card);
+      if (!card || card.agent !== agent || (card.token ?? '') !== token || card.deliver !== 'stream') continue;
+      if (cardState(card, answer) === 'closed') continue;
+      const next: Answer = { ...answer, deliveredTo: instance };
+      this.store.put('answers', answer.card, next);
+      send({ type: 'answer', id: randomId(6), card: publicCard(card), answer: next });
+    }
+  }
+
   /** Deliver each answer the agent has not received yet. */
   private flush(agent: string): void {
     for (const answer of this.store.list<Answer>('answers')) {
@@ -895,7 +912,8 @@ export class Inbox {
       if (cardState(card, answer) === 'closed') continue;
       const subs = this.agents.get(this.key(card.token ?? '', agent));
       if (!subs || subs.size === 0) continue;
-      const next = { ...answer, deliveredAt: this.now() };
+      const to = [...subs].map((f) => this.instances.get(f)).find(Boolean);
+      const next: Answer = { ...answer, deliveredAt: this.now(), ...(to ? { deliveredTo: to } : {}) };
       this.store.put('answers', answer.card, next);
       const ev: AgentEvent = { type: 'answer', id: randomId(6), card: publicCard(card), answer: next };
       for (const send of subs) send(ev);

@@ -142,7 +142,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       caller = { token: t.id, role: t.role };
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const conn = agentSocket(inbox, agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller);
+      const conn = agentSocket(inbox, agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, u.searchParams.get('instance') ?? undefined);
       // A connection that misses a heartbeat is gone, and presence follows within seconds.
       let alive = true;
       ws.on('pong', () => { alive = true; });

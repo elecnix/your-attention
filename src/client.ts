@@ -55,6 +55,8 @@ export class Client {
   private inboxId: string | undefined;
   /** Answers already handed to the agent, so one that arrives over two links counts once. */
   private readonly seen = new Set<string>();
+  /** This process, the same across reconnects, so the inbox sends a restarted agent the answers its earlier process never read. */
+  readonly instance = crypto.randomUUID();
 
   constructor(config: ClientConfig) {
     this.urls = [config.url, ...(config.urls ?? [])].map((u) => u.replace(/\/$/, ''));
@@ -154,7 +156,7 @@ export class Client {
   }
 
   private async overSse(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
-    const res = await fetch(`${url}/v1/stream?agent=${encodeURIComponent(agent)}`, {
+    const res = await fetch(`${url}/v1/stream?agent=${encodeURIComponent(agent)}&instance=${this.instance}`, {
       headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
       signal,
     });
@@ -181,7 +183,7 @@ export class Client {
   private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<boolean> {
     return new Promise((resolve) => {
       let opened = false;
-      const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}`);
+      const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}&instance=${this.instance}`);
       const stop = (): void => ws.close();
       signal.addEventListener('abort', stop, { once: true });
       // The global WebSocket cannot send headers, so the token goes in the first frame.
@@ -203,7 +205,7 @@ export class Client {
 
   private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
-      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
+      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&instance=${this.instance}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
       if (!res.ok) throw new Error(`poll: ${res.status}`);
       for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }

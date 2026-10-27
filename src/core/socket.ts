@@ -19,12 +19,12 @@ export interface AgentSocket {
   readonly caller: Caller | undefined;
 }
 
-export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller): AgentSocket {
+export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller, instance?: string): AgentSocket {
   let me = caller;
   let disconnect: (() => void) | undefined;
   const start = (c: Caller): void => {
     me = c;
-    disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)));
+    disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)), instance);
   };
   if (me) start(me);
   return {

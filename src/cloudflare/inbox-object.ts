@@ -11,6 +11,8 @@ import type { Env } from './worker.ts';
 /** What each agent socket keeps across hibernation. */
 interface SocketAttachment {
   agent: string;
+  /** The agent process, the same across its reconnects. */
+  instance?: string | undefined;
   token?: string;
   role?: Role;
   /** When the socket opened, the start of its heartbeat clock until its first ping. */
@@ -64,7 +66,7 @@ export class InboxObject {
   private attach(ws: WebSocket): AgentSocket {
     const a = ws.deserializeAttachment() as SocketAttachment;
     const caller = a.token && a.role ? { token: a.token, role: a.role } : undefined;
-    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller);
+    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance);
     this.sockets.set(ws, conn);
     return conn;
   }
@@ -97,7 +99,7 @@ export class InboxObject {
       const pair = new WebSocketPair();
       const server = pair[1];
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ agent, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
+      server.serializeAttachment({ agent, instance: url.searchParams.get('instance') ?? undefined, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
       this.attach(server);
       await this.schedule();
       return new Response(null, { status: 101, webSocket: pair[0] });
