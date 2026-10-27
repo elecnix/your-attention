@@ -1,0 +1,53 @@
+import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, SecretForm, cardSource } from '../components.js';
+import { h } from '../env.js';
+import { PNG, card, dataUrl, mount } from './render.js';
+
+export default { title: 'Cards' };
+
+const view = (c) => h(CardView, { draftKey: `story:${c.id}`, response: cardSource(c), onAction: () => {} });
+
+export const Choice = { render: () => mount(view(card({ options: [{ id: 'o1', label: 'SQLite', description: 'One file, FTS5 search' }, { id: 'o2', label: 'Postgres', description: 'A server to run' }] }))) };
+
+export const MultipleChoice = { render: () => mount(view(card({ title: 'Which checks run on every push?', multiple: true, options: [{ id: 'a', label: 'Unit tests' }, { id: 'b', label: 'Integration tests' }, { id: 'c', label: 'Browser tests' }] }))) };
+
+export const AskUserQuestion = {
+  render: () => mount(view(card({ title: 'Which port?', questions: [{ question: 'Which port?', options: [{ label: '4815', description: 'The default' }, { label: '8080' }] }, { question: 'Advertise over mDNS?', options: [{ label: 'Yes' }, { label: 'No' }] }] }))),
+};
+
+export const BlockedAgent = { render: () => mount(view(card({ kind: 'blocked', deliver: 'none', title: 'api-tests is waiting for you', screen: 'Bash command\n  npm run test:e2e\nDo you want to proceed?\n❯ 1. Yes\n  2. No' }))) };
+
+export const WithLinks = {
+  render: () => {
+    const target = card({ id: 'c2', title: 'Pick the database', text: 'SQLite or Postgres.' });
+    return mount(h(LinkedText, { text: 'This plan depends on [[c2]] and on [[missing]].', byId: { c2: target }, open: () => {} }));
+  },
+};
+
+export const Attached = {
+  render: () => mount(h(Attachments, { files: [
+    { url: PNG, name: 'a.png', type: 'image/png', alt: 'Layout A' },
+    { url: PNG, name: 'b.png', type: 'image/png', alt: 'Layout B' },
+    { url: dataUrl('text/markdown', '# Rollout plan\n\n1. Ship the **bridge**\n2. Then the relay\n\n| Step | Owner |\n|---|---|\n| bridge | agent |'), name: 'plan.md', type: 'text/markdown', size: 96 },
+    { url: dataUrl('text/csv', 'name,score\nbridge,3\nrelay,5'), name: 'scores.csv', type: 'text/csv', size: 28 },
+    { url: dataUrl('application/json', '{"ok":true,"cards":3}'), name: 'data.json', type: 'application/json', size: 21 },
+    { url: 'https://example.com/logs.zip', name: 'logs.zip', type: 'application/zip', size: 524288 },
+  ] })),
+};
+
+export const WhatChanged = {
+  render: () => mount(h(Changes, { card: card({ text: 'Use SQLite with FTS5 for storage.', version: 2, history: [{ version: 1, title: 'Store sessions in SQLite or Postgres?', text: 'Use SQLite for storage.', at: Date.now() - 60000 }] }) })),
+};
+
+export const Secret = { render: () => mount(h(SecretForm, { card: card({ kind: 'secret', title: 'Need the demo token', secret: { name: 'DEMO_TOKEN', publicKey: { kty: 'RSA' } } }), onSent: () => {}, onSkip: () => {} })) };
+
+export const HtmlAllowed = { render: () => mount(h(HtmlCard, { card: card({ html: '<p style="font:16px sans-serif">Pick one:</p><button onclick="yourAttention.answer({colour:\'blue\'})">Blue</button>' }), allowed: true, onAnswer: () => {} })) };
+
+export const HtmlBlocked = { render: () => mount(h(HtmlCard, { card: card({ html: '<p>hidden</p>' }), allowed: false, onAnswer: () => {} })) };
+
+export const ClosedByAgent = {
+  render: () => mount(h(ClosedCard, { closed: { kind: 'self-answered', outcome: 'Found it in the README.', at: Date.now() }, onNext: () => {}, animate: false }, view(card()))),
+};
+
+export const GuidanceBroadcast = {
+  render: () => mount(h(BroadcastForm, { card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: 'Attach a screenshot to every UI card.', agents: ['claude:3239ab8e', 'pi:01a17c01', 'herdr:w1:p2'] } }), onDone: () => {} })),
+};

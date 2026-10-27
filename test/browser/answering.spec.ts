@@ -1,0 +1,79 @@
+import { expect, test } from '@playwright/test';
+import { seal } from '../../web/sealed.js';
+import { SecretRequests } from '../../src/integrations/secrets.ts';
+import { startInbox, type TestInbox } from './inbox.ts';
+
+let inbox: TestInbox;
+test.beforeAll(async () => { inbox = await startInbox(); });
+test.afterAll(async () => { await inbox.close(); });
+
+test('the person picks an option, adds a comment, and the agent receives both at once', async ({ page }) => {
+  const heard = inbox.listen('s-answer');
+  await inbox.agent.post({ id: 'pick', agent: 's-answer', title: 'Which storage?', text: 'SQLite or Postgres.', recommendation: 'SQLite.', options: [{ id: 'o1', label: 'SQLite' }, { id: 'o2', label: 'Postgres' }], priority: 'now' });
+  await inbox.open(page);
+  await expect(page.locator('.card-title')).toHaveText('Which storage?');
+  await expect(page.locator('.pill.small.on')).toHaveText('Agent listening');
+  await page.getByText('SQLite', { exact: true }).click();
+  await page.locator('textarea').fill('One file is enough.');
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(() => heard.events.find((e) => e.type === 'answer')).toBeTruthy();
+  const ev = heard.events.find((e) => e.type === 'answer');
+  expect(ev?.type === 'answer' && ev.answer.values).toEqual({ choice: 'o1' });
+  expect(ev?.type === 'answer' && ev.answer.comment).toBe('One file is enough.');
+  await expect(page.locator('.queue')).toContainText('Outbox');
+});
+
+test('an empty answer is allowed', async ({ page }) => {
+  await inbox.agent.post({ id: 'empty', agent: 's-empty', title: 'Anything to add?' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Anything to add?' }).click();
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(async () => (await inbox.state()).answers['empty']?.comment).toBe('');
+});
+
+test('a new card joins the queue while the card on screen stays put', async ({ page }) => {
+  await inbox.agent.post({ id: 'first', agent: 's-live', title: 'The card I am reading', priority: 'soon' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'The card I am reading' }).click();
+  await inbox.agent.post({ id: 'urgent', agent: 's-live', title: 'An urgent card arrives', priority: 'now' });
+  await expect(page.locator('.q', { hasText: 'An urgent card arrives' })).toBeVisible();
+  await expect(page.locator('.q', { hasText: 'An urgent card arrives' }).locator('.new')).toHaveText('new');
+  await expect(page.locator('.card-title')).toHaveText('The card I am reading');
+});
+
+test('a card the agent closes while you read it collapses to its outcome', async ({ page }) => {
+  await inbox.agent.post({ id: 'closing', agent: 's-close', title: 'Still needed?', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Still needed?' }).click();
+  await inbox.agent.close('closing', 'self-answered', 'Found it in the README.');
+  await expect(page.locator('.closed-line')).toContainText('Found it in the README.');
+  await expect(page.locator('.closed-line .tag')).toHaveText('Answered by agent');
+});
+
+test('a secret is sealed in the browser, and only the asking session opens it', async ({ page }) => {
+  const secrets = new SecretRequests();
+  const id = await secrets.ask(inbox.agent, { agent: 's-secret', name: 'DEMO_TOKEN', title: 'Need the demo token', priority: 'now' });
+  const heard = inbox.listen('s-secret');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Need the demo token' }).click();
+  await page.locator('input[type=password]').fill('typed-in-the-browser');
+  await page.getByRole('button', { name: 'Send sealed' }).click();
+  await expect.poll(() => heard.events.find((e) => e.type === 'answer')).toBeTruthy();
+  const ev = heard.events.find((e) => e.type === 'answer');
+  if (ev?.type !== 'answer') throw new Error('no answer');
+  expect(JSON.stringify(ev.answer)).not.toContain('typed-in-the-browser');
+  expect(await secrets.receive(ev.card, ev.answer)).toMatch(/It is in .*DEMO_TOKEN/);
+  void id;
+  void seal;
+});
+
+test('an HTML card stays hidden until the owner allows it, then answers from its sandbox', async ({ page }) => {
+  await inbox.agent.post({ id: 'html', agent: 's-html', title: 'Pick a colour', html: "<button id=b onclick=\"yourAttention.answer({colour:'blue'},'from the frame')\">Blue</button>", priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Pick a colour' }).click();
+  await expect(page.locator('.note.warn')).toContainText('Allow HTML cards');
+  await page.getByLabel('Allow HTML cards').check();
+  const frame = page.frameLocator('iframe.html-card');
+  await frame.locator('#b').click();
+  await expect.poll(async () => (await inbox.state()).answers['html']?.values).toEqual({ colour: 'blue' });
+});

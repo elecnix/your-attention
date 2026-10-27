@@ -21,9 +21,14 @@ src/node/          the Node HTTP server and the home directory
 src/integrations/  Claude Code (MCP channel, AskUserQuestion hooks), pi, herdr
 src/client.ts      the client every integration uses
 src/cli.ts         the your-attention command
-web/               the built-in page, plain JavaScript on the OpenUI browser bundle
+web/               the built-in page: env.js, components.js and app.js, plain JavaScript modules on the OpenUI browser bundle
+web/stories/       Storybook stories for each component and for the whole page on a stand-in inbox
+src/cloudflare/    the Worker and the Durable Object, with their storage adapters
+src/extensions/    the triage service
 test/unit/         fast tests with in-memory storage
-test/integration/  a real server, the CLI, the channel over MCP stdio, the pi extension, and mDNS
+test/integration/  a real server, the CLI, the channel over MCP stdio, the pi extension, triage, links and mDNS
+test/cloudflare/   the Durable Object with stand-ins, and the hosted build on wrangler dev
+test/browser/      Playwright on the page, two people in two browser contexts, and every story
 ```
 
 ## Rules a reader cannot find in the code
@@ -41,6 +46,8 @@ test/integration/  a real server, the CLI, the channel over MCP stdio, the pi ex
 npm ci
 npm run typecheck        # tsgo and tsc-rs, and both must pass
 npm test                 # unit, then integration
+npm run test:cloudflare  # the Durable Object, and the hosted build on wrangler dev
+npm run storybook:build && npm run test:browser   # Playwright, after building the stories
 vale sync && vale *.md   # prose rules, the same ones CI runs
 ```
 
