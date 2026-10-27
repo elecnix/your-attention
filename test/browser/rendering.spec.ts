@@ -133,3 +133,38 @@ test('a queue width saved on a wider window shrinks to fit a narrower one', asyn
   await inbox.open(page);
   expect((await page.locator('.queue').boundingBox())!.width).toBeLessThanOrEqual(640);
 });
+
+test('a card triage sent back shows its content on request', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    const ext = { token: 'tx', role: 'extension' as const };
+    const calls: { id: string }[] = [];
+    own.server.inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'] }, (e) => calls.push(e as { id: string }));
+    await own.agent.post({ id: 'back', agent: 's-back', title: 'Thoughts?', text: 'The body triage judged.' });
+    own.server.inbox.hookVerdict(ext, calls[0]!.id, 'return', 'Say what you recommend.');
+    await own.open(page);
+    await page.locator('.q', { hasText: 'Thoughts?' }).click();
+    await expect(page.locator('.closed-line')).toContainText('Sent back by triage');
+    await page.getByRole('button', { name: 'Show card' }).click();
+    await expect(page.getByText('The body triage judged.')).toBeVisible();
+  } finally {
+    await own.close();
+  }
+});
+
+test('the browser back and forward buttons move between the cards you opened', async ({ page }) => {
+  await inbox.agent.post({ id: 'nav-a', agent: 's-nav', title: 'First card to read', priority: 'now' });
+  await inbox.agent.post({ id: 'nav-b', agent: 's-nav', title: 'Second card, linking back', text: 'See [[nav-a]].', priority: 'now' });
+  await inbox.open(page);
+  const title = page.locator('.focus-card .card-title');
+  await page.locator('.q', { hasText: 'First card to read' }).click();
+  await expect(title).toHaveText('First card to read');
+  await page.locator('.chain a', { hasText: 'Second card, linking back' }).click();
+  await expect(title).toHaveText('Second card, linking back');
+  await page.goBack();
+  await expect(title).toHaveText('First card to read');
+  await page.goForward();
+  await expect(title).toHaveText('Second card, linking back');
+  await page.reload();
+  await expect(title).toHaveText('Second card, linking back');
+});
