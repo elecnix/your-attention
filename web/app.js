@@ -51,7 +51,8 @@ export function App() {
     const escape = (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented || (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]'))) return;
       // The sign-in token stays in the address until the sign-in request has used it.
-      if (!(history.state && history.state.cleared)) history.pushState({ cleared: true }, '', /token=/.test(location.hash) ? location.href : location.pathname);
+      const token = /token=[^&]*/.exec(location.hash);
+      if (!(history.state && history.state.cleared)) history.pushState({ cleared: true }, '', location.pathname + (token ? `#${token[0]}` : ''));
       pinnedRef.current = null;
       setFocus(null);
       setCleared(true);
