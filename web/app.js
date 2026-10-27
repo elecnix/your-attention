@@ -18,6 +18,7 @@ export function App() {
   const seenRef = React.useRef(null);
   const reportedFocus = React.useRef(undefined);
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
+  const [queueWidth, setQueueWidth] = React.useState(() => store.get('queueWidth') || QUEUE_WIDTH);
 
   const refresh = React.useCallback(() => fetch(BASE + 'v1/state').then((r) => {
     if (r.status === 401) { setAuth('needed'); return null; }
@@ -222,8 +223,55 @@ export function App() {
       h('h1', null, 'Your attention'),
       state.settings && h(HtmlToggle, { settings: state.settings }),
       h(NotifyToggle),
-      h('span', { className: `pill ${up ? 'on' : 'down'}` }, up ? 'Inbox connected' : 'Inbox unreachable'))),
-    h('div', { className: 'layout' }, queue, h('main', null, main)));
+      h('span', { className: `pill ${up ? 'on' : 'down'}` }, up ? 'Inbox connected' : 'Inbox unreachable'),
+      h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: 'Your Attention on GitHub' },
+        h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'currentColor' }, h('path', { d: OCTOCAT }))))),
+    h('div', { className: 'layout', style: { '--queue-w': `${queueWidth}px` } },
+      queue, h(QueueResizer, { width: queueWidth, onResize: setQueueWidth }), h('main', null, main)));
+}
+
+// GitHub's mark, from Octicons (mark-github).
+const OCTOCAT = 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z';
+
+const QUEUE_WIDTH = 290;
+const clampWidth = (w) => Math.round(Math.min(Math.max(w, 200), Math.max(200, window.innerWidth - 360)));
+
+// The border between the queue and the card. Drag it, or focus it and press the arrow keys,
+// to change the queue's width. A double click restores the default. The page keeps the width.
+function QueueResizer({ width, onResize }) {
+  const [dragging, setDragging] = React.useState(false);
+  const set = (w) => { const v = clampWidth(w); onResize(v); store.set('queueWidth', v); };
+  const down = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    const start = e.clientX - width;
+    el.setPointerCapture(e.pointerId);
+    setDragging(true);
+    const move = (m) => onResize(clampWidth(m.clientX - start));
+    const up = (u) => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      setDragging(false);
+      set(u.clientX - start);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+  const key = (e) => {
+    const step = e.shiftKey ? 64 : 16;
+    if (e.key === 'ArrowLeft') set(width - step);
+    else if (e.key === 'ArrowRight') set(width + step);
+    else return;
+    e.preventDefault();
+  };
+  return h('div', {
+    className: `resizer${dragging ? ' dragging' : ''}`, role: 'separator', tabIndex: 0, 'aria-orientation': 'vertical',
+    'aria-label': 'Resize the card list', 'aria-valuenow': width, 'aria-valuemin': 200, title: 'Drag to resize the card list',
+    onPointerDown: down, onKeyDown: key, onDoubleClick: () => set(QUEUE_WIDTH),
+  });
 }
 
 // Grow each comment box to fit its text where the browser lacks CSS field-sizing.

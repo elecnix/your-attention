@@ -88,3 +88,41 @@ test('a PDF from the inbox shows in a frame without a sandbox', async ({ page })
   await expect(frame).toBeVisible();
   expect(await frame.getAttribute('sandbox')).toBeNull();
 });
+
+test('the queue border drags or takes arrow keys to resize the queue, and the width stays after a reload', async ({ page }) => {
+  await inbox.open(page);
+  const queue = page.locator('.queue');
+  const handle = page.getByRole('separator', { name: 'Resize the card list' });
+  const before = (await queue.boundingBox())!.width;
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + 40, { steps: 5 });
+  await page.mouse.up();
+  const wider = (await queue.boundingBox())!.width;
+  expect(Math.abs(wider - before - 120)).toBeLessThan(4);
+  await handle.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => Math.round((await queue.boundingBox())!.width)).toBe(Math.round(wider - 16));
+  await page.reload();
+  await expect.poll(async () => Math.round((await queue.boundingBox())!.width)).toBe(Math.round(wider - 16));
+});
+
+test('text in the inbox and in its cards is Gill Sans, larger than the defaults, and code stays monospace', async ({ page }) => {
+  await inbox.agent.post({ id: 'type', agent: 's-type', title: 'Typography', attachments: [{ src: `data:text/markdown;base64,${b64('Run `npm test` first.')}`, name: 'steps.md' }] });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Typography' }).click();
+  const font = (sel: string) => page.locator(sel).first().evaluate((el) => { const s = getComputedStyle(el); return { family: s.fontFamily, size: parseFloat(s.fontSize) }; });
+  expect((await font('body')).size).toBe(18);
+  expect((await font('.card-title')).family).toContain('Gill Sans');
+  expect((await font('.focus-card code')).family).toContain('monospace');
+  const header = await page.locator('.queue h3').first().evaluate((el) => Number(getComputedStyle(el).fontWeight));
+  expect(header).toBeGreaterThanOrEqual(600);
+});
+
+test('the top bar links to the project on GitHub', async ({ page }) => {
+  await inbox.open(page);
+  const link = page.getByRole('link', { name: 'Your Attention on GitHub' });
+  await expect(link).toHaveAttribute('href', 'https://github.com/elecnix/your-attention');
+  await expect(link.locator('svg')).toBeVisible();
+});
