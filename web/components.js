@@ -227,7 +227,8 @@ function diff(before, after) {
   return { removed: b.filter((l) => l && !a.includes(l)), added: a.filter((l) => l && !b.includes(l)) };
 }
 // The words that differ between a removed line and the added line that replaced it,
-// from the longest common run of words. Very long lines get no word marks.
+// from the longest common run of words. Lines that share no word, or are very long,
+// get no word marks: the whole line changed.
 export function wordDiff(before, after) {
   const x = before.split(/(\s+)/);
   const y = after.split(/(\s+)/);
@@ -245,6 +246,7 @@ export function wordDiff(before, after) {
   }
   while (i < x.length) del.push([x[i++], true]);
   while (j < y.length) add.push([y[j++], true]);
+  if (!del.some(([w, changed]) => !changed && w.trim())) return null;
   return { del, add };
 }
 const marked = (words) => words.map(([w, changed], k) => (changed && w.trim() ? h('mark', { key: k }, w) : w));

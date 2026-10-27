@@ -194,3 +194,14 @@ test('the queue names an agent by its session name, and by its id when it has no
   await expect(page.locator('.queue h3', { hasText: 'claude:0000-plain' })).toBeVisible();
   await expect(page.locator('.queue h3', { hasText: 'claude:0000-named' })).toHaveCount(0);
 });
+
+test('a line rewritten from scratch shows as removed and added, with no words marked', async ({ page }) => {
+  await inbox.agent.post({ id: 'rewrite', agent: 's-rewrite', title: 'Rewrite the plan', text: 'Ship it Friday.', priority: 'now' });
+  await inbox.agent.post({ id: 'rewrite', agent: 's-rewrite', title: 'Rewrite the plan', text: 'Wait until QA signs off.', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Rewrite the plan' }).click();
+  await page.locator('details.changes summary').click();
+  await expect(page.locator('details.changes .del')).toHaveText('− Ship it Friday.');
+  await expect(page.locator('details.changes .add')).toHaveText('+ Wait until QA signs off.');
+  await expect(page.locator('details.changes mark')).toHaveCount(0);
+});
