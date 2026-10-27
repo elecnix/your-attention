@@ -8,6 +8,7 @@ export interface Dialog {
   options: { key: string; label: string }[];
 }
 
+const MAX_GAP = 3;
 const OPTION = /^\s*(?:[❯›>▶]\s*)?(\d)\.\s+(.*\S)\s*$/;
 // A choice that opens a text box needs typing, which a card answer cannot do safely.
 const NEEDS_TYPING = /^(type something|chat about this)\b/i;
@@ -19,11 +20,14 @@ export function parseDialog(screen: string): Dialog | undefined {
   for (let i = lines.length - 1; i >= 0; i--) if (OPTION.exec(lines[i] ?? '')?.[1] === '1') { start = i; break; }
   if (start < 0) return undefined;
   const options: Dialog['options'] = [];
+  let gap = 0;
   for (let i = start; i < lines.length; i++) {
     const m = OPTION.exec(lines[i] ?? '');
-    if (!m) continue;
+    // A choice may carry a description of a line or two. A longer gap ends the dialog, so two numbered runs never merge.
+    if (!m) { if (++gap > MAX_GAP) break; continue; }
     if (Number(m[1]) !== options.length + 1) return undefined;
     options.push({ key: m[1] ?? '', label: m[2] ?? '' });
+    gap = 0;
   }
   if (options.length < 2) return undefined;
   const usable = options.filter((o) => !NEEDS_TYPING.test(o.label));

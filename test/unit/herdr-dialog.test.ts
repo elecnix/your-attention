@@ -56,6 +56,11 @@ describe('reading a dialog from an agent screen', () => {
     assert.equal(parseDialog(CODEX_APPROVAL)?.question, 'Would you like to run the following command?\n$ rm -rf build');
   });
 
+  it('never merges the dialog with numbered lines far below it', () => {
+    const screen = ' Pick one?\n ❯ 1. Red\n   2. Blue\n\n Earlier output:\n step done\n more output\n   3. Green';
+    assert.deepEqual(parseDialog(screen)?.options.map((o) => o.label), ['Red', 'Blue']);
+  });
+
   it('finds no dialog on a screen without numbered choices, or with one choice only', () => {
     assert.equal(parseDialog('Thinking…\n> '), undefined);
     assert.equal(parseDialog('Steps:\n1. Build it\nDone.'), undefined);
