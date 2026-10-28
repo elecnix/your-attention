@@ -221,6 +221,8 @@
   .qr-dialog .note, .qr-dialog .muted { font-size: calc(13px * var(--text-scale)); }
   /* A phone: the bar scrolls away, the title, the status and the links share the first row, and every control is big enough for a thumb. */
   @media (max-width: 760px) {
+    /* One page scroll on a phone: the queue grows with its cards instead of scrolling inside itself. */
+    .queue { position: static; max-height: none; overflow: visible; }
     .bar { position: static; }
     .bar-inner { padding: 6px 16px 8px; gap: 0 12px; }
     .bar h1 { order: 0; }

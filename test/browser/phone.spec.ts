@@ -53,6 +53,25 @@ test.describe('on an iPhone', () => {
   const { defaultBrowserType: _webkit, ...iphone } = devices['iPhone 15'];
   test.use(iphone);
 
+  test('the card and the queue scroll as one page, and a tapped title brings its card to the top', async ({ page }) => {
+    const own = await startInbox();
+    try {
+      for (let i = 0; i < 12; i++) await own.agent.post({ id: `tall-${i}`, agent: `tall-${i % 3}`, title: `Tall question ${i}`, text: 'A line\n'.repeat(30), priority: 'now', options: [{ id: 'y', label: 'Yes' }] });
+      await own.open(page);
+      await expect(page.locator('nav.queue button.q').first()).toBeVisible();
+      // Nothing scrolls inside the page: the queue grows with its cards.
+      const inner = await page.evaluate(() => [...document.querySelectorAll('*')].filter((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 2).map((e) => e.className));
+      expect(inner).toEqual([]);
+      const pick = page.locator('nav.queue button.q').nth(6);
+      const title = ((await pick.locator('.t').textContent()) ?? '').replace(/Decide now|new/g, '').trim();
+      await pick.tap();
+      await expect(page.locator('.focus-card h2').first()).toContainText(title);
+      await expect.poll(async () => Math.abs(await page.locator('.focus-card').evaluate((e) => e.getBoundingClientRect().top))).toBeLessThan(20);
+    } finally {
+      await own.close();
+    }
+  });
+
   test('the page fits the screen, and the bar, notices and fields suit a phone', async ({ page }) => {
     await inbox.agent.post({ id: 'phone-1', agent: 'phone-offline', title: 'Which option on the phone?', priority: 'now', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] });
     await inbox.agent.post({ id: 'phone-2', agent: 'phone-offline', title: 'A second question', priority: 'soon' });

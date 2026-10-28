@@ -186,7 +186,13 @@ export function App() {
   }
 
   // Each card you open is a step in the browser's history, so back and forward move between them.
-  const go = (id) => { if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id)); setCleared(false); setFocus(id); };
+  const go = (id) => {
+    if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id));
+    setCleared(false);
+    setFocus(id);
+    // On a phone the card sits above the queue, so the page scrolls up to the card that opened.
+    if (id && window.matchMedia('(max-width: 760px)').matches) requestAnimationFrame(() => document.querySelector('.focus-card')?.scrollIntoView({ block: 'start' }));
+  };
   // Skip opens the card after this one, in the order the queue shows, and wraps around at the end.
   const next = () => {
     pinnedRef.current = null;
