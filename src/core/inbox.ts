@@ -55,7 +55,8 @@ export const DEFAULT_GUIDANCE = [
   'Write each card so the person can answer it without opening the session.',
   'State the goal, the options you weighed, the evidence, and your recommendation.',
   'Shape the answer options to the question. The person may leave any field empty.',
-  'When a card asks several things, put each question beside the text or table it is about, with forms in the body.',
+  'Put each question next to the field that answers it. One question uses options. Several questions use forms in the body, each beside the text or table it is about.',
+  'Never list questions in the text with the answers at the bottom. Write what you will check yourself as statements, not questions.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;

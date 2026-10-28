@@ -9,14 +9,14 @@ export interface CardTool {
 export const cardTools: CardTool[] = [
   {
     name: 'card_post',
-    description: 'Ask the person for a decision on a card in their inbox. Returns at once: the answer arrives later, so keep working. State the goal, the options you weighed, the evidence, and your recommendation.',
+    description: 'Ask the person for a decision on a card in their inbox. Returns at once: the answer arrives later, so keep working. State the goal, the options you weighed, the evidence, and your recommendation. Put each question next to the field that answers it, so the person answers while the question is in mind: never list questions in the text with the answers at the bottom.',
     schema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'The question, in one line.' },
-        text: { type: 'string', description: 'Context: the goal, the options you weighed, and the evidence. Markdown: [label](https://...) links, lists, **bold**, `code`, tables. A bare https address becomes a link, and [[card-id]] links to another card.' },
+        text: { type: 'string', description: 'Context: the goal, the options you weighed, and the evidence. No questions here: each question sits beside its answer field, in options for one question or in body forms for several. Write what you will check yourself as statements. Markdown: [label](https://...) links, lists, **bold**, `code`, tables. A bare https address becomes a link, and [[card-id]] links to another card.' },
         recommendation: { type: 'string', description: 'What you would do, and why. Markdown, like text.' },
-        options: { type: 'array', items: { type: 'string' }, description: 'Answer options shaped to this question. Every option is optional to the person.' },
+        options: { type: 'array', items: { type: 'string' }, description: 'Answer options for a card that asks one question. For several questions, give each its own field in body forms instead. Every option is optional to the person.' },
         multiple: { type: 'boolean', description: 'Allow more than one option.' },
         priority: { type: 'string', enum: ['now', 'soon', 'later'], description: 'now: blocks your work. soon: needed before you finish. later: can wait.' },
         follows: { type: 'string', description: 'The id of the card this one follows up on.' },
