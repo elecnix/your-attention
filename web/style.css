@@ -23,6 +23,8 @@
   .bar { position: sticky; top: 0; z-index: 10; background: var(--panel); border-bottom: 1px solid var(--line); }
   .bar-inner { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
   .bar h1 { font-size: calc(17px * var(--text-scale)); margin: 0; flex: 1 1 auto; }
+  .code-update { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: calc(13px * var(--text-scale)); }
+  .code-update .btn { padding: 2px 10px; }
   .notify { display: inline-flex; align-items: center; gap: 6px; font-size: calc(13px * var(--text-scale)); color: var(--muted); cursor: pointer; }
   .notify input { accent-color: var(--accent); }
   .repo { display: inline-flex; color: var(--muted); }

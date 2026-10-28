@@ -234,7 +234,7 @@ Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST 
 
 ## Pages
 
-`GET /v1/state` returns every card except the cleared ones, answer, presence record and card state. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`.
+`GET /v1/state` returns every card except the cleared ones, answer, presence record and card state. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`. On `code`, a page someone looks at offers a **Reload** button instead of reloading, so it never takes a field away while the person types. A hidden page reloads at once, and a page that offered the button reloads when it is hidden.
 
 The tab icon is the ✋ emoji, `web/favicon.svg`. While a card waits for you, the page switches it to `web/favicon-waiting.svg`, which adds a red dot.
 

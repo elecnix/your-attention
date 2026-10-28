@@ -9,6 +9,8 @@ export function App() {
   const [state, setState] = React.useState(null);
   const [auth, setAuth] = React.useState('checking');
   const [up, setUp] = React.useState(false);
+  // New page code waits for the person: a reload under their typing would take the field away.
+  const [codeReady, setCodeReady] = React.useState(false);
   // A card in the address is one the person asked for. The card from the last visit comes back only while it waits for them.
   const [focus, setFocus] = React.useState(() => cardInAddress());
   const lastVisitRef = React.useRef(cardInAddress() ? null : store.get('focus:current'));
@@ -44,6 +46,14 @@ export function App() {
   }), [state, closing]);
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
+
+  // A tab the person stops looking at takes the new code at once.
+  React.useEffect(() => {
+    if (!codeReady) return undefined;
+    const hidden = () => { if (document.visibilityState === 'hidden') reloadPage(); };
+    document.addEventListener('visibilitychange', hidden);
+    return () => document.removeEventListener('visibilitychange', hidden);
+  }, [codeReady]);
 
   React.useEffect(() => {
     const back = () => { const id = cardInAddress(); setCleared(!id && !!(history.state && history.state.cleared)); pinnedRef.current = id; setFocus(id); };
@@ -81,7 +91,7 @@ export function App() {
     const onEvent = (type) => {
       if (type === 'beat' || type === 'pong') { last = Date.now(); setUp(true); }
       if (type === 'change' || type === 'presence') refreshRef.current();
-      if (type === 'code') { store.set('scroll:y', window.scrollY); location.reload(); }
+      if (type === 'code') { if (document.visibilityState === 'hidden') reloadPage(); else setCodeReady(true); }
     };
     const stop = () => {
       if (es) es.close();
@@ -310,6 +320,8 @@ export function App() {
   return h(React.Fragment, null,
     h('div', { className: 'bar' }, h('div', { className: 'bar-inner' },
       h('h1', null, 'Your attention'),
+      codeReady && h('div', { className: 'code-update', role: 'status' }, 'A new version of this page is ready.',
+        h('button', { type: 'button', className: 'btn', onClick: reloadPage }, 'Reload')),
       h(NotifyToggle),
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : 'Inbox unreachable')),
       h(PhoneLink),
@@ -320,6 +332,12 @@ export function App() {
         // On a phone the queue sits below the card, so a button above the card says how many wait and jumps there.
         main && pending.length > 0 && h('button', { type: 'button', className: 'btn to-queue', onClick: () => document.querySelector('.queue')?.scrollIntoView({ behavior: 'smooth' }) }, `${pending.length} waiting · show the queue`),
         main)));
+}
+
+// Reload for new page code, back at the same scroll position. Drafts live in storage, so typed text comes back.
+function reloadPage() {
+  store.set('scroll:y', window.scrollY);
+  location.reload();
 }
 
 // GitHub's mark, from Octicons (mark-github).
