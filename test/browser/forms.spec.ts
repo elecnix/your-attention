@@ -75,8 +75,10 @@ test('the example in the card_post description renders and answers', async ({ pa
   const card = page.locator('.focus-card');
   await expect(card.getByText('Duplicate uploads')).toBeVisible();
   await card.getByText('Merge it', { exact: true }).click();
+  await card.getByPlaceholder('Optional').fill('after the release');
   await card.getByRole('button', { name: 'Send answer' }).click();
   await expect.poll(() => ev.events.find((e) => e.type === 'answer')?.type).toBe('answer');
   const a = ev.events.find((e) => e.type === 'answer');
-  expect(a?.type === 'answer' && a.answer.values).toEqual({ merge12: 'yes' });
+  expect(a?.type === 'answer' && a.answer.values).toEqual({ merge12: 'yes', note12: 'after the release' });
+  await expect(page.locator('.note.ok')).toContainText('Comment on #12: after the release');
 });
