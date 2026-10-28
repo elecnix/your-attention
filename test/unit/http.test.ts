@@ -188,3 +188,17 @@ describe('limits a hosted inbox needs', () => {
     }
   });
 });
+
+describe('signing a phone in', () => {
+  it('turns a sign-in code into a cookie once, and only the owner gets codes', async () => {
+    const { call, owner, agent } = await setup();
+    assert.equal((await call('POST', '/v1/sign-in-codes', { token: agent })).status, 403);
+    const { code } = (await (await call('POST', '/v1/sign-in-codes', { token: owner })).json()) as { code: string };
+    const first = await call('POST', '/v1/login', { body: { code } });
+    assert.equal(first.status, 200);
+    const cookie = (first.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    assert.notEqual(cookie, `${COOKIE}=${encodeURIComponent(owner)}`, 'the phone gets its own token');
+    assert.equal((await call('GET', '/v1/state', { headers: { cookie } })).status, 200);
+    assert.equal((await call('POST', '/v1/login', { body: { code } })).status, 401);
+  });
+});

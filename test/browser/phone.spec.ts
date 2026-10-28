@@ -30,7 +30,7 @@ async function readQr(page: Page): Promise<string | undefined> {
   return jsQR(Uint8ClampedArray.from(data), width, height)?.data;
 }
 
-test('the phone button shows a QR code of the inbox address, without the sign-in token', async ({ page }) => {
+test('the phone button shows a QR code of the inbox address with a one-time sign-in code, never the owner token', async ({ page }) => {
   await inbox.open(page);
   const phone = page.getByRole('button', { name: 'Open this inbox on your phone' });
   const repo = page.getByRole('link', { name: 'Your Attention on GitHub' });
@@ -40,7 +40,7 @@ test('the phone button shows a QR code of the inbox address, without the sign-in
   await phone.click();
   const dialog = page.getByRole('dialog', { name: 'Open this inbox on your phone' });
   await expect(dialog).toBeVisible();
-  expect(await readQr(page)).toBe(`${inbox.server.url}/`);
+  expect(await readQr(page)).toMatch(new RegExp(`^${inbox.server.url}/#signin=[0-9a-f]{32}$`));
   await expect(dialog.locator('.qr-address')).toHaveText(`${inbox.server.url}/`);
   // The test inbox listens on 127.0.0.1, which a phone cannot reach.
   await expect(dialog).toContainText('a phone cannot open it');
@@ -89,7 +89,7 @@ test.describe('on an iPhone', () => {
   test('the QR dialog fits the screen with its buttons in reach', async ({ page }) => {
     await inbox.open(page);
     await page.getByRole('button', { name: 'Open this inbox on your phone' }).click();
-    expect(await readQr(page)).toBe(`${inbox.server.url}/`);
+    expect(await readQr(page)).toMatch(new RegExp(`^${inbox.server.url}/#signin=[0-9a-f]{32}$`));
     const close = page.getByRole('button', { name: 'Close' });
     await expect(close).toBeInViewport();
     await close.click();
@@ -103,4 +103,41 @@ test('the dialog says so when the QR code cannot load, and still shows the addre
   await page.getByRole('button', { name: 'Open this inbox on your phone' }).click();
   await expect(page.locator('.qr-failed')).toContainText('did not load');
   await expect(page.locator('.qr-address')).toHaveCSS('font-family', /mono|Menlo|Courier|Code/i);
+});
+
+test('a phone that scans the code opens the inbox signed in, and the code works once', async ({ page, browser }) => {
+  await inbox.agent.post({ id: 'scan-1', agent: 'scan', title: 'Seen on the phone after the scan', priority: 'now' });
+  await inbox.open(page);
+  await page.getByRole('button', { name: 'Open this inbox on your phone' }).click();
+  const scanned = await readQr(page);
+  const phone = await browser.newContext();
+  const p = await phone.newPage();
+  await p.goto(scanned!);
+  await expect(p.getByText('Seen on the phone after the scan').first()).toBeVisible();
+  expect(p.url()).not.toContain('signin=');
+  const other = await browser.newContext();
+  const q = await other.newPage();
+  await q.goto(scanned!);
+  await expect(q.getByRole('heading', { name: 'Sign in to your inbox' })).toBeVisible();
+  await expect(q.locator('.signin')).toContainText('scan the QR code');
+  await phone.close();
+  await other.close();
+});
+
+test('Escape keeps an unused sign-in code in the address', async ({ page, browser }) => {
+  await inbox.open(page);
+  await page.getByRole('button', { name: 'Open this inbox on your phone' }).click();
+  const scanned = await readQr(page);
+  const phone = await browser.newContext();
+  const p = await phone.newPage();
+  // Hold the sign-in request, so the code is still unused when Escape comes.
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => { release = r; });
+  await p.route('**/v1/login', async (route) => { await held; await route.continue(); });
+  await p.goto(scanned!);
+  await p.keyboard.press('Escape');
+  expect(p.url()).toContain('signin=');
+  release();
+  await expect(p.getByRole('heading', { name: 'Sign in to your inbox' })).toBeHidden();
+  await phone.close();
 });

@@ -119,7 +119,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     }
     if (method === 'GET' && a === 'pair' && b) return json(inbox.collectPairing(b));
     if (method === 'POST' && a === 'login') {
-      const { token } = await readJson<{ token?: string }>(req, BODY_LIMIT.open);
+      const body = await readJson<{ token?: string; code?: string }>(req, BODY_LIMIT.open);
+      // A sign-in code from the phone dialog becomes the device's own owner token.
+      const token = body.code !== undefined ? (await inbox.redeemSignInCode(body.code)).secret : body.token;
       const t = await inbox.authenticate(token);
       if (!t || t.role !== 'owner') return json({ error: 'not an owner token' }, 401);
       const secure = url.protocol === 'https:' ? '; Secure' : '';
@@ -168,6 +170,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
 
     if (method === 'GET' && a === 'state') { owner(); return json(inbox.state()); }
     if (method === 'POST' && a === 'archive' && !b) return json(inbox.archive(me));
+    if (method === 'POST' && a === 'sign-in-codes' && !b) return json(inbox.createSignInCode(me), 201);
     if (method === 'POST' && a === 'reset' && !b) {
       // A reset cannot be undone, so the request must say so.
       if ((await readJson<{ confirm?: string }>(req)).confirm !== 'reset') throw new InboxError(400, 'send {"confirm": "reset"} to remove every card');

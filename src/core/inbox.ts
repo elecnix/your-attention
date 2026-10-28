@@ -68,6 +68,9 @@ export const MAX_VERSIONS = 50;
 export const MAX_REPLY_BYTES = 4096;
 export const MAX_REPLIES = 200;
 export const MAX_WEBHOOKS = 5;
+/** How long a sign-in code from the phone dialog works. */
+export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
+const MAX_SIGN_IN_CODES = 5;
 /** How long a closed pairing request and its card stay before the sweep deletes them. */
 export const PAIRING_KEEP_MS = 24 * 60 * 60 * 1000;
 
@@ -173,6 +176,37 @@ export class Inbox {
   revokeToken(id: string): void {
     if (!this.store.get('tokens', id)) throw new InboxError(404, 'unknown token');
     this.store.delete('tokens', id);
+  }
+
+  /** The owner's page asks for a code that signs one more device in, such as a phone that scans it. */
+  createSignInCode(caller: Caller): { code: string; expiresAt: number } {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner signs a device in');
+    const now = this.now();
+    const live = this.signInCodes().filter((c) => {
+      if (c.expiresAt > now) return true;
+      this.store.delete('meta', c.key);
+      return false;
+    });
+    if (live.length >= MAX_SIGN_IN_CODES) throw new InboxError(429, 'too many sign-in codes are waiting; wait five minutes');
+    const code = randomId(16);
+    const expiresAt = now + SIGN_IN_CODE_TTL_MS;
+    this.store.put('meta', `signin:${code}`, { key: `signin:${code}`, expiresAt });
+    return { code, expiresAt };
+  }
+
+  /** A device turns a sign-in code into its own owner token. Each code works once. */
+  async redeemSignInCode(code: string): Promise<{ secret: string }> {
+    const key = `signin:${String(code ?? '')}`;
+    const found = /^signin:[0-9a-f]{32}$/.test(key) ? this.store.get<{ key: string; expiresAt: number }>('meta', key) : undefined;
+    if (found) this.store.delete('meta', key);
+    if (!found || found.expiresAt <= this.now()) throw new InboxError(401, 'this sign-in code is not valid or has expired; scan a new one');
+    const { secret } = await this.createToken(`device signed in ${new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ')}`, 'owner');
+    return { secret };
+  }
+
+  private signInCodes(): { key: string; expiresAt: number }[] {
+    return this.store.list<{ key?: unknown; expiresAt?: unknown }>('meta')
+      .filter((m): m is { key: string; expiresAt: number } => typeof m?.key === 'string' && m.key.startsWith('signin:'));
   }
 
   /** A client asks to pair. The person sees a system card with the code. */
@@ -1072,6 +1106,8 @@ export class Inbox {
     for (const m of this.store.list<unknown>('meta')) {
       const key = (m as { key?: unknown })?.key;
       if (typeof key === 'string' && key.startsWith('reads:') && !key.startsWith(today)) this.store.delete('meta', key);
+      const expiresAt = (m as { expiresAt?: unknown })?.expiresAt;
+      if (typeof key === 'string' && key.startsWith('signin:') && typeof expiresAt === 'number' && expiresAt <= now) this.store.delete('meta', key);
     }
     for (const m of this.store.list<{ key: string; at: number }>('messages')) {
       if (now - m.at > MESSAGE_MEMORY_MS) this.store.delete('messages', m.key);

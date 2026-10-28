@@ -1,7 +1,7 @@
 // Card features from the batch of principles about the card model.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Inbox, InboxError, MAX_CARD_BYTES, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PAIRING_KEEP_MS, type Caller } from '../../src/core/inbox.ts';
+import { Inbox, InboxError, MAX_CARD_BYTES, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 
@@ -488,5 +488,29 @@ describe('fixes from the review of the limits', () => {
   it('measures the card in UTF-8 bytes', () => {
     const inbox = new Inbox(new MemoryStorage());
     assert.throws(() => inbox.postCard(agent, { agent: 'a', title: 'q', text: 'é'.repeat(MAX_CARD_BYTES / 2 + 10) }), (e: unknown) => e instanceof InboxError && e.status === 413);
+  });
+});
+
+describe('sign-in codes for a phone', () => {
+  const owner: Caller = { token: 'o', role: 'owner' };
+
+  it('signs one device in once, as its own owner token, within five minutes', async () => {
+    let t = 1_000_000;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const { code, expiresAt } = inbox.createSignInCode(owner);
+    assert.equal(expiresAt, t + SIGN_IN_CODE_TTL_MS);
+    const { secret } = await inbox.redeemSignInCode(code);
+    assert.equal((await inbox.authenticate(secret))?.role, 'owner');
+    await assert.rejects(inbox.redeemSignInCode(code), (e: unknown) => e instanceof InboxError && e.status === 401);
+    const late = inbox.createSignInCode(owner).code;
+    t += SIGN_IN_CODE_TTL_MS + 1;
+    await assert.rejects(inbox.redeemSignInCode(late), /expired|not valid/);
+  });
+
+  it('gives codes to the owner only, a few at a time', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    assert.throws(() => inbox.createSignInCode({ token: 'a', role: 'agent' }), (e: unknown) => e instanceof InboxError && e.status === 403);
+    for (let i = 0; i < 5; i++) inbox.createSignInCode(owner);
+    assert.throws(() => inbox.createSignInCode(owner), (e: unknown) => e instanceof InboxError && e.status === 429);
   });
 });

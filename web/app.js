@@ -50,8 +50,8 @@ export function App() {
     // Escape in a field belongs to the field, so a half-typed answer stays on screen.
     const escape = (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented || (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]'))) return;
-      // The sign-in token stays in the address until the sign-in request has used it.
-      const token = /token=[^&]*/.exec(location.hash);
+      // The sign-in token or code stays in the address until the sign-in request has used it.
+      const token = /(?:token|signin)=[^&]*/.exec(location.hash);
       if (!(history.state && history.state.cleared)) history.pushState({ cleared: true }, '', location.pathname + (token ? `#${token[0]}` : ''));
       pinnedRef.current = null;
       setFocus(null);
@@ -66,11 +66,13 @@ export function App() {
     let es;
     let last = 0;
     // Sign in with the token in the address, then drop it from the address.
+    // Sign in with the owner token, or the one-time code a phone scanned, then drop it from the address.
     const signIn = () => {
-      const m = /token=([^&]+)/.exec(location.hash);
+      const m = /(?:^#|&)(token|signin)=([^&]+)/.exec(location.hash);
       if (!m) return Promise.resolve();
-      return fetch(BASE + 'v1/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: J({ token: decodeURIComponent(m[1]) }) })
-        .then(() => history.replaceState(history.state, '', location.pathname + location.hash.replace(/(^#|&)token=[^&]*/, '$1').replace(/^#&?$/, '')));
+      const body = m[1] === 'token' ? { token: decodeURIComponent(m[2]) } : { code: decodeURIComponent(m[2]) };
+      return fetch(BASE + 'v1/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: J(body) })
+        .then(() => history.replaceState(history.state, '', location.pathname + location.hash.replace(/(^#|&)(token|signin)=[^&]*/, '$1').replace(/^#&?$/, '')));
     };
     let ws;
     let ping;
@@ -134,7 +136,8 @@ export function App() {
 
   if (auth === 'needed') {
     return h('div', { className: 'signin' }, h('h2', null, 'Sign in to your inbox'),
-      h('p', null, 'Open this page with ', h('code', null, 'your-attention open'), ' on the machine that runs the inbox. Another device pairs with ', h('code', null, 'your-attention pair <url> --role owner'), '.'));
+      h('p', null, 'On a phone, scan the QR code from the phone button of a page that is signed in. Its code works once, for five minutes.'),
+      h('p', null, 'On a computer, open the sign-in link you got when you created the inbox. On the machine that runs a laptop inbox, ', h('code', null, 'your-attention open'), ' signs you in.'));
   }
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
@@ -175,7 +178,7 @@ export function App() {
     reportedFocus.current = current ? current.id : null;
     report({ focus: reportedFocus.current, active: true });
   }
-  if (current && cardInAddress() !== current.id && !/token=/.test(location.hash)) history.replaceState({ card: current.id }, '', cardAddress(current.id));
+  if (current && cardInAddress() !== current.id && !/(?:token|signin)=/.test(location.hash)) history.replaceState({ card: current.id }, '', cardAddress(current.id));
   const seenKey = current ? `${current.id}:${current.replies.length}` : null;
   if (current && current.replies.some((r) => !r.seenAt) && seenRef.current !== seenKey) {
     seenRef.current = seenKey;
