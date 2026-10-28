@@ -251,7 +251,8 @@ export function App() {
   const item = (c, dim) => {
     const s = st(c);
     const prio = h('span', { className: `prio small ${levelOf(c)}` }, label(levelOf(c)));
-    const icon = s === 'closed' ? c.closed.kind : s;
+    // Every card that waits for you raises its hand, except an agent reply, which keeps its speech bubble.
+    const icon = s === 'closed' ? c.closed.kind : waiting(s) && s !== 'reply' ? 'open' : s;
     const tip = s === 'closed' ? CLOSED_LABEL[c.closed.kind] : STATE_LABEL[s];
     return h('button', { key: c.id, className: `q${current && current.id === c.id ? ' focus' : ''}${dim ? ' dim' : ''}`, onClick: () => open(c.id) },
       h('span', { className: 't' }, c.title, fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio),

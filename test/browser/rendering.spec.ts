@@ -459,3 +459,15 @@ test('a card body reads in the dim text color, with its title and bold words in 
   expect(await textColor('Priority')).toBe(ink);
   expect(await textColor('Urgent')).toBe(muted);
 });
+
+test('a card that waits for you shows a raised hand in the queue, and a sent one does not', async ({ page }) => {
+  await inbox.agent.post({ id: 'hand-wait', agent: 's-hand', title: 'Raise a hand for me', priority: 'now' });
+  await inbox.agent.post({ id: 'hand-sent', agent: 's-hand', title: 'Already answered hand', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Already answered hand' }).click();
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  const icon = (title: string) => page.locator('.q', { hasText: title }).locator('.ico');
+  await expect(icon('Raise a hand for me')).toHaveAttribute('aria-label', 'to answer');
+  expect(await icon('Raise a hand for me').locator('path').first().getAttribute('d')).toBe('M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2');
+  await expect.poll(async () => icon('Already answered hand').locator('path').first().getAttribute('d')).not.toBe('M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2');
+});
