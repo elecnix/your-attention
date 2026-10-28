@@ -14,6 +14,10 @@ export interface Env {
   MODE?: string;
   /** In single mode, the owner token, set with `wrangler secret put OWNER_TOKEN`. */
   OWNER_TOKEN?: string;
+  /** The bytes of files each inbox may store over its life. */
+  UPLOAD_LIMIT_BYTES?: string;
+  /** Counts each inbox's API requests per minute. */
+  LIMITER?: RateLimit;
 }
 
 const json = (data: unknown, status = 200): Response => Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
@@ -22,8 +26,11 @@ function hex(bytes: number): string {
   return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Send a request to the inbox object, with the path the inbox expects. */
-function toInbox(env: Env, name: string, req: Request, path: string, search: string): Promise<Response> {
+/** Send a request to the inbox object, with the path the inbox expects. Each inbox belongs to one person, so the rate limit counts per inbox. */
+async function toInbox(env: Env, name: string, req: Request, path: string, search: string): Promise<Response> {
+  if (env.LIMITER && !(await env.LIMITER.limit({ key: name })).success) {
+    return Response.json({ error: 'too many requests to this inbox, try again in a minute' }, { status: 429, headers: { 'retry-after': '60' } });
+  }
   const stub = env.INBOX.get(env.INBOX.idFromName(name));
   return stub.fetch(new Request(`https://inbox${path}${search}`, req));
 }

@@ -28,7 +28,7 @@ before(async () => {
   const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:test-code', '2', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell });
   assert.equal(seed.status, 0, seed.stderr);
   const port = await freePort();
-  dev = spawn(WRANGLER, ['dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--var', 'MODE:hosted', '--persist-to', persist, '--show-interactive-dev-session=false'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell });
+  dev = spawn(WRANGLER, ['dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--var', 'MODE:hosted', '--var', 'UPLOAD_LIMIT_BYTES:4096', '--persist-to', persist, '--show-interactive-dev-session=false'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell });
   let out = '';
   dev.stdout?.on('data', (d) => { out += String(d); });
   dev.stderr?.on('data', (d) => { out += String(d); });
@@ -128,5 +128,27 @@ describe('the hosted Cloudflare build', () => {
   it('searches past answers in the Durable Object storage', async () => {
     const hits = await new Client({ url: inbox, token: agent }).search('workerd');
     assert.ok(hits.some((h) => h.card.id === 'cf-sse'));
+  });
+
+  it('refuses files past the inbox lifetime limit', async () => {
+    const client = new Client({ url: inbox, token: agent });
+    const src = `data:application/octet-stream;base64,${Buffer.alloc(3000, 1).toString('base64')}`;
+    await client.post({ id: 'cf-big-1', agent: 'cf', title: 'One', attachments: [{ src, name: 'a.bin' }] });
+    await assert.rejects(client.post({ id: 'cf-big-2', agent: 'cf', title: 'Two', attachments: [{ src, name: 'b.bin' }] }), /lifetime limit of 4096/);
+  });
+
+  // Last, because it uses up this inbox's requests for the minute.
+  it('limits each inbox to 600 API requests a minute', async () => {
+    // More than twice the limit, so one window passes 600 even when the minute turns during the burst.
+    // workerd drops connections past a few hundred at once, so the burst goes in batches.
+    const all: number[] = [];
+    for (let i = 0; i < 1250 && !all.includes(429); i += 125) {
+      all.push(...await Promise.all(Array.from({ length: 125 }, () => fetch(`${inbox}/v1/info`).then((r) => r.status))));
+    }
+    assert.ok(all.includes(429), 'some requests went over the limit');
+    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:second', '1', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
+    assert.equal(seed.status, 0, seed.stderr);
+    const { url } = (await (await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'second' }) })).json()) as { url: string };
+    assert.equal((await fetch(`${url}v1/info`)).status, 200, 'another inbox has its own count');
   });
 });

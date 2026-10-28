@@ -27,6 +27,18 @@ resource "cloudflare_r2_bucket" "files" {
   name       = "your-attention-files"
 }
 
+# R2 deletes each attached file 30 days after its upload. The card stays, and its file link answers 410.
+resource "cloudflare_r2_bucket_lifecycle" "files" {
+  account_id  = var.account_id
+  bucket_name = cloudflare_r2_bucket.files.name
+  rules = [{
+    id                        = "delete-after-30-days"
+    enabled                   = true
+    conditions                = { prefix = "" }
+    delete_objects_transition = { condition = { type = "Age", max_age = 30 * 24 * 60 * 60 } }
+  }]
+}
+
 data "cloudflare_account_api_token_permission_groups_list" "scripts_write" {
   account_id = var.account_id
   name       = "Workers Scripts Write"

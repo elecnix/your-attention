@@ -19,6 +19,13 @@ interface SocketAttachment {
   connectedAt?: number;
 }
 
+/** An unset limit means none. A value that is not a byte count blocks every upload, so a typo never lifts the cap. */
+export function uploadLimit(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
 /** A socket closes when it has not answered a heartbeat for this long. */
 const HEARTBEAT_LIMIT_MS = 60_000;
 /** How often the alarm checks heartbeats while agent sockets are open. */
@@ -56,7 +63,7 @@ export class InboxObject {
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
     this.env = env;
-    this.inbox = new Inbox(new DurableSqlStorage(ctx.storage.sql), Date.now, new R2Blobs(env.FILES, ctx.id.toString()), { keepPresence: true });
+    this.inbox = new Inbox(new DurableSqlStorage(ctx.storage.sql), Date.now, new R2Blobs(env.FILES, ctx.id.toString()), { keepPresence: true, uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES) });
     this.handle = createHandler(this.inbox, { heartbeatMs: 2000 });
     // Heartbeats get their answer without waking the object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));

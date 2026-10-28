@@ -74,6 +74,7 @@ type PageSend = (ev: PageEvent) => void;
 export class Inbox {
   private readonly store: Storage;
   private readonly blobs: BlobStore;
+  private readonly uploadLimit: number | undefined;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
@@ -84,11 +85,13 @@ export class Inbox {
   /** Webhook deliveries still running, so tests and shutdown can wait for them. */
   readonly deliveries = new Set<Promise<boolean>>();
 
-  /** `keepPresence` is for a platform whose sockets outlive the object, such as a Durable Object that wakes from hibernation. */
-  constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs(), opts: { keepPresence?: boolean } = {}) {
+  /** `keepPresence` is for a platform whose sockets outlive the object, such as a Durable Object that wakes from hibernation.
+   * `uploadLimitBytes` caps the bytes of every file this inbox ever stores. Deleting a file gives none back. */
+  constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs(), opts: { keepPresence?: boolean; uploadLimitBytes?: number | undefined } = {}) {
     this.store = store;
     this.now = now;
     this.blobs = blobs;
+    this.uploadLimit = opts.uploadLimitBytes;
     // On a laptop, connections do not survive a restart, so nobody is online at start.
     if (!opts.keepPresence) {
       for (const p of store.list<Presence>('presence')) {
@@ -450,16 +453,34 @@ export class Inbox {
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
     if (files.some((f) => !f || typeof f !== 'object')) throw new InboxError(400, 'each attachment must be an object with src');
     const decoded = files.map((f, i) => (/^data:/.test(String(f?.src ?? '')) ? decodeDataUrl(i, f) : undefined));
+    // Count the bytes before the first await, so two posts at once cannot both fit under the limit.
+    const bytes = decoded.reduce((n, d) => n + (d?.bytes.length ?? 0), 0);
+    const { used, limit } = this.uploads();
+    if (limit !== undefined && used + bytes > limit) {
+      throw new InboxError(413, `these files are ${bytes} bytes, and this inbox has stored ${used} of its lifetime limit of ${limit} bytes`);
+    }
+    this.store.put('meta', 'uploaded-bytes', used + bytes);
     const stored: Attachment[] = [];
-    const resolved = await Promise.all(files.map(async (f, i) => {
+    const refund = async (): Promise<void> => {
+      await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
+      this.store.put('meta', 'uploaded-bytes', Math.max(0, this.uploads().used - bytes));
+    };
+    // Wait for every put, so a put that fails leaves none of the others behind. Each key is listed before its put starts.
+    const settled = await Promise.allSettled(files.map(async (f, i): Promise<NewAttachment> => {
       const d = decoded[i];
       if (!d) return f;
       const key = `${id}.${i}.${randomId(6)}`;
-      await this.blobs.put(key, d.bytes, d.type);
       const ref: Attachment = { id: key, name: cleanName(f.name) || `attachment-${i + 1}`, type: d.type, size: d.bytes.length, alt: f.alt ? String(f.alt).slice(0, 300) : undefined };
       stored.push(ref);
+      await this.blobs.put(key, d.bytes, d.type);
       return { src: '', ref };
     }));
+    const failed = settled.find((r) => r.status === 'rejected');
+    if (failed) {
+      await refund();
+      throw failed.reason;
+    }
+    const resolved = settled.map((r) => (r as PromiseFulfilledResult<NewAttachment>).value);
     let card: Card;
     let prior: Card | undefined;
     try {
@@ -467,12 +488,17 @@ export class Inbox {
       prior = this.store.get<Card>('cards', id);
       card = this.postCard(caller, { ...input, id, attachments: resolved });
     } catch (e) {
-      await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
+      await refund();
       throw e;
     }
     const kept = new Set(card.attachments?.map((f) => f.id));
     await Promise.all((prior?.attachments ?? []).filter((f) => f.id && !kept.has(f.id)).map((f) => this.blobs.delete(f.id ?? '')));
     return card;
+  }
+
+  /** The bytes of files this inbox has stored since it was created, and its lifetime limit, if it has one. */
+  uploads(): { used: number; limit: number | undefined } {
+    return { used: this.store.get<number>('meta', 'uploaded-bytes') ?? 0, limit: this.uploadLimit };
   }
 
   /** The bytes of a file, for the owner, an extension, or the client that posted its card. */
@@ -482,7 +508,9 @@ export class Inbox {
     if (caller.role === 'agent' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
     const file = card.attachments?.find((f) => f.id === id);
     const blob = file ? await this.blobs.get(id) : undefined;
-    if (!file || !blob) throw new InboxError(404, 'unknown attachment');
+    if (!file) throw new InboxError(404, 'unknown attachment');
+    // A cloud inbox deletes files after a while, and the card keeps listing them.
+    if (!blob) throw new InboxError(410, `${file.name} is no longer stored`);
     return { file, bytes: blob.bytes };
   }
 

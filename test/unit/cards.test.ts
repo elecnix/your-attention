@@ -328,3 +328,51 @@ describe('fixes from the last review', () => {
     assert.equal(inbox.nextDeadline(), undefined);
   });
 });
+
+describe('the upload limit', () => {
+  const agent: Caller = { token: 'ta', role: 'agent' };
+  const file = (n: number) => ({ src: `data:application/octet-stream;base64,${Buffer.alloc(n, 1).toString('base64')}`, name: 'f.bin' });
+
+  it('counts every byte an inbox has stored, and refuses files past its lifetime limit', async () => {
+    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs(), { uploadLimitBytes: 1000 });
+    await inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [file(600)] });
+    await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c2', agent: 's1', title: 'q', attachments: [file(500)] }),
+      (e: unknown) => e instanceof InboxError && e.status === 413 && /lifetime limit/.test(e.message));
+    // Deleting files gives no bytes back: the limit counts what was ever uploaded.
+    await inbox.reset({ token: 'o', role: 'owner' });
+    await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c3', agent: 's1', title: 'q', attachments: [file(500)] }), /lifetime limit/);
+    await inbox.postCardWithFiles(agent, { id: 'c4', agent: 's1', title: 'q', attachments: [file(400)] });
+    assert.deepEqual(inbox.uploads(), { used: 1000, limit: 1000 });
+  });
+
+  it('gives the bytes back when the card is refused', async () => {
+    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs(), { uploadLimitBytes: 1000 });
+    await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: ' ', attachments: [file(600)] }), /title/);
+    assert.equal(inbox.uploads().used, 0);
+  });
+
+  it('deletes every file and gives the bytes back when one file fails to store', async () => {
+    const blobs = new MemoryBlobs();
+    const put = blobs.put.bind(blobs);
+    let n = 0;
+    blobs.put = async (key, bytes, type) => {
+      if (n++ === 0) throw new Error('the store is down');
+      await new Promise((r) => setTimeout(r, 20));
+      return put(key, bytes, type);
+    };
+    const del: string[] = [];
+    const remove = blobs.delete.bind(blobs);
+    blobs.delete = async (key) => { del.push(key); return remove(key); };
+    const inbox = new Inbox(new MemoryStorage(), Date.now, blobs, { uploadLimitBytes: 1000 });
+    await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [file(100), file(100), file(100)] }), /store is down/);
+    assert.equal(del.length, 3);
+    for (const key of del) assert.equal(await blobs.get(key), undefined);
+    assert.equal(inbox.uploads().used, 0);
+  });
+
+  it('has no limit unless one is set', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    await inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [file(600)] });
+    assert.deepEqual(inbox.uploads(), { used: 600, limit: undefined });
+  });
+});

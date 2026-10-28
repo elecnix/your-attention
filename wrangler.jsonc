@@ -8,5 +8,7 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InboxObject", "RegistryObject"] }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "your-attention-files" }],
   "kv_namespaces": [{ "binding": "INVITES", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
-  "vars": { "MODE": "single" }
+  // A limit per inbox: 600 API requests a minute, and 100 MB of files over its life. R2 deletes each file after 30 days (cloudflare/main.tf).
+  "ratelimits": [{ "name": "LIMITER", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } }],
+  "vars": { "MODE": "single", "UPLOAD_LIMIT_BYTES": "104857600" }
 }

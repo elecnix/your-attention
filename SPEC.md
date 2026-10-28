@@ -133,6 +133,10 @@ The page renders `text` as Markdown: headings, lists, block quotes, fenced code,
 
 The inbox keeps the bytes of each `data:` attachment in its blob store, R2 in the Cloudflare build and files on disk on a laptop, and the card keeps a reference `{id, name, type, size, alt}`. It stores the bytes before it commits the card, so the card changes in one step. Replacing a card's attachments deletes the old files.
 
+An inbox built with `uploadLimitBytes` counts the bytes of every file it stores and refuses a card with 413 once a post would pass the limit. The count covers the inbox's whole life, so the count doesn't go down when a file is deleted, even by `reset`. A post that fails gives back the bytes it counted. The Cloudflare build sets the limit from `UPLOAD_LIMIT_BYTES`, 100 MB in `wrangler.jsonc`, and the laptop inbox has none.
+
+A file the blob store no longer has, such as one R2 deleted after 30 days, answers 410. The card still lists it.
+
 `GET /v1/attachments/<id>` serves the bytes to owner and extension tokens, and to the client that posted the card. Images, PDF, Markdown, text, CSV and JSON come back inline, and every other type as a download with `content-type: application/octet-stream`. Each response has `x-content-type-options: nosniff` and a Content Security Policy that blocks scripts.
 
 ## Templates
@@ -243,5 +247,7 @@ With `MODE` set to `single`, the Worker serves one inbox, whose owner token is t
 - `POST /new {invite}` takes one use of an invite code and returns the address of a new inbox and its owner sign-in link. KV keeps `invite:<code>` with the number of uses the operator allows, and a registry Durable Object counts the uses taken, one request at a time.
 - Each inbox is at `/i/<id>/`, where `id` is 32 random hex digits. Whoever knows the address can sign in with its token, so the person bookmarks the address and keeps it private. The Worker checks KV for `inbox:<id>` first, so an address nobody created reaches no Durable Object.
 - The operator manages invites with `wrangler kv key put invite:<code> <uses> --binding INVITES --remote`.
+
+The Worker counts API requests per inbox with the Workers rate limiting binding, `LIMITER`, and answers 429 with `retry-after: 60` past 600 a minute. Each inbox belongs to one person, so the count is per person. R2 deletes each file 30 days after its upload, by the lifecycle rule in `cloudflare/main.tf`.
 
 `npm run cloudflare:check` bundles the Worker with a dry-run deploy, and `npm run test:cloudflare` runs the hosted build on `wrangler dev` with local Durable Objects, R2 and KV. The `deploy-cloudflare` workflow deploys it when someone runs it from the Actions tab.

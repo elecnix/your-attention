@@ -30,7 +30,7 @@ g['Response'] = class extends NodeResponse {
   }
 };
 
-const { InboxObject } = await import('../../src/cloudflare/inbox-object.ts');
+const { InboxObject, uploadLimit } = await import('../../src/cloudflare/inbox-object.ts');
 
 function runtime() {
   const db = new DatabaseSync(':memory:');
@@ -137,5 +137,16 @@ describe('the inbox Durable Object', () => {
     assert.ok([...rt.blobs.keys()][0]?.startsWith('object-1/'));
     const res = await call(obj, 'GET', `/v1/attachments/${card.attachments[0]!.id}`, owner);
     assert.equal(await res.text(), '# Hello');
+  });
+});
+
+describe('the upload limit setting', () => {
+  it('reads a byte count, means no limit when unset, and blocks uploads when it is not a number', () => {
+    assert.equal(uploadLimit('104857600'), 104857600);
+    assert.equal(uploadLimit(undefined), undefined);
+    assert.equal(uploadLimit(''), undefined);
+    assert.equal(uploadLimit('0'), 0);
+    assert.equal(uploadLimit('100MB'), 0);
+    assert.equal(uploadLimit('-5'), 0);
   });
 });
