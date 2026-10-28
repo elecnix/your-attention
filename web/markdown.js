@@ -3,15 +3,27 @@
 // inline code, bold, italic, links to http, https and mailto addresses, and bare
 // http and https addresses. With a cardLink option, [[card-id]] becomes what it returns.
 const URL_TAIL = /[.,;:!?'"*_]+$/;
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+/**
+ * As in CommonMark, an underscore next to a letter or digit on its outer side never opens or closes emphasis,
+ * so MY_SERVICE_API_KEY stays one word, and the text inside must not start or end with a space. Stars have no
+ * such rule, so un*frigging*believable keeps its emphasis. A check in code, since some phone browsers lack regex lookbehind.
+ */
+function underscoreEmphasis(text, at, match) {
+  const before = text[at - 1] || '';
+  const after = text[at + match.length] || '';
+  return !WORD_CHAR.test(before) && !WORD_CHAR.test(after) && !/^\s|\s$/.test(match.slice(1, -1));
+}
+
 function inline(h, text, key, opts = {}) {
   const out = [];
-  // As in CommonMark, an underscore next to a letter or digit on its outer side never opens or closes emphasis,
-  // so MY_SERVICE_API_KEY stays one word. A star can, so un*frigging*believable keeps its emphasis.
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*|(?<![\p{L}\p{N}])_(?!\s)[^_]+?(?<!\s)_(?![\p{L}\p{N}]))|\[\[([\w.:-]+)\]\]|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()[\]]+)/gu;
+  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*|_[^_]+_)|\[\[([\w.:-]+)\]\]|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()[\]]+)/g;
   let last = 0;
   let m;
   let n = 0;
   while ((m = re.exec(text))) {
+    // An underscore pair that is not emphasis stays text, and the scan resumes one character later.
+    if (m[3] && m[3][0] === '_' && !underscoreEmphasis(text, m.index, m[3])) { re.lastIndex = m.index + 1; continue; }
     if (m.index > last) out.push(text.slice(last, m.index));
     const k = `${key}.${n++}`;
     const a = (href, label) => h('a', { key: k, href, target: '_blank', rel: 'noopener noreferrer' }, label);

@@ -35,3 +35,14 @@ describe('emphasis with underscores, as CommonMark reads it', () => {
     assert.deepEqual(texts('a _ b _ c', 'em'), []);
   });
 });
+
+describe('the scan after an underscore that is not emphasis', () => {
+  it('still finds emphasis that starts at the rejected closing underscore', () => {
+    assert.deepEqual(texts('a_b _c_ d', 'em'), ['c']);
+  });
+
+  it('uses no regex lookbehind, which some phone browsers cannot parse', async () => {
+    const fs = await import('node:fs');
+    assert.equal(/\(\?<[=!]/.test(fs.readFileSync(new URL('../../web/markdown.js', import.meta.url), 'utf8')), false);
+  });
+});
