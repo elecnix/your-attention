@@ -225,9 +225,12 @@ export function describeAnswer(card: Card, answer: Answer): string {
   }
   for (const [k, v] of Object.entries(answer.values)) {
     if (card.questions?.length && /^q\d+$/.test(k)) continue;
-    const label = k === 'choice' && card.options
-      ? [v].flat().map((x) => card.options?.find((o) => o.id === x)?.label ?? String(x)).join(', ')
-      : [v].flat().join(', ');
+    // A check box or switch group answers with each item on or off, by the item names the agent gave.
+    const on = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => (v as Record<string, unknown>)[x]) : undefined;
+    const label = on ? on.join(', ') || '(none turned on)'
+      : k === 'choice' && card.options
+        ? [v].flat().map((x) => card.options?.find((o) => o.id === x)?.label ?? String(x)).join(', ')
+        : [v].flat().join(', ');
     lines.push(`${k}: ${label}`);
   }
   if (answer.comment) lines.push(`Comment: ${answer.comment}`);

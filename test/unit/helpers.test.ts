@@ -28,6 +28,11 @@ describe('describeAnswer', () => {
     assert.equal(describeAnswer(c, answer({ values: { q0: ['4815'] } })), 'Which port? 4815\nWhich host? (no option picked)');
   });
 
+  it('lists the items turned on in a check box or switch group, by their names', () => {
+    const values = { checks42: { dry: true, review: false, rollback: true }, flags42: { keepOld: false }, retries41: 5 };
+    assert.equal(describeAnswer(card(), answer({ values })), 'checks42: dry, rollback\nflags42: (none turned on)\nretries41: 5');
+  });
+
   it('says so when the answer is empty', () => {
     assert.match(describeAnswer(card(), answer()), /empty answer/);
   });
