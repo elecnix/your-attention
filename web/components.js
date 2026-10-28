@@ -362,7 +362,7 @@ export function PhoneLink() {
       let d = '';
       for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (code.isDark(y, x)) d += `M${x} ${y}h1v1h-1z`;
       if (live) setQr({ n, d });
-    });
+    }, () => { if (live) setQr({ failed: true }); });
     return () => { live = false; };
   }, [open]);
   const close = () => { ref.current?.close(); setOpen(false); setCopied(false); };
@@ -375,7 +375,9 @@ export function PhoneLink() {
     open && h('dialog', { ref, className: 'qr-dialog', onClose: close, onClick: (e) => { if (e.target === ref.current) close(); }, 'aria-labelledby': 'qr-title' },
       h('h2', { id: 'qr-title' }, 'Open this inbox on your phone'),
       h('p', null, 'Scan the code with the phone camera.'),
-      h('div', { className: 'qr' }, qr
+      h('div', { className: 'qr' }, qr && qr.failed
+        ? h('p', { className: 'qr-failed' }, 'The QR code did not load. Copy the address below instead.')
+        : qr
         ? h('svg', { viewBox: `-4 -4 ${qr.n + 8} ${qr.n + 8}`, role: 'img', 'aria-label': `QR code of ${address}`, shapeRendering: 'crispEdges' },
           h('rect', { x: -4, y: -4, width: qr.n + 8, height: qr.n + 8, fill: '#fff' }), h('path', { d: qr.d, fill: '#000' }))
         : h('span', { className: 'muted' }, 'Drawing the code…')),

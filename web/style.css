@@ -150,7 +150,7 @@
      Sizes scale by --text-scale rather than CSS zoom, which misplaces clicks inside an HTML card's frame. */
   body, body * { font-family: var(--font-text) !important; font-weight: 200 !important; letter-spacing: .02em !important; }
   h1, h2, h3, h4, h5, h6, strong, b, th { font-weight: 300 !important; }
-  code, code *, pre, pre *, kbd, samp,
+  code, code *, pre, pre *, kbd, samp, .qr-address,
   .openui-tool-call__request, .openui-tool-call__response, .openui-tool-code-block__code, .openui-tool-result__output {
     font-family: var(--font-code) !important; letter-spacing: normal !important;
   }

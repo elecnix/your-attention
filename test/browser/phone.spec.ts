@@ -96,3 +96,11 @@ test.describe('on an iPhone', () => {
     await expect(page.getByRole('dialog')).toBeHidden();
   });
 });
+
+test('the dialog says so when the QR code cannot load, and still shows the address', async ({ page }) => {
+  await page.route('**/vendor/qrcode.mjs', (route) => route.fulfill({ status: 404, body: '' }));
+  await inbox.open(page);
+  await page.getByRole('button', { name: 'Open this inbox on your phone' }).click();
+  await expect(page.locator('.qr-failed')).toContainText('did not load');
+  await expect(page.locator('.qr-address')).toHaveCSS('font-family', /mono|Menlo|Courier|Code/i);
+});
