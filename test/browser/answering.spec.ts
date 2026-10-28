@@ -87,6 +87,22 @@ test('an HTML card stays hidden until the owner allows it, then answers from its
   await expect.poll(async () => (await inbox.state()).answers['html']?.values).toEqual({ colour: 'blue' });
 });
 
+test('a link in an HTML card opens in a new tab', async ({ page, context }) => {
+  await context.route('https://example.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Linked page</title>' }));
+  await inbox.agent.post({ id: 'html-link', agent: 's-html-link', title: 'Read the linked page', html: '<a id=l href="https://example.com/pr/12">Pull request 12</a>', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Read the linked page' }).click();
+  // An earlier test may have turned HTML cards on for the whole inbox.
+  const show = page.getByRole('button', { name: 'Show this card' });
+  if (await show.isVisible()) await show.click();
+  const opened = context.waitForEvent('page');
+  await page.frameLocator('iframe.html-card').locator('#l').click();
+  const tab = await opened;
+  await tab.waitForLoadState();
+  expect(tab.url()).toBe('https://example.com/pr/12');
+  expect(await tab.evaluate(() => window.opener)).toBeNull();
+});
+
 test('an HTML card shows once on request, and the owner can stop showing them from the card', async ({ page }) => {
   await inbox.server.inbox.setSettings({ allowHtml: false });
   await inbox.agent.post({ id: 'html-once', agent: 's-html-once', title: 'Pick a shape', html: '<p id=p>Square</p>', priority: 'now' });

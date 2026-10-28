@@ -344,6 +344,8 @@ export function Attachments({ files }) {
 // The frame answers by posting a message: yourAttention.answer(values, comment).
 // The frame may not load or send anything over the network: the card shows only what it brings.
 export const FRAME_POLICY = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
+// Links open in a new tab: a page loaded inside the frame would run sandboxed, and most sites refuse to be framed.
+export const FRAME_LINKS = '<base target="_blank">';
 export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){parent.postMessage({yourAttention:"answer",values:v||{},comment:c||""},"*")}};<\/script>';
 /** Turn showing HTML cards on or off for the whole inbox. */
 const setAllowHtml = (on) => fetch(BASE + 'v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: on }) });
@@ -371,7 +373,8 @@ export function HtmlCard({ card, allowed, onAnswer }) {
         h('button', { type: 'button', className: 'btn', onClick: () => allow(true) }, 'Always show HTML cards')));
   }
   return h(React.Fragment, null,
-    h('iframe', { ref, className: 'html-card', sandbox: 'allow-scripts allow-forms', srcDoc: FRAME_POLICY + FRAME_BRIDGE + card.html, title: card.title }),
+    // The new tab leaves the sandbox, so the linked page works as it does anywhere. It opens without a reference back to this page.
+    h('iframe', { ref, className: 'html-card', sandbox: 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox', srcDoc: FRAME_POLICY + FRAME_LINKS + FRAME_BRIDGE + card.html, title: card.title }),
     always
       ? h('button', { type: 'button', className: 'link html-off', onClick: () => { setOnce(null); allow(false); } }, 'Stop showing HTML cards')
       : h('button', { type: 'button', className: 'link html-off', onClick: () => allow(true) }, 'Always show HTML cards'));
