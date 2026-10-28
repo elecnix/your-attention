@@ -84,7 +84,7 @@ gh variable set KV_NAMESPACE_ID --env cloudflare --body "$(terraform -chdir=clou
 npx wrangler kv key put invite:<code> 5 --binding INVITES --remote   # hosted mode: an invite with 5 uses
 ```
 
-Single mode also needs `CLOUDFLARE_ACCOUNT_ID` and an `OWNER_TOKEN` secret in that environment. An owner token is 12 hex digits, a dot, and 64 hex digits: `echo "$(openssl rand -hex 6).$(openssl rand -hex 32)"`. The account needs R2 enabled once in the dashboard, and a workers.dev subdomain. Each cloud inbox takes 600 API requests a minute and 100 MB of files over its life, and R2 deletes each file after 30 days.
+Single mode also needs `CLOUDFLARE_ACCOUNT_ID` and an `OWNER_TOKEN` secret in that environment. An owner token is 12 hex digits, a dot, and 64 hex digits: `echo "$(openssl rand -hex 6).$(openssl rand -hex 32)"`. The account needs R2 enabled once in the dashboard, and a workers.dev subdomain. The Worker is named `app`, so it answers at `https://app.<subdomain>.workers.dev`. Each cloud inbox takes 600 API requests a minute and 100 MB of files over its life, and R2 deletes each file after 30 days.
 
 Another machine on the LAN finds the inbox and pairs with it. Approve the card that shows the same code.
 
