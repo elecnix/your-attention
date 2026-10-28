@@ -93,7 +93,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `screen` | The terminal screen of a blocked agent. |
 | `priority` | The id of a priority level: `now`, `soon` (the default) or `later` unless the levels changed. |
 | `origin` | Where the session runs: `harness`, `session`, `name`, `host`, `cwd`, `herdrPane`, and the labels of the herdr workspace and tab, `herdrWorkspace` and `herdrTab`. The integration fills it in when the agent posts, and the inbox keeps each field to 200 characters. |
-| `from` | The name the agent gives itself, such as `the release agent`, at most 80 characters. It is only a label: the token that posted the card owns it. |
+| `from` | A label the agent picks for itself, such as `the release agent`, at most 80 characters. It changes nothing about access: only the token that posted a card can change that card. |
 | `tags` | String properties for grouping. |
 | `follows` | The card this one follows up on. The inbox sets `followedBy` on that card. |
 | `deliver` | `stream` (the default) or `none` for a card that only shows state. |
@@ -234,7 +234,7 @@ Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST 
 
 ## Pages
 
-`GET /v1/state` returns every card except the cleared ones, answer, presence record and card state. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`. On `code`, a hidden page reloads at once. A page someone looks at reloads once nothing has happened on it for 3 seconds and no field has focus, so it never takes a field away while the person types. Drafts and the scroll position come back after the reload. When the agent revises the card the person is answering, the form stays in place with its text and focus, and shows the new version. A pick names the option's id and label, so a revision that drops or relabels the picked option drops that pick.
+`GET /v1/state` returns every card except the cleared ones, answer, presence record and card state. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`. On `code`, a hidden page reloads at once. A page someone looks at reloads once nothing has happened on it for 3 seconds and no field has focus, so it never takes a field away while the person types. Drafts and the scroll position come back after the reload. When the agent revises a card while the person answers it, the form stays in place with its text and focus, and shows the new version. A pick records the option's id and label, so a revision that drops or relabels the picked option drops that pick.
 
 The tab icon is the ✋ emoji, `web/favicon.svg`. While a card waits for you, the page switches it to `web/favicon-waiting.svg`, which adds a red dot.
 
