@@ -53,7 +53,10 @@ export default {
     const url = new URL(req.url);
     if (env.MODE !== 'hosted') {
       if (url.pathname.startsWith('/v1/')) {
-        if (env.OWNER_TOKEN) await env.INBOX.get(env.INBOX.idFromName('main')).fetch('https://inbox/_init', { method: 'POST', body: JSON.stringify({ ownerToken: env.OWNER_TOKEN }) });
+        if (env.OWNER_TOKEN) {
+          const init = await env.INBOX.get(env.INBOX.idFromName('main')).fetch('https://inbox/_init', { method: 'POST', body: JSON.stringify({ ownerToken: env.OWNER_TOKEN }) });
+          if (!init.ok) return json(await init.json().catch(() => ({ error: 'the inbox did not start' })), init.status);
+        }
         return toInbox(env, 'main', req, url.pathname, url.search);
       }
       return asset(env, req, url.pathname);

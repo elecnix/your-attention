@@ -91,7 +91,11 @@ export class InboxObject {
       // The Worker calls this once per inbox. The object is never reachable from outside without the Worker.
       const { ownerToken } = (await req.json()) as { ownerToken?: string };
       if (ownerToken) {
-        if (!(await this.inbox.authenticate(ownerToken))) await this.inbox.adoptToken(ownerToken, 'owner from the deployment', 'owner');
+        try {
+          if (!(await this.inbox.authenticate(ownerToken))) await this.inbox.adoptToken(ownerToken, 'owner from the deployment', 'owner');
+        } catch (e) {
+          return Response.json({ error: `the OWNER_TOKEN secret is wrong: ${(e as Error).message}` }, { status: 500 });
+        }
         return Response.json({ ok: true });
       }
       const { secret } = await this.inbox.createToken('owner of this hosted inbox', 'owner');

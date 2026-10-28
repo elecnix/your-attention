@@ -43,12 +43,16 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
+          OWNER_TOKEN: ${{ secrets.OWNER_TOKEN }}
+          MODE: ${{ inputs.mode }}
         run: |
           missing=""
           [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
           [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
           [ -n "$KV_NAMESPACE_ID" ] || missing="$missing KV_NAMESPACE_ID"
+          if [ "$MODE" = single ]; then [ -n "$OWNER_TOKEN" ] || missing="$missing OWNER_TOKEN"; fi
           if [ -n "$missing" ]; then echo "::error::the cloudflare environment lacks:$missing"; exit 1; fi
+          if [ "$MODE" = single ] && ! printf %s "$OWNER_TOKEN" | grep -Eq '^[0-9a-f]{12}\.[0-9a-f]{64}$'; then echo "::error::OWNER_TOKEN must be 12 hex digits, a dot, and 64 hex digits"; exit 1; fi
       - name: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -66,5 +70,4 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OWNER_TOKEN: ${{ secrets.OWNER_TOKEN }}
         run: |
-          if [ -z "$OWNER_TOKEN" ]; then echo "::error::single mode needs the OWNER_TOKEN secret"; exit 1; fi
           printf %s "$OWNER_TOKEN" | npx wrangler secret put OWNER_TOKEN

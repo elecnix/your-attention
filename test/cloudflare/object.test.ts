@@ -150,3 +150,11 @@ describe('the upload limit setting', () => {
     assert.equal(uploadLimit('-5'), 0);
   });
 });
+
+describe('the owner token from the deployment', () => {
+  it('answers 500 with the reason when the OWNER_TOKEN secret is not a token', async () => {
+    const res = await call(runtime().make(), 'POST', '/_init', undefined, { ownerToken: 'a'.repeat(64) });
+    assert.equal(res.status, 500);
+    assert.match(((await res.json()) as { error: string }).error, /OWNER_TOKEN.*12 hex digits/);
+  });
+});
