@@ -390,3 +390,23 @@ test('the queue headers use the text color, and the cards you sent are dimmer th
   await expect.poll(() => color(page.locator('.q', { hasText: 'Already sent' }).locator('.t'))).toBe(muted);
   expect(await color(page.locator('.q', { hasText: 'Still waits' }).locator('.t'))).toBe(inkRgb);
 });
+
+test('a tall HTML card and a long attachment grow with the card, so the page is the only scroll', async ({ page }) => {
+  const b64 = (s: string) => Buffer.from(s).toString('base64');
+  const long = Array.from({ length: 80 }, (_, i) => `- line ${i + 1}`).join('\n');
+  await inbox.agent.post({ id: 'tall', agent: 's-tall', title: 'A tall card', priority: 'now',
+    html: '<div id=top>Top</div><div style="height:1500px"></div><div id=end>End</div>',
+    attachments: [{ src: `data:text/markdown;base64,${b64(`# Notes\n\n${long}`)}`, name: 'notes.md' }] });
+  await inbox.server.inbox.setSettings({ allowHtml: true });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'A tall card' }).click();
+  const show = page.getByRole('button', { name: 'Show this card' });
+  if (await show.isVisible()) await show.click();
+  const frame = page.locator('iframe.html-card');
+  await expect.poll(async () => (await frame.boundingBox())?.height ?? 0).toBeGreaterThan(1500);
+  const inner = await page.frameLocator('iframe.html-card').locator('html').evaluate((el) => el.scrollHeight - el.clientHeight);
+  expect(inner).toBeLessThanOrEqual(1);
+  const md = page.locator('.file .markdown');
+  await expect(md).toContainText('line 80');
+  expect(await md.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
+});

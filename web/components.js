@@ -346,7 +346,12 @@ export function Attachments({ files }) {
 export const FRAME_POLICY = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
 // Links open in a new tab: a page loaded inside the frame would run sandboxed, and most sites refuse to be framed.
 export const FRAME_LINKS = '<base target="_blank">';
-export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){parent.postMessage({yourAttention:"answer",values:v||{},comment:c||""},"*")}};<\/script>';
+// The frame also reports its content height, so the page sizes it to fit and the card has one scroll: the page's.
+export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){parent.postMessage({yourAttention:"answer",values:v||{},comment:c||""},"*")}};'
+  + '(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.scrollHeight);if(h!==last){last=h;parent.postMessage({yourAttention:"height",height:h},"*")}}'
+  + 'new ResizeObserver(send).observe(document.documentElement);addEventListener("load",send)})();<\/script>';
+/** The tallest frame the page makes, so a card cannot grow the page without bound. The frame's height also takes its 2px of border. */
+const MAX_FRAME_HEIGHT = 20000;
 /** Turn showing HTML cards on or off for the whole inbox. */
 const setAllowHtml = (on) => fetch(BASE + 'v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: on }) });
 
@@ -355,10 +360,13 @@ export function HtmlCard({ card, allowed, onAnswer }) {
   const ref = React.useRef(null);
   const [once, setOnce] = React.useState(null);
   const [always, setAlways] = React.useState(allowed);
+  const [height, setHeight] = React.useState(null);
   React.useEffect(() => setAlways(allowed), [allowed]);
   React.useEffect(() => {
     const listen = (e) => {
-      if (!ref.current || e.source !== ref.current.contentWindow || !e.data || e.data.yourAttention !== 'answer') return;
+      if (!ref.current || e.source !== ref.current.contentWindow || !e.data) return;
+      if (e.data.yourAttention === 'height') { const px = Number(e.data.height); if (px > 0) setHeight(Math.min(px, MAX_FRAME_HEIGHT)); return; }
+      if (e.data.yourAttention !== 'answer') return;
       onAnswer(typeof e.data.values === 'object' && e.data.values ? e.data.values : {}, String(e.data.comment || ''));
     };
     window.addEventListener('message', listen);
@@ -374,7 +382,7 @@ export function HtmlCard({ card, allowed, onAnswer }) {
   }
   return h(React.Fragment, null,
     // The new tab leaves the sandbox, so the linked page works as it does anywhere. It opens without a reference back to this page.
-    h('iframe', { ref, className: 'html-card', sandbox: 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox', srcDoc: FRAME_POLICY + FRAME_LINKS + FRAME_BRIDGE + card.html, title: card.title }),
+    h('iframe', { ref, className: 'html-card', style: height ? { height: `calc(${height}px + 2px)` } : undefined, sandbox: 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox', srcDoc: FRAME_POLICY + FRAME_LINKS + FRAME_BRIDGE + card.html, title: card.title }),
     always
       ? h('button', { type: 'button', className: 'link html-off', onClick: () => { setOnce(null); allow(false); } }, 'Stop showing HTML cards')
       : h('button', { type: 'button', className: 'link html-off', onClick: () => allow(true) }, 'Always show HTML cards'));
