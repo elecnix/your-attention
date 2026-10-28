@@ -236,18 +236,19 @@ export function App() {
     setTimeout(() => { if (pinnedRef.current === c.id) pinnedRef.current = null; setFocus((f) => (f === c.id || f === null ? null : f)); }, 700);
   }
 
-  const item = (c) => {
+  const item = (c, dim) => {
     const s = st(c);
     const prio = h('span', { className: `prio small ${levelOf(c)}` }, label(levelOf(c)));
     const icon = s === 'closed' ? c.closed.kind : s;
     const tip = s === 'closed' ? CLOSED_LABEL[c.closed.kind] : STATE_LABEL[s];
-    return h('button', { key: c.id, className: `q ${current && current.id === c.id ? 'focus' : ''}`, onClick: () => open(c.id) },
+    return h('button', { key: c.id, className: `q${current && current.id === c.id ? ' focus' : ''}${dim ? ' dim' : ''}`, onClick: () => open(c.id) },
       h('span', { className: 't' }, c.title, fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio),
       h(Icon, { name: icon, tip, cls: `s ${s}` }));
   };
   const group = (title, items, empty, cls) => h(React.Fragment, { key: title },
     h('h3', { className: cls }, title),
-    items.length ? items.map(item) : h('div', { className: 'empty' }, empty));
+    // The cards you sent are done with: they read dimmer than the ones that wait for you.
+    items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty));
 
   // No grouping by default. The choices follow the properties the cards carry.
   const tagKeys = [...new Set(visible.flatMap((c) => Object.keys(c.tags || {})))].sort();

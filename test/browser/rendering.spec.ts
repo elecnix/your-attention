@@ -374,3 +374,19 @@ test('skip for now walks down the queue in its order, and wraps around at the en
     await own.close();
   }
 });
+
+test('the queue headers use the text color, and the cards you sent are dimmer than the ones that wait', async ({ page }) => {
+  await inbox.agent.post({ id: 'waits-dim', agent: 's-dim', title: 'Still waits', priority: 'now' });
+  await inbox.agent.post({ id: 'sent-dim', agent: 's-dim', title: 'Already sent', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Already sent' }).click();
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  const color = (l: import('@playwright/test').Locator) => l.evaluate((el) => getComputedStyle(el).color);
+  const ink = await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--ink').trim());
+  const muted = await page.evaluate(() => { const d = document.createElement('div'); d.style.color = 'var(--muted)'; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; });
+  const inkRgb = await page.evaluate((v) => { const d = document.createElement('div'); d.style.color = v; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c; }, ink);
+  await page.locator('.focus-card').click();
+  await expect.poll(() => color(page.locator('.queue h3', { hasText: 'Sent, newest first' }))).toBe(inkRgb);
+  await expect.poll(() => color(page.locator('.q', { hasText: 'Already sent' }).locator('.t'))).toBe(muted);
+  expect(await color(page.locator('.q', { hasText: 'Still waits' }).locator('.t'))).toBe(inkRgb);
+});
