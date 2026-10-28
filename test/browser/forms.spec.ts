@@ -16,10 +16,11 @@ r1 = RadioGroup("merge12", [RadioItem("Merge it", "", "yes"), RadioItem("Wait", 
 c2 = FormControl("Checks for #12", k1)
 k1 = CheckBoxGroup("checks12", [CheckBoxItem("Rerun CI", "", "ci"), CheckBoxItem("Ask a reviewer", "", "review")])
 mid = TextContent("#13 changes the deploy script.")
-pr13 = Form("pr13", none, [c3, flags])
+pr13 = Form("pr13", none, [c3, flags, note])
 c3 = FormControl("Merge #13?", s1)
 s1 = Select("merge13", [SelectItem("yes", "Merge it"), SelectItem("no", "Wait")])
-flags = SwitchGroup("flags13", [SwitchItem("Deploy after merge", "", "deploy")])`;
+flags = SwitchGroup("flags13", [SwitchItem("Deploy after merge", "", "deploy")])
+note = Input("ticket", "Ticket")`;
 
 test('one send carries every form on the card, with the comment the page adds below them', async ({ page }) => {
   await inbox.agent.post({ id: 'forms', agent: 's-forms', title: 'Two pull requests', body, priority: 'now' });
@@ -31,22 +32,22 @@ test('one send carries every form on the card, with the comment the page adds be
   await card.getByText('Rerun CI').click();
   await card.getByText('Deploy after merge').click();
   await card.locator('textarea').fill('Merge #12 first.');
+  await card.getByPlaceholder('Ticket').fill('T-7');
   await expect(card.getByRole('button', { name: 'Skip for now' })).toBeVisible();
   await card.getByRole('button', { name: 'Send answer' }).click();
   await expect.poll(() => ev.events.find((e) => e.type === 'answer')?.type).toBe('answer');
   const a = ev.events.find((e) => e.type === 'answer');
-  expect(a?.type === 'answer' && a.answer.values).toEqual({ merge12: 'yes', checks12: { ci: true, review: false }, flags13: { deploy: true } });
+  expect(a?.type === 'answer' && a.answer.values).toEqual({ merge12: 'yes', checks12: { ci: true, review: false }, flags13: { deploy: true }, ticket: 'T-7' });
   expect(a?.type === 'answer' && a.answer.comment).toBe('Merge #12 first.');
   await page.waitForTimeout(1000);
   await page.locator('.q', { hasText: 'Two pull requests' }).click();
-  await expect(page.locator('.note.ok')).toHaveText('Your answer: Merge #12?: Merge it\nChecks for #12: Rerun CI\nDeploy after merge\nMerge #12 first.');
+  await expect(page.locator('.note.ok')).toHaveText('Your answer: Merge #12?: Merge it\nChecks for #12: Rerun CI\nDeploy after merge\nticket: T-7\nMerge #12 first.');
 });
 
 test('a card with its own comment field and buttons gets no second comment field', async ({ page }) => {
   const own = `root = Card([f])
 f = Form("f", b, [fc])
-fc = FormControl("Why?", comment)
-comment = TextArea("comment", "Say why", 2)
+fc = FormControl("Why?", TextArea("comment", "Say why", 2))
 b = Buttons([go])
 go = Button("Decide", @ToAssistant("send answer"), "primary")`;
   await inbox.agent.post({ id: 'own', agent: 's-own', title: 'Own comment field', body: own, priority: 'now' });

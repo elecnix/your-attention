@@ -66,7 +66,9 @@ export function cardSource(c) {
 // Every card ends with a comment field, Send answer and Skip. The page's statements start with ya, so they leave
 // the agent's names alone. A body that has a field named comment keeps its own.
 function withAnswerFooter(body) {
-  const ownComment = Object.values(parseSource(body)).some((s) => s.args[0] === 'comment' && /^(TextArea|Input)$/.test(s.call));
+  // A field named comment counts wherever it is written: in a statement of its own, or in place inside another call.
+  const named = (v) => !!v && typeof v === 'object' && (Array.isArray(v) ? v.some(named) : v.call ? v.args[0] === 'comment' || v.args.some(named) : false);
+  const ownComment = Object.values(parseSource(body)).some(named);
   return [
     'root = Card([yaBody, yaAnswer])',
     body.replace(/^\s*root\s*=/m, 'yaBody ='),
@@ -207,7 +209,9 @@ export function describe(card, a) {
     const picked = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => v[x]) : list;
     const shown = picked.map((x) => (f && f.choices[x]) || x).join(', ');
     if (!shown) return '';
-    return f && f.label ? `${f.label}: ${shown}` : shown;
+    // A field without a label keeps its name, unless its choices carry the labels, as a switch group's do.
+    const label = (f && f.label) || (f && Object.keys(f.choices).length ? '' : k);
+    return label ? `${label}: ${shown}` : shown;
   });
   return [...picks, a.comment].filter(Boolean).join('\n') || 'Empty answer';
 }
