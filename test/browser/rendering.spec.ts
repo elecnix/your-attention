@@ -426,7 +426,7 @@ test('a short HTML card shrinks to its content and stays that height', async ({ 
 
 test('a card body reads in the dim text color, with its title and bold words in the bright one', async ({ page }) => {
   await inbox.agent.post({ id: 'dim-body', agent: 's-dim-body', title: 'Dim body', text: 'Plain words and **bold words**.', recommendation: 'Do the safe thing.', options: [{ id: 'o1', label: 'Go' }], priority: 'now',
-    body: 'root = Card([t, tbl])\nt = TextContent("Body text from OpenUI.")\ntbl = Table([Col("Ticket", ["T-1"])])' });
+    body: 'root = Card([head, t, tbl, f])\nhead = CardHeader("Ticket header", "Its subtitle")\nt = TextContent("Body text from OpenUI.")\ntbl = Table([Col("Ticket", ["T-1"])])\nf = Form("f", none, [fc])\nnone = Buttons([])\nfc = FormControl("Priority", RadioGroup("prio", [RadioItem("Urgent", "", "u"), RadioItem("Low", "", "l")]))' });
   await inbox.open(page);
   await page.locator('.q', { hasText: 'Dim body' }).click();
   const color = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).color);
@@ -437,4 +437,9 @@ test('a card body reads in the dim text color, with its title and bold words in 
   expect(await color('.focus-card .card-title')).toBe(ink);
   expect(await page.locator('.focus-card').getByText('Body text from OpenUI.').evaluate((el) => getComputedStyle(el).color)).toBe(muted);
   expect(await page.locator('.focus-card td').first().evaluate((el) => getComputedStyle(el).color)).toBe(muted);
+  const textColor = (text: string) => page.locator('.focus-card').getByText(text, { exact: true }).first().evaluate((el) => getComputedStyle(el).color);
+  expect(await textColor('Ticket header')).toBe(ink);
+  expect(await textColor('Its subtitle')).toBe(muted);
+  expect(await textColor('Priority')).toBe(ink);
+  expect(await textColor('Urgent')).toBe(muted);
 });

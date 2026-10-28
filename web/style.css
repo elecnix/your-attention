@@ -59,12 +59,12 @@
   .focus-card pre, .focus-card code { max-width: 100%; overflow-x: auto; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
   .closed-line .o { overflow-wrap: anywhere; }
   .focus-card { min-width: 0; overflow-x: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
-  /* A card's body reads in a dim text color, 5% brighter than the cards you sent, so it reads well without glare. The title, headings, bold words and the
-     labels of the answer controls keep the bright one, so they stand out. OpenUI's own text takes the same colors. */
+  /* A card's body reads in a dim text color, 5% brighter than the cards you sent, so it reads well without glare. The title, headings, bold words, card
+     headers and question labels keep the bright one, so they stand out. The choices under a question read as body text. OpenUI's own text takes the same colors. */
   .focus-card { --openui-text-neutral-primary: var(--body-text); --openui-text-neutral-secondary: var(--body-text); }
   .card-text, .file .markdown { color: var(--body-text); }
   .card-text :is(strong, b, h1, h2, h3, h4, h5, h6), .file .markdown :is(strong, b, h1, h2, h3, h4, h5, h6),
-  .focus-card :is(.openui-radio-item-label, .openui-checkbox-item-label, .openui-switch-item-label, .openui-label, .openui-option-card__title, .openui-callout-title) { color: var(--ink); }
+  .focus-card :is(.openui-header-top-left, .openui-label, .openui-callout-title) { color: var(--ink); }
   .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .prio { font-weight: 700; white-space: nowrap; padding: 2px 8px; border-radius: 6px; font-size: calc(12px * var(--text-scale)); }
   .prio.now { color: var(--bad); background: var(--bad-bg); }
