@@ -5,6 +5,7 @@ name: deploy-cloudflare
 #   secrets   CLOUDFLARE_API_TOKEN (the deploy token: Workers Scripts Write, Account Settings Read) and CLOUDFLARE_ACCOUNT_ID
 #   variable  KV_NAMESPACE_ID, the namespace for invite codes and inbox ids
 #   secret    OWNER_TOKEN, in single mode: the owner token the Worker gets as its OWNER_TOKEN secret
+#   secret    INBOX_ID_SECRET, in hosted mode: the key that signs inbox addresses. Changing it makes every address invalid
 on:
   workflow_dispatch:
     inputs:
@@ -44,6 +45,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
           OWNER_TOKEN: ${{ secrets.OWNER_TOKEN }}
+          INBOX_ID_SECRET: ${{ secrets.INBOX_ID_SECRET }}
           MODE: ${{ inputs.mode }}
         run: |
           missing=""
@@ -51,6 +53,7 @@ jobs:
           [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
           [ -n "$KV_NAMESPACE_ID" ] || missing="$missing KV_NAMESPACE_ID"
           if [ "$MODE" = single ]; then [ -n "$OWNER_TOKEN" ] || missing="$missing OWNER_TOKEN"; fi
+          if [ "$MODE" = hosted ]; then [ -n "$INBOX_ID_SECRET" ] || missing="$missing INBOX_ID_SECRET"; fi
           if [ -n "$missing" ]; then echo "::error::the cloudflare environment lacks:$missing"; exit 1; fi
           if [ "$MODE" = single ] && ! printf %s "$OWNER_TOKEN" | grep -Eq '^[0-9a-f]{12}\.[0-9a-f]{64}$'; then echo "::error::OWNER_TOKEN must be 12 hex digits, a dot, and 64 hex digits"; exit 1; fi
       - name: deploy
@@ -71,3 +74,10 @@ jobs:
           OWNER_TOKEN: ${{ secrets.OWNER_TOKEN }}
         run: |
           printf %s "$OWNER_TOKEN" | npx wrangler secret put OWNER_TOKEN
+      - name: set the inbox address key
+        if: inputs.mode == 'hosted'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          INBOX_ID_SECRET: ${{ secrets.INBOX_ID_SECRET }}
+        run: printf %s "$INBOX_ID_SECRET" | npx wrangler secret put INBOX_ID_SECRET

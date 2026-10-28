@@ -26,6 +26,13 @@ export interface Caller {
   role: Role;
 }
 
+export interface InboxOptions {
+  keepPresence?: boolean;
+  uploadLimitBytes?: number | undefined;
+  storageLimitBytes?: number | undefined;
+  attachmentReadsPerDay?: number | undefined;
+}
+
 export const SYSTEM_AGENT = 'system';
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_PAIRINGS = 5;
@@ -52,6 +59,17 @@ export const DEFAULT_GUIDANCE = [
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+/** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
+export const MIN_FILE_CHARGE = 64 * 1024;
+/** The largest card, as stored, without its files. */
+export const MAX_CARD_BYTES = 256 * 1024;
+export const MAX_SOURCE_BYTES = 64 * 1024;
+export const MAX_VERSIONS = 50;
+export const MAX_REPLY_BYTES = 4096;
+export const MAX_REPLIES = 200;
+export const MAX_WEBHOOKS = 5;
+/** How long a closed pairing request and its card stay before the sweep deletes them. */
+export const PAIRING_KEEP_MS = 24 * 60 * 60 * 1000;
 
 const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']);
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
@@ -75,6 +93,8 @@ export class Inbox {
   private readonly store: Storage;
   private readonly blobs: BlobStore;
   private readonly uploadLimit: number | undefined;
+  private readonly storageLimit: number | undefined;
+  private readonly readsPerDay: number | undefined;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
@@ -86,12 +106,16 @@ export class Inbox {
   readonly deliveries = new Set<Promise<boolean>>();
 
   /** `keepPresence` is for a platform whose sockets outlive the object, such as a Durable Object that wakes from hibernation.
-   * `uploadLimitBytes` caps the bytes of every file this inbox ever stores. Deleting a file gives none back. */
-  constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs(), opts: { keepPresence?: boolean; uploadLimitBytes?: number | undefined } = {}) {
+   * `uploadLimitBytes` caps the bytes of every file this inbox ever stores. Deleting a file gives none back.
+   * `storageLimitBytes` caps what the inbox keeps in its storage now. A full inbox takes only writes that free space.
+   * `attachmentReadsPerDay` caps how many files the inbox serves in a day. */
+  constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs(), opts: InboxOptions = {}) {
     this.store = store;
     this.now = now;
     this.blobs = blobs;
     this.uploadLimit = opts.uploadLimitBytes;
+    this.storageLimit = opts.storageLimitBytes;
+    this.readsPerDay = opts.attachmentReadsPerDay;
     // On a laptop, connections do not survive a restart, so nobody is online at start.
     if (!opts.keepPresence) {
       for (const p of store.list<Presence>('presence')) {
@@ -113,7 +137,9 @@ export class Inbox {
   nextDeadline(): number | undefined {
     const times: number[] = [];
     for (const p of this.store.list<Presence>('presence')) if (p.online && p.leftAt !== undefined) times.push(p.leftAt + PRESENCE_GRACE_MS);
-    for (const p of this.store.list<Pairing>('pairings')) if (p.status === 'pending') times.push(p.createdAt + PAIRING_TTL_MS);
+    for (const p of this.store.list<Pairing>('pairings')) {
+      times.push(p.status === 'pending' || p.secret ? p.createdAt + PAIRING_TTL_MS : p.createdAt + PAIRING_KEEP_MS);
+    }
     for (const c of this.store.list<Card>('cards')) {
       if (c.triage?.state === 'pending' && c.triage.deadline) times.push(c.triage.deadline);
       if (c.expiresAt && !c.closed && !this.store.get('answers', c.id)) times.push(c.expiresAt);
@@ -203,12 +229,14 @@ export class Inbox {
 
   // ---- cards ----
 
-  postCard(caller: Caller, input: NewCard): Card {
+  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>): Card {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
     const title = String(input.title ?? '').trim();
     if (!title) throw new InboxError(400, 'title is required');
     const agent = String(input.agent ?? '').trim();
     if (!agent) throw new InboxError(400, 'agent is required');
+    if (agent.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (title.length > 300) throw new InboxError(400, 'title must be at most 300 characters');
     if (agent === SYSTEM_AGENT && caller.token !== '') throw new InboxError(403, 'the system agent is reserved');
     const levels = this.priorities();
     const priority = input.priority ?? (levels.some((l) => l.id === 'soon') ? 'soon' : levels[0]?.id ?? 'soon');
@@ -248,7 +276,13 @@ export class Inbox {
       if (!Array.isArray(input.attachments) || input.attachments.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
       attachments = input.attachments.map((f, i) => {
         if (!f || typeof f !== 'object') throw new InboxError(400, `attachment ${index(i)}: must be an object with src`);
-        if (f.ref) return f.ref;
+        if (f.ref) {
+          // A reference names a file this inbox stored: one postCardWithFiles just stored, or one the card already has.
+          const kept = before?.attachments?.find((a) => a.id !== undefined && a.id === f.ref?.id);
+          if (kept) return kept;
+          if (f.ref.id && storedFiles?.has(f.ref.id)) return f.ref;
+          throw new InboxError(400, `attachment ${index(i)}: ref must name a file this card already has`);
+        }
         const src = String(f.src ?? '');
         if (!/^https:\/\//.test(src)) throw new InboxError(400, `attachment ${index(i)}: src must be an https URL, or a data: URL posted through postCardWithFiles`);
         let last: string;
@@ -297,6 +331,8 @@ export class Inbox {
       closed: before?.closed?.kind === 'returned' ? undefined : before?.closed,
       replies: before?.replies ?? [],
     };
+    const size = JSON.stringify({ ...card, history: undefined }).length;
+    if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
     this.store.put('cards', id, card);
     this.store.index(id, searchText(card));
     if (card.follows && card.follows !== id) {
@@ -407,6 +443,7 @@ export class Inbox {
   addWebhook(hook: string, url: string, secret: string): Webhook {
     if (!isHook(hook)) throw new InboxError(400, `hook must be one of ${Object.keys(HOOKS).join(', ')}`);
     if (!/^https:\/\//.test(String(url))) throw new InboxError(400, 'url must be https');
+    if (this.webhooks().length >= MAX_WEBHOOKS) throw new InboxError(400, `an inbox takes at most ${MAX_WEBHOOKS} webhooks`);
     const w: Webhook = { id: randomId(6), hook, url: String(url), secret };
     this.store.put('meta', `webhook:${w.id}`, w);
     return w;
@@ -454,7 +491,7 @@ export class Inbox {
     if (files.some((f) => !f || typeof f !== 'object')) throw new InboxError(400, 'each attachment must be an object with src');
     const decoded = files.map((f, i) => (/^data:/.test(String(f?.src ?? '')) ? decodeDataUrl(i, f) : undefined));
     // Count the bytes before the first await, so two posts at once cannot both fit under the limit.
-    const bytes = decoded.reduce((n, d) => n + (d?.bytes.length ?? 0), 0);
+    const bytes = decoded.reduce((n, d) => n + (d ? Math.max(d.bytes.length, MIN_FILE_CHARGE) : 0), 0);
     const { used, limit } = this.uploads();
     if (limit !== undefined && used + bytes > limit) {
       throw new InboxError(413, `these files are ${bytes} bytes, and this inbox has stored ${used} of its lifetime limit of ${limit} bytes`);
@@ -486,7 +523,7 @@ export class Inbox {
     try {
       // Read the card again right before the commit, with no await between: another update may have landed meanwhile.
       prior = this.store.get<Card>('cards', id);
-      card = this.postCard(caller, { ...input, id, attachments: resolved });
+      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')));
     } catch (e) {
       await refund();
       throw e;
@@ -494,6 +531,11 @@ export class Inbox {
     const kept = new Set(card.attachments?.map((f) => f.id));
     await Promise.all((prior?.attachments ?? []).filter((f) => f.id && !kept.has(f.id)).map((f) => this.blobs.delete(f.id ?? '')));
     return card;
+  }
+
+  /** Whether the inbox keeps more than its storage limit. A full inbox takes only writes that free space. */
+  storageFull(): boolean {
+    return this.storageLimit !== undefined && (this.store.bytes?.() ?? 0) >= this.storageLimit;
   }
 
   /** The bytes of files this inbox has stored since it was created, and its lifetime limit, if it has one. */
@@ -509,6 +551,12 @@ export class Inbox {
     const file = card.attachments?.find((f) => f.id === id);
     const blob = file ? await this.blobs.get(id) : undefined;
     if (!file) throw new InboxError(404, 'unknown attachment');
+    if (this.readsPerDay !== undefined) {
+      const day = `reads:${new Date(this.now()).toISOString().slice(0, 10)}`;
+      const n = this.store.get<number>('meta', day) ?? 0;
+      if (n >= this.readsPerDay) throw new InboxError(429, `this inbox served its ${this.readsPerDay} files for today`);
+      this.store.put('meta', day, n + 1);
+    }
     // A cloud inbox deletes files after a while, and the card keeps listing them.
     if (!blob) throw new InboxError(410, `${file.name} is no longer stored`);
     return { file, bytes: blob.bytes };
@@ -558,8 +606,10 @@ export class Inbox {
   private saveVersion(kind: 'templates' | 'widgets', label: string, name: string, source: string, feedback?: string): Template {
     if (!/^[\w.-]{1,60}$/.test(String(name ?? ''))) throw new InboxError(400, `${label} name must be 1 to 60 letters, digits, dots, dashes or underscores`);
     if (!String(source ?? '').trim()) throw new InboxError(400, 'source is required');
+    if (String(source).length > MAX_SOURCE_BYTES) throw new InboxError(413, `source must be at most ${MAX_SOURCE_BYTES} characters`);
     const before = this.store.get<Template>(kind, name);
     const versions = before?.versions ?? [];
+    if (versions.length >= MAX_VERSIONS) throw new InboxError(400, `${label} ${name} has ${MAX_VERSIONS} versions, the most it keeps. Save it under a new name`);
     const next: Template = { name, versions: [...versions, { version: versions.length + 1, source: String(source), feedback: feedback ? String(feedback) : undefined, at: this.now() }] };
     this.store.put(kind, name, next);
     return next;
@@ -753,6 +803,8 @@ export class Inbox {
     const card = this.owned(caller, id);
     const clean = String(text || '').trim();
     if (!clean) throw new InboxError(400, 'text is required');
+    if (clean.length > MAX_REPLY_BYTES) throw new InboxError(413, `a reply must be at most ${MAX_REPLY_BYTES} characters`);
+    if (card.replies.length >= MAX_REPLIES) throw new InboxError(400, `a card takes at most ${MAX_REPLIES} replies`);
     const next: Card = { ...card, archivedAt: undefined, replies: [...card.replies, { text: clean, at: this.now(), seenAt: null }] };
     this.store.put('cards', id, next);
     this.emit({ type: 'change', card: id });
@@ -895,6 +947,7 @@ export class Inbox {
   /** An agent opens its stream. `instance` names the agent process, and stays the same across its reconnects.
    * Returns the function that closes it. */
   connect(caller: Caller, agent: string, send: AgentSend, instance?: string): () => void {
+    if (String(agent).length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     const k = this.key(caller.token, agent);
     let set = this.agents.get(k);
     if (!set) this.agents.set(k, (set = new Set()));
@@ -1030,7 +1083,23 @@ export class Inbox {
       }
     }
     for (const p of this.store.list<Pairing>('pairings')) {
-      if (p.status !== 'pending' || now - p.createdAt < PAIRING_TTL_MS) continue;
+      if (now - p.createdAt >= PAIRING_KEEP_MS) {
+        // A day later, the request and its card go, so pairing requests cannot pile up.
+        this.store.delete('pairings', p.id);
+        this.store.delete('cards', `pair-${p.id}`);
+        this.store.delete('answers', `pair-${p.id}`);
+        this.store.index(`pair-${p.id}`, '');
+        this.emit({ type: 'change', card: `pair-${p.id}` });
+        continue;
+      }
+      if (now - p.createdAt < PAIRING_TTL_MS) continue;
+      // A token nobody collected in time is dropped, so its secret never stays in storage.
+      if (p.secret) {
+        const { secret: _s, ...rest } = p;
+        this.store.put<Pairing>('pairings', p.id, rest);
+        continue;
+      }
+      if (p.status !== 'pending') continue;
       this.store.put<Pairing>('pairings', p.id, { ...p, status: 'denied' });
       const card = this.store.get<Card>('cards', `pair-${p.id}`);
       if (card && !card.closed) this.closeAs(card, 'resolved', 'The pairing request expired.');

@@ -158,3 +158,46 @@ describe('the owner token from the deployment', () => {
     assert.match(((await res.json()) as { error: string }).error, /OWNER_TOKEN.*12 hex digits/);
   });
 });
+
+describe('sockets that cost the inbox', () => {
+  it('closes a socket that answers pings but never signs in', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    await obj.fetch(new Request('https://inbox/v1/ws?agent=lurker', { headers: { upgrade: 'websocket' } }));
+    const server = rt.sockets[0]! as FakeSocket & { lastPong: Date | null };
+    server.lastPong = new Date();
+    (server.attachment as { connectedAt: number }).connectedAt = Date.now() - 11_000;
+    await obj.alarm();
+    assert.equal(server.closed, 1001);
+  });
+
+  it('closes a socket that sends more frames than its budget', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    await obj.fetch(new Request('https://inbox/v1/ws?agent=chatty', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
+    const server = rt.sockets[0]!;
+    for (let i = 0; i < 130 && server.closed === undefined; i++) await obj.webSocketMessage(server as never, '{"type":"ack","card":"none"}');
+    assert.equal(server.closed, 4429);
+  });
+
+  it('carries page events to the owner page over a socket, and refuses other tokens', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    const refused = await obj.fetch(new Request('https://inbox/v1/ws?page=1', { headers: { upgrade: 'websocket' } }));
+    assert.equal(refused.status, 401);
+    await obj.fetch(new Request('https://inbox/v1/ws?page=1&viewer=tab-1', { headers: { upgrade: 'websocket', cookie: `ya_token=${encodeURIComponent(owner)}` } }));
+    assert.equal(rt.sockets.length, 1, 'the owner cookie opens the page socket');
+    const page = rt.sockets[0]!;
+    await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 's1', title: 'Seen on the page?' });
+    assert.ok(page.sent.some((t: string) => JSON.parse(t).type === 'change'));
+  });
+
+  it('serves no event stream, since an open request keeps the object awake', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    assert.equal((await call(obj, 'GET', '/v1/events', owner)).status, 410);
+  });
+});

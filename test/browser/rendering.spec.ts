@@ -334,3 +334,11 @@ test('a blocked agent card offers the dialog choices, and saves the one you pick
     await expect.poll(async () => (await own.state()).answers['blk']?.values['choice']).toBe('o2');
   } finally { await own.close(); }
 });
+
+test('the page takes its events over a WebSocket, and a new card shows without a reload', async ({ page }) => {
+  const opened = page.waitForEvent('websocket', (ws) => /\/v1\/ws\?page=1/.test(ws.url()));
+  await inbox.open(page);
+  await opened;
+  await inbox.agent.post({ id: 'live', agent: 's-live', title: 'Arrives over the page socket', priority: 'now' });
+  await expect(page.getByText('Arrives over the page socket').first()).toBeVisible();
+});

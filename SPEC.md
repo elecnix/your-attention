@@ -48,7 +48,7 @@ A hook call without a verdict by its deadline follows the policy: `fail-open` pa
 
 ## Person presence
 
-Each page opens `GET /v1/events?viewer=<page id>` and reports `POST /v1/person/<page id> {visible, active, focus}`. The inbox combines the pages into `{pages, visible, activeAt, focus}` at `GET /v1/person`, for the owner and extensions. With two people on one inbox, each page counts.
+Each page opens a WebSocket at `/v1/ws?page=1&viewer=<page id>`, signed in with its cookie, and falls back to `GET /v1/events?viewer=<page id>` when the socket never opens. The page socket sends the same events as the stream. The page sends `{"type":"ping"}` every 2 seconds and gets `{"type":"pong"}`. Each page reports `POST /v1/person/<page id> {visible, active, focus}`. The inbox combines the pages into `{pages, visible, activeAt, focus}` at `GET /v1/person`, for the owner and extensions. With two people on one inbox, each page counts.
 
 ## Clients and tokens
 
@@ -133,9 +133,26 @@ The page renders `text` as Markdown: headings, lists, block quotes, fenced code,
 
 The inbox keeps the bytes of each `data:` attachment in its blob store, R2 in the Cloudflare build and files on disk on a laptop, and the card keeps a reference `{id, name, type, size, alt}`. It stores the bytes before it commits the card, so the card changes in one step. Replacing a card's attachments deletes the old files.
 
-An inbox built with `uploadLimitBytes` counts the bytes of every file it stores and refuses a card with 413 once a post would pass the limit. The count covers the inbox's whole life, so the count doesn't go down when a file is deleted, even by `reset`. A post that fails gives back the bytes it counted. The Cloudflare build sets the limit from `UPLOAD_LIMIT_BYTES`, 100 MB in `wrangler.jsonc`, and the laptop inbox has none.
+An inbox built with `uploadLimitBytes` counts the bytes of every file it stores and refuses a card with 413 once a post would pass the limit. Each file counts as at least 64 KB, so tiny files cannot make unlimited blob writes. The count covers the inbox's whole life, so the count doesn't go down when a file is deleted, even by `reset`. A post that fails gives back the bytes it counted. The Cloudflare build sets the limit from `UPLOAD_LIMIT_BYTES`, 100 MB in `wrangler.jsonc`, and the laptop inbox has none.
 
-A file the blob store no longer has, such as one R2 deleted after 30 days, answers 410. The card still lists it.
+A file the blob store no longer has, such as one R2 deleted after 30 days, answers 410. The card still lists it. An inbox built with `attachmentReadsPerDay` serves that many files a day and answers 429 after.
+
+A card's attachment may carry a `ref` only to a file the card already has, so a client keeps its files when it reposts a card. A `ref` to any other file is refused with 400.
+
+## Size limits
+
+Every inbox applies these:
+
+- A card is at most 256 KB as stored, without its files.
+- A title is at most 300 characters, and an agent id at most 80.
+- A template or widget source is at most 64 KB, and each name keeps at most 50 versions.
+- A reply is at most 4,096 characters, and a card takes at most 200 replies.
+- An inbox takes at most 5 webhooks.
+- A request body is at most 16 MB for a card post, 4 KB on the routes open without a token, and 1 MB elsewhere. The inbox reads `content-length` first, and stops reading a body that grows past the limit.
+
+An inbox built with `storageLimitBytes` refuses writes with 507 while it stores more than the limit. It still takes deletes, `reset`, `archive`, answers, closes, sign-in and presence reports, so the owner can make room.
+
+A pairing request and its card go a day after the request. An approved token that the client has not collected within 10 minutes goes from storage.
 
 `GET /v1/attachments/<id>` serves the bytes to owner and extension tokens, and to the client that posted the card. Images, PDF, Markdown, text, CSV and JSON come back inline, and every other type as a download with `content-type: application/octet-stream`. Each response has `x-content-type-options: nosniff` and a Content Security Policy that blocks scripts.
 
@@ -245,9 +262,19 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 With `MODE` set to `single`, the Worker serves one inbox, whose owner token is the `OWNER_TOKEN` secret. With `MODE` set to `hosted`, it serves many:
 
 - `POST /new {invite}` takes one use of an invite code and returns the address of a new inbox and its owner sign-in link. KV keeps `invite:<code>` with the number of uses the operator allows, and a registry Durable Object counts the uses taken, one request at a time.
-- Each inbox is at `/i/<id>/`, where `id` is 32 random hex digits. Whoever knows the address can sign in with its token, so the person bookmarks the address and keeps it private. The Worker checks KV for `inbox:<id>` first, so an address nobody created reaches no Durable Object.
-- The operator manages invites with `wrangler kv key put invite:<code> <uses> --binding INVITES --remote`.
+- Each inbox is at `/i/<id>/`. The person bookmarks the address and keeps it private.
+- The operator manages invites with `wrangler kv key put invite:<code> <uses> --binding INVITES --remote`. Codes need 20 characters or more, such as the 128 random bits of `openssl rand -hex 16`, and the Worker refuses a shorter one before any lookup.
+- An address is 20 random hex digits and 12 hex digits of an HMAC over them, keyed by the `INBOX_ID_SECRET` secret. The Worker checks the HMAC, so a guessed address costs no KV read and reaches no Durable Object. Changing the secret makes every address invalid.
+- Each inbox's sign-in cookie has the path `/i/<id>/`, so signing in to one inbox leaves another one's cookie alone.
 
-The Worker counts API requests per inbox with the Workers rate limiting binding, `LIMITER`, and answers 429 with `retry-after: 60` past 600 a minute. Each inbox belongs to one person, so the count is per person. R2 deletes each file 30 days after its upload, by the lifecycle rule in `cloudflare/main.tf`.
+The Worker counts each request before it reaches a Durable Object, with two Workers rate limiting bindings, and answers 429 past them. `LIMITER` counts signed-in calls per inbox and client address, 300 a minute. `ANON_LIMITER` counts calls without a token per client address, 100 a minute, including `POST /new`. So a stranger without a token can't use up the owner's budget. Both limits are approximate, since Cloudflare counts per location. The hard limits are the budgets each inbox applies itself:
+
+- 100 MB of files over the inbox's life, from `UPLOAD_LIMIT_BYTES`.
+- 20 MB of database storage, from `STORAGE_LIMIT_BYTES`. The Durable Object adds up its rows once, then adds or subtracts the size of each write.
+- 2,000 file downloads a day, from `ATTACHMENT_READS_PER_DAY`.
+
+R2 deletes each file 30 days after its upload, by the lifecycle rule in `cloudflare/main.tf`.
+
+An open request keeps a Durable Object awake and billed, so the Cloudflare build answers `GET /v1/events`, `/v1/stream` and `/v1/poll` with 410. Agents and pages use hibernating WebSockets, whose pings get their answer from the runtime without waking the object. Each inbox keeps at most 64 sockets. A socket that has not signed in 10 seconds after it opened closes at the next alarm, and a socket that sends more than 120 frames in a minute closes with 4429. In single mode, each Worker isolate gives the owner token to the inbox on its first request only.
 
 `npm run cloudflare:check` bundles the Worker with a dry-run deploy, and `npm run test:cloudflare` runs the hosted build on `wrangler dev` with local Durable Objects, R2 and KV. The `deploy-cloudflare` workflow deploys it when someone runs it from the Actions tab.

@@ -158,3 +158,33 @@ describe('message ids from review', () => {
     assert.equal(again.headers.get('x-message-id-replayed'), '1');
   });
 });
+
+describe('limits a hosted inbox needs', () => {
+  it('refuses a large body before it reads all of it, with a smaller limit on routes open without a token', async () => {
+    const { call, agent } = await setup();
+    assert.equal((await call('POST', '/v1/pair', { body: { name: 'x'.repeat(5000) } })).status, 413);
+    assert.equal((await call('POST', '/v1/login', { headers: { 'content-length': '999999' }, body: {} })).status, 413);
+    assert.equal((await call('POST', '/v1/templates', { token: agent, body: { name: 't', source: 'x'.repeat(1_100_000) } })).status, 413);
+  });
+
+  it('answers 507 to writes on a full inbox, and still takes the ones that free space', async () => {
+    const inbox = new Inbox(new MemoryStorage(), Date.now, undefined, { storageLimitBytes: 3000 });
+    const handle = createHandler(inbox);
+    const owner = (await inbox.createToken('page', 'owner')).secret;
+    const call = (method: string, path: string, body?: unknown) => handle(new Request(`http://inbox.test${path}`, { method, headers: { authorization: `Bearer ${owner}` }, body: body === undefined ? undefined : JSON.stringify(body) }));
+    assert.equal((await call('POST', '/v1/cards', { id: 'big', agent: 'a', title: 'q', text: 'x'.repeat(4000) })).status, 201);
+    assert.equal((await call('POST', '/v1/cards', { agent: 'a', title: 'one more' })).status, 507);
+    assert.equal((await call('POST', '/v1/pair', { name: 'x' })).status, 507);
+    assert.equal((await call('POST', '/v1/reset', { confirm: 'reset' })).status, 200);
+    assert.equal((await call('POST', '/v1/cards', { agent: 'a', title: 'room again' })).status, 201);
+  });
+
+  it('serves no streams or long-polls when streams are off', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const handle = createHandler(inbox, { streams: false });
+    const owner = (await inbox.createToken('page', 'owner')).secret;
+    for (const path of ['/v1/events', '/v1/stream?agent=a', '/v1/poll?agent=a']) {
+      assert.equal((await handle(new Request(`http://inbox.test${path}`, { headers: { authorization: `Bearer ${owner}` } }))).status, 410, path);
+    }
+  });
+});

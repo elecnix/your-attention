@@ -6,6 +6,19 @@
 // Inbox to client: the same events as the stream, and {type: "pong"}.
 import type { Caller, Inbox } from './inbox.ts';
 
+/** The frames a socket may send in a minute. A socket past it closes, since each frame wakes the inbox. */
+export const FRAMES_PER_MINUTE = 120;
+
+/** Counts a socket's frames in the current minute. */
+function frameBudget(now: () => number = Date.now): () => boolean {
+  let start = now();
+  let count = 0;
+  return () => {
+    if (now() - start >= 60_000) { start = now(); count = 0; }
+    return ++count <= FRAMES_PER_MINUTE;
+  };
+}
+
 export interface SocketLike {
   send(text: string): void;
   close(code?: number, reason?: string): void;
@@ -22,6 +35,7 @@ export interface AgentSocket {
 export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller, instance?: string): AgentSocket {
   let me = caller;
   let disconnect: (() => void) | undefined;
+  const allow = frameBudget();
   const start = (c: Caller): void => {
     me = c;
     disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)), instance);
@@ -29,6 +43,7 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
   if (me) start(me);
   return {
     async message(text) {
+      if (!allow()) return ws.close(4429, `more than ${FRAMES_PER_MINUTE} frames a minute`);
       let msg: { type?: string; token?: string; card?: string } | null;
       try { msg = JSON.parse(text) as typeof msg; } catch { return ws.close(1003, 'frames must be JSON'); }
       if (!msg || typeof msg !== 'object') return ws.close(1003, 'frames must be JSON objects');
@@ -52,5 +67,18 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
     get caller() {
       return me;
     },
+  };
+}
+
+/** The inbox page over a WebSocket, for the owner: the same events as GET /v1/events. The page sends {type: "ping"} and gets {type: "pong"}. */
+export function pageSocket(inbox: Inbox, ws: SocketLike, viewer?: string): { message(text: string): void; close(): void } {
+  const allow = frameBudget();
+  const stop = inbox.subscribePage((ev) => ws.send(JSON.stringify(ev)), viewer);
+  return {
+    message(text) {
+      if (!allow()) return ws.close(4429, `more than ${FRAMES_PER_MINUTE} frames a minute`);
+      if (text.includes('"ping"')) ws.send('{"type":"pong"}');
+    },
+    close: stop,
   };
 }

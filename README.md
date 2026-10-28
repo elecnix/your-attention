@@ -81,10 +81,10 @@ terraform -chdir=cloudflare init -backend-config="path=$HOME/.your-attention/clo
 terraform -chdir=cloudflare apply -var account_id=<account id>
 terraform -chdir=cloudflare output -raw deploy_token | gh secret set CLOUDFLARE_API_TOKEN --env cloudflare
 gh variable set KV_NAMESPACE_ID --env cloudflare --body "$(terraform -chdir=cloudflare output -raw kv_namespace_id)"
-npx wrangler kv key put invite:<code> 5 --binding INVITES --remote   # hosted mode: an invite with 5 uses
+npx wrangler kv key put invite:$(openssl rand -hex 16) 5 --binding INVITES --remote   # hosted mode: an invite with 5 uses
 ```
 
-Single mode also needs `CLOUDFLARE_ACCOUNT_ID` and an `OWNER_TOKEN` secret in that environment. An owner token is 12 hex digits, a dot, and 64 hex digits: `echo "$(openssl rand -hex 6).$(openssl rand -hex 32)"`. The account needs R2 enabled once in the dashboard, and a workers.dev subdomain. The Worker is named `app`, so it answers at `https://app.<subdomain>.workers.dev`. Each cloud inbox takes 600 API requests a minute and 100 MB of files over its life, and R2 deletes each file after 30 days.
+Single mode also needs `CLOUDFLARE_ACCOUNT_ID` and an `OWNER_TOKEN` secret in that environment. An owner token is 12 hex digits, a dot, and 64 hex digits: `echo "$(openssl rand -hex 6).$(openssl rand -hex 32)"`. The account needs R2 enabled once in the dashboard, and a workers.dev subdomain. The Worker is named `app`, so it answers at `https://app.<subdomain>.workers.dev`. Hosted mode needs an `INBOX_ID_SECRET` secret, from `openssl rand -hex 32`, which signs inbox addresses. Each cloud inbox may upload 100 MB of files over its life and keep 20 MB in its database. It serves up to 2,000 file downloads a day. R2 deletes each file after 30 days. Pages and agents get their events over WebSockets, so an idle inbox sleeps.
 
 Another machine on the LAN finds the inbox and pairs with it. Approve the card that shows the same code.
 

@@ -19,14 +19,36 @@ export interface HandlerOptions {
   openOrigin?: (card: Card) => Promise<void>;
   /** Milliseconds between keep-alive lines on a stream. */
   heartbeatMs?: number;
+  /** Whether to serve the event stream, agent streams and long-polls. A platform that bills for open requests turns them off and serves WebSockets only. */
+  streams?: boolean;
 }
+
+/** The largest body each kind of route reads. A card post carries its files as data: URLs. */
+const BODY_LIMIT = { open: 4096, card: 16_000_000, other: 1_000_000 };
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
 
-async function readJson<T>(req: Request): Promise<T> {
-  const text = await req.text();
-  if (text.length > 16_000_000) throw new InboxError(413, 'body over 16 MB');
+/** Read a JSON body of at most `max` bytes. A body that says or turns out to be larger is refused before it is all in memory. */
+async function readJson<T>(req: Request, max = BODY_LIMIT.other): Promise<T> {
+  const tooLarge = (): InboxError => new InboxError(413, `body over ${max} bytes`);
+  if (Number(req.headers.get('content-length') ?? 0) > max) throw tooLarge();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (req.body) {
+    const reader = req.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) { await reader.cancel(); throw tooLarge(); }
+      chunks.push(value);
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { bytes.set(c, at); at += c.byteLength; }
+  const text = new TextDecoder().decode(bytes);
   try {
     return (text ? JSON.parse(text) : {}) as T;
   } catch {
@@ -90,13 +112,14 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     // Routes open to any client on the network.
     if (method === 'GET' && a === 'info') return json({ name: 'your-attention', protocol: PROTOCOL_VERSION, id: inbox.id(), pair: '/v1/pair' });
     if (method === 'POST' && a === 'pair' && !b) {
-      const body = await readJson<{ name?: string; role?: Role }>(req);
+      if (inbox.storageFull()) return json({ error: 'this inbox is full' }, 507);
+      const body = await readJson<{ name?: string; role?: Role }>(req, BODY_LIMIT.open);
       const p = inbox.requestPairing(String(body.name ?? ''), body.role ?? 'agent');
       return json({ id: p.id, code: p.code }, 201);
     }
     if (method === 'GET' && a === 'pair' && b) return json(inbox.collectPairing(b));
     if (method === 'POST' && a === 'login') {
-      const { token } = await readJson<{ token?: string }>(req);
+      const { token } = await readJson<{ token?: string }>(req, BODY_LIMIT.open);
       const t = await inbox.authenticate(token);
       if (!t || t.role !== 'owner') return json({ error: 'not an owner token' }, 401);
       const secure = url.protocol === 'https:' ? '; Secure' : '';
@@ -107,6 +130,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (!who) return json({ error: 'pair first: POST /v1/pair' }, 401);
     if (who.viaCookie && method !== 'GET' && req.headers.get(CSRF_HEADER) !== '1') return json({ error: `missing ${CSRF_HEADER} header` }, 403);
     const me: Caller = { token: who.token.id, role: who.token.role };
+    // A full inbox takes the writes that free space or answer cards, and refuses the rest.
+    const frees = method === 'DELETE' || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'answer'));
+    if (method !== 'GET' && !frees && inbox.storageFull()) return json({ error: 'this inbox is full: remove cards, templates or widgets to make room' }, 507);
     // A message that arrives over two links, or again after a retry, is applied once: the inbox
     // keeps the first result for each x-message-id, per client.
     const messageId = method === 'GET' ? null : req.headers.get(MESSAGE_HEADER);
@@ -146,6 +172,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       // A reset cannot be undone, so the request must say so.
       if ((await readJson<{ confirm?: string }>(req)).confirm !== 'reset') throw new InboxError(400, 'send {"confirm": "reset"} to remove every card');
       return json(await inbox.reset(me));
+    }
+    if (options.streams === false && method === 'GET' && (a === 'events' || a === 'stream' || a === 'poll')) {
+      return json({ error: 'this inbox serves events over the WebSocket at /v1/ws only' }, 410);
     }
     if (method === 'GET' && a === 'events') {
       owner();
@@ -262,7 +291,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'DELETE' && a === 'tokens' && b) { owner(); inbox.revokeToken(b); return json({ ok: true }); }
 
     if (a === 'cards') {
-      if (method === 'POST' && !b) return json(publicCard(await inbox.postCardWithFiles(me, await readJson<NewCard>(req))), 201);
+      if (method === 'POST' && !b) return json(publicCard(await inbox.postCardWithFiles(me, await readJson<NewCard>(req, BODY_LIMIT.card))), 201);
       if (method === 'GET' && !b) return json(inbox.listCards(me));
       if (!b) return json({ error: 'not found' }, 404);
       if (method === 'GET' && !c) {

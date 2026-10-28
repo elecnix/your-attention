@@ -1,7 +1,7 @@
 // Card features from the batch of principles about the card model.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Inbox, InboxError, ORPHAN_MS, type Caller } from '../../src/core/inbox.ts';
+import { Inbox, InboxError, MAX_CARD_BYTES, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PAIRING_KEEP_MS, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 
@@ -331,22 +331,34 @@ describe('fixes from the last review', () => {
 
 describe('the upload limit', () => {
   const agent: Caller = { token: 'ta', role: 'agent' };
+  const owner: Caller = { token: 'o', role: 'owner' };
+  const K = MIN_FILE_CHARGE;
   const file = (n: number) => ({ src: `data:application/octet-stream;base64,${Buffer.alloc(n, 1).toString('base64')}`, name: 'f.bin' });
 
   it('counts every byte an inbox has stored, and refuses files past its lifetime limit', async () => {
-    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs(), { uploadLimitBytes: 1000 });
-    await inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [file(600)] });
-    await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c2', agent: 's1', title: 'q', attachments: [file(500)] }),
+    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs(), { uploadLimitBytes: 4 * K });
+    await inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [file(2 * K)] });
+    await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c2', agent: 's1', title: 'q', attachments: [file(3 * K)] }),
       (e: unknown) => e instanceof InboxError && e.status === 413 && /lifetime limit/.test(e.message));
     // Deleting files gives no bytes back: the limit counts what was ever uploaded.
-    await inbox.reset({ token: 'o', role: 'owner' });
-    await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c3', agent: 's1', title: 'q', attachments: [file(500)] }), /lifetime limit/);
-    await inbox.postCardWithFiles(agent, { id: 'c4', agent: 's1', title: 'q', attachments: [file(400)] });
-    assert.deepEqual(inbox.uploads(), { used: 1000, limit: 1000 });
+    await inbox.reset(owner);
+    await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c3', agent: 's1', title: 'q', attachments: [file(3 * K)] }), /lifetime limit/);
+    await inbox.postCardWithFiles(agent, { id: 'c4', agent: 's1', title: 'q', attachments: [file(2 * K)] });
+    assert.deepEqual(inbox.uploads(), { used: 4 * K, limit: 4 * K });
+  });
+
+  it('counts each file as at least 64 KB, so tiny files cannot make unlimited writes', async () => {
+    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs(), { uploadLimitBytes: 20 * K });
+    let posted = 0;
+    for (let i = 0; i < 5; i++) {
+      try { await inbox.postCardWithFiles(agent, { id: 'tiny', agent: 's1', title: 'q', attachments: Array(10).fill(file(1)) }); posted++; } catch { break; }
+    }
+    assert.equal(posted, 2, '20 files of one byte use the 20 file charges the limit allows');
+    assert.equal(inbox.uploads().used, 20 * K);
   });
 
   it('gives the bytes back when the card is refused', async () => {
-    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs(), { uploadLimitBytes: 1000 });
+    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs(), { uploadLimitBytes: 4 * K });
     await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: ' ', attachments: [file(600)] }), /title/);
     assert.equal(inbox.uploads().used, 0);
   });
@@ -363,7 +375,7 @@ describe('the upload limit', () => {
     const del: string[] = [];
     const remove = blobs.delete.bind(blobs);
     blobs.delete = async (key) => { del.push(key); return remove(key); };
-    const inbox = new Inbox(new MemoryStorage(), Date.now, blobs, { uploadLimitBytes: 1000 });
+    const inbox = new Inbox(new MemoryStorage(), Date.now, blobs, { uploadLimitBytes: 10 * K });
     await assert.rejects(inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [file(100), file(100), file(100)] }), /store is down/);
     assert.equal(del.length, 3);
     for (const key of del) assert.equal(await blobs.get(key), undefined);
@@ -373,6 +385,77 @@ describe('the upload limit', () => {
   it('has no limit unless one is set', async () => {
     const inbox = new Inbox(new MemoryStorage());
     await inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [file(600)] });
-    assert.deepEqual(inbox.uploads(), { used: 600, limit: undefined });
+    assert.deepEqual(inbox.uploads(), { used: K, limit: undefined });
+  });
+
+  it('serves a day\'s file downloads, then refuses until the next day', async () => {
+    let t = Date.UTC(2026, 0, 1, 12);
+    const inbox = new Inbox(new MemoryStorage(), () => t, new MemoryBlobs(), { attachmentReadsPerDay: 2 });
+    const card = await inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [file(10)] });
+    const id = card.attachments![0]!.id!;
+    await inbox.attachment(agent, id);
+    await inbox.attachment(agent, id);
+    await assert.rejects(inbox.attachment(agent, id), (e: unknown) => e instanceof InboxError && e.status === 429);
+    t += 24 * 60 * 60 * 1000;
+    await inbox.attachment(agent, id);
+  });
+});
+
+describe('limits on what a client can store', () => {
+  const agent: Caller = { token: 'ta', role: 'agent' };
+  const owner: Caller = { token: 'o', role: 'owner' };
+
+  it('refuses a reference to a file the card does not have', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const theirs = await inbox.postCardWithFiles({ token: 'tb', role: 'agent' }, { id: 'b1', agent: 'b', title: 'q', attachments: [{ src: `data:text/plain;base64,${Buffer.from('x').toString('base64')}` }] });
+    const ref = theirs.attachments![0]!;
+    assert.throws(() => inbox.postCard(agent, { id: 'a1', agent: 'a', title: 'q', attachments: [{ src: '', ref }] }), /ref must name a file this card already has/);
+    // A card may send back a file it already has, to keep it.
+    const again = await inbox.postCardWithFiles({ token: 'tb', role: 'agent' }, { id: 'b1', agent: 'b', title: 'q2', attachments: [{ src: '', ref }] });
+    assert.equal(again.attachments?.[0]?.id, ref.id);
+  });
+
+  it('caps the size of a card, its title and its agent name', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    assert.throws(() => inbox.postCard(agent, { agent: 'a', title: 'q', text: 'x'.repeat(MAX_CARD_BYTES) }), (e: unknown) => e instanceof InboxError && e.status === 413);
+    assert.throws(() => inbox.postCard(agent, { agent: 'a', title: 'x'.repeat(301) }), /title/);
+    assert.throws(() => inbox.postCard(agent, { agent: 'a'.repeat(81), title: 'q' }), /agent/);
+    assert.throws(() => inbox.connect(agent, 'a'.repeat(81), () => {}), /agent/);
+  });
+
+  it('caps template sources, their versions, replies and webhooks', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    assert.throws(() => inbox.saveTemplate('t', 'x'.repeat(MAX_SOURCE_BYTES + 1)), /source/);
+    for (let i = 0; i < MAX_VERSIONS; i++) inbox.saveTemplate('t', `v${i}`);
+    assert.throws(() => inbox.saveTemplate('t', 'one more'), /versions/);
+    inbox.postCard(agent, { id: 'c1', agent: 'a', title: 'q' });
+    assert.throws(() => inbox.reply(agent, 'c1', 'x'.repeat(MAX_REPLY_BYTES + 1)), /reply/);
+    for (let i = 0; i < MAX_WEBHOOKS; i++) inbox.addWebhook('card.created', 'https://example.com/h', 's');
+    assert.throws(() => inbox.addWebhook('card.created', 'https://example.com/h', 's'), /webhooks/);
+    void owner;
+  });
+
+  it('refuses writes when the storage is full, except the ones that free space', () => {
+    const store = new MemoryStorage();
+    const inbox = new Inbox(store, Date.now, new MemoryBlobs(), { storageLimitBytes: 2000 });
+    assert.equal(inbox.storageFull(), false);
+    inbox.postCard(agent, { id: 'c1', agent: 'a', title: 'q', text: 'x'.repeat(3000) });
+    assert.equal(inbox.storageFull(), true);
+  });
+});
+
+describe('pairing requests', () => {
+  it('drops an uncollected token after ten minutes, and the request and its card after a day', async () => {
+    let t = 1_000_000;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const p = inbox.requestPairing('spam', 'agent');
+    await inbox.answer(`pair-${p.id}`, { values: { choice: 'approve' } });
+    t += PAIRING_KEEP_MS / 2;
+    inbox.sweep();
+    assert.deepEqual(inbox.collectPairing(p.id), { status: 'approved' }, 'the secret is gone');
+    t += PAIRING_KEEP_MS;
+    inbox.sweep();
+    assert.throws(() => inbox.collectPairing(p.id), /unknown pairing/);
+    assert.equal(inbox.state().cards.some((c) => c.id === `pair-${p.id}`), false);
   });
 });

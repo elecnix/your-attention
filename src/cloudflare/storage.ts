@@ -9,6 +9,8 @@ export interface SqlLike {
 export class DurableSqlStorage implements Storage {
   private readonly sql: SqlLike;
   private readonly fts: boolean;
+  /** The bytes of values and search text, counted once and then kept current with each write. */
+  private used: number | undefined;
 
   constructor(sql: SqlLike) {
     this.sql = sql;
@@ -29,11 +31,27 @@ export class DurableSqlStorage implements Storage {
     return row ? (JSON.parse(String(row['value'])) as T) : undefined;
   }
 
+  bytes(): number {
+    this.used ??= Number(this.sql.exec('SELECT (SELECT COALESCE(SUM(length(value)), 0) FROM docs) + (SELECT COALESCE(SUM(length(text)), 0) FROM search) AS n').toArray()[0]?.['n'] ?? 0);
+    return this.used;
+  }
+
+  private change(delta: number): void {
+    if (this.used !== undefined) this.used = Math.max(0, this.used + delta);
+  }
+
+  private size(collection: Collection, id: string): number {
+    return Number(this.sql.exec('SELECT length(value) AS n FROM docs WHERE collection = ? AND id = ?', collection, id).toArray()[0]?.['n'] ?? 0);
+  }
+
   put<T>(collection: Collection, id: string, value: T): void {
-    this.sql.exec('INSERT INTO docs (collection, id, value) VALUES (?, ?, ?) ON CONFLICT (collection, id) DO UPDATE SET value = excluded.value', collection, id, JSON.stringify(value));
+    const text = JSON.stringify(value);
+    this.change(text.length - this.size(collection, id));
+    this.sql.exec('INSERT INTO docs (collection, id, value) VALUES (?, ?, ?) ON CONFLICT (collection, id) DO UPDATE SET value = excluded.value', collection, id, text);
   }
 
   delete(collection: Collection, id: string): void {
+    this.change(-this.size(collection, id));
     this.sql.exec('DELETE FROM docs WHERE collection = ? AND id = ?', collection, id);
   }
 
@@ -42,6 +60,8 @@ export class DurableSqlStorage implements Storage {
   }
 
   index(card: string, text: string): void {
+    const old = Number(this.sql.exec('SELECT COALESCE(SUM(length(text)), 0) AS n FROM search WHERE card = ?', card).toArray()[0]?.['n'] ?? 0);
+    this.change(text.length - old);
     this.sql.exec('DELETE FROM search WHERE card = ?', card);
     if (text) this.sql.exec('INSERT INTO search (card, text) VALUES (?, ?)', card, text);
   }

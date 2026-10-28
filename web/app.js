@@ -1,5 +1,5 @@
 // The built-in front-end. It is one client of the protocol among others:
-// it reads GET /v1/state, listens on GET /v1/events, and posts answers.
+// it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
 import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, HtmlToggle, LinkedText, NotifyToggle, SecretForm, cardSource, describe, formValues, presenceOf } from './components.js';
 
@@ -72,22 +72,58 @@ export function App() {
       return fetch(BASE + 'v1/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: J({ token: decodeURIComponent(m[1]) }) })
         .then(() => history.replaceState(history.state, '', location.pathname + location.hash.replace(/(^#|&)token=[^&]*/, '$1').replace(/^#&?$/, '')));
     };
-    const connect = () => signIn().then(() => {
+    let ws;
+    let ping;
+    let retry;
+    let closed = false;
+    const onEvent = (type) => {
+      if (type === 'beat' || type === 'pong') { last = Date.now(); setUp(true); }
+      if (type === 'change' || type === 'presence') refreshRef.current();
+      if (type === 'code') { store.set('scroll:y', window.scrollY); location.reload(); }
+    };
+    const stop = () => {
       if (es) es.close();
-      refreshRef.current();
+      if (ws) { ws.onclose = null; ws.close(); }
+      clearInterval(ping);
+      clearTimeout(retry);
+    };
+    // The server-sent event stream, for an inbox that serves no page socket.
+    const overStream = () => {
       es = new EventSource(`${BASE}v1/events?viewer=${encodeURIComponent(VIEWER)}`);
       es.onopen = () => refreshRef.current();
       // A stream that fails may mean a revoked token: the state request tells.
       es.onerror = () => refreshRef.current();
-      es.addEventListener('beat', () => { last = Date.now(); setUp(true); });
-      es.addEventListener('change', () => refreshRef.current());
-      es.addEventListener('presence', () => refreshRef.current());
-      es.addEventListener('code', () => { store.set('scroll:y', window.scrollY); location.reload(); });
+      for (const type of ['beat', 'change', 'presence', 'code']) es.addEventListener(type, () => onEvent(type));
+    };
+    // A WebSocket lets a cloud inbox sleep between events: its pings get their answer without waking it.
+    const overSocket = () => {
+      let opened = false;
+      ws = new WebSocket(new URL(`${BASE}v1/ws?page=1&viewer=${encodeURIComponent(VIEWER)}`, location.href).href.replace(/^http/, 'ws'));
+      ws.onopen = () => {
+        opened = true;
+        refreshRef.current();
+        const beat = () => { if (ws.readyState === 1) ws.send('{"type":"ping"}'); };
+        beat();
+        ping = setInterval(beat, 2000);
+      };
+      ws.onmessage = (m) => { try { onEvent(JSON.parse(m.data).type); } catch {} };
+      ws.onclose = () => {
+        clearInterval(ping);
+        if (closed) return;
+        refreshRef.current();
+        if (!opened) return overStream();
+        retry = setTimeout(overSocket, 1000);
+      };
+    };
+    const connect = () => signIn().then(() => {
+      stop();
+      refreshRef.current();
+      overSocket();
     });
     connect();
     window.addEventListener('hashchange', connect);
     const watchdog = setInterval(() => { if (Date.now() - last > 5000) setUp(false); }, 1000);
-    return () => { if (es) es.close(); clearInterval(watchdog); window.removeEventListener('hashchange', connect); };
+    return () => { closed = true; stop(); clearInterval(watchdog); window.removeEventListener('hashchange', connect); };
   }, []);
 
   React.useEffect(() => {

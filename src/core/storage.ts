@@ -17,6 +17,8 @@ export interface Storage {
   /** Replace the searchable text of a card. Empty text removes the card from search. */
   index(card: string, text: string): void;
   search(query: string, limit: number): SearchHit[];
+  /** The bytes the storage keeps, for a storage that measures them. */
+  bytes?(): number;
   close(): void;
 }
 
@@ -46,6 +48,13 @@ export class MemoryStorage implements Storage {
 
   list<T>(c: Collection): T[] {
     return [...this.bucket(c).values()].map((v) => JSON.parse(v) as T);
+  }
+
+  bytes(): number {
+    let n = 0;
+    for (const b of this.data.values()) for (const v of b.values()) n += v.length;
+    for (const v of this.text.values()) n += v.length;
+    return n;
   }
 
   index(card: string, text: string): void {

@@ -11,7 +11,7 @@ import { SqliteStorage } from '../adapters/sqlite.ts';
 import { randomId } from '../core/crypto.ts';
 import { createHandler } from '../core/http.ts';
 import type { Caller } from '../core/inbox.ts';
-import { agentSocket } from '../core/socket.ts';
+import { agentSocket, pageSocket } from '../core/socket.ts';
 import { WebSocketServer } from 'ws';
 import { Inbox } from '../core/inbox.ts';
 import { focusHerdrPane } from '../integrations/herdr/focus.ts';
@@ -132,6 +132,20 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', async (req, socket, head) => {
     const u = new URL(req.url ?? '/', 'http://localhost');
+    if (u.pathname === '/v1/ws' && u.searchParams.get('page') === '1') {
+      // The inbox page signs in with its cookie, which the browser sends with the upgrade.
+      const auth = req.headers.authorization;
+      const secret = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : /(?:^|;\s*)ya_token=([^;]*)/.exec(req.headers.cookie ?? '')?.[1];
+      const t = await inbox.authenticate(secret ? decodeURIComponent(secret) : undefined);
+      if (t?.role !== 'owner') { socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return; }
+      const viewer = u.searchParams.get('viewer') ?? undefined;
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        const conn = pageSocket(inbox, { send: (text) => ws.send(text), close: (c, r) => ws.close(c, r) }, viewer && /^[\w-]{4,64}$/.test(viewer) ? viewer : undefined);
+        ws.on('message', (d) => conn.message(String(d)));
+        ws.on('close', () => conn.close());
+      });
+      return;
+    }
     const agent = u.searchParams.get('agent');
     if (u.pathname !== '/v1/ws' || !agent) return void socket.destroy();
     let caller: Caller | undefined;

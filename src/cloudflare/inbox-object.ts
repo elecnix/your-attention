@@ -1,15 +1,18 @@
 // One inbox as one Durable Object. All its changes go through this object one
 // at a time, and it hibernates when idle: agent sockets stay open, and the
 // object rebuilds each connection from the socket's attachment when it wakes.
-import { createHandler } from '../core/http.ts';
+import { COOKIE, createHandler } from '../core/http.ts';
 import { Inbox } from '../core/inbox.ts';
-import { agentSocket, type AgentSocket } from '../core/socket.ts';
+import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
 import type { Role } from '../core/types.ts';
 import { DurableSqlStorage, R2Blobs } from './storage.ts';
 import type { Env } from './worker.ts';
 
 /** What each agent socket keeps across hibernation. */
 interface SocketAttachment {
+  /** Set for the inbox page's socket, which carries page events. */
+  page?: boolean;
+  viewer?: string | undefined;
   agent: string;
   /** The agent process, the same across its reconnects. */
   instance?: string | undefined;
@@ -30,6 +33,17 @@ export function uploadLimit(value: string | undefined): number | undefined {
 const HEARTBEAT_LIMIT_MS = 60_000;
 /** How often the alarm checks heartbeats while agent sockets are open. */
 const HEARTBEAT_CHECK_MS = 30_000;
+type Conn = AgentSocket | ReturnType<typeof pageSocket>;
+
+/** A socket that has not signed in this long after it opened closes. */
+const AUTH_LIMIT_MS = 10_000;
+/** The most sockets one inbox keeps open. */
+const MAX_SOCKETS = 64;
+
+/** Read a numeric limit from the environment. */
+function limit(value: string | undefined): number | undefined {
+  return uploadLimit(value);
+}
 
 /** Redeems invite codes one at a time, so a code with one use left creates one inbox, however many requests race.
  * The operator sets the uses in KV; this object counts the uses taken. */
@@ -58,20 +72,31 @@ export class InboxObject {
   private readonly env: Env;
   private readonly inbox: Inbox;
   private readonly handle: (req: Request) => Promise<Response>;
-  private readonly sockets = new Map<WebSocket, AgentSocket>();
+  private readonly sockets = new Map<WebSocket, Conn>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
     this.env = env;
-    this.inbox = new Inbox(new DurableSqlStorage(ctx.storage.sql), Date.now, new R2Blobs(env.FILES, ctx.id.toString()), { keepPresence: true, uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES) });
-    this.handle = createHandler(this.inbox, { heartbeatMs: 2000 });
+    this.inbox = new Inbox(new DurableSqlStorage(ctx.storage.sql), Date.now, new R2Blobs(env.FILES, ctx.id.toString()), {
+      keepPresence: true,
+      uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES),
+      storageLimitBytes: limit(env.STORAGE_LIMIT_BYTES),
+      attachmentReadsPerDay: limit(env.ATTACHMENT_READS_PER_DAY),
+    });
+    // Open requests keep the object awake and billed, so events go over hibernating WebSockets only.
+    this.handle = createHandler(this.inbox, { heartbeatMs: 2000, streams: false });
     // Heartbeats get their answer without waking the object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
     for (const ws of ctx.getWebSockets()) this.attach(ws);
   }
 
-  private attach(ws: WebSocket): AgentSocket {
+  private attach(ws: WebSocket): Conn {
     const a = ws.deserializeAttachment() as SocketAttachment;
+    if (a.page) {
+      const conn = pageSocket(this.inbox, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, a.viewer);
+      this.sockets.set(ws, conn);
+      return conn;
+    }
     const caller = a.token && a.role ? { token: a.token, role: a.role } : undefined;
     const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance);
     this.sockets.set(ws, conn);
@@ -102,8 +127,24 @@ export class InboxObject {
       return Response.json({ owner: secret });
     }
     if (url.pathname === '/v1/ws' && req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+      if (this.ctx.getWebSockets().length >= MAX_SOCKETS) return new Response('too many open sockets', { status: 503 });
+      if (url.searchParams.get('page') === '1') {
+        // The page signs in with its cookie, which the browser sends with the upgrade.
+        const auth = req.headers.get('authorization');
+        const secret = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : cookieValue(req.headers.get('cookie'), COOKIE);
+        const token = await this.inbox.authenticate(secret);
+        if (token?.role !== 'owner') return new Response('the page needs the owner token', { status: 401 });
+        const pair = new WebSocketPair();
+        const server = pair[1];
+        this.ctx.acceptWebSocket(server);
+        const viewer = url.searchParams.get('viewer') ?? undefined;
+        server.serializeAttachment({ page: true, viewer: viewer && /^[\w-]{4,64}$/.test(viewer) ? viewer : undefined, agent: '', token: token.id, role: token.role, connectedAt: Date.now() } satisfies SocketAttachment);
+        this.attach(server);
+        await this.schedule();
+        return new Response(null, { status: 101, webSocket: pair[0] });
+      }
       const agent = url.searchParams.get('agent');
-      if (!agent) return new Response('agent is required', { status: 400 });
+      if (!agent || agent.length > 80) return new Response('agent is required, at most 80 characters', { status: 400 });
       const auth = req.headers.get('authorization');
       const token = auth?.startsWith('Bearer ') ? await this.inbox.authenticate(auth.slice(7).trim()) : undefined;
       if (auth && !token) return new Response('unknown token', { status: 401 });
@@ -122,12 +163,13 @@ export class InboxObject {
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const conn = this.sockets.get(ws) ?? this.attach(ws);
-    const before = conn.authenticated;
+    const agent = 'caller' in conn ? conn : undefined;
+    const before = agent?.authenticated ?? true;
     await conn.message(typeof message === 'string' ? message : new TextDecoder().decode(message));
     // A client that authenticated in its first frame keeps that across hibernation.
-    if (!before && conn.caller) {
+    if (!before && agent?.caller) {
       const a = ws.deserializeAttachment() as SocketAttachment;
-      ws.serializeAttachment({ ...a, token: conn.caller.token, role: conn.caller.role } satisfies SocketAttachment);
+      ws.serializeAttachment({ ...a, token: agent.caller.token, role: agent.caller.role } satisfies SocketAttachment);
     }
     await this.schedule();
   }
@@ -147,8 +189,11 @@ export class InboxObject {
     this.inbox.sweep();
     const now = Date.now();
     for (const ws of this.ctx.getWebSockets()) {
-      const last = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? (ws.deserializeAttachment() as SocketAttachment).connectedAt ?? now;
-      if (now - last > HEARTBEAT_LIMIT_MS) {
+      const a = ws.deserializeAttachment() as SocketAttachment;
+      const last = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? a.connectedAt ?? now;
+      // A socket that answers pings but never signed in would stay open for free, so it gets a deadline.
+      const unsigned = !a.token && now - (a.connectedAt ?? now) > AUTH_LIMIT_MS;
+      if (unsigned || now - last > HEARTBEAT_LIMIT_MS) {
         this.sockets.get(ws)?.close();
         this.sockets.delete(ws);
         ws.close(1001, 'missed heartbeats');
@@ -156,4 +201,12 @@ export class InboxObject {
     }
     await this.schedule();
   }
+}
+
+function cookieValue(header: string | null, name: string): string | undefined {
+  for (const part of (header ?? '').split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(v.join('='));
+  }
+  return undefined;
 }

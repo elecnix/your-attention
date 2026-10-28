@@ -7,6 +7,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import WebSocket from 'ws';
 import { Client } from '../../src/client.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 
@@ -25,10 +26,10 @@ before(async () => {
   // An invite code with two uses, as the operator would add with `wrangler kv key put`.
   // A .cmd file runs only through a shell on Windows.
   const shell = process.platform === 'win32';
-  const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:test-code', '2', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell });
+  const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:test-code-0123456789ab', '2', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell });
   assert.equal(seed.status, 0, seed.stderr);
   const port = await freePort();
-  dev = spawn(WRANGLER, ['dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--var', 'MODE:hosted', '--var', 'UPLOAD_LIMIT_BYTES:4096', '--persist-to', persist, '--show-interactive-dev-session=false'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell });
+  dev = spawn(WRANGLER, ['dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--var', 'MODE:hosted', '--var', 'UPLOAD_LIMIT_BYTES:150000', '--var', 'INBOX_ID_SECRET:test-address-key', '--persist-to', persist, '--show-interactive-dev-session=false'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell });
   let out = '';
   dev.stdout?.on('data', (d) => { out += String(d); });
   dev.stderr?.on('data', (d) => { out += String(d); });
@@ -64,21 +65,21 @@ describe('the hosted Cloudflare build', () => {
   it('creates an inbox with an invite code, and refuses one that is used up', async () => {
     assert.match(await (await fetch(`${base}/`)).text(), /Create my inbox/);
     assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'wrong' }) })).status, 403);
-    const res = await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'test-code' }) });
+    const res = await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'test-code-0123456789ab' }) });
     assert.equal(res.status, 201);
     const { url, login } = (await res.json()) as { url: string; login: string };
     assert.match(url, /\/i\/[0-9a-f]{32}\/$/);
     inbox = url.replace(/\/$/, '');
     owner = decodeURIComponent(login.split('#token=')[1] ?? '');
-    assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'test-code' }) })).status, 201);
-    assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'test-code' }) })).status, 403, 'the code had two uses');
+    assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'test-code-0123456789ab' }) })).status, 201);
+    assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'test-code-0123456789ab' }) })).status, 403, 'the code had two uses');
   });
 
   it('redeems a one-use code once when requests race for it', async () => {
-    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:race', '1', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
+    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:race-code-0123456789ab', '1', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
     assert.equal(seed.status, 0, seed.stderr);
     // The running dev server reads KV from the same folder, so it sees the new code.
-    const all = await Promise.all(Array.from({ length: 6 }, () => fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'race' }) })));
+    const all = await Promise.all(Array.from({ length: 6 }, () => fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'race-code-0123456789ab' }) })));
     assert.equal(all.filter((r) => r.status === 201).length, 1);
   });
 
@@ -102,7 +103,29 @@ describe('the hosted Cloudflare build', () => {
     assert.ok(agent);
   });
 
-  for (const transport of ['sse', 'ws', 'poll'] as const) {
+  it('serves events over WebSockets only, so idle inboxes can sleep', async () => {
+    for (const path of ['/v1/events', '/v1/stream?agent=x', '/v1/poll?agent=x']) {
+      assert.equal((await fetch(`${inbox}${path}`, { headers: { authorization: `Bearer ${owner}` } })).status, 410, path);
+    }
+  });
+
+  it('scopes the sign-in cookie to the inbox address', async () => {
+    const res = await fetch(`${inbox}/v1/login`, { method: 'POST', body: JSON.stringify({ token: owner }) });
+    assert.match(res.headers.get('set-cookie') ?? '', new RegExp(`Path=${new URL(inbox).pathname}/`));
+  });
+
+  it('carries page events to the owner page over a WebSocket', async () => {
+    const page = new WebSocket(`${inbox.replace(/^http/, 'ws')}/v1/ws?page=1&viewer=test-page`, { headers: { authorization: `Bearer ${owner}` } });
+    const got: string[] = [];
+    page.on('message', (d) => got.push(String(d)));
+    await new Promise((r, j) => { page.once('open', r); page.once('error', j); });
+    page.send('{"type":"ping"}');
+    await fetch(`${inbox}/v1/cards`, { method: 'POST', headers: { authorization: `Bearer ${owner}` }, body: JSON.stringify({ id: 'cf-page', agent: 'cf', title: 'On the page?' }) });
+    await until(async () => (got.some((t) => JSON.parse(t).type === 'change') && got.some((t) => JSON.parse(t).type === 'pong')) || undefined);
+    page.close();
+  });
+
+  for (const transport of ['ws'] as const) {
     it(`delivers an answer over ${transport}, through the Worker to the Durable Object`, async () => {
       const client = new Client({ url: inbox, token: agent });
       await client.post({ id: `cf-${transport}`, agent: `cf-${transport}`, title: `Over ${transport} on workerd?` });
@@ -129,28 +152,35 @@ describe('the hosted Cloudflare build', () => {
 
   it('searches past answers in the Durable Object storage', async () => {
     const hits = await new Client({ url: inbox, token: agent }).search('workerd');
-    assert.ok(hits.some((h) => h.card.id === 'cf-sse'));
+    assert.ok(hits.some((h) => h.card.id === 'cf-ws'));
   });
 
   it('refuses files past the inbox lifetime limit', async () => {
     const client = new Client({ url: inbox, token: agent });
     const src = `data:application/octet-stream;base64,${Buffer.alloc(3000, 1).toString('base64')}`;
     await client.post({ id: 'cf-big-1', agent: 'cf', title: 'One', attachments: [{ src, name: 'a.bin' }] });
-    await assert.rejects(client.post({ id: 'cf-big-2', agent: 'cf', title: 'Two', attachments: [{ src, name: 'b.bin' }] }), /lifetime limit of 4096/);
+    await assert.rejects(client.post({ id: 'cf-big-2', agent: 'cf', title: 'Two', attachments: [{ src, name: 'b.bin' }] }), /lifetime limit of 150000/);
   });
 
-  // Last, because it uses up this inbox's requests for the minute.
-  it('limits each inbox to 600 API requests a minute', async () => {
-    // More than twice the limit, so one window passes 600 even when the minute turns during the burst.
-    // workerd drops connections past a few hundred at once, so the burst goes in batches.
-    const all: number[] = [];
-    for (let i = 0; i < 1250 && !all.includes(429); i += 125) {
-      all.push(...await Promise.all(Array.from({ length: 125 }, () => fetch(`${inbox}/v1/info`).then((r) => r.status))));
-    }
-    assert.ok(all.includes(429), 'some requests went over the limit');
-    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:second', '1', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
+  // Last, because they use up the minute's requests.
+  it('limits signed-in calls per inbox, and strangers cannot use up the owner\'s budget', async () => {
+    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:second-code-0123456789', '1', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
     assert.equal(seed.status, 0, seed.stderr);
-    const { url } = (await (await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'second' }) })).json()) as { url: string };
-    assert.equal((await fetch(`${url}v1/info`)).status, 200, 'another inbox has its own count');
+    const made = (await (await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'second-code-0123456789' }) })).json()) as { url: string; login: string };
+    const other = made.url.replace(/\/$/, '');
+    const otherOwner = decodeURIComponent(made.login.split('#token=')[1] ?? '');
+    // workerd drops connections past a few hundred at once, so each burst goes in batches.
+    const burst = async (url: string, headers: Record<string, string>): Promise<number[]> => {
+      const all: number[] = [];
+      for (let i = 0; i < 1250 && !all.includes(429); i += 125) {
+        all.push(...await Promise.all(Array.from({ length: 125 }, () => fetch(url, { headers }).then((r) => r.status))));
+      }
+      return all;
+    };
+    assert.ok((await burst(`${inbox}/v1/cards`, { authorization: `Bearer ${agent}` })).includes(429), 'signed-in calls past 300 a minute');
+    assert.equal((await fetch(`${other}/v1/state`, { headers: { authorization: `Bearer ${otherOwner}` } })).status, 200, 'another inbox has its own count');
+    assert.ok((await burst(`${other}/v1/info`, {})).includes(429), 'calls without a token past 100 a minute');
+    assert.equal((await fetch(`${other}/v1/state`, { headers: { authorization: `Bearer ${otherOwner}` } })).status, 200, 'the owner still gets in');
   });
+
 });
