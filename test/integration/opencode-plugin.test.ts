@@ -1,5 +1,6 @@
 // Loads the OpenCode plugin against a stand-in for OpenCode's plugin input, with the real Zod OpenCode hands plugins.
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { z } from 'zod';
 import { Client } from '../../src/client.ts';
@@ -80,7 +81,7 @@ describe('the OpenCode plugin', () => {
 describe('your-attention opencode-plugin', () => {
   it('writes a file in OpenCode plugin directory that loads this checkout', async () => {
     const { pluginFile, pluginSource } = await import('../../src/integrations/opencode/install.ts');
-    assert.equal(pluginFile({ XDG_CONFIG_HOME: '/cfg' }), '/cfg/opencode/plugin/your-attention.ts');
+    assert.equal(pluginFile({ XDG_CONFIG_HOME: '/cfg' }), path.join('/cfg', 'opencode', 'plugin', 'your-attention.ts'));
     const src = pluginSource();
     assert.match(src, /from '@opencode-ai\/plugin'/);
     assert.match(src, /src\/integrations\/opencode\/plugin\.ts"/);
