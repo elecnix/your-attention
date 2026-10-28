@@ -132,6 +132,8 @@ The page renders `text` as Markdown: headings, lists, block quotes, fenced code,
 
 A herdr link is a session link: `[label](https://herdr.invalid/v1/<kind>/<id>)`, where the kind is `agent`, `pane`, `tab` or `workspace`, with or without herdr's session fingerprint before the kind. An agent writes one to point at another agent's session, such as an orchestrator reporting on a blocked agent in another tab. The page shows it as a terminal chip in the card's text, body, Markdown files and HTML. A click opens no page: the page sends the link to `POST /v1/focus`, owner only, and the inbox runs `herdr agent focus`, `tab focus` or `workspace focus` on this computer. A pane with no agent opens its tab. The id is letters, digits, `_`, `:`, `.` and `-`, and never starts with a dash. A hosted inbox has no herdr and answers 501, and the chip shows the error.
 
+In any field of the card on screen, Command+Enter or Control+Enter sends the answer, as the card's Send answer button does. Enter and Shift+Enter add a line. In the queue, a card that waits for you shows a raised hand, and the card on screen shows it filled.
+
 ## Attachments
 
 The inbox keeps the bytes of each `data:` attachment in its blob store, R2 in the Cloudflare build and files on disk on a laptop, and the card keeps a reference `{id, name, type, size, alt}`. It stores the bytes before it commits the card, so the card changes in one step. Replacing a card's attachments deletes the old files.

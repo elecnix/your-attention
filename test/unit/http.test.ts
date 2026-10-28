@@ -225,6 +225,8 @@ describe('network addresses', () => {
     }));
     assert.equal((await post(owner, 'https://herdr.invalid/v1/tab/w1:t2')).status, 200);
     assert.equal((await post(owner, 'https://example.com/')).status, 400);
+    const nullBody = await handle(new Request('http://inbox.test/v1/focus', { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json' }, body: 'null' }));
+    assert.equal(nullBody.status, 400);
     assert.equal((await post(agent, 'https://herdr.invalid/v1/tab/w1:t2')).status, 403);
     assert.deepEqual(focused, ['https://herdr.invalid/v1/tab/w1:t2']);
     const hosted = createHandler(inbox);

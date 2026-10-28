@@ -179,7 +179,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'addresses' && !b) { owner(); return json({ addresses: options.networkAddresses?.() ?? [] }); }
     if (method === 'POST' && a === 'focus' && !b) {
       owner();
-      const { href } = await readJson<{ href?: string }>(req, BODY_LIMIT.open);
+      const { href } = (await readJson<{ href?: string } | null>(req, BODY_LIMIT.open)) ?? {};
       if (typeof href !== 'string' || !parseSessionLink(href)) return json({ error: 'not a session link' }, 400);
       if (!options.focusSession) return json({ error: 'this inbox cannot open sessions' }, 501);
       try { await options.focusSession(href); } catch { return json({ error: 'herdr could not open that session' }, 502); }

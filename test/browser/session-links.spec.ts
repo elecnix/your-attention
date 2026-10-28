@@ -28,6 +28,8 @@ test('a session link in the card text focuses that tab in herdr, and opens no pa
   await page.locator('.q', { hasText: 'A blocked agent' }).click();
   const link = page.locator('.focus-card a.session-link', { hasText: 'release agent' });
   await expect(link).toBeVisible();
+  // The chip lays its icon and text out in a row, centered on one line, so the icon sits level with the text.
+  expect(await link.evaluate((el) => [getComputedStyle(el).display, getComputedStyle(el).alignItems, getComputedStyle(el, '::before').verticalAlign])).toEqual(['inline-flex', 'center', 'baseline']);
   const pages = page.context().pages().length;
   await link.click();
   await expect.poll(focused).toEqual(['tab focus w7:t3']);

@@ -107,6 +107,8 @@
   .ico { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; cursor: default; }
   .ico svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .ico.dim { opacity: .35; }
+  .ico path.fill { fill: currentColor; }
+  .ico path.gap { stroke: var(--info-bg); stroke-width: 1.5; }
   .ico:hover::after, .ico:focus-visible::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--ink); color: var(--bg); font-size: calc(12px * var(--text-scale)); font-weight: 500; padding: 4px 8px; border-radius: 6px; z-index: 20; pointer-events: none; }
   .q .ico:hover::after { left: auto; right: 0; transform: none; }
   .collapse { overflow: hidden; transition: max-height .6s ease, opacity .6s ease; }
@@ -142,8 +144,8 @@
   .card-text p, .card-text ul, .card-text ol { margin: 0 0 8px; }
   .card-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
   /* A link to another agent's session, in a card's text, body or file. A click opens it in herdr. */
-  a[href^="https://herdr.invalid/v1/"] { color: var(--accent); cursor: pointer; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 0 .35em; white-space: nowrap; }
-  a[href^="https://herdr.invalid/v1/"]::before { content: ''; display: inline-block; width: .9em; height: .9em; margin-right: .3em; vertical-align: -.1em; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 11 2-2-2-2'/%3E%3Cpath d='M11 13h4'/%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 11 2-2-2-2'/%3E%3Cpath d='M11 13h4'/%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3C/svg%3E") center / contain no-repeat; }
+  a[href^="https://herdr.invalid/v1/"] { color: var(--accent); cursor: pointer; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 0 .35em; white-space: nowrap; display: inline-flex; align-items: center; gap: .3em; vertical-align: bottom; }
+  a[href^="https://herdr.invalid/v1/"]::before { content: ''; flex: none; width: .9em; height: .9em; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 11 2-2-2-2'/%3E%3Cpath d='M11 13h4'/%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 11 2-2-2-2'/%3E%3Cpath d='M11 13h4'/%3E%3Crect width='18' height='18' x='3' y='3' rx='2'/%3E%3C/svg%3E") center / contain no-repeat; }
   a[href^="https://herdr.invalid/v1/"]:hover { border-color: var(--accent); }
   a[href^="https://herdr.invalid/v1/"][data-failed]:not([data-failed=""])::after { content: ' · ' attr(data-failed); color: var(--bad); white-space: normal; }
   .dead-link { color: var(--muted); text-decoration: line-through; }

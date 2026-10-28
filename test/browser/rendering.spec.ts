@@ -471,3 +471,16 @@ test('a card that waits for you shows a raised hand in the queue, and a sent one
   expect(await icon('Raise a hand for me').locator('path').first().getAttribute('d')).toBe('M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2');
   await expect.poll(async () => icon('Already answered hand').locator('path').first().getAttribute('d')).not.toBe('M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2');
 });
+
+test('the selected card shows a filled hand, and the other waiting cards an outline', async ({ page }) => {
+  await inbox.agent.post({ id: 'fill-a', agent: 's-fill', title: 'Filled hand one', priority: 'now' });
+  await inbox.agent.post({ id: 'fill-b', agent: 's-fill', title: 'Filled hand two', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Filled hand one' }).click();
+  const filled = (title: string) => page.locator('.q', { hasText: title }).locator('.ico path.fill').count();
+  await expect.poll(() => filled('Filled hand one')).toBe(1);
+  expect(await filled('Filled hand two')).toBe(0);
+  await page.locator('.q', { hasText: 'Filled hand two' }).click();
+  await expect.poll(() => filled('Filled hand two')).toBe(1);
+  expect(await filled('Filled hand one')).toBe(0);
+});

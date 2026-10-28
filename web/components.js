@@ -1,6 +1,6 @@
 // The parts of the page, each one renderable alone, as the stories do.
 import { BASE, CLOSED_LABEL, Icon, J, api, h, notifyOn, store } from './env.js';
-import { renderMarkdown } from './markdown.js';
+import { SESSION_LINK, renderMarkdown } from './markdown.js';
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 
@@ -418,7 +418,7 @@ export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
       if (!ref.current || e.source !== ref.current.contentWindow || !e.data) return;
       if (e.data.yourAttention === 'height') { const px = Number(e.data.height); if (px > 0) setHeight(Math.min(px, MAX_FRAME_HEIGHT)); return; }
       const values = typeof e.data.values === 'object' && e.data.values ? e.data.values : {};
-      if (e.data.yourAttention === 'session') { if (typeof e.data.href === 'string') openSessionLink(e.data.href, ref.current); return; }
+      if (e.data.yourAttention === 'session') { if (typeof e.data.href === 'string' && SESSION_LINK.test(e.data.href)) openSessionLink(e.data.href, ref.current); return; }
       if (e.data.yourAttention === 'collected') { pending.current.get(e.data.id)?.(values); return; }
       if (e.data.yourAttention !== 'answer') return;
       // An answer from the card's own button carries the comment from the page's box too.

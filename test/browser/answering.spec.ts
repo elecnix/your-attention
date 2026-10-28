@@ -186,3 +186,19 @@ test('an HTML card takes the app font, text size and weights, whatever its own s
   expect((await style('#b')).color).toBe(app.ink);
   expect((await style('#code')).family).toMatch(/monospace/);
 });
+
+test('Command or Control with Enter in the comment box sends the answer, and Shift with Enter adds a line', async ({ page }) => {
+  await inbox.agent.post({ id: 'enter-send', agent: 's-enter', title: 'Send with the keyboard', priority: 'now' });
+  const ev = inbox.listen('s-enter');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Send with the keyboard' }).click();
+  const box = page.locator('.focus-card textarea').last();
+  await box.fill('first line');
+  await box.press('Shift+Enter');
+  await box.pressSequentially('second line');
+  expect(ev.events.find((e) => e.type === 'answer')).toBeUndefined();
+  await box.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
+  await expect.poll(() => ev.events.find((e) => e.type === 'answer')?.type).toBe('answer');
+  const a = ev.events.find((e) => e.type === 'answer');
+  expect(a?.type === 'answer' && a.answer.comment).toBe('first line\nsecond line');
+});
