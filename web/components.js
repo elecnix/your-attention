@@ -6,8 +6,10 @@ const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
+  // A body with forms of its own keeps them where the agent placed them, and gets the comment and buttons below.
+  if (c.body && /\bForm\(/.test(c.body)) return withAnswerFooter(c.body);
   // A body without a form of its own gets the generated answer form below it, so the card stays answerable.
-  if (c.body && (/\bForm\(/.test(c.body) || (!c.options?.length && !c.questions?.length))) return c.body;
+  if (c.body && !c.options?.length && !c.questions?.length) return c.body;
   if (c.kind === 'blocked' && c.options && c.options.length) {
     // The sidecar read these choices from the agent's dialog, and presses the one you pick in that pane.
     return [
@@ -61,6 +63,101 @@ export function cardSource(c) {
   return [`root = Card([${parts.join(', ')}])`, ...L].join('\n');
 }
 
+// Every card ends with a comment field, Send answer and Skip. The page's statements start with ya, so they leave
+// the agent's names alone. A body that has a field named comment keeps its own.
+function withAnswerFooter(body) {
+  const ownComment = Object.values(parseSource(body)).some((s) => s.args[0] === 'comment' && /^(TextArea|Input)$/.test(s.call));
+  return [
+    'root = Card([yaBody, yaAnswer])',
+    body.replace(/^\s*root\s*=/m, 'yaBody ='),
+    `yaAnswer = Form("yaAnswer", yaButtons, [${ownComment ? '' : 'yaFcComment'}])`,
+    ...(ownComment ? [] : ['yaFcComment = FormControl("Comment", yaComment)', 'yaComment = TextArea("comment", "Anything to add?", 3)']),
+    'yaButtons = Buttons([yaSave, yaSkip], "row")',
+    'yaSave = Button("Send answer", @ToAssistant("send answer"), "primary")',
+    'yaSkip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+  ].join('\n');
+}
+
+/** The statements of OpenUI Lang source, by name: each `name = Call(args)` with its strings, numbers and references. */
+export function parseSource(source) {
+  const out = {};
+  for (const line of String(source || '').split('\n')) {
+    const m = /^\s*(\w+)\s*=\s*(\w+)\((.*)\)\s*$/.exec(line);
+    if (!m) continue;
+    try { out[m[1]] = { call: m[2], args: parseArgs(m[3]) }; } catch {}
+  }
+  return out;
+}
+
+function parseArgs(text) {
+  let i = 0;
+  const space = () => { while (/\s/.test(text[i] || '')) i++; };
+  const value = () => {
+    space();
+    const ch = text[i];
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      const s = JSON.parse(text.slice(i, j + 1));
+      i = j + 1;
+      return s;
+    }
+    if (ch === '[') { i++; const list = items(']'); return list; }
+    if (ch === '{') {
+      // An object inside the arguments, such as rules: skip to the matching close.
+      const close = '}';
+      let depth = 0;
+      for (; i < text.length; i++) { if (text[i] === ch) depth++; else if (text[i] === close && --depth === 0) { i++; break; } else if (text[i] === '"') { i++; while (i < text.length && text[i] !== '"') i += text[i] === '\\' ? 2 : 1; } }
+      return null;
+    }
+    const m = /^[@$]?[\w.-]+/.exec(text.slice(i));
+    if (!m) throw new Error(`cannot read ${text.slice(i, i + 10)}`);
+    i += m[0].length;
+    space();
+    if (text[i] === '(') { i++; return { call: m[0], args: items(')') }; }
+    return /^-?\d/.test(m[0]) ? Number(m[0]) : { ref: m[0] };
+  };
+  const items = (end) => {
+    const list = [];
+    space();
+    if (text[i] === end) { i++; return list; }
+    for (;;) {
+      list.push(value());
+      space();
+      if (text[i] === ',') { i++; continue; }
+      if (text[i] === end) { i++; return list; }
+      throw new Error('expected a comma');
+    }
+  };
+  text += '\u0000';
+  return items('\u0000');
+}
+
+/** What each field of a card's own forms asks, and the label of each choice, read from the card's source. */
+function fieldLabels(source) {
+  const st = parseSource(source);
+  // An argument is a reference to another statement, or a call written in place.
+  const get = (v) => (v && v.ref ? st[v.ref] : v && v.call ? v : undefined);
+  const fields = {};
+  const field = (s, label) => {
+    if (!s || typeof s.args[0] !== 'string') return;
+    const choices = {};
+    for (const it of Array.isArray(s.args[1]) ? s.args[1] : []) {
+      const item = get(it);
+      if (!item) continue;
+      const [a0, , a2] = item.args;
+      if (item.call === 'RadioItem') choices[a2] = a0;
+      else if (item.call === 'SelectItem') choices[a0] = item.args[1];
+      else if (item.call === 'OptionCard') choices[a0] = item.args[1];
+      else if (item.call === 'CheckBoxItem' || item.call === 'SwitchItem') choices[a2] = a0;
+    }
+    fields[s.args[0]] = { label: label ?? fields[s.args[0]]?.label, choices };
+  };
+  for (const s of Object.values(st)) if (/^(RadioGroup|Select|OptionCards|CheckBoxGroup|SwitchGroup|Input|TextArea|Slider|DatePicker)$/.test(s.call)) field(s);
+  for (const s of Object.values(st)) if (s.call === 'FormControl') field(get(s.args[1]), s.args[0]);
+  return fields;
+}
+
 // A pick names the option's id and its label, so a pick stays only while the revised card still offers that option.
 const optionValue = (o) => `${o.id}:${o.label}`;
 
@@ -99,12 +196,18 @@ export function formValues(formState) {
 export function describe(card, a) {
   if (!a) return '';
   if (card.kind === 'secret') return [a.values && a.values.sealed ? 'Sent sealed' : 'Declined', a.comment].filter(Boolean).join('\n');
+  let fields;
   const picks = Object.entries(a.values || {}).map(([k, v]) => {
     const list = [].concat(v);
     if (k === 'choice' && card.options) return list.map((x) => (card.options.find((o) => o.id === x) || {}).label || x).join(', ');
     const qi = /^q(\d+)$/.exec(k);
     if (qi && card.questions) return `${card.questions[Number(qi[1])]?.question || k} ${list.join(', ')}`;
-    return `${k}: ${list.join(', ')}`;
+    const f = (fields ??= fieldLabels(card.body))[k];
+    // A check box or switch group answers with each item on or off: the summary lists the ones turned on.
+    const picked = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => v[x]) : list;
+    const shown = picked.map((x) => (f && f.choices[x]) || x).join(', ');
+    if (!shown) return '';
+    return f && f.label ? `${f.label}: ${shown}` : shown;
   });
   return [...picks, a.comment].filter(Boolean).join('\n') || 'Empty answer';
 }
@@ -114,9 +217,11 @@ export function CardView({ draftKey, response, onAction }) {
   const [initialState] = React.useState(() => store.get(draftKey) || undefined);
   const actionRef = React.useRef(onAction);
   actionRef.current = onAction;
+  // A button sends only its own form's state. A card can hold several forms, so the answer takes all of them.
+  const stateRef = React.useRef(initialState);
   const handlers = React.useMemo(() => ({
-    onStateUpdate: (s) => store.set(draftKey, s),
-    onAction: (ev) => actionRef.current(ev),
+    onStateUpdate: (s) => { stateRef.current = s; store.set(draftKey, s); },
+    onAction: (ev) => actionRef.current({ ...ev, formState: { ...(ev.formState || {}), ...(stateRef.current || {}) } }),
   }), [draftKey]);
   return h(Renderer, { response, library: openuiChatLibrary, initialState, ...handlers });
 }
