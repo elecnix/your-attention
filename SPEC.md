@@ -84,7 +84,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `options`, `multiple` | Answer options as `{id, label, description}`. The person picks with the `choice` field. |
 | `questions` | Claude Code `AskUserQuestion` questions. Field `q0` answers the first one. |
 | `body` | OpenUI Lang source for a card that brings its own widgets. |
-| `html` | The agent's own HTML and scripts. The page shows it in a frame with `sandbox="allow-scripts allow-forms"`, only after the owner turns on `allowHtml` in the settings. A script in the frame sends the answer with `yourAttention.answer(values, comment)`. |
+| `html` | The agent's own HTML and scripts. The page shows it in a frame with `sandbox="allow-scripts allow-forms"`. `allowHtml` is off by default. Then the card offers **Show this card**, for this card only, and **Always show HTML cards**, which turns the setting on. A card in a frame offers to turn the setting off. A script in the frame sends the answer with `yourAttention.answer(values, comment)`. |
 | `attachments` | Up to 10 files, each `{src, name, alt}`. `src` is an https URL or a base64 `data:` URL of at most 8 MB. |
 | `template` | `{name, version, vars}`: the inbox fills the body from a saved template, replacing each `{{name}}` with the JSON string of its value. |
 | `status` | A state label the agent sets, such as `waiting on CI`. |

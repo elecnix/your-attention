@@ -218,8 +218,15 @@ export function Attachments({ files }) {
 // The frame may not load or send anything over the network: the card shows only what it brings.
 export const FRAME_POLICY = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:">`;
 export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){parent.postMessage({yourAttention:"answer",values:v||{},comment:c||""},"*")}};<\/script>';
+/** Turn showing HTML cards on or off for the whole inbox. */
+const setAllowHtml = (on) => fetch(BASE + 'v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: on }) });
+
+// A card with the agent's own HTML. It shows only when the owner allows HTML cards, or asks to see this one.
 export function HtmlCard({ card, allowed, onAnswer }) {
   const ref = React.useRef(null);
+  const [once, setOnce] = React.useState(null);
+  const [always, setAlways] = React.useState(allowed);
+  React.useEffect(() => setAlways(allowed), [allowed]);
   React.useEffect(() => {
     const listen = (e) => {
       if (!ref.current || e.source !== ref.current.contentWindow || !e.data || e.data.yourAttention !== 'answer') return;
@@ -228,8 +235,19 @@ export function HtmlCard({ card, allowed, onAnswer }) {
     window.addEventListener('message', listen);
     return () => window.removeEventListener('message', listen);
   }, [card.id, card.version]);
-  if (!allowed) return h('div', { className: 'note warn' }, 'This card brings its own HTML and scripts. Turn on "Allow HTML cards" in the bar to show it in a sandboxed frame.');
-  return h('iframe', { ref, className: 'html-card', sandbox: 'allow-scripts allow-forms', srcDoc: FRAME_POLICY + FRAME_BRIDGE + card.html, title: card.title });
+  const allow = (on) => { setAlways(on); setAllowHtml(on); };
+  if (!always && once !== card.id) {
+    return h('div', { className: 'note warn html-gate' },
+      h('p', null, 'This card brings its own HTML and scripts. They run in a sandboxed frame that cannot reach the network or this page.'),
+      h('div', { className: 'html-gate-actions' },
+        h('button', { type: 'button', className: 'btn primary', onClick: () => setOnce(card.id) }, 'Show this card'),
+        h('button', { type: 'button', className: 'btn', onClick: () => allow(true) }, 'Always show HTML cards')));
+  }
+  return h(React.Fragment, null,
+    h('iframe', { ref, className: 'html-card', sandbox: 'allow-scripts allow-forms', srcDoc: FRAME_POLICY + FRAME_BRIDGE + card.html, title: card.title }),
+    always
+      ? h('button', { type: 'button', className: 'link html-off', onClick: () => { setOnce(null); allow(false); } }, 'Stop showing HTML cards')
+      : h('button', { type: 'button', className: 'link html-off', onClick: () => allow(true) }, 'Always show HTML cards'));
 }
 
 // What changed since the version before, line by line.
@@ -304,18 +322,6 @@ export function BroadcastForm({ card, cards = [], onDone }) {
     h('div', { className: 'nav' },
       h('button', { className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),
       h('button', { className: 'btn', onClick: () => send('reject') }, 'Reject')));
-}
-
-export function HtmlToggle({ settings }) {
-  // The switch moves at once; the inbox's change event confirms it.
-  const [on, setOn] = React.useState(!!settings.allowHtml);
-  React.useEffect(() => setOn(!!settings.allowHtml), [settings.allowHtml]);
-  const toggle = () => {
-    setOn(!on);
-    fetch(BASE + 'v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: !on }) });
-  };
-  return h('label', { className: 'notify', title: 'Show cards that bring their own HTML and scripts, in a sandboxed frame' },
-    h('input', { type: 'checkbox', role: 'switch', checked: on, onChange: toggle }), 'Allow HTML cards');
 }
 
 export function NotifyToggle() {

@@ -1,7 +1,7 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
-import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, HtmlToggle, LinkedText, NotifyToggle, PhoneLink, SecretForm, cardSource, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, PhoneLink, SecretForm, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -301,7 +301,6 @@ export function App() {
   return h(React.Fragment, null,
     h('div', { className: 'bar' }, h('div', { className: 'bar-inner' },
       h('h1', null, 'Your attention'),
-      state.settings && h(HtmlToggle, { settings: state.settings }),
       h(NotifyToggle),
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : 'Inbox unreachable')),
       h(PhoneLink),

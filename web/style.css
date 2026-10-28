@@ -64,6 +64,11 @@
   .note { margin: 8px 0; padding: 10px 12px; border-radius: 8px; font-size: calc(14px * var(--text-scale)); white-space: pre-wrap; }
   .note.warn { background: var(--warn-bg); color: var(--warn); }
   .note.ok { background: var(--ok-bg); color: var(--ok); }
+  .html-gate { white-space: normal; }
+  .html-gate p { margin: 0 0 10px; }
+  .html-gate-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  button.link { background: none; border: 0; padding: 6px 0; color: var(--muted); text-decoration: underline; cursor: pointer; font: inherit; font-size: calc(13px * var(--text-scale)); }
+  button.link:hover { color: inherit; }
   .receipt { margin-top: 10px; font-size: calc(13px * var(--text-scale)); color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .receipt .btn { margin-left: 8px; }
   .receipt:empty { display: none; }

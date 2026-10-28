@@ -71,10 +71,26 @@ test('an HTML card stays hidden until the owner allows it, then answers from its
   await inbox.agent.post({ id: 'html', agent: 's-html', title: 'Pick a colour', html: "<button id=b onclick=\"yourAttention.answer({colour:'blue'},'from the frame')\">Blue</button>", priority: 'now' });
   await inbox.open(page);
   await page.locator('.q', { hasText: 'Pick a colour' }).click();
-  await expect(page.locator('.note.warn')).toContainText('Allow HTML cards');
-  await page.getByLabel('Allow HTML cards').check();
+  // The switch lives on the HTML card, not in the bar.
+  await expect(page.getByLabel('Allow HTML cards')).toHaveCount(0);
+  await expect(page.locator('.note.warn')).toContainText('own HTML and scripts');
+  await page.getByRole('button', { name: 'Always show HTML cards' }).click();
   expect(await page.locator('iframe.html-card').getAttribute('srcdoc')).toContain("default-src 'none'");
   const frame = page.frameLocator('iframe.html-card');
   await frame.locator('#b').click();
   await expect.poll(async () => (await inbox.state()).answers['html']?.values).toEqual({ colour: 'blue' });
+});
+
+test('an HTML card shows once on request, and the owner can stop showing them from the card', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ allowHtml: false });
+  await inbox.agent.post({ id: 'html-once', agent: 's-html-once', title: 'Pick a shape', html: '<p id=p>Square</p>', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Pick a shape' }).click();
+  await page.getByRole('button', { name: 'Show this card' }).click();
+  await expect(page.frameLocator('iframe.html-card').locator('#p')).toHaveText('Square');
+  expect((await inbox.state() as unknown as { settings: { allowHtml: boolean } }).settings.allowHtml).toBe(false);
+  await page.getByRole('button', { name: 'Always show HTML cards' }).click();
+  await expect.poll(async () => (await inbox.state() as unknown as { settings: { allowHtml: boolean } }).settings.allowHtml).toBe(true);
+  await page.getByRole('button', { name: 'Stop showing HTML cards' }).click();
+  await expect(page.locator('.note.warn')).toContainText('own HTML and scripts');
 });
