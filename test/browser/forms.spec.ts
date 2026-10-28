@@ -44,17 +44,24 @@ test('one send carries every form on the card, with the comment the page adds be
   await expect(page.locator('.note.ok')).toHaveText('Your answer: Merge #12?: Merge it\nChecks for #12: Rerun CI\nDeploy after merge\nticket: T-7\nMerge #12 first.');
 });
 
-test('a card with its own comment field and buttons gets no second comment field', async ({ page }) => {
+test('a card with its own comment field still ends with the page comment box, and the answer joins both texts', async ({ page }) => {
   const own = `root = Card([f])
 f = Form("f", b, [fc])
 fc = FormControl("Why?", TextArea("comment", "Say why", 2))
-b = Buttons([go])
-go = Button("Decide", @ToAssistant("send answer"), "primary")`;
+b = Buttons([])`;
   await inbox.agent.post({ id: 'own', agent: 's-own', title: 'Own comment field', body: own, priority: 'now' });
+  const ev = inbox.listen('s-own');
   await inbox.open(page);
   await page.locator('.q', { hasText: 'Own comment field' }).click();
-  await expect(page.locator('.focus-card textarea')).toHaveCount(1);
+  const boxes = page.locator('.focus-card textarea');
+  await expect(boxes).toHaveCount(2);
+  await boxes.first().fill('Because of the outage.');
+  await boxes.last().fill('Ship it after lunch.');
   await expect(page.locator('.focus-card').getByRole('button', { name: 'Skip for now' })).toBeVisible();
+  await page.locator('.focus-card').getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(() => ev.events.find((e) => e.type === 'answer')?.type).toBe('answer');
+  const a = ev.events.find((e) => e.type === 'answer');
+  expect(a?.type === 'answer' && a.answer.comment).toBe('Because of the outage.\nShip it after lunch.');
 });
 
 test('the example in the card_post description renders and answers', async ({ page }) => {

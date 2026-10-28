@@ -22,7 +22,7 @@ export const cardTools: CardTool[] = [
         follows: { type: 'string', description: 'The id of the card this one follows up on.' },
         body: { type: 'string', description: [
           'Optional OpenUI Lang source for a card that needs other components. Place a saved widget with a line of its own: `pr = widget pull-request {"title": "Add stop"}`, or `widget pull-request@2` for one version.',
-          'To ask several things, put each question beside the text or table it is about: give the body its own forms, between TextContent and Table statements. Give each form `Buttons([])`. The page adds a comment field, Send answer and Skip below the card, and one send carries every form.',
+          'To ask several things, put each question beside the text or table it is about: give the body its own forms, between TextContent and Table statements. Give each form `Buttons([])`. The page adds a comment box, Send answer and Skip below every card, and one send carries every form, so add no general comment field or send button of your own.',
           'Fields: FormControl(label, input) around RadioGroup(name, [RadioItem(label, "", value)]), CheckBoxGroup(name, [CheckBoxItem(label, "", name)]), Select(name, [SelectItem(value, label)]), Input(name), TextArea(name), Slider(name, "discrete", min, max, step, [start], label). A slider shows its name when it has no label. SwitchGroup(name, [SwitchItem(label, "", name)]) goes in a form without a FormControl. Use a distinct name for each field: the answer gives each value by its field name.',
           'Example:\nroot = Card([intro, risks, pr12])\nintro = TextContent("#12 adds retries to the uploader.")\nrisks = Table([Col("Risk", ["Duplicate uploads"]), Col("Likelihood", ["low"])])\npr12 = Form("pr12", none, [merge])\nnone = Buttons([])\nmerge = FormControl("Merge #12?", RadioGroup("merge12", [RadioItem("Merge it", "", "yes"), RadioItem("Wait", "", "no")]))',
         ].join(' ') },
@@ -34,7 +34,7 @@ export const cardTools: CardTool[] = [
           description: 'Files to show on the card: images, PDF, Markdown, text, CSV, JSON, or any file to download. At most 10, 8 MB each.',
           items: { type: 'object', properties: { path: { type: 'string', description: 'A local file.' }, url: { type: 'string', description: 'An https URL.' }, name: { type: 'string' }, alt: { type: 'string', description: 'What an image shows.' } } },
         },
-        html: { type: 'string', description: 'Your own HTML and scripts, shown in a sandboxed frame if the person allows it. The frame answers with yourAttention.answer(values, comment).' },
+        html: { type: 'string', description: 'Your own HTML and scripts, shown in a sandboxed frame if the person allows it. The page adds a comment box, Send answer and Skip below the frame, so add no general comment box or send button. Send answer takes every named input, select and textarea in the frame: a radio gives its value, check boxes give the list of checked values. A script can also answer with yourAttention.answer(values, comment), and the comment box text joins it.' },
         template: { type: 'string', description: 'A saved template to fill the body from.' },
         template_version: { type: 'number', description: 'The template version to use. The latest by default.' },
         vars: { type: 'object', additionalProperties: { type: 'string' }, description: 'Values for the template, by {{name}}.' },

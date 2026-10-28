@@ -63,17 +63,15 @@ export function cardSource(c) {
   return [`root = Card([${parts.join(', ')}])`, ...L].join('\n');
 }
 
-// Every card ends with a comment field, Send answer and Skip. The page's statements start with ya, so they leave
-// the agent's names alone. A body that has a field named comment keeps its own.
+// Every card ends with the page's comment box, Send answer and Skip. The page's statements start with ya, so they leave
+// the agent's names alone. A body with a field of its own named comment keeps it, and the answer joins both texts.
 function withAnswerFooter(body) {
-  // A field named comment counts wherever it is written: in a statement of its own, or in place inside another call.
-  const named = (v) => !!v && typeof v === 'object' && (Array.isArray(v) ? v.some(named) : v.call ? v.args[0] === 'comment' || v.args.some(named) : false);
-  const ownComment = Object.values(parseSource(body)).some(named);
   return [
     'root = Card([yaBody, yaAnswer])',
     body.replace(/^\s*root\s*=/m, 'yaBody ='),
-    `yaAnswer = Form("yaAnswer", yaButtons, [${ownComment ? '' : 'yaFcComment'}])`,
-    ...(ownComment ? [] : ['yaFcComment = FormControl("Comment", yaComment)', 'yaComment = TextArea("comment", "Anything to add?", 3)']),
+    'yaAnswer = Form("yaAnswer", yaButtons, [yaFcComment])',
+    'yaFcComment = FormControl("Comment", yaComment)',
+    'yaComment = TextArea("comment", "Anything to add?", 3)',
     'yaButtons = Buttons([yaSave, yaSkip], "row")',
     'yaSave = Button("Send answer", @ToAssistant("send answer"), "primary")',
     'yaSkip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
@@ -181,17 +179,19 @@ export function answerValues(card, values) {
 // Form values by field name, without the comment.
 export function formValues(formState) {
   const values = {};
-  let comment = '';
-  const walk = (o) => {
+  // A body's own comment field comes first, and the page's comment box under the card comes last.
+  const comments = [];
+  const walk = (o, footer) => {
     if (!o || typeof o !== 'object') return;
     for (const [k, v] of Object.entries(o)) {
       if (v && typeof v === 'object' && 'value' in v) {
-        if (k === 'comment') comment = String(v.value || '').trim();
+        if (k === 'comment') comments.push([footer, String(v.value || '').trim()]);
         else values[k] = v.value;
-      } else walk(v);
+      } else walk(v, footer || k === 'yaAnswer');
     }
   };
-  walk(formState);
+  walk(formState, false);
+  const comment = comments.sort((a, b) => Number(a[0]) - Number(b[0])).map(([, t]) => t).filter(Boolean).join('\n');
   return { values, comment };
 }
 
@@ -350,15 +350,26 @@ export const FRAME_LINKS = '<base target="_blank">';
 // It measures the root element, not the scroll height, which is never less than the frame: a short card would grow on each report.
 export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){parent.postMessage({yourAttention:"answer",values:v||{},comment:c||""},"*")}};'
   + '(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);if(h!==last){last=h;parent.postMessage({yourAttention:"height",height:h},"*")}}'
-  + 'new ResizeObserver(send).observe(document.documentElement);addEventListener("load",send)})();<\/script>';
+  + 'new ResizeObserver(send).observe(document.documentElement);addEventListener("load",send)})();'
+  // The page's Send answer asks the frame for its form: every named field, a radio's picked value, each checked box.
+  + 'addEventListener("message",function(e){if(e.source!==parent||!e.data||e.data.yourAttention!=="collect")return;var v={};'
+  + 'document.querySelectorAll("input[name],select[name],textarea[name]").forEach(function(el){var n=el.name,t=el.type;'
+  + 'if(t==="radio"){if(el.checked)v[n]=el.value}else if(t==="checkbox"){if(el.checked)(v[n]=v[n]||[]).push(el.value)}'
+  + 'else if(t==="button"||t==="submit"||t==="reset"||t==="hidden"){}else if(el.multiple){v[n]=[].map.call(el.selectedOptions,function(o){return o.value})}'
+  + 'else if(el.value!=="")v[n]=el.value});parent.postMessage({yourAttention:"collected",id:e.data.id,values:v},"*")});<\/script>';
 /** The tallest frame the page makes, so a card cannot grow the page without bound. The frame's height also takes its 2px of border. */
 const MAX_FRAME_HEIGHT = 20000;
 /** Turn showing HTML cards on or off for the whole inbox. */
 const setAllowHtml = (on) => fetch(BASE + 'v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: on }) });
 
 // A card with the agent's own HTML. It shows only when the owner allows HTML cards, or asks to see this one.
-export function HtmlCard({ card, allowed, onAnswer }) {
+export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
   const ref = React.useRef(null);
+  const draftKey = `draft:${card.id}:${card.version}:comment`;
+  const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
+  const commentRef = React.useRef(comment);
+  commentRef.current = comment;
+  const pending = React.useRef(new Map());
   const [once, setOnce] = React.useState(null);
   const [always, setAlways] = React.useState(allowed);
   const [height, setHeight] = React.useState(null);
@@ -367,26 +378,45 @@ export function HtmlCard({ card, allowed, onAnswer }) {
     const listen = (e) => {
       if (!ref.current || e.source !== ref.current.contentWindow || !e.data) return;
       if (e.data.yourAttention === 'height') { const px = Number(e.data.height); if (px > 0) setHeight(Math.min(px, MAX_FRAME_HEIGHT)); return; }
+      const values = typeof e.data.values === 'object' && e.data.values ? e.data.values : {};
+      if (e.data.yourAttention === 'collected') { pending.current.get(e.data.id)?.(values); return; }
       if (e.data.yourAttention !== 'answer') return;
-      onAnswer(typeof e.data.values === 'object' && e.data.values ? e.data.values : {}, String(e.data.comment || ''));
+      // An answer from the card's own button carries the comment from the page's box too.
+      onAnswer(values, [String(e.data.comment || '').trim(), commentRef.current.trim()].filter(Boolean).join('\n'));
     };
     window.addEventListener('message', listen);
     return () => window.removeEventListener('message', listen);
   }, [card.id, card.version]);
   const allow = (on) => { setAlways(on); setAllowHtml(on); };
+  // Send answer takes what the frame's form holds, or nothing when the frame is hidden or does not reply.
+  const collect = () => new Promise((resolve) => {
+    const frame = ref.current && ref.current.contentWindow;
+    if (!frame) return resolve({});
+    const id = Math.random().toString(36).slice(2);
+    const done = (v) => { pending.current.delete(id); clearTimeout(timer); resolve(v); };
+    const timer = setTimeout(() => done({}), 1500);
+    pending.current.set(id, done);
+    frame.postMessage({ yourAttention: 'collect', id }, '*');
+  });
+  const footer = h('div', { className: 'html-answer' },
+    h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
+    h('div', { className: 'html-answer-actions' },
+      h('button', { type: 'button', className: 'btn primary', onClick: async () => { onAnswer(await collect(), comment.trim()); store.del(draftKey); } }, 'Send answer'),
+      h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now')));
   if (!always && once !== card.id) {
-    return h('div', { className: 'note warn html-gate' },
+    return h(React.Fragment, null, h('div', { className: 'note warn html-gate' },
       h('p', null, 'This card brings its own HTML and scripts. They run in a sandboxed frame that cannot reach the network or this page. A click in the card can open a page in a new tab, and the card chooses its address.'),
       h('div', { className: 'html-gate-actions' },
         h('button', { type: 'button', className: 'btn primary', onClick: () => setOnce(card.id) }, 'Show this card'),
-        h('button', { type: 'button', className: 'btn', onClick: () => allow(true) }, 'Always show HTML cards')));
+        h('button', { type: 'button', className: 'btn', onClick: () => allow(true) }, 'Always show HTML cards'))), footer);
   }
   return h(React.Fragment, null,
     // The new tab leaves the sandbox, so the linked page works as it does anywhere. It opens without a reference back to this page.
     h('iframe', { ref, className: 'html-card', style: height ? { height: `calc(${height}px + 2px)` } : undefined, sandbox: 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox', srcDoc: FRAME_POLICY + FRAME_LINKS + FRAME_BRIDGE + card.html, title: card.title }),
     always
       ? h('button', { type: 'button', className: 'link html-off', onClick: () => { setOnce(null); allow(false); } }, 'Stop showing HTML cards')
-      : h('button', { type: 'button', className: 'link html-off', onClick: () => allow(true) }, 'Always show HTML cards'));
+      : h('button', { type: 'button', className: 'link html-off', onClick: () => allow(true) }, 'Always show HTML cards'),
+    footer);
 }
 
 // What changed since the version before, line by line.

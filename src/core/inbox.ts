@@ -57,6 +57,7 @@ export const DEFAULT_GUIDANCE = [
   'Shape the answer options to the question. The person may leave any field empty.',
   'Put each question next to the field that answers it. One question uses options. Several questions use forms in the body, each beside the text or table it is about.',
   'Never list questions in the text with the answers at the bottom. Write what you will check yourself as statements, not questions.',
+  'The page adds a comment box, Send answer and Skip at the bottom of every card. Add no general comment box or send button of your own.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;

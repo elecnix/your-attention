@@ -117,3 +117,30 @@ test('an HTML card shows once on request, and the owner can stop showing them fr
   await page.getByRole('button', { name: 'Stop showing HTML cards' }).click();
   await expect(page.locator('.note.warn')).toContainText('own HTML and scripts');
 });
+
+test('an HTML card ends with the page comment box: Send answer collects the frame form, and the frame button keeps the comment', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ allowHtml: true });
+  const html = '<label><input type=radio name=size value=small> Small</label><label><input type=radio name=size value=large> Large</label>'
+    + '<label><input type=checkbox name=extras value=tests> Tests</label><input name=ticket>'
+    + "<button id=own onclick=\"yourAttention.answer({size:'small'},'')\">Send from the card</button>";
+  await inbox.agent.post({ id: 'html-footer', agent: 's-html-footer', title: 'Footer on an HTML card', html, priority: 'now' });
+  await inbox.agent.post({ id: 'html-footer-2', agent: 's-html-footer', title: 'Second HTML card', html, priority: 'now' });
+  const heard = inbox.listen('s-html-footer');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Footer on an HTML card' }).click();
+  const frame = page.frameLocator('iframe.html-card');
+  await frame.locator('input[value=large]').check();
+  await frame.locator('input[value=tests]').check();
+  await frame.locator('input[name=ticket]').fill('T-9');
+  await page.locator('.html-answer textarea').fill('Large, with tests.');
+  await page.locator('.html-answer').getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(() => heard.events.filter((e) => e.type === 'answer').length).toBe(1);
+  const first = heard.events.find((e) => e.type === 'answer');
+  expect(first?.type === 'answer' && [first.answer.values, first.answer.comment]).toEqual([{ size: 'large', extras: ['tests'], ticket: 'T-9' }, 'Large, with tests.']);
+  await page.locator('.q', { hasText: 'Second HTML card' }).click();
+  await page.locator('.html-answer textarea').fill('Sent from inside.');
+  await page.frameLocator('iframe.html-card').locator('#own').click();
+  await expect.poll(() => heard.events.filter((e) => e.type === 'answer').length).toBe(2);
+  const second = heard.events.filter((e) => e.type === 'answer')[1];
+  expect(second?.type === 'answer' && [second.answer.values, second.answer.comment]).toEqual([{ size: 'small' }, 'Sent from inside.']);
+});
