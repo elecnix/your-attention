@@ -35,10 +35,10 @@ async function toInbox(env: Env, name: string, req: Request, path: string, searc
   return stub.fetch(new Request(`https://inbox${path}${search}`, req));
 }
 
-/** Serve the built-in page and its files. */
+/** Serve the built-in page and its files. Assets serve index.html at "/", and answer "/index.html" with a redirect to "/". */
 function asset(env: Env, req: Request, path: string): Promise<Response> {
   const url = new URL(req.url);
-  return env.ASSETS.fetch(new Request(new URL(path === '/' ? '/index.html' : path, url.origin), req));
+  return env.ASSETS.fetch(new Request(new URL(path, url.origin), req));
 }
 
 const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
