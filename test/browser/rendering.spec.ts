@@ -410,3 +410,16 @@ test('a tall HTML card and a long attachment grow with the card, so the page is 
   await expect(md).toContainText('line 80');
   expect(await md.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
 });
+
+test('a short HTML card shrinks to its content and stays that height', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ allowHtml: true });
+  await inbox.agent.post({ id: 'short-html', agent: 's-short', title: 'A short HTML card', priority: 'now', html: '<p style="margin:0;height:40px">One line</p>' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'A short HTML card' }).click();
+  const frame = page.locator('iframe.html-card');
+  await expect.poll(async () => (await frame.boundingBox())?.height ?? 0).toBeLessThan(80);
+  const first = (await frame.boundingBox())?.height;
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.waitForTimeout(500);
+  expect((await frame.boundingBox())?.height).toBe(first);
+});

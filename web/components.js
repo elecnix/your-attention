@@ -347,8 +347,9 @@ export const FRAME_POLICY = `<meta http-equiv="Content-Security-Policy" content=
 // Links open in a new tab: a page loaded inside the frame would run sandboxed, and most sites refuse to be framed.
 export const FRAME_LINKS = '<base target="_blank">';
 // The frame also reports its content height, so the page sizes it to fit and the card has one scroll: the page's.
+// It measures the root element, not the scroll height, which is never less than the frame: a short card would grow on each report.
 export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){parent.postMessage({yourAttention:"answer",values:v||{},comment:c||""},"*")}};'
-  + '(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.scrollHeight);if(h!==last){last=h;parent.postMessage({yourAttention:"height",height:h},"*")}}'
+  + '(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);if(h!==last){last=h;parent.postMessage({yourAttention:"height",height:h},"*")}}'
   + 'new ResizeObserver(send).observe(document.documentElement);addEventListener("load",send)})();<\/script>';
 /** The tallest frame the page makes, so a card cannot grow the page without bound. The frame's height also takes its 2px of border. */
 const MAX_FRAME_HEIGHT = 20000;
