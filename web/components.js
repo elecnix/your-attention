@@ -136,7 +136,7 @@ export function ClosedCard({ closed, children, onNext, animate }) {
     h('div', { className: 'closed-line', style: { marginBottom: collapsed ? 0 : 10 } },
       h('span', { className: 'tag' }, CLOSED_LABEL[closed.kind] || 'Closed'),
       h('span', { className: 'o' }, closed.outcome),
-      h('button', { className: 'btn', onClick: () => setCollapsed((c) => !c) }, collapsed ? (closed.kind === 'returned' ? 'Show card' : 'Reply') : 'Hide card'),
+      h('button', { className: 'btn', onClick: () => setCollapsed((c) => !c) }, collapsed ? 'Show card' : 'Hide card'),
       h('button', { className: 'btn', onClick: onNext }, 'Next card')),
     h('div', { ref, className: 'collapse', style: { maxHeight: collapsed ? 0 : (height || 4000), opacity: collapsed ? 0 : 1 } }, children));
 }

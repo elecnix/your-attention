@@ -48,6 +48,12 @@ test('a card the agent closes while you read it collapses to its outcome', async
   await inbox.agent.close('closing', 'self-answered', 'Found it in the README.');
   await expect(page.locator('.closed-line')).toContainText('Found it in the README.');
   await expect(page.locator('.closed-line .tag')).toHaveText('Answered by agent');
+  await expect(page.locator('.collapse')).toHaveCSS('opacity', '0');
+  await page.getByRole('button', { name: 'Show card' }).click();
+  await expect(page.locator('.collapse')).toHaveCSS('opacity', '1');
+  await expect(page.locator('.collapse .card-title')).toHaveText('Still needed?');
+  await page.getByRole('button', { name: 'Hide card' }).click();
+  await expect(page.locator('.collapse')).toHaveCSS('opacity', '0');
 });
 
 test('a secret is sealed in the browser, and only the asking session opens it', async ({ page }) => {
