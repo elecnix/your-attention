@@ -27,6 +27,11 @@ describe('your-attention open --link', () => {
       const login = () => fetch(`${info.url}/v1/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: decodeURIComponent(link[2]!) }) });
       assert.equal((await login()).ok, true);
       assert.equal((await login()).ok, false);
+      serve.kill();
+      await until(async () => (await fetch(`${info.url}/v1/info`).then(() => false, () => true)) || undefined);
+      const down = spawnSync(process.execPath, [...CLI, 'open', '--link'], { env, encoding: 'utf8' });
+      assert.notEqual(down.status, 0);
+      assert.match(down.stderr, /No inbox runs on this machine/);
     } finally {
       serve.kill();
       fs.rmSync(home, { recursive: true, force: true });

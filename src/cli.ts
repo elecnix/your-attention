@@ -158,8 +158,9 @@ switch (command) {
     const { values } = parseArgs({ args: rest, options: { link: { type: 'boolean', default: false } } });
     const { url, owner } = localServer();
     // A one-time code signs the browser in, so the owner token stays out of the address bar and the browser history.
-    const res = await fetch(`${url}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json', 'x-your-attention': '1' }, body: '{}' });
-    const { code, error } = (await res.json()) as { code?: string; error?: string };
+    const res = await fetch(`${url}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json', 'x-your-attention': '1' }, body: '{}' }).catch(() => undefined);
+    if (!res) fail('No inbox runs on this machine. Start one with `your-attention start`.');
+    const { code, error } = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
     if (!res.ok || !code) fail(`Could not make a sign-in code: ${error ?? res.status}`);
     const link = `${url}/#signin=${encodeURIComponent(code)}`;
     if (values.link) {

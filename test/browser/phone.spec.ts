@@ -173,7 +173,8 @@ test('on a laptop inbox, the code opens the computer\'s network name, which the 
 });
 
 test('the sign-in page of a laptop inbox says to run your-attention open on that computer, and how to sign in another browser', async ({ browser }) => {
-  const p = await (await browser.newContext()).newPage();
+  const context = await browser.newContext();
+  const p = await context.newPage();
   await p.goto(`${inbox.server.url}/`);
   await expect(p.getByRole('heading', { name: 'Sign in to your inbox' })).toBeVisible();
   const steps = p.locator('.signin');
@@ -181,4 +182,5 @@ test('the sign-in page of a laptop inbox says to run your-attention open on that
   await expect(steps.locator('ol li').nth(1)).toContainText('your-attention open --link');
   await expect(steps).toContainText('your-attention open --link');
   await expect(steps).toContainText('phone button');
+  await context.close();
 });
