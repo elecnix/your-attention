@@ -85,5 +85,6 @@ describe('your-attention opencode-plugin', () => {
     assert.match(src, /from '@opencode-ai\/plugin'/);
     assert.match(src, /src\/integrations\/opencode\/plugin\.ts"/);
     assert.match(src, /export const YourAttention = createPlugin\(tool\.schema\)/);
+    assert.match(pluginSource('C:\\ya\\src\\integrations\\opencode\\plugin.ts', 'win32'), /from "file:\/\/\/C:\/ya\/src\/integrations\/opencode\/plugin\.ts"/);
   });
 });
