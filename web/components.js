@@ -340,3 +340,49 @@ export function presenceOf(card, state) {
   return unread ? ['busy', 'Agent busy: it has an answer it has not read yet'] : ['on', 'Agent listening'];
 }
 
+
+// The inbox address as a QR code, to open the inbox on a phone. The address has no token, so the phone signs in by itself.
+export function PhoneLink() {
+  const [open, setOpen] = React.useState(false);
+  const [qr, setQr] = React.useState(null);
+  const [copied, setCopied] = React.useState(false);
+  const ref = React.useRef(null);
+  const address = location.origin + location.pathname;
+  // A phone cannot reach an address that names this computer itself.
+  const local = /^(localhost|127\.|\[::1\]$|0\.0\.0\.0$)/.test(location.hostname);
+  React.useEffect(() => {
+    if (!open) return;
+    if (ref.current && !ref.current.open) ref.current.showModal();
+    let live = true;
+    import(/* @vite-ignore */ new URL('vendor/qrcode.mjs', document.baseURI).href).then(({ default: qrcode }) => {
+      const code = qrcode(0, 'M');
+      code.addData(address);
+      code.make();
+      const n = code.getModuleCount();
+      let d = '';
+      for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (code.isDark(y, x)) d += `M${x} ${y}h1v1h-1z`;
+      if (live) setQr({ n, d });
+    });
+    return () => { live = false; };
+  }, [open]);
+  const close = () => { ref.current?.close(); setOpen(false); setCopied(false); };
+  const copy = () => navigator.clipboard?.writeText(address).then(() => setCopied(true), () => {});
+  return h(React.Fragment, null,
+    h('button', { type: 'button', className: 'phone', onClick: () => setOpen(true), 'aria-label': 'Open this inbox on your phone', title: 'Open this inbox on your phone' },
+      h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 },
+        h('rect', { x: 4, y: 1, width: 8, height: 14, rx: 1.75 }),
+        h('path', { d: 'M7 12.5h2', strokeLinecap: 'round' }))),
+    open && h('dialog', { ref, className: 'qr-dialog', onClose: close, onClick: (e) => { if (e.target === ref.current) close(); }, 'aria-labelledby': 'qr-title' },
+      h('h2', { id: 'qr-title' }, 'Open this inbox on your phone'),
+      h('p', null, 'Scan the code with the phone camera.'),
+      h('div', { className: 'qr' }, qr
+        ? h('svg', { viewBox: `-4 -4 ${qr.n + 8} ${qr.n + 8}`, role: 'img', 'aria-label': `QR code of ${address}`, shapeRendering: 'crispEdges' },
+          h('rect', { x: -4, y: -4, width: qr.n + 8, height: qr.n + 8, fill: '#fff' }), h('path', { d: qr.d, fill: '#000' }))
+        : h('span', { className: 'muted' }, 'Drawing the code…')),
+      h('p', { className: 'qr-address' }, address),
+      local && h('p', { className: 'note warn' }, 'This address names this computer, so a phone cannot open it. Run the inbox on your network with ', h('code', null, 'your-attention serve --host 0.0.0.0'), ', then open the page from its network address, or use a cloud inbox.'),
+      h('p', { className: 'muted' }, 'The address carries no sign-in. On the phone, sign in with your owner link.'),
+      h('div', { className: 'qr-actions' },
+        h('button', { type: 'button', className: 'btn', onClick: copy }, copied ? 'Copied' : 'Copy the address'),
+        h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: true }, 'Close'))));
+}

@@ -1,7 +1,7 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
-import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, HtmlToggle, LinkedText, NotifyToggle, SecretForm, cardSource, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, HtmlToggle, LinkedText, NotifyToggle, PhoneLink, SecretForm, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -300,11 +300,15 @@ export function App() {
       h('h1', null, 'Your attention'),
       state.settings && h(HtmlToggle, { settings: state.settings }),
       h(NotifyToggle),
-      h('span', { className: `pill ${up ? 'on' : 'down'}` }, up ? 'Inbox connected' : 'Inbox unreachable'),
+      h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : 'Inbox unreachable')),
+      h(PhoneLink),
       h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: 'Your Attention on GitHub' },
         h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'currentColor' }, h('path', { d: OCTOCAT }))))),
     h('div', { className: 'layout', style: { '--queue-w': `${queueWidth}px` } },
-      queue, h(QueueResizer, { width: queueWidth, onResize: setQueueWidth }), h('main', null, main)));
+      queue, h(QueueResizer, { width: queueWidth, onResize: setQueueWidth }), h('main', null,
+        // On a phone the queue sits below the card, so a button above the card says how many wait and jumps there.
+        main && pending.length > 0 && h('button', { type: 'button', className: 'btn to-queue', onClick: () => document.querySelector('.queue')?.scrollIntoView({ behavior: 'smooth' }) }, `${pending.length} waiting · show the queue`),
+        main)));
 }
 
 // GitHub's mark, from Octicons (mark-github).

@@ -11,4 +11,6 @@ for (const f of fs.readdirSync('web', { withFileTypes: true })) {
 }
 const vendor = path.resolve('node_modules/@openuidev/browser-bundle/dist');
 for (const f of fs.readdirSync(vendor)) fs.copyFileSync(path.join(vendor, f), path.join(out, 'vendor', f));
+// The QR encoder the phone link draws with.
+fs.copyFileSync(path.resolve('node_modules/qrcode-generator/dist/qrcode.mjs'), path.join(out, 'vendor', 'qrcode.mjs'));
 console.log(`assets in ${out}`);

@@ -237,6 +237,10 @@ Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST 
 
 The tab icon is the ✋ emoji, `web/favicon.svg`. While a card waits for you, the page switches it to `web/favicon-waiting.svg`, which adds a red dot.
 
+The phone button, left of the GitHub mark, opens a QR code of the inbox address, so a phone camera opens the inbox. The address is the page's own, without the sign-in token, so the phone signs in by itself. When the page runs on `localhost` or `127.0.0.1`, the dialog says that a phone cannot reach that address, and how to serve the inbox on the network. `qrcode-generator` draws the code, served at `vendor/qrcode.mjs`.
+
+On a screen 760 pixels wide or less, the page puts the queue below the card, and a button above the card says how many cards wait and scrolls to the queue. The bar scrolls away with the page. A connected inbox shows as a dot, and a lost connection keeps its words. Fields use 16-pixel text, so iOS does not zoom into them.
+
 ## Search
 
 `GET /v1/search?q=<words>` matches each word as a prefix, over card text and answer comments. The laptop build uses SQLite FTS5.

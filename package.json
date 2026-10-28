@@ -41,6 +41,7 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "@openuidev/browser-bundle": "0.2.1",
     "bonjour-service": "1.4.4",
+    "qrcode-generator": "2.0.4",
     "typebox": "1.4.3",
     "ws": "8.22.0"
   },
@@ -51,6 +52,7 @@
     "@types/node": "22.20.5",
     "@types/ws": "8.18.2",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "jsqr": "1.4.0",
     "storybook": "10.6.4",
     "tsc-rs": "0.8.0",
     "vite": "8.3.5",

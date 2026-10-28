@@ -20,12 +20,15 @@ import { relayClient } from './links.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WEB = path.join(ROOT, 'web');
-const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
 function vendorDir(): string {
   const url = import.meta.resolve('@openuidev/browser-bundle');
   return path.dirname(fileURLToPath(url));
 }
+
+/** Vendor files that come from other packages than the OpenUI bundle. */
+export const VENDOR_FILES: Record<string, string> = { 'qrcode.mjs': fileURLToPath(import.meta.resolve('qrcode-generator')) };
 
 export interface ServeOptions {
   port: number;
@@ -68,8 +71,8 @@ function serveStatic(pathname: string, res: http.ServerResponse): boolean {
   const vendor = pathname.startsWith('/vendor/');
   const base = vendor ? vendorDir() : WEB;
   const rel = vendor ? pathname.slice('/vendor/'.length) : pathname === '/' ? 'index.html' : pathname.slice(1);
-  const file = path.resolve(base, rel);
-  if (!file.startsWith(base + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return false;
+  const file = vendor && VENDOR_FILES[rel] ? VENDOR_FILES[rel] : path.resolve(base, rel);
+  if (!(vendor && VENDOR_FILES[rel]) && !file.startsWith(base + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return false;
   res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream', 'cache-control': vendor ? 'max-age=86400' : 'no-store' });
   fs.createReadStream(file).pipe(res);
   return true;
