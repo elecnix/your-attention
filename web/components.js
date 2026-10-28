@@ -357,6 +357,23 @@ export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){
   + 'if(t==="radio"){if(el.checked)v[n]=el.value}else if(t==="checkbox"){if(el.checked)(v[n]=v[n]||[]).push(el.value)}'
   + 'else if(t==="button"||t==="submit"||t==="reset"||t==="hidden"){}else if(el.multiple){v[n]=[].map.call(el.selectedOptions,function(o){return o.value})}'
   + 'else if(el.value!=="")v[n]=el.value});parent.postMessage({yourAttention:"collected",id:e.data.id,values:v},"*")});<\/script>';
+/**
+ * The app's text styles for an HTML card, placed after the agent's own CSS: its font, weight, spacing, text size and
+ * colors, and monospace for code. The agent keeps its layout, but every card reads the same as the rest of the inbox.
+ */
+function frameTheme() {
+  const root = getComputedStyle(document.documentElement);
+  const token = (name) => root.getPropertyValue(name).trim();
+  const size = getComputedStyle(document.body).fontSize;
+  const dark = document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+  return `<style>:root{color-scheme:${dark ? 'dark' : 'light'}}`
+    + `html,body{background:${token('--panel')} !important;color:${token('--ink')} !important;font-family:${token('--font-text')} !important;`
+    + `font-size:${size} !important;line-height:1.5 !important;font-weight:200 !important;letter-spacing:.02em !important}`
+    + 'body *{font-family:inherit !important;font-weight:inherit !important;letter-spacing:inherit !important}'
+    + 'body *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6){font-size:inherit !important}'
+    + 'h1,h2,h3,h4,h5,h6,b,strong,th{font-weight:300 !important}'
+    + `code,code *,pre,pre *,kbd,samp{font-family:${token('--font-code')} !important;letter-spacing:normal !important}</style>`;
+}
 /** The tallest frame the page makes, so a card cannot grow the page without bound. The frame's height also takes its 2px of border. */
 const MAX_FRAME_HEIGHT = 20000;
 /** Turn showing HTML cards on or off for the whole inbox. */
@@ -413,7 +430,7 @@ export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
   }
   return h(React.Fragment, null,
     // The new tab leaves the sandbox, so the linked page works as it does anywhere. It opens without a reference back to this page.
-    h('iframe', { ref, className: 'html-card', style: height ? { height: `calc(${height}px + 2px)` } : undefined, sandbox: 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox', srcDoc: FRAME_POLICY + FRAME_LINKS + FRAME_BRIDGE + card.html, title: card.title }),
+    h('iframe', { ref, className: 'html-card', style: height ? { height: `calc(${height}px + 2px)` } : undefined, sandbox: 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox', srcDoc: FRAME_POLICY + FRAME_LINKS + FRAME_BRIDGE + card.html + frameTheme(), title: card.title }),
     always
       ? h('button', { type: 'button', className: 'link html-off', onClick: () => { setOnce(null); allow(false); } }, 'Stop showing HTML cards')
       : h('button', { type: 'button', className: 'link html-off', onClick: () => allow(true) }, 'Always show HTML cards'),

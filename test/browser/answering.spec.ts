@@ -158,3 +158,25 @@ test('a revision of the HTML card you are commenting on keeps your comment and i
   await page.keyboard.type(' comment');
   await expect(box).toHaveValue('half of my comment');
 });
+
+test('an HTML card takes the app font, text size and weights, whatever its own styles say', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ allowHtml: true });
+  const html = '<style>body{font:12px Arial;color:#ff0000}.why{font-size:10px}b{font-weight:900}</style>'
+    + '<p id=p>Plain <b id=b>bold</b></p><div class=why id=why>Small print</div><code id=code>npm test</code>';
+  await inbox.agent.post({ id: 'html-theme', agent: 's-html-theme', title: 'Styled by its agent', html, priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Styled by its agent' }).click();
+  const app = await page.locator('.focus-card .card-title').evaluate(() => {
+    const s = getComputedStyle(document.body);
+    return { family: s.fontFamily, size: s.fontSize, color: s.color };
+  });
+  const frame = page.frameLocator('iframe.html-card');
+  const style = (sel: string) => frame.locator(sel).evaluate((el) => { const s = getComputedStyle(el); return { family: s.fontFamily, size: s.fontSize, weight: s.fontWeight, color: s.color }; });
+  const p = await style('#p');
+  expect(p.family).toBe(app.family);
+  expect(p.size).toBe(app.size);
+  expect(p.color).toBe(app.color);
+  expect((await style('#why')).size).toBe(app.size);
+  expect(Number((await style('#b')).weight)).toBeLessThanOrEqual(400);
+  expect((await style('#code')).family).toMatch(/monospace/);
+});
