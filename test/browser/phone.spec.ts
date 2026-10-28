@@ -138,7 +138,7 @@ test('a phone that scans the code opens the inbox signed in, and the code works 
   const q = await other.newPage();
   await q.goto(scanned!);
   await expect(q.getByRole('heading', { name: 'Sign in to your inbox' })).toBeVisible();
-  await expect(q.locator('.signin')).toContainText('scan the QR code');
+  await expect(q.locator('.signin')).toContainText('scan its QR code');
   await phone.close();
   await other.close();
 });
@@ -170,4 +170,15 @@ test('on a laptop inbox, the code opens the computer\'s network name, which the 
   await expect(dialog.locator('.qr-address')).toHaveText('http://example-mac.local:4815/');
   await expect(dialog).toContainText('192.168.1.20');
   await expect(dialog).not.toContainText('a phone cannot open it');
+});
+
+test('the sign-in page of a laptop inbox says to run your-attention open on that computer, and how to sign in another browser', async ({ browser }) => {
+  const p = await (await browser.newContext()).newPage();
+  await p.goto(`${inbox.server.url}/`);
+  await expect(p.getByRole('heading', { name: 'Sign in to your inbox' })).toBeVisible();
+  const steps = p.locator('.signin');
+  await expect(steps).toContainText('This inbox runs on a computer.');
+  await expect(steps.locator('ol li').nth(1)).toContainText('your-attention open --link');
+  await expect(steps).toContainText('your-attention open --link');
+  await expect(steps).toContainText('phone button');
 });

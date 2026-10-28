@@ -159,9 +159,21 @@ export function App() {
   }, [!!state]);
 
   if (auth === 'needed') {
+    const phone = h('p', null, 'On a phone: on a page that is signed in, tap the phone button at the top, then scan its QR code. The code works once, within 5 minutes.');
+    // The page cannot sign itself in. The steps depend on where the inbox runs: on a computer, or in the cloud.
+    if (LAPTOP_HOST.test(location.hostname)) {
+      return h('div', { className: 'signin' }, h('h2', null, 'Sign in to your inbox'),
+        h('p', null, 'This inbox runs on a computer. To sign in this browser:'),
+        h('ol', null,
+          h('li', null, 'Open a terminal on the computer that runs the inbox.'),
+          h('li', null, 'Run ', h('code', null, 'your-attention open --link'), '. It prints a sign-in link that works once, within 5 minutes.'),
+          h('li', null, 'Open that link in this browser.')),
+        h('p', null, 'In your usual browser, ', h('code', null, 'your-attention open'), ' opens the page signed in, with no link to copy.'),
+        phone);
+    }
     return h('div', { className: 'signin' }, h('h2', null, 'Sign in to your inbox'),
-      h('p', null, 'On a phone, scan the QR code from the phone button of a page that is signed in. Its code works once, for five minutes.'),
-      h('p', null, 'On a computer, open the sign-in link you got when you created the inbox. On the machine that runs a laptop inbox, ', h('code', null, 'your-attention open'), ' signs you in.'));
+      h('p', null, 'This inbox runs in the cloud. To sign in this browser, open the sign-in link you got when you created the inbox.'),
+      phone);
   }
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
@@ -349,6 +361,8 @@ export function App() {
 }
 
 const IDLE_RELOAD_MS = 3000;
+// An inbox at a loopback, private network or .local address runs on a computer, where `your-attention open` signs in.
+const LAPTOP_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|\[f[cd][0-9a-f:]*\]|\[fe80:[0-9a-f:]*\]|[\w-]+\.local)$/i;
 
 // Reload for new page code, back at the same scroll position. Drafts live in storage, so typed text comes back.
 function reloadPage() {

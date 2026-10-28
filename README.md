@@ -61,6 +61,7 @@ your-attention --help
 ```sh
 your-attention start            # runs the inbox in the background, on port 4815
 your-attention open             # opens the inbox page, signed in
+your-attention open --link      # prints a one-time sign-in link, for a private window or another browser
 ```
 
 The inbox keeps its files in `~/.your-attention`. Set `YOUR_ATTENTION_HOME` to move them.

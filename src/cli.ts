@@ -15,7 +15,7 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   serve [--port 4815] [--host ::] [--no-mdns]        run the inbox
   start [options for serve]                           run the inbox in the background
   stop                                                stop the inbox, or its service when one is installed
-  open                                                open the inbox page in a browser
+  open [--link]                                       open the inbox page signed in, or print a one-time sign-in link
   clear                                               clear the cards you answered or that closed; search still finds them
   reset --yes                                         remove every card, answer and file; tokens and templates stay
   login-url                                           print the page address with its sign-in token
@@ -155,9 +155,19 @@ switch (command) {
     break;
   }
   case 'open': {
+    const { values } = parseArgs({ args: rest, options: { link: { type: 'boolean', default: false } } });
     const { url, owner } = localServer();
+    // A one-time code signs the browser in, so the owner token stays out of the address bar and the browser history.
+    const res = await fetch(`${url}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json', 'x-your-attention': '1' }, body: '{}' });
+    const { code, error } = (await res.json()) as { code?: string; error?: string };
+    if (!res.ok || !code) fail(`Could not make a sign-in code: ${error ?? res.status}`);
+    const link = `${url}/#signin=${encodeURIComponent(code)}`;
+    if (values.link) {
+      console.log(`Open this link in the browser to sign in. It works once, within 5 minutes:\n${link}`);
+      break;
+    }
     const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
-    execFile(opener, [`${url}/#token=${owner}`]);
+    execFile(opener, [link]);
     break;
   }
   case 'discover': {
