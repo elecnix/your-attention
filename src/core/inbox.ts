@@ -331,7 +331,8 @@ export class Inbox {
       closed: before?.closed?.kind === 'returned' ? undefined : before?.closed,
       replies: before?.replies ?? [],
     };
-    const size = JSON.stringify({ ...card, history: undefined }).length;
+    // Replies and history have their own caps, so a card with many replies can still be revised.
+    const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined })).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
     this.store.put('cards', id, card);
     this.store.index(id, searchText(card));
@@ -549,14 +550,15 @@ export class Inbox {
     const card = this.getCard(id.split('.').slice(0, -2).join('.') || id);
     if (caller.role === 'agent' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
     const file = card.attachments?.find((f) => f.id === id);
-    const blob = file ? await this.blobs.get(id) : undefined;
     if (!file) throw new InboxError(404, 'unknown attachment');
+    // Each client has its own daily budget, so an agent's downloads never use up the owner's. A refused download reads no blob.
     if (this.readsPerDay !== undefined) {
-      const day = `reads:${new Date(this.now()).toISOString().slice(0, 10)}`;
-      const n = this.store.get<number>('meta', day) ?? 0;
-      if (n >= this.readsPerDay) throw new InboxError(429, `this inbox served its ${this.readsPerDay} files for today`);
-      this.store.put('meta', day, n + 1);
+      const key = `reads:${new Date(this.now()).toISOString().slice(0, 10)}:${caller.token}`;
+      const n = this.store.get<{ key: string; n: number }>('meta', key)?.n ?? 0;
+      if (n >= this.readsPerDay) throw new InboxError(429, `you downloaded ${this.readsPerDay} files from this inbox today`);
+      this.store.put('meta', key, { key, n: n + 1 });
     }
+    const blob = await this.blobs.get(id);
     // A cloud inbox deletes files after a while, and the card keeps listing them.
     if (!blob) throw new InboxError(410, `${file.name} is no longer stored`);
     return { file, bytes: blob.bytes };
@@ -1064,6 +1066,12 @@ export class Inbox {
         this.store.put<Presence>('presence', p.agent, { agent: p.agent, online: false, lastSeen: p.leftAt });
         this.emit({ type: 'presence', agent: p.agent, online: false });
       }
+    }
+    // Download counts from earlier days go.
+    const today = `reads:${new Date(now).toISOString().slice(0, 10)}:`;
+    for (const m of this.store.list<unknown>('meta')) {
+      const key = (m as { key?: unknown })?.key;
+      if (typeof key === 'string' && key.startsWith('reads:') && !key.startsWith(today)) this.store.delete('meta', key);
     }
     for (const m of this.store.list<{ key: string; at: number }>('messages')) {
       if (now - m.at > MESSAGE_MEMORY_MS) this.store.delete('messages', m.key);

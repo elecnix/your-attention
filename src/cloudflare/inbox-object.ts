@@ -206,7 +206,8 @@ export class InboxObject {
 function cookieValue(header: string | null, name: string): string | undefined {
   for (const part of (header ?? '').split(';')) {
     const [k, ...v] = part.trim().split('=');
-    if (k === name) return decodeURIComponent(v.join('='));
+    if (k !== name) continue;
+    try { return decodeURIComponent(v.join('=')); } catch { return undefined; }
   }
   return undefined;
 }

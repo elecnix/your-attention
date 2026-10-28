@@ -135,7 +135,7 @@ The inbox keeps the bytes of each `data:` attachment in its blob store, R2 in th
 
 An inbox built with `uploadLimitBytes` counts the bytes of every file it stores and refuses a card with 413 once a post would pass the limit. Each file counts as at least 64 KB, so tiny files cannot make unlimited blob writes. The count covers the inbox's whole life, so the count doesn't go down when a file is deleted, even by `reset`. A post that fails gives back the bytes it counted. The Cloudflare build sets the limit from `UPLOAD_LIMIT_BYTES`, 100 MB in `wrangler.jsonc`, and the laptop inbox has none.
 
-A file the blob store no longer has, such as one R2 deleted after 30 days, answers 410. The card still lists it. An inbox built with `attachmentReadsPerDay` serves that many files a day and answers 429 after.
+A file the blob store no longer has, such as one R2 deleted after 30 days, answers 410. The card still lists it. An inbox built with `attachmentReadsPerDay` serves each client that many files a day and answers 429 after, before it reads the file.
 
 A card's attachment may carry a `ref` only to a file the card already has, so a client keeps its files when it reposts a card. A `ref` to any other file is refused with 400.
 
@@ -143,7 +143,7 @@ A card's attachment may carry a `ref` only to a file the card already has, so a 
 
 Every inbox applies these:
 
-- A card is at most 256 KB as stored, without its files.
+- A card is at most 256 KB of UTF-8 as stored, without its files, replies and history.
 - A title is at most 300 characters, and an agent id at most 80.
 - A template or widget source is at most 64 KB, and each name keeps at most 50 versions.
 - A reply is at most 4,096 characters, and a card takes at most 200 replies.
@@ -271,7 +271,7 @@ The Worker counts each request before it reaches a Durable Object, with two Work
 
 - 100 MB of files over the inbox's life, from `UPLOAD_LIMIT_BYTES`.
 - 20 MB of database storage, from `STORAGE_LIMIT_BYTES`. The Durable Object adds up its rows once, then adds or subtracts the size of each write.
-- 2,000 file downloads a day, from `ATTACHMENT_READS_PER_DAY`.
+- 2,000 file downloads a day for each client, from `ATTACHMENT_READS_PER_DAY`.
 
 R2 deletes each file 30 days after its upload, by the lifecycle rule in `cloudflare/main.tf`.
 

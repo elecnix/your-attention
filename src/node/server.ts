@@ -136,7 +136,9 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       // The inbox page signs in with its cookie, which the browser sends with the upgrade.
       const auth = req.headers.authorization;
       const secret = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : /(?:^|;\s*)ya_token=([^;]*)/.exec(req.headers.cookie ?? '')?.[1];
-      const t = await inbox.authenticate(secret ? decodeURIComponent(secret) : undefined);
+      let decoded: string | undefined;
+      try { decoded = secret ? decodeURIComponent(secret) : undefined; } catch { decoded = undefined; }
+      const t = await inbox.authenticate(decoded);
       if (t?.role !== 'owner') { socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return; }
       const viewer = u.searchParams.get('viewer') ?? undefined;
       wss.handleUpgrade(req, socket, head, (ws) => {

@@ -46,12 +46,14 @@ export class DurableSqlStorage implements Storage {
 
   put<T>(collection: Collection, id: string, value: T): void {
     const text = JSON.stringify(value);
-    this.change(text.length - this.size(collection, id));
+    // SQLite measures the sizes before and after, so the count matches what length() reports.
+    const old = this.used === undefined ? 0 : this.size(collection, id);
     this.sql.exec('INSERT INTO docs (collection, id, value) VALUES (?, ?, ?) ON CONFLICT (collection, id) DO UPDATE SET value = excluded.value', collection, id, text);
+    if (this.used !== undefined) this.change(this.size(collection, id) - old);
   }
 
   delete(collection: Collection, id: string): void {
-    this.change(-this.size(collection, id));
+    if (this.used !== undefined) this.change(-this.size(collection, id));
     this.sql.exec('DELETE FROM docs WHERE collection = ? AND id = ?', collection, id);
   }
 
@@ -60,10 +62,11 @@ export class DurableSqlStorage implements Storage {
   }
 
   index(card: string, text: string): void {
-    const old = Number(this.sql.exec('SELECT COALESCE(SUM(length(text)), 0) AS n FROM search WHERE card = ?', card).toArray()[0]?.['n'] ?? 0);
-    this.change(text.length - old);
+    const indexed = (): number => Number(this.sql.exec('SELECT COALESCE(SUM(length(text)), 0) AS n FROM search WHERE card = ?', card).toArray()[0]?.['n'] ?? 0);
+    const old = this.used === undefined ? 0 : indexed();
     this.sql.exec('DELETE FROM search WHERE card = ?', card);
     if (text) this.sql.exec('INSERT INTO search (card, text) VALUES (?, ?)', card, text);
+    if (this.used !== undefined) this.change(indexed() - old);
   }
 
   search(query: string, limit: number): SearchHit[] {

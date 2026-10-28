@@ -459,3 +459,34 @@ describe('pairing requests', () => {
     assert.equal(inbox.state().cards.some((c) => c.id === `pair-${p.id}`), false);
   });
 });
+
+describe('fixes from the review of the limits', () => {
+  const agent: Caller = { token: 'ta', role: 'agent' };
+  const owner: Caller = { token: 'o', role: 'owner' };
+
+  it('gives each client its own download budget, and a refused download reads no file', async () => {
+    const blobs = new MemoryBlobs();
+    const get = blobs.get.bind(blobs);
+    let reads = 0;
+    blobs.get = async (key) => { reads++; return get(key); };
+    const inbox = new Inbox(new MemoryStorage(), Date.now, blobs, { attachmentReadsPerDay: 1 });
+    const card = await inbox.postCardWithFiles(agent, { id: 'c1', agent: 's1', title: 'q', attachments: [{ src: `data:text/plain;base64,${Buffer.from('x').toString('base64')}` }] });
+    const id = card.attachments![0]!.id!;
+    await inbox.attachment(agent, id);
+    await assert.rejects(inbox.attachment(agent, id), /downloaded 1 files/);
+    assert.equal(reads, 1);
+    await inbox.attachment(owner, id);
+  });
+
+  it('lets an agent revise a card with many long replies', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
+    for (let i = 0; i < 80; i++) inbox.reply(agent, 'c1', 'x'.repeat(MAX_REPLY_BYTES));
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q, revised' });
+  });
+
+  it('measures the card in UTF-8 bytes', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    assert.throws(() => inbox.postCard(agent, { agent: 'a', title: 'q', text: 'é'.repeat(MAX_CARD_BYTES / 2 + 10) }), (e: unknown) => e instanceof InboxError && e.status === 413);
+  });
+});

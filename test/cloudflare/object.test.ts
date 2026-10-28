@@ -201,3 +201,27 @@ describe('sockets that cost the inbox', () => {
     assert.equal((await call(obj, 'GET', '/v1/events', owner)).status, 410);
   });
 });
+
+describe('fixes from the review of the limits', () => {
+  it('answers 401 to a page socket with a malformed cookie', async () => {
+    const obj = runtime().make();
+    const res = await obj.fetch(new Request('https://inbox/v1/ws?page=1', { headers: { upgrade: 'websocket', cookie: 'ya_token=%' } }));
+    assert.equal(res.status, 401);
+  });
+
+  it('counts storage the way SQLite measures it, so rewrites with emoji do not inflate it', async () => {
+    const { DurableSqlStorage } = await import('../../src/cloudflare/storage.ts');
+    const db = new DatabaseSync(':memory:');
+    const sql = { exec: (q: string, ...b: unknown[]) => {
+      const stmt = db.prepare(q);
+      const rows = /^\s*select/i.test(q) ? stmt.all(...(b as never[])) as Record<string, unknown>[] : (stmt.run(...(b as never[])), []);
+      return { toArray: () => rows };
+    } };
+    const store = new DurableSqlStorage(sql);
+    const start = store.bytes();
+    for (let i = 0; i < 50; i++) { store.put('cards', 'c1', { text: '🙂'.repeat(100) }); store.index('c1', '🙂'.repeat(100)); }
+    const fresh = new DurableSqlStorage(sql);
+    assert.equal(store.bytes(), fresh.bytes());
+    assert.ok(store.bytes() - start < 1000);
+  });
+});
