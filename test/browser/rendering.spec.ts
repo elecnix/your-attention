@@ -330,6 +330,22 @@ test('the queue clears answered and closed cards in one click, and keeps the wai
   } finally { await own.close(); }
 });
 
+test('a broom in the Sent header clears answered and closed cards, without scrolling to the bottom', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    await own.agent.post({ id: 'br-wait', agent: 's-broom', title: 'Still waiting here', priority: 'now' });
+    await own.agent.post({ id: 'br-gone', agent: 's-broom', title: 'Closed already', priority: 'later' });
+    await own.agent.close('br-gone', 'retracted', 'Not needed.');
+    await own.open(page);
+    const broom = page.locator('.queue h3', { hasText: 'Sent, newest first' }).getByRole('button', { name: 'Clear 1 answered or closed card' });
+    await expect(broom).toBeVisible();
+    await broom.click();
+    await expect(page.locator('.q', { hasText: 'Closed already' })).toHaveCount(0);
+    await expect(page.locator('.q', { hasText: 'Still waiting here' })).toBeVisible();
+    await expect(page.locator('.queue h3', { hasText: 'Sent, newest first' }).getByRole('button')).toHaveCount(0);
+  } finally { await own.close(); }
+});
+
 test('a blocked agent card offers the dialog choices, and saves the one you pick', async ({ page }) => {
   const own = await startInbox();
   try {

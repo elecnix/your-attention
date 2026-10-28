@@ -40,6 +40,10 @@
   .queue { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px; position: sticky; top: 72px; max-height: calc(100vh - 90px); overflow: auto; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
   .queue h3 { font-size: calc(12px * var(--text-scale)); text-transform: uppercase; letter-spacing: .06em; color: var(--ink); margin: 12px 8px 4px; }
   .queue h3.sent { border-top: 1px solid var(--line); padding-top: 12px; }
+  .queue h3 { display: flex; align-items: center; gap: 8px; }
+  .icon-btn { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  .icon-btn:hover, .icon-btn:focus-visible { color: var(--ink); border-color: var(--line); }
+  .icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .q { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; border: 0; background: none; color: var(--ink); padding: 6px 8px; border-radius: 8px; cursor: pointer; font: inherit; font-size: calc(13px * var(--text-scale)); }
   .q:hover { background: var(--bg); }
   .q.focus { background: var(--info-bg); }

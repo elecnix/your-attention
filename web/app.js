@@ -1,6 +1,6 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
-import { BASE, CLOSED_LABEL, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
+import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
 import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, PhoneLink, SecretForm, answerValues, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
@@ -257,8 +257,8 @@ export function App() {
       h('span', { className: 't' }, c.title, fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio),
       h(Icon, { name: icon, tip, cls: `s ${s}` }));
   };
-  const group = (title, items, empty, cls) => h(React.Fragment, { key: title },
-    h('h3', { className: cls }, title),
+  const group = (title, items, empty, cls, action) => h(React.Fragment, { key: title },
+    h('h3', { className: cls }, title, action),
     // The cards you sent are done with: they read dimmer than the ones that wait for you.
     items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty));
 
@@ -279,7 +279,7 @@ export function App() {
     groups.length ? groups.map(([title, items]) => group(title, items, 'Nothing waiting')) : group('Waiting for you', [], 'Nothing waiting'),
     checking.length > 0 && group('Being checked by triage', checking, ''),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent'),
-    group('Sent, newest first', sent, 'Nothing sent yet', 'sent'),
+    group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length })),
     dealt.length > 0 && h('button', { className: 'btn clear-dealt', onClick: () => api(`${BASE}v1/archive`, {}) },
       `Clear ${dealt.length} answered or closed card${dealt.length === 1 ? '' : 's'}`));
 
@@ -368,6 +368,13 @@ const LAPTOP_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0|10(\.\d{1,
 function reloadPage() {
   store.set('scroll:y', window.scrollY);
   location.reload();
+}
+
+// A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.
+function ClearButton({ count }) {
+  const tip = `Clear ${count} answered or closed card${count === 1 ? '' : 's'}`;
+  return h('button', { type: 'button', className: 'icon-btn clear-sent', title: tip, 'aria-label': tip, onClick: () => api(`${BASE}v1/archive`, {}) },
+    h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.broom.map((d) => h('path', { key: d, d }))));
 }
 
 // GitHub's mark, from Octicons (mark-github).
