@@ -367,7 +367,7 @@ export function HtmlCard({ card, allowed, onAnswer }) {
   const allow = (on) => { setAlways(on); setAllowHtml(on); };
   if (!always && once !== card.id) {
     return h('div', { className: 'note warn html-gate' },
-      h('p', null, 'This card brings its own HTML and scripts. They run in a sandboxed frame that cannot reach the network or this page.'),
+      h('p', null, 'This card brings its own HTML and scripts. They run in a sandboxed frame that cannot reach the network or this page. A click in the card can open a page in a new tab, and the card chooses its address.'),
       h('div', { className: 'html-gate-actions' },
         h('button', { type: 'button', className: 'btn primary', onClick: () => setOnce(card.id) }, 'Show this card'),
         h('button', { type: 'button', className: 'btn', onClick: () => allow(true) }, 'Always show HTML cards')));

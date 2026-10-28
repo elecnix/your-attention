@@ -80,6 +80,7 @@ test('an HTML card stays hidden until the owner allows it, then answers from its
   // The switch lives on the HTML card, not in the bar.
   await expect(page.getByLabel('Allow HTML cards')).toHaveCount(0);
   await expect(page.locator('.note.warn')).toContainText('own HTML and scripts');
+  await expect(page.locator('.note.warn')).toContainText('can open a page in a new tab');
   await page.getByRole('button', { name: 'Always show HTML cards' }).click();
   expect(await page.locator('iframe.html-card').getAttribute('srcdoc')).toContain("default-src 'none'");
   const frame = page.frameLocator('iframe.html-card');
