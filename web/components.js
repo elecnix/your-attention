@@ -225,7 +225,7 @@ export function CardView({ draftKey, response, onAction }) {
   const stateRef = React.useRef(initialState);
   const handlers = React.useMemo(() => ({
     onStateUpdate: (s) => { stateRef.current = s; store.set(draftKey, s); },
-    onAction: (ev) => actionRef.current({ ...ev, formState: { ...(ev.formState || {}), ...(stateRef.current || {}) } }),
+    onAction: (ev) => actionRef.current({ ...ev, formState: stateRef.current || ev.formState }),
   }), [draftKey]);
   return h(Renderer, { response, library: openuiChatLibrary, initialState, ...handlers });
 }
@@ -365,7 +365,8 @@ const setAllowHtml = (on) => fetch(BASE + 'v1/settings', { method: 'PUT', header
 // A card with the agent's own HTML. It shows only when the owner allows HTML cards, or asks to see this one.
 export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
   const ref = React.useRef(null);
-  const draftKey = `draft:${card.id}:${card.version}:comment`;
+  // The comment draft belongs to the card, not its version, so a revision keeps what the person typed.
+  const draftKey = `draft:${card.id}:comment`;
   const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
   const commentRef = React.useRef(comment);
   commentRef.current = comment;

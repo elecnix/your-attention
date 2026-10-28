@@ -144,3 +144,17 @@ test('an HTML card ends with the page comment box: Send answer collects the fram
   const second = heard.events.filter((e) => e.type === 'answer')[1];
   expect(second?.type === 'answer' && [second.answer.values, second.answer.comment]).toEqual([{ size: 'small' }, 'Sent from inside.']);
 });
+
+test('a revision of the HTML card you are commenting on keeps your comment and its focus', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ allowHtml: true });
+  await inbox.agent.post({ id: 'html-rev', agent: 's-html-rev', title: 'Revised HTML card', html: '<p>First version</p>', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Revised HTML card' }).click();
+  const box = page.locator('.html-answer textarea');
+  await box.click();
+  await page.keyboard.type('half of my');
+  await inbox.agent.post({ id: 'html-rev', agent: 's-html-rev', title: 'Revised HTML card', html: '<p>Second version</p>', priority: 'now' });
+  await expect(page.frameLocator('iframe.html-card').locator('p')).toHaveText('Second version');
+  await page.keyboard.type(' comment');
+  await expect(box).toHaveValue('half of my comment');
+});

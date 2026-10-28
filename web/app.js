@@ -321,7 +321,7 @@ export function App() {
       current.broadcast && !current.closed
         ? h(BroadcastForm, { card: current, cards: state.cards, onDone: next })
         : current.html !== undefined
-        ? h(HtmlCard, { key: `${current.id}:${current.version}`, card: current, onSkip: next, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
+        ? h(HtmlCard, { key: current.id, card: current, onSkip: next, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
         : current.kind === 'secret'
         ? h(React.Fragment, null,
           h('h2', { className: 'secret-title' }, current.title),
