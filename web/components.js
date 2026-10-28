@@ -287,6 +287,17 @@ export function SecretForm({ card, onSent, onSkip }) {
     h('p', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the model sees a file path, never the value.'));
 }
 
+// A session link opens another agent's session in herdr through the inbox, which runs herdr on this computer.
+// The link says whether it worked, since the session opens in the terminal and the page does not change.
+export async function openSessionLink(href, el) {
+  const res = await api(`${BASE}v1/focus`, { href }).catch(() => null);
+  const error = !res ? 'The inbox did not answer.' : res.ok ? '' : ((await res.json().catch(() => ({}))).error || `Error ${res.status}`);
+  if (!el) return;
+  el.dataset.opened = error ? '' : 'Opened in herdr';
+  el.dataset.failed = error ? `Could not open: ${error}` : '';
+  el.title = error ? `Could not open: ${error}` : 'Opened in herdr';
+}
+
 // Card text with [[card-id]] links. A link shows the linked card title, and its text on hover.
 // Card text is Markdown, and [[card-id]] links to another card by its title.
 export function LinkedText({ text, byId, open }) {
@@ -351,6 +362,9 @@ export const FRAME_LINKS = '<base target="_blank">';
 export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){parent.postMessage({yourAttention:"answer",values:v||{},comment:c||""},"*")}};'
   + '(function(){var last=0;function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);if(h!==last){last=h;parent.postMessage({yourAttention:"height",height:h},"*")}}'
   + 'new ResizeObserver(send).observe(document.documentElement);addEventListener("load",send)})();'
+  // A session link opens in herdr through the page, not in a new tab.
+  + 'addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[href]");if(!a||a.href.indexOf("https://herdr.invalid/v1/")!==0)return;'
+  + 'e.preventDefault();parent.postMessage({yourAttention:"session",href:a.href},"*")},true);'
   // The page's Send answer asks the frame for its form: every named field, a radio's picked value, each checked box.
   + 'addEventListener("message",function(e){if(e.source!==parent||!e.data||e.data.yourAttention!=="collect")return;var v={};'
   + 'document.querySelectorAll("input[name],select[name],textarea[name]").forEach(function(el){var n=el.name,t=el.type;'
@@ -378,7 +392,8 @@ function frameTheme() {
     + 'body *{font-family:inherit !important;font-weight:inherit !important;letter-spacing:inherit !important}'
     + 'body *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6){font-size:inherit !important}'
     + `h1,h2,h3,h4,h5,h6,b,strong,th{font-weight:300 !important;color:${token('--ink')} !important}`
-    + `code,code *,pre,pre *,kbd,samp{font-family:${token('--font-code')} !important;letter-spacing:normal !important}</style>`;
+    + `code,code *,pre,pre *,kbd,samp{font-family:${token('--font-code')} !important;letter-spacing:normal !important}`
+    + `a[href^="https://herdr.invalid/v1/"]{color:${token('--accent')} !important;cursor:pointer}</style>`;
 }
 /** The tallest frame the page makes, so a card cannot grow the page without bound. The frame's height also takes its 2px of border. */
 const MAX_FRAME_HEIGHT = 20000;
@@ -403,6 +418,7 @@ export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
       if (!ref.current || e.source !== ref.current.contentWindow || !e.data) return;
       if (e.data.yourAttention === 'height') { const px = Number(e.data.height); if (px > 0) setHeight(Math.min(px, MAX_FRAME_HEIGHT)); return; }
       const values = typeof e.data.values === 'object' && e.data.values ? e.data.values : {};
+      if (e.data.yourAttention === 'session') { if (typeof e.data.href === 'string') openSessionLink(e.data.href, ref.current); return; }
       if (e.data.yourAttention === 'collected') { pending.current.get(e.data.id)?.(values); return; }
       if (e.data.yourAttention !== 'answer') return;
       // An answer from the card's own button carries the comment from the page's box too.

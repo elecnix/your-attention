@@ -2,6 +2,8 @@
 // It covers headings, paragraphs, lists, block quotes, fenced code, tables,
 // inline code, bold, italic, links to http, https and mailto addresses, and bare
 // http and https addresses. With a cardLink option, [[card-id]] becomes what it returns.
+// A herdr link, https://herdr.invalid/v1/..., is a session link: the page opens it in herdr.
+export const SESSION_LINK = /^https:\/\/herdr\.invalid\/v1\//;
 const URL_TAIL = /[.,;:!?'"*_]+$/;
 const WORD_CHAR = /[\p{L}\p{N}]/u;
 /**
@@ -26,7 +28,10 @@ function inline(h, text, key, opts = {}) {
     if (m[3] && m[3][0] === '_' && !underscoreEmphasis(text, m.index, m[3])) { re.lastIndex = m.index + 1; continue; }
     if (m.index > last) out.push(text.slice(last, m.index));
     const k = `${key}.${n++}`;
-    const a = (href, label) => h('a', { key: k, href, target: '_blank', rel: 'noopener noreferrer' }, label);
+    // A session link opens another agent's session in herdr, through the page, so it gets no new tab.
+    const a = (href, label) => (SESSION_LINK.test(href)
+      ? h('a', { key: k, href, className: 'session-link', title: 'Open this session in herdr' }, label)
+      : h('a', { key: k, href, target: '_blank', rel: 'noopener noreferrer' }, label));
     if (m[1]) out.push(h('code', { key: k }, m[1].slice(1, -1)));
     else if (m[2]) out.push(h('strong', { key: k }, inline(h, m[2].slice(2, -2), k, opts)));
     else if (m[3]) out.push(h('em', { key: k }, inline(h, m[3].slice(1, -1), k, opts)));

@@ -1,7 +1,7 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
-import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, PhoneLink, SecretForm, answerValues, cardSource, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, answerValues, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -49,6 +49,18 @@ export function App() {
 
   // New page code loads at once in a hidden tab. In a tab the person looks at, it loads once they have
   // done nothing for a moment and no field has focus. A send in flight finishes within that moment.
+  // A session link anywhere on a card, in its text, its body or its Markdown files, opens that session in herdr.
+  React.useEffect(() => {
+    const click = (e) => {
+      const a = e.target.closest && e.target.closest('a[href^="https://herdr.invalid/v1/"]');
+      if (!a || e.button !== 0) return;
+      e.preventDefault();
+      openSessionLink(a.href, a);
+    };
+    document.addEventListener('click', click, true);
+    return () => document.removeEventListener('click', click, true);
+  }, []);
+
   React.useEffect(() => {
     if (!codeReady) return undefined;
     let last = Date.now();

@@ -213,4 +213,24 @@ describe('network addresses', () => {
     assert.deepEqual(await (await get(owner)).json(), { addresses: ['http://laptop.local:4815', 'http://192.168.1.20:4815'] });
     assert.equal((await get(agent)).status, 403);
   });
+
+  it('focuses a session link for the owner only, and refuses an address that is not one', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const focused: string[] = [];
+    const handle = createHandler(inbox, { focusSession: async (href) => { focused.push(href); } });
+    const owner = (await inbox.createToken('page', 'owner')).secret;
+    const agent = (await inbox.createToken('agents', 'agent')).secret;
+    const post = (token: string, href: string) => handle(new Request('http://inbox.test/v1/focus', {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ href }),
+    }));
+    assert.equal((await post(owner, 'https://herdr.invalid/v1/tab/w1:t2')).status, 200);
+    assert.equal((await post(owner, 'https://example.com/')).status, 400);
+    assert.equal((await post(agent, 'https://herdr.invalid/v1/tab/w1:t2')).status, 403);
+    assert.deepEqual(focused, ['https://herdr.invalid/v1/tab/w1:t2']);
+    const hosted = createHandler(inbox);
+    const res = await hosted(new Request('http://inbox.test/v1/focus', {
+      method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json' }, body: JSON.stringify({ href: 'https://herdr.invalid/v1/tab/w1:t2' }),
+    }));
+    assert.equal(res.status, 501);
+  });
 });

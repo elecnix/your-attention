@@ -1,6 +1,7 @@
 // The HTTP protocol, with fetch Request and Response only, so the same handler
 // runs on Node, Bun, Deno and Workers. SPEC.md lists each route.
 import { randomId } from './crypto.ts';
+import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
 import { Inbox, InboxError, publicCard, type Caller } from './inbox.ts';
 import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
@@ -17,6 +18,8 @@ const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/web
 export interface HandlerOptions {
   /** Opens the session a card came from, such as a herdr pane. */
   openOrigin?: (card: Card) => Promise<void>;
+  /** Focuses the session a session link in a card points at, such as another agent's herdr tab. */
+  focusSession?: (href: string) => Promise<void>;
   /** Milliseconds between keep-alive lines on a stream. */
   heartbeatMs?: number;
   /** Whether to serve the event stream, agent streams and long-polls. A platform that bills for open requests turns them off and serves WebSockets only. */
@@ -174,6 +177,14 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'POST' && a === 'archive' && !b) return json(inbox.archive(me));
     if (method === 'POST' && a === 'sign-in-codes' && !b) return json(inbox.createSignInCode(me), 201);
     if (method === 'GET' && a === 'addresses' && !b) { owner(); return json({ addresses: options.networkAddresses?.() ?? [] }); }
+    if (method === 'POST' && a === 'focus' && !b) {
+      owner();
+      const { href } = await readJson<{ href?: string }>(req, BODY_LIMIT.open);
+      if (typeof href !== 'string' || !parseSessionLink(href)) return json({ error: 'not a session link' }, 400);
+      if (!options.focusSession) return json({ error: 'this inbox cannot open sessions' }, 501);
+      try { await options.focusSession(href); } catch { return json({ error: 'herdr could not open that session' }, 502); }
+      return json({ ok: true });
+    }
     if (method === 'POST' && a === 'reset' && !b) {
       // A reset cannot be undone, so the request must say so.
       if ((await readJson<{ confirm?: string }>(req)).confirm !== 'reset') throw new InboxError(400, 'send {"confirm": "reset"} to remove every card');

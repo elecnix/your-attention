@@ -14,7 +14,7 @@ import type { Caller } from '../core/inbox.ts';
 import { agentSocket, pageSocket } from '../core/socket.ts';
 import { WebSocketServer } from 'ws';
 import { Inbox } from '../core/inbox.ts';
-import { focusHerdrPane } from '../integrations/herdr/focus.ts';
+import { focusHerdrPane, focusSessionLink } from '../integrations/herdr/focus.ts';
 import { homeDir, writePrivate } from './home.ts';
 import { relayClient } from './links.ts';
 
@@ -106,7 +106,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
     const v4 = lan.filter((i) => i.family === 'IPv4').map((i) => `http://${i.address}:${listening}`);
     return [`http://${name}.local:${listening}`, ...v6, ...v4];
   };
-  const handle = createHandler(inbox, { openOrigin: focusHerdrPane, networkAddresses });
+  const handle = createHandler(inbox, { openOrigin: (card) => focusHerdrPane(card), focusSession: (href) => focusSessionLink(href), networkAddresses });
 
   const server = http.createServer(async (req, res) => {
     const pathname = (req.url ?? '/').split('?')[0] ?? '/';
