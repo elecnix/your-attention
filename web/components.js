@@ -347,9 +347,10 @@ export function PhoneLink() {
   const [qr, setQr] = React.useState(null);
   const [copied, setCopied] = React.useState(false);
   const ref = React.useRef(null);
-  const address = location.origin + location.pathname;
-  // A phone cannot reach an address that names this computer itself.
-  const local = /^(localhost|127\.|\[::1\]$|0\.0\.0\.0$)/.test(location.hostname);
+  // A phone cannot reach an address that names this computer itself, so a laptop inbox gives its network addresses.
+  const local = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)$/.test(location.hostname);
+  const [network, setNetwork] = React.useState([]);
+  const address = (local && network[0] ? network[0] : location.origin) + location.pathname;
   React.useEffect(() => {
     if (!open) return;
     if (ref.current && !ref.current.open) ref.current.showModal();
@@ -364,12 +365,18 @@ export function PhoneLink() {
       for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (code.isDark(y, x)) d += `M${x} ${y}h1v1h-1z`;
       return { n, d };
     };
+    // The QR code waits for the network address, so it never encodes this computer's own name.
+    const where = local
+      ? api(`${BASE}v1/addresses`).then((r) => (r.ok ? r.json() : {})).then((d) => d.addresses || [], () => [])
+      : Promise.resolve([]);
+    where.then((list) => { if (live) setNetwork(list); });
     const load = import(/* @vite-ignore */ new URL('vendor/qrcode.mjs', document.baseURI).href);
     // Ask for a fresh sign-in code, and another one shortly before it expires while the dialog stays open.
-    const refresh = () => Promise.all([load, api(`${BASE}v1/sign-in-codes`, {}).then((r) => (r.ok ? r.json() : null)).catch(() => null)])
-      .then(([{ default: qrcode }, signin]) => {
+    const refresh = () => Promise.all([load, where, api(`${BASE}v1/sign-in-codes`, {}).then((r) => (r.ok ? r.json() : null)).catch(() => null)])
+      .then(([{ default: qrcode }, list, signin]) => {
         if (!live) return;
-        setQr({ ...draw(qrcode, signin ? `${address}#signin=${signin.code}` : address), signsIn: !!signin });
+        const target = (list[0] || location.origin) + location.pathname;
+        setQr({ ...draw(qrcode, signin ? `${target}#signin=${signin.code}` : target), signsIn: !!signin });
         if (signin) renew = setTimeout(refresh, Math.max(10_000, signin.expiresAt - Date.now() - 30_000));
       }, () => { if (live) setQr({ failed: true }); });
     refresh();
@@ -392,7 +399,8 @@ export function PhoneLink() {
           h('rect', { x: -4, y: -4, width: qr.n + 8, height: qr.n + 8, fill: '#fff' }), h('path', { d: qr.d, fill: '#000' }))
         : h('span', { className: 'muted' }, 'Drawing the code…')),
       h('p', { className: 'qr-address' }, address),
-      local && h('p', { className: 'note warn' }, 'This address names this computer, so a phone cannot open it. Open this page at the computer\'s network address instead, such as ', h('code', null, 'http://<name>.local:4815'), ', or use a cloud inbox.'),
+      local && network.length > 1 && h('p', { className: 'muted' }, 'Your phone must be on the same network. If its camera cannot open the name, try ', h('code', null, network[1] + location.pathname), '.'),
+      local && !network.length && h('p', { className: 'note warn' }, 'This address names this computer, so a phone cannot open it. Open this page at the computer\'s network address instead, such as ', h('code', null, 'http://<name>.local:4815'), ', or use a cloud inbox.'),
       qr && h('p', { className: 'muted' }, qr.signsIn
         ? 'The code signs one phone in, once, within five minutes. Anyone who scans it first gets in, so keep it to yourself.'
         : 'This address has no sign-in. On the phone, sign in with your owner link.'),

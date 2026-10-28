@@ -90,7 +90,17 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   // Keep the identity an earlier version advertised in its own file.
   const idFile = path.join(home, 'inbox-id');
   if (fs.existsSync(idFile) && !store.get('meta', 'inbox-id')) store.put('meta', 'inbox-id', fs.readFileSync(idFile, 'utf8').trim());
-  const handle = createHandler(inbox, { openOrigin: focusHerdrPane });
+  let listening = 0;
+  // A phone on the same network reaches the inbox at the computer's .local name, or at one of its addresses.
+  const networkAddresses = (): string[] => {
+    if (!listening || !['0.0.0.0', '::'].includes(opts.host)) return [];
+    const name = os.hostname().replace(/\.local$/i, '');
+    const ips = Object.values(os.networkInterfaces()).flat()
+      .filter((i): i is os.NetworkInterfaceInfo => !!i && i.family === 'IPv4' && !i.internal)
+      .map((i) => `http://${i.address}:${listening}`);
+    return [`http://${name}.local:${listening}`, ...ips];
+  };
+  const handle = createHandler(inbox, { openOrigin: focusHerdrPane, networkAddresses });
 
   const server = http.createServer(async (req, res) => {
     const pathname = (req.url ?? '/').split('?')[0] ?? '/';
@@ -181,6 +191,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   });
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : opts.port;
+  listening = port;
   const url = `http://${opts.host === '0.0.0.0' || opts.host === '::' ? '127.0.0.1' : opts.host}:${port}`;
   const serverInfo = JSON.stringify({ url, port, pid: process.pid });
   writePrivate(path.join(home, 'server.json'), serverInfo);

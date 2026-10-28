@@ -141,3 +141,14 @@ test('Escape keeps an unused sign-in code in the address', async ({ page, browse
   await expect(p.getByRole('heading', { name: 'Sign in to your inbox' })).toBeHidden();
   await phone.close();
 });
+
+test('on a laptop inbox, the code opens the computer\'s network name, which the dialog shows', async ({ page }) => {
+  await page.route('**/v1/addresses', (route) => route.fulfill({ json: { addresses: ['http://example-mac.local:4815', 'http://192.168.1.20:4815'] } }));
+  await inbox.open(page);
+  await page.getByRole('button', { name: 'Open this inbox on your phone' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Open this inbox on your phone' });
+  expect(await readQr(page)).toMatch(/^http:\/\/example-mac\.local:4815\/#signin=[0-9a-f]{32}$/);
+  await expect(dialog.locator('.qr-address')).toHaveText('http://example-mac.local:4815/');
+  await expect(dialog).toContainText('192.168.1.20');
+  await expect(dialog).not.toContainText('a phone cannot open it');
+});

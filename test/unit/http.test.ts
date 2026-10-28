@@ -202,3 +202,15 @@ describe('signing a phone in', () => {
     assert.equal((await call('POST', '/v1/login', { body: { code } })).status, 401);
   });
 });
+
+describe('network addresses', () => {
+  it('tells the owner where a phone on the network reaches the inbox, and nobody else', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const handle = createHandler(inbox, { networkAddresses: () => ['http://laptop.local:4815', 'http://192.168.1.20:4815'] });
+    const owner = (await inbox.createToken('page', 'owner')).secret;
+    const agent = (await inbox.createToken('a', 'agent')).secret;
+    const get = (token: string) => handle(new Request('http://inbox.test/v1/addresses', { headers: { authorization: `Bearer ${token}` } }));
+    assert.deepEqual(await (await get(owner)).json(), { addresses: ['http://laptop.local:4815', 'http://192.168.1.20:4815'] });
+    assert.equal((await get(agent)).status, 403);
+  });
+});

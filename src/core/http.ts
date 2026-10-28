@@ -21,6 +21,8 @@ export interface HandlerOptions {
   heartbeatMs?: number;
   /** Whether to serve the event stream, agent streams and long-polls. A platform that bills for open requests turns them off and serves WebSockets only. */
   streams?: boolean;
+  /** Where a device on the same network reaches this inbox, such as http://laptop.local:4815. */
+  networkAddresses?: () => string[];
 }
 
 /** The largest body each kind of route reads. A card post carries its files as data: URLs. */
@@ -171,6 +173,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'state') { owner(); return json(inbox.state()); }
     if (method === 'POST' && a === 'archive' && !b) return json(inbox.archive(me));
     if (method === 'POST' && a === 'sign-in-codes' && !b) return json(inbox.createSignInCode(me), 201);
+    if (method === 'GET' && a === 'addresses' && !b) { owner(); return json({ addresses: options.networkAddresses?.() ?? [] }); }
     if (method === 'POST' && a === 'reset' && !b) {
       // A reset cannot be undone, so the request must say so.
       if ((await readJson<{ confirm?: string }>(req)).confirm !== 'reset') throw new InboxError(400, 'send {"confirm": "reset"} to remove every card');
