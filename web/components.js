@@ -392,7 +392,7 @@ export function PhoneLink() {
           h('rect', { x: -4, y: -4, width: qr.n + 8, height: qr.n + 8, fill: '#fff' }), h('path', { d: qr.d, fill: '#000' }))
         : h('span', { className: 'muted' }, 'Drawing the code…')),
       h('p', { className: 'qr-address' }, address),
-      local && h('p', { className: 'note warn' }, 'This address names this computer, so a phone cannot open it. Run the inbox on your network with ', h('code', null, 'your-attention serve --host 0.0.0.0'), ', then open the page from its network address, or use a cloud inbox.'),
+      local && h('p', { className: 'note warn' }, 'This address names this computer, so a phone cannot open it. Open this page at the computer\'s network address instead, such as ', h('code', null, 'http://<name>.local:4815'), ', or use a cloud inbox.'),
       qr && h('p', { className: 'muted' }, qr.signsIn
         ? 'The code signs one phone in, once, within five minutes. Anyone who scans it first gets in, so keep it to yourself.'
         : 'This address has no sign-in. On the phone, sign in with your owner link.'),
