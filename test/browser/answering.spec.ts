@@ -168,7 +168,12 @@ test('an HTML card takes the app font, text size and weights, whatever its own s
   await page.locator('.q', { hasText: 'Styled by its agent' }).click();
   const app = await page.locator('.focus-card .card-title').evaluate(() => {
     const s = getComputedStyle(document.body);
-    return { family: s.fontFamily, size: s.fontSize, color: s.color };
+    const muted = document.createElement('div');
+    muted.style.color = 'var(--body-text)';
+    document.body.append(muted);
+    const color = getComputedStyle(muted).color;
+    muted.remove();
+    return { family: s.fontFamily, size: s.fontSize, color, ink: s.color };
   });
   const frame = page.frameLocator('iframe.html-card');
   const style = (sel: string) => frame.locator(sel).evaluate((el) => { const s = getComputedStyle(el); return { family: s.fontFamily, size: s.fontSize, weight: s.fontWeight, color: s.color }; });
@@ -178,5 +183,6 @@ test('an HTML card takes the app font, text size and weights, whatever its own s
   expect(p.color).toBe(app.color);
   expect((await style('#why')).size).toBe(app.size);
   expect(Number((await style('#b')).weight)).toBeLessThanOrEqual(400);
+  expect((await style('#b')).color).toBe(app.ink);
   expect((await style('#code')).family).toMatch(/monospace/);
 });

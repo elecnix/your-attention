@@ -359,19 +359,25 @@ export const FRAME_BRIDGE = '<script>window.yourAttention={answer:function(v,c){
   + 'else if(el.value!=="")v[n]=el.value});parent.postMessage({yourAttention:"collected",id:e.data.id,values:v},"*")});<\/script>';
 /**
  * The app's text styles for an HTML card, placed after the agent's own CSS: its font, weight, spacing, text size and
- * colors, and monospace for code. The agent keeps its layout, but every card reads the same as the rest of the inbox.
+ * colors, with the dim color for body text and the bright one for headings and bold words, and monospace for code. The agent keeps its layout, but every card reads the same as the rest of the inbox.
  */
 function frameTheme() {
   const root = getComputedStyle(document.documentElement);
   const token = (name) => root.getPropertyValue(name).trim();
   const size = getComputedStyle(document.body).fontSize;
+  // A custom property that holds color-mix() reads back unresolved, so the frame gets the computed color.
+  const probe = document.createElement('span');
+  probe.style.color = 'var(--body-text)';
+  document.body.append(probe);
+  const bodyText = getComputedStyle(probe).color;
+  probe.remove();
   const dark = document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
   return `<style>:root{color-scheme:${dark ? 'dark' : 'light'}}`
-    + `html,body{background:${token('--panel')} !important;color:${token('--ink')} !important;font-family:${token('--font-text')} !important;`
+    + `html,body{background:${token('--panel')} !important;color:${bodyText} !important;font-family:${token('--font-text')} !important;`
     + `font-size:${size} !important;line-height:1.5 !important;font-weight:200 !important;letter-spacing:.02em !important}`
     + 'body *{font-family:inherit !important;font-weight:inherit !important;letter-spacing:inherit !important}'
     + 'body *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6){font-size:inherit !important}'
-    + 'h1,h2,h3,h4,h5,h6,b,strong,th{font-weight:300 !important}'
+    + `h1,h2,h3,h4,h5,h6,b,strong,th{font-weight:300 !important;color:${token('--ink')} !important}`
     + `code,code *,pre,pre *,kbd,samp{font-family:${token('--font-code')} !important;letter-spacing:normal !important}</style>`;
 }
 /** The tallest frame the page makes, so a card cannot grow the page without bound. The frame's height also takes its 2px of border. */

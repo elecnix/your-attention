@@ -19,6 +19,8 @@
     --info: #9db4ff; --info-bg: #1c2645; --accent: #8f9bff;
   }
   * { box-sizing: border-box; }
+  /* The text color of a card's body: the dim color, moved toward the bright one by about 5% of lightness. */
+  :root { --body-text: color-mix(in srgb, var(--muted) 78%, var(--ink)); }
   body { margin: 0; background: var(--bg); color: var(--ink); font: calc(15px * var(--text-scale))/1.5 var(--font-text); }
   .bar { position: sticky; top: 0; z-index: 10; background: var(--panel); border-bottom: 1px solid var(--line); }
   .bar-inner { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
@@ -57,6 +59,12 @@
   .focus-card pre, .focus-card code { max-width: 100%; overflow-x: auto; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
   .closed-line .o { overflow-wrap: anywhere; }
   .focus-card { min-width: 0; overflow-x: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  /* A card's body reads in a dim text color, 5% brighter than the cards you sent, so it reads well without glare. The title, headings, bold words and the
+     labels of the answer controls keep the bright one, so they stand out. OpenUI's own text takes the same colors. */
+  .focus-card { --openui-text-neutral-primary: var(--body-text); --openui-text-neutral-secondary: var(--body-text); }
+  .card-text, .file .markdown { color: var(--body-text); }
+  .card-text :is(strong, b, h1, h2, h3, h4, h5, h6), .file .markdown :is(strong, b, h1, h2, h3, h4, h5, h6),
+  .focus-card :is(.openui-radio-item-label, .openui-checkbox-item-label, .openui-switch-item-label, .openui-label, .openui-option-card__title, .openui-callout-title) { color: var(--ink); }
   .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .prio { font-weight: 700; white-space: nowrap; padding: 2px 8px; border-radius: 6px; font-size: calc(12px * var(--text-scale)); }
   .prio.now { color: var(--bad); background: var(--bad-bg); }
