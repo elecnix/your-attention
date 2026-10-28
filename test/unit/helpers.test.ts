@@ -89,6 +89,15 @@ describe('card tools', () => {
     await assert.rejects(runTool(ctx, 'card_guidance', { text: 'x' }), /card_guidance does not take text\. It takes propose/);
   });
 
+  it('posts the card without an origin when looking it up fails', async () => {
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    let posted: Record<string, unknown> = {};
+    const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
+    await runTool({ inbox, secrets: {} as never, agent: 's1', origin: async () => { throw new Error('no transcript'); }, arrival: 'as a test' }, 'card_post', { title: 'q' });
+    assert.equal(posted['title'], 'q');
+    assert.equal(posted['origin'], undefined);
+  });
+
   it('posts the name the agent gives itself, and the origin the integration found', async () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     let posted: Record<string, unknown> = {};

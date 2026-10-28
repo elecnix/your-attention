@@ -33,6 +33,8 @@ const str = (v: unknown): string | undefined => (v === undefined || v === null ?
 
 export async function runTool(ctx: ToolContext, name: string, args: Record<string, unknown>): Promise<string> {
   const { inbox, agent } = ctx;
+  // Where the session runs only labels the card, so a failed lookup posts the card without it.
+  const origin = (): Promise<Origin | undefined> => ctx.origin().catch(() => undefined);
   // An argument the tool does not take is a mistake to report, not to drop.
   const known = cardTools.find((t) => t.name === name)?.schema['properties'] as Record<string, unknown> | undefined;
   const unknown = known ? Object.keys(args).filter((k) => !(k in known)) : [];
@@ -58,7 +60,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         follows: str(args['follows']),
         tags: args['tags'] as Record<string, string> | undefined,
         from: str(args['from']),
-        origin: await ctx.origin(),
+        origin: await origin(),
       };
       const posted = await inbox.post(card);
       return `Posted card ${posted.id}. The answer arrives ${ctx.arrival}; keep working meanwhile.`;
@@ -87,7 +89,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return `Card guidance, version ${g.version}:\n${g.text}`;
     }
     case 'card_ask_secret': {
-      const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await ctx.origin() });
+      const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await origin() });
       return `Asked for the secret on card ${id}. The answer arrives ${ctx.arrival} with the path of a file, never the value.`;
     }
     case 'card_reply':

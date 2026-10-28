@@ -278,7 +278,7 @@ export function App() {
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,
         current.triage.state === 'held' && h('button', { className: 'btn', style: { marginLeft: 8 }, onClick: () => api(`${BASE}v1/cards/${current.id}/release`, {}) }, 'Release')),
       current.from && h('div', { className: 'from' }, `From ${current.from}`),
-      (o.harness || o.host || o.herdrWorkspace) && h('div', { className: 'origin' },
+      (o.harness || o.host || o.herdrWorkspace || o.herdrTab) && h('div', { className: 'origin' },
         h('span', null, [o.name, o.harness, o.host, o.cwd].filter(Boolean).join(' · ')),
         (o.herdrWorkspace || o.herdrTab) && h('span', { className: 'herdr-place' },
           `herdr: ${[o.herdrWorkspace && `workspace ${o.herdrWorkspace}`, o.herdrTab && `tab ${o.herdrTab}`].filter(Boolean).join(' › ')}`),
