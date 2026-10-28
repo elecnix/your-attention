@@ -16,7 +16,7 @@ export function cardSource(c) {
       `form = Form(${J(c.id)}, buttons, [fcChoice])`,
       'fcChoice = FormControl("Your answer", choice)',
       `choice = OptionCards("choice", "single", [${c.options.map((_, j) => `c${j}`).join(', ')}])`,
-      ...c.options.map((o, j) => `c${j} = OptionCard(${J(o.id)}, ${J(o.label)}, "")`),
+      ...c.options.map((o, j) => `c${j} = OptionCard(${J(optionValue(o))}, ${J(o.label)}, "")`),
       'buttons = Buttons([save, go, skip], "row")',
       'save = Button("Press it in the session", @ToAssistant("send answer"), "primary")',
       'go = Button("Open session", @ToAssistant("open session"), "secondary")',
@@ -49,7 +49,7 @@ export function cardSource(c) {
     controls.push('fcChoice');
     L.push('fcChoice = FormControl("Your answer", choice)');
     L.push(`choice = OptionCards("choice", ${J(c.multiple ? 'multiple' : 'single')}, [${c.options.map((_, j) => `c${j}`).join(', ')}])`);
-    c.options.forEach((o, j) => L.push(`c${j} = OptionCard(${J(o.id)}, ${J(o.label)}, ${J(o.description || '')})`));
+    c.options.forEach((o, j) => L.push(`c${j} = OptionCard(${J(optionValue(o))}, ${J(o.label)}, ${J(o.description || '')})`));
   }
   controls.push('fcComment');
   L.push('fcComment = FormControl("Comment", comment)', 'comment = TextArea("comment", "Anything to add?", 3)');
@@ -59,6 +59,24 @@ export function cardSource(c) {
     'save = Button("Send answer", @ToAssistant("send answer"), "primary")',
     'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")');
   return [`root = Card([${parts.join(', ')}])`, ...L].join('\n');
+}
+
+// A pick names the option's id and its label, so a pick stays only while the revised card still offers that option.
+const optionValue = (o) => `${o.id}:${o.label}`;
+
+/** The picks the card still offers, by option id. A revision that dropped or relabeled an option drops its pick. */
+export function answerValues(card, values) {
+  const out = { ...values };
+  const keep = (key, lookup) => {
+    if (!(key in out)) return;
+    const picked = [out[key]].flat().filter((v) => lookup.has(v)).map((v) => lookup.get(v));
+    if (Array.isArray(out[key])) out[key] = picked;
+    else if (picked.length) out[key] = picked[0];
+    else delete out[key];
+  };
+  keep('choice', new Map((card.options || []).map((o) => [optionValue(o), o.id])));
+  (card.questions || []).forEach((q, i) => keep(`q${i}`, new Map((q.options || []).map((o) => [o.label, o.label]))));
+  return out;
 }
 
 // Form values by field name, without the comment.

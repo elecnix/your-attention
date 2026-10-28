@@ -28,15 +28,16 @@ test('cards that arrive, change or close while you type keep your field, its tex
   expect(await box.evaluate((el) => document.activeElement === el && (el as HTMLElement & { marked?: boolean }).marked === true)).toBe(true);
 });
 
-test('new page code waits for you: the page offers a reload and does not reload under your typing', async ({ page }) => {
+test('new page code waits while you type, and loads once you pause outside a field', async ({ page }) => {
   const box = await typing(page, 'code', 'Answer me while the page code changes');
   inbox.server.inbox.announceCode();
-  await expect(page.locator('.code-update')).toBeVisible();
+  await page.waitForTimeout(4000);
   await page.keyboard.type(' answer');
   await expect(box).toHaveValue('half of my answer');
   expect(await box.evaluate((el) => document.activeElement === el && (el as HTMLElement & { marked?: boolean }).marked === true)).toBe(true);
-  await page.locator('.code-update button', { hasText: 'Reload' }).click();
-  await expect(page.locator('.code-update')).toHaveCount(0);
+  const reload = page.waitForEvent('load');
+  await page.locator('.focus-card .card-title').click();
+  await reload;
   await expect(page.locator('.focus-card textarea')).toHaveValue('half of my answer');
 });
 
@@ -49,4 +50,33 @@ test('new page code loads at once in a tab you are not looking at', async ({ pag
   const reload = page.waitForEvent('load');
   inbox.server.inbox.announceCode();
   await reload;
+});
+
+test('a revision of the card you are typing on keeps your text and focus, and shows the new words', async ({ page }) => {
+  const box = await typing(page, 'revise', 'Answer me while I change');
+  await inbox.agent.post({ id: 'revise', agent: 's-revise', title: 'Answer me while I change', text: 'New context from the agent.', options: [{ id: 'o1', label: 'Yes' }], priority: 'now' });
+  await expect(page.locator('.focus-card')).toContainText('New context from the agent.');
+  await page.keyboard.type(' answer');
+  await expect(box).toHaveValue('half of my answer');
+  expect(await box.evaluate((el) => document.activeElement === el)).toBe(true);
+  const ev = inbox.listen('s-revise');
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  await expect.poll(() => ev.events.find((e) => e.type === 'answer')?.type).toBe('answer');
+  const a = ev.events.find((e) => e.type === 'answer');
+  expect(a?.type === 'answer' && [a.answer.comment, a.answer.version]).toEqual(['half of my answer', 2]);
+});
+
+test('a revision that relabels the option you picked drops that pick, and keeps your comment', async ({ page }) => {
+  await inbox.agent.post({ id: 'relabel', agent: 's-relabel', title: 'Pick one while I relabel', options: [{ id: 'o1', label: 'Yes' }, { id: 'o2', label: 'No' }], priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Pick one while I relabel' }).click();
+  await page.locator('.focus-card').getByText('No', { exact: true }).click();
+  await page.locator('.focus-card textarea').fill('my reason');
+  await inbox.agent.post({ id: 'relabel', agent: 's-relabel', title: 'Pick one while I relabel', options: [{ id: 'o1', label: 'Yes' }, { id: 'o2', label: 'Maybe' }], priority: 'now' });
+  await expect(page.locator('.focus-card').getByText('Maybe', { exact: true })).toBeVisible();
+  const ev = inbox.listen('s-relabel');
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  await expect.poll(() => ev.events.find((e) => e.type === 'answer')?.type).toBe('answer');
+  const a = ev.events.find((e) => e.type === 'answer');
+  expect(a?.type === 'answer' && [a.answer.values['choice'], a.answer.comment]).toEqual([undefined, 'my reason']);
 });

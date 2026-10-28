@@ -1,7 +1,7 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
-import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, PhoneLink, SecretForm, cardSource, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, agentName, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, PhoneLink, SecretForm, answerValues, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -9,7 +9,7 @@ export function App() {
   const [state, setState] = React.useState(null);
   const [auth, setAuth] = React.useState('checking');
   const [up, setUp] = React.useState(false);
-  // New page code waits for the person: a reload under their typing would take the field away.
+  // New page code waits until the person pauses: a reload under their typing would take the field away.
   const [codeReady, setCodeReady] = React.useState(false);
   // A card in the address is one the person asked for. The card from the last visit comes back only while it waits for them.
   const [focus, setFocus] = React.useState(() => cardInAddress());
@@ -47,12 +47,26 @@ export function App() {
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
 
-  // A tab the person stops looking at takes the new code at once.
+  // New page code loads at once in a hidden tab. In a tab the person looks at, it loads once they have
+  // done nothing for a moment and no field has focus. A send in flight finishes within that moment.
   React.useEffect(() => {
     if (!codeReady) return undefined;
-    const hidden = () => { if (document.visibilityState === 'hidden') reloadPage(); };
-    document.addEventListener('visibilitychange', hidden);
-    return () => document.removeEventListener('visibilitychange', hidden);
+    let last = Date.now();
+    const busy = () => { last = Date.now(); };
+    const editing = () => !!(document.activeElement && document.activeElement.closest('input, textarea, select, [contenteditable]'));
+    const check = () => {
+      if (document.visibilityState === 'hidden' || (Date.now() - last >= IDLE_RELOAD_MS && !editing())) reloadPage();
+    };
+    const events = ['keydown', 'pointerdown', 'input', 'focusin', 'focusout'];
+    for (const e of events) window.addEventListener(e, busy, true);
+    document.addEventListener('visibilitychange', check);
+    const timer = setInterval(check, 500);
+    check();
+    return () => {
+      for (const e of events) window.removeEventListener(e, busy, true);
+      document.removeEventListener('visibilitychange', check);
+      clearInterval(timer);
+    };
   }, [codeReady]);
 
   React.useEffect(() => {
@@ -91,7 +105,7 @@ export function App() {
     const onEvent = (type) => {
       if (type === 'beat' || type === 'pong') { last = Date.now(); setUp(true); }
       if (type === 'change' || type === 'presence') refreshRef.current();
-      if (type === 'code') { if (document.visibilityState === 'hidden') reloadPage(); else setCodeReady(true); }
+      if (type === 'code') setCodeReady(true);
     };
     const stop = () => {
       if (es) es.close();
@@ -215,7 +229,8 @@ export function App() {
   async function onAction(c, ev) {
     if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return next();
     if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
-    const { values, comment } = formValues(ev.formState);
+    const { values: picked, comment } = formValues(ev.formState);
+    const values = answerValues(c, picked);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version });
     store.del(`draft:${c.id}:${c.version}`);
     setTimeout(() => { if (pinnedRef.current === c.id) pinnedRef.current = null; setFocus((f) => (f === c.id || f === null ? null : f)); }, 700);
@@ -299,7 +314,7 @@ export function App() {
           h('h2', { className: 'secret-title' }, current.title),
           current.text && h('p', null, current.text),
           h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: next, onSent: () => setTimeout(() => { pinnedRef.current = null; setFocus(null); }, 700) }))
-        : h(CardView, { key: `${draftKey}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current), onAction: (ev) => onAction(current, ev) }),
+        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current), onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
         h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),
@@ -320,8 +335,6 @@ export function App() {
   return h(React.Fragment, null,
     h('div', { className: 'bar' }, h('div', { className: 'bar-inner' },
       h('h1', null, 'Your attention'),
-      codeReady && h('div', { className: 'code-update', role: 'status' }, 'A new version of this page is ready.',
-        h('button', { type: 'button', className: 'btn', onClick: reloadPage }, 'Reload')),
       h(NotifyToggle),
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : 'Inbox unreachable')),
       h(PhoneLink),
@@ -333,6 +346,8 @@ export function App() {
         main && pending.length > 0 && h('button', { type: 'button', className: 'btn to-queue', onClick: () => document.querySelector('.queue')?.scrollIntoView({ behavior: 'smooth' }) }, `${pending.length} waiting · show the queue`),
         main)));
 }
+
+const IDLE_RELOAD_MS = 3000;
 
 // Reload for new page code, back at the same scroll position. Drafts live in storage, so typed text comes back.
 function reloadPage() {
