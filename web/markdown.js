@@ -5,7 +5,9 @@
 const URL_TAIL = /[.,;:!?'"*_]+$/;
 function inline(h, text, key, opts = {}) {
   const out = [];
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*|_[^_]+_)|\[\[([\w.:-]+)\]\]|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()[\]]+)/g;
+  // As in CommonMark, an underscore next to a letter or digit on its outer side never opens or closes emphasis,
+  // so MY_SERVICE_API_KEY stays one word. A star can, so un*frigging*believable keeps its emphasis.
+  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*|(?<![\p{L}\p{N}])_(?!\s)[^_]+?(?<!\s)_(?![\p{L}\p{N}]))|\[\[([\w.:-]+)\]\]|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()[\]]+)/gu;
   let last = 0;
   let m;
   let n = 0;
