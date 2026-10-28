@@ -95,10 +95,16 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const networkAddresses = (): string[] => {
     if (!listening || !['0.0.0.0', '::'].includes(opts.host)) return [];
     const name = os.hostname().replace(/\.local$/i, '');
-    const ips = Object.values(os.networkInterfaces()).flat()
-      .filter((i): i is os.NetworkInterfaceInfo => !!i && i.family === 'IPv4' && !i.internal)
-      .map((i) => `http://${i.address}:${listening}`);
-    return [`http://${name}.local:${listening}`, ...ips];
+    // Tunnels, VPNs and container bridges carry addresses a phone on the same Wi-Fi never reaches.
+    const lan = Object.entries(os.networkInterfaces())
+      .filter(([iface]) => !/^(lo|utun|tun|tap|wg|ppp|ipsec|gif|stf|awdl|llw|anpi|bridge|docker|br-|veth|virbr|vmnet|vethernet|tailscale|zt)/i.test(iface))
+      .flatMap(([, list]) => list ?? [])
+      // 100.64.0.0/10 is the carrier-grade range VPNs such as Tailscale use.
+      .filter((i) => !i.internal && !/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(i.address));
+    // IPv6 first: a VPN that routes the LAN's IPv4 elsewhere often leaves IPv6 alone.
+    const v6 = opts.host === '::' ? lan.filter((i) => i.family === 'IPv6' && !/^fe80/i.test(i.address)).map((i) => `http://[${i.address}]:${listening}`) : [];
+    const v4 = lan.filter((i) => i.family === 'IPv4').map((i) => `http://${i.address}:${listening}`);
+    return [`http://${name}.local:${listening}`, ...v6, ...v4];
   };
   const handle = createHandler(inbox, { openOrigin: focusHerdrPane, networkAddresses });
 
@@ -186,7 +192,13 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   });
 
   await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
+    server.once('error', (e: NodeJS.ErrnoException) => {
+      // A machine without IPv6 cannot listen on ::, so the inbox listens on every IPv4 address instead.
+      if (opts.host !== '::' || !['EAFNOSUPPORT', 'EADDRNOTAVAIL'].includes(e.code ?? '')) return reject(e);
+      opts = { ...opts, host: '0.0.0.0' };
+      server.once('error', reject);
+      server.listen(opts.port, opts.host, resolve);
+    });
     server.listen(opts.port, opts.host, resolve);
   });
   const address = server.address();

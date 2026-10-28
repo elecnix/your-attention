@@ -178,7 +178,9 @@ YOUR_ATTENTION_RELAY_KEY=... your-attention serve --relay https://relay.example
 
 Select the phone button, left of the GitHub mark, and scan the QR code with the phone camera. The phone opens the inbox, signed in with its own token. The code works once, for five minutes, so keep it to yourself.
 
-A cloud inbox works from anywhere, and a laptop inbox from a phone on the same network. The laptop inbox listens on every network interface by default. Its QR code opens the laptop's `.local` name, such as `http://my-laptop.local:4815`, and the dialog also gives the laptop's IP address, for a phone that cannot open `.local` names.
+A cloud inbox works from anywhere, and a laptop inbox from a phone on the same network. The laptop inbox listens on every network interface, IPv4 and IPv6, by default. Its QR code opens the laptop's `.local` name, such as `http://my-laptop.local:4815`, and the dialog also gives an IP address, for a phone that cannot open `.local` names.
+
+If the phone cannot open the inbox, check for a VPN on the laptop. A VPN that sends your home network's IPv4 traffic into its tunnel breaks every connection from the phone to the laptop over IPv4. The inbox still answers over IPv6, which most home networks and phones use. Otherwise, exclude your home network from the VPN, or use a cloud inbox.
 
 ## Day to day
 

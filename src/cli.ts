@@ -12,7 +12,7 @@ import { serve } from './node/server.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
-  serve [--port 4815] [--host 0.0.0.0] [--no-mdns]   run the inbox
+  serve [--port 4815] [--host ::] [--no-mdns]        run the inbox
   start [options for serve]                           run the inbox in the background
   stop                                                stop the inbox, or its service when one is installed
   open                                                open the inbox page in a browser
@@ -76,7 +76,7 @@ function localServer(): { url: string; owner: string } {
 
 switch (command) {
   case 'serve': {
-    const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '0.0.0.0' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
+    const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '::' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
     const relayKey = values.relay ? process.env[String(values['relay-key-env'])] ?? fail(`--relay needs the relay key in $${values['relay-key-env']}`) : '';
     const stop = async (): Promise<void> => { await server.close(); process.exit(0); };
     const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop() });
