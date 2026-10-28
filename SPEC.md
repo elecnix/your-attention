@@ -78,7 +78,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | Field | Meaning |
 | -- | -- |
 | `id` | 1 to 80 characters: letters, digits, dots, colons, dashes or the `_` character. Posting the same id again revises the card and adds 1 to its `version`. |
-| `agent` | The session that receives the answer, such as `claude:<session id>` or `pi:<session id>`. |
+| `agent` | The session that receives the answer, such as `claude:<session id>`, `pi:<session id>` or `opencode:<session id>`. |
 | `kind` | `ask` (the default), `blocked` for a harness that waits on a prompt, or `system` for cards the inbox posts. |
 | `title`, `text`, `recommendation` | The question, its context, and what the agent would do. |
 | `options`, `multiple` | Answer options as `{id, label, description}`. The person picks with the `choice` field. |
@@ -227,6 +227,8 @@ An agent opens `GET /v1/stream?agent=<id>`, and the inbox reports the agent onli
 ```
 
 The event above is trimmed to the fields an agent reads. The `id` is a receipt: the Claude Code channel watches the session transcript for it before it sends the acknowledgment.
+
+The OpenCode plugin follows one stream per session, as agent `opencode:<session id>`: each session that calls a card tool, and each session from before a restart that still has an open card. It sends each answer into its session with OpenCode's `promptAsync`. OpenCode starts a new turn when the session is idle, and queues the message behind a turn that runs. The plugin acknowledges the answer when OpenCode's `chat.message` hook shows the receipt in the conversation.
 
 A client adds `instance=<id>` to the stream, `/v1/ws` or `/v1/poll` address, with one id per process that stays the same across its reconnects. The inbox records the instance that received each answer. When a different instance of the agent connects, such as a session restarted before it read an answer, the inbox sends it every answer that was delivered but never read. A reconnect from the same instance gets nothing twice.
 

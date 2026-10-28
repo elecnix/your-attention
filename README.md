@@ -130,6 +130,16 @@ claude() {
 pi install git:github.com/elecnix/your-attention
 ```
 
+#### OpenCode
+
+Write the plugin file once. It gives every session the card tools, and brings each answer into its session as a new message. A message that arrives while the agent works waits for the turn to end.
+
+```sh
+your-attention opencode-plugin --write
+```
+
+The file goes in `~/.config/opencode/plugin/`, or under `$XDG_CONFIG_HOME` when you set it, and OpenCode loads it at its next start. It loads the plugin from this checkout, so keep the checkout where it is. Run the command without `--write` to see the file first.
+
 #### herdr: a card for each blocked agent (optional)
 
 The sidecar posts a card when any herdr agent waits for you, whatever its harness. When the agent shows numbered choices, such as a permission prompt, you pick one on the card, and the sidecar presses it in that agent's pane. It first checks that the same prompt still waits there.

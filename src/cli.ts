@@ -26,6 +26,7 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   claude-channel                                      the MCP channel server for Claude Code
   claude-hook ask-pre|ask-post|ask-cancel             the AskUserQuestion hooks for Claude Code
   herdr-blocked                                       post a card for each herdr agent that is blocked
+  opencode-plugin [--write]                           print or write the OpenCode plugin file that loads the card tools
   triage [--judge-cmd "claude -p" | --judge-url URL --judge-model M --judge-key-env VAR]
                                                       check each card before you see it (OpenRouter by default)
   triage login                                        sign in to OpenRouter for the default judge
@@ -276,6 +277,16 @@ switch (command) {
   case 'claude-hook':
     await (await import('./integrations/claude/ask-hook.ts')).main(rest[0] ?? '');
     break;
+  case 'opencode-plugin': {
+    const { values } = parseArgs({ args: rest, options: { write: { type: 'boolean', default: false } } });
+    const { pluginFile, pluginSource } = await import('./integrations/opencode/install.ts');
+    const file = pluginFile();
+    if (!values.write) { console.log(`# ${file}\n${pluginSource()}`); break; }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, pluginSource());
+    console.log(`Wrote ${file}. OpenCode loads it at its next start.`);
+    break;
+  }
   case 'herdr-blocked':
     await (await import('./integrations/herdr/blocked.ts')).main();
     break;
