@@ -342,3 +342,25 @@ test('the page takes its events over a WebSocket, and a new card shows without a
   await inbox.agent.post({ id: 'live', agent: 's-live', title: 'Arrives over the page socket', priority: 'now' });
   await expect(page.getByText('Arrives over the page socket').first()).toBeVisible();
 });
+
+test('skip for now walks down the queue in its order, and wraps around at the end', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    for (const n of ['One', 'Two', 'Three', 'Four']) await own.agent.post({ id: `skip-${n}`, agent: `s-skip-${n}`, title: `Card ${n}`, priority: 'now', options: [{ id: 'y', label: 'Yes' }] });
+    await own.open(page);
+    const queue = await page.locator('nav.queue button.q .t').allTextContents();
+    const titles = queue.map((t) => /Card \w+/.exec(t)?.[0]).filter((t): t is string => !!t);
+    expect(titles).toHaveLength(4);
+    await page.locator('nav.queue button.q', { hasText: titles[0] }).click();
+    const focused = () => page.locator('nav.queue button.q.focus .t');
+    const visited: string[] = [];
+    for (let i = 1; i <= 4; i++) {
+      await page.getByRole('button', { name: 'Skip for now' }).click();
+      await expect(focused()).toContainText(titles[i % 4]!);
+      visited.push(titles[i % 4]!);
+    }
+    expect(visited).toEqual([titles[1], titles[2], titles[3], titles[0]]);
+  } finally {
+    await own.close();
+  }
+});

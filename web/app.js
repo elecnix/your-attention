@@ -184,7 +184,13 @@ export function App() {
 
   // Each card you open is a step in the browser's history, so back and forward move between them.
   const go = (id) => { if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id)); setCleared(false); setFocus(id); };
-  const next = () => { pinnedRef.current = null; go((pending.find((c) => c.id !== (current && current.id)) || {}).id || null); };
+  // Skip opens the card after this one, in the order the queue shows, and wraps around at the end.
+  const next = () => {
+    pinnedRef.current = null;
+    const i = order.findIndex((c) => c.id === (current && current.id));
+    const after = i < 0 ? order : [...order.slice(i + 1), ...order.slice(0, i)];
+    go((after[0] || {}).id || null);
+  };
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
 
   async function onAction(c, ev) {
@@ -216,6 +222,7 @@ export function App() {
   // The cards the inbox clears: answered or closed, with no agent reply you have not seen. Search still finds them.
   const dealt = visible.filter((c) => ['closed', 'answered', 'delivered', 'read'].includes(st(c)));
   const groups = groupBy === 'none' ? [['Waiting for you', rest]] : [...rest.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];
+  const order = [...replied, ...groups.flatMap(([, items]) => items)];
   const queue = h('nav', { className: 'queue' },
     h('label', { className: 'group-by' }, 'Group by ',
       h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); store.set('groupBy', e.target.value); } },
