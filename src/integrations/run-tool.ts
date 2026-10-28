@@ -10,7 +10,8 @@ export interface ToolContext {
   inbox: Client;
   secrets: SecretRequests;
   agent: string;
-  origin: Origin | undefined;
+  /** Where the session runs, looked up when a tool posts a card, so a renamed session or a moved tab shows. */
+  origin: () => Promise<Origin | undefined>;
   /** How the answer reaches this harness, for the tool result: "as a channel event". */
   arrival: string;
 }
@@ -31,7 +32,7 @@ export function toAttachment(a: { path?: string; url?: string; name?: string; al
 const str = (v: unknown): string | undefined => (v === undefined || v === null ? undefined : String(v));
 
 export async function runTool(ctx: ToolContext, name: string, args: Record<string, unknown>): Promise<string> {
-  const { inbox, agent, origin } = ctx;
+  const { inbox, agent } = ctx;
   // An argument the tool does not take is a mistake to report, not to drop.
   const known = cardTools.find((t) => t.name === name)?.schema['properties'] as Record<string, unknown> | undefined;
   const unknown = known ? Object.keys(args).filter((k) => !(k in known)) : [];
@@ -56,7 +57,8 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         expiresAt: minutes > 0 ? Date.now() + minutes * 60_000 : undefined,
         follows: str(args['follows']),
         tags: args['tags'] as Record<string, string> | undefined,
-        origin,
+        from: str(args['from']),
+        origin: await ctx.origin(),
       };
       const posted = await inbox.post(card);
       return `Posted card ${posted.id}. The answer arrives ${ctx.arrival}; keep working meanwhile.`;
@@ -85,7 +87,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return `Card guidance, version ${g.version}:\n${g.text}`;
     }
     case 'card_ask_secret': {
-      const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin });
+      const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await ctx.origin() });
       return `Asked for the secret on card ${id}. The answer arrives ${ctx.arrival} with the path of a file, never the value.`;
     }
     case 'card_reply':

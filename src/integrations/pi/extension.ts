@@ -5,6 +5,7 @@ import os from 'node:os';
 import { Type } from 'typebox';
 import { Client, describeAnswer, loadConfig } from '../../client.ts';
 import type { NewCard } from '../../core/types.ts';
+import { herdrPlace } from '../herdr/place.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { cardTools } from '../tools.ts';
@@ -98,7 +99,7 @@ export default function yourAttention(pi: PiApi): void {
       description: tool.description,
       parameters: Type.Unsafe(tool.schema),
       async execute(_id, args) {
-        return result(await runTool({ inbox: need(), secrets, agent, origin, arrival: 'as a user message' }, tool.name, args));
+        return result(await runTool({ inbox: need(), secrets, agent, origin: async () => (origin && { ...origin, ...(await herdrPlace(origin.herdrPane)) }), arrival: 'as a user message' }, tool.name, args));
       },
     });
   }

@@ -100,6 +100,8 @@
   @media (prefers-reduced-motion: reduce) { .collapse { transition: none; } }
   .origin { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .origin .btn { padding: 2px 10px; }
+  .origin .herdr-place { flex-basis: 100%; }
+  .from { margin: 0 0 4px; font-weight: 600; font-size: calc(13px * var(--text-scale)); }
   .pill.small { font-size: calc(12px * var(--text-scale)); padding: 2px 8px; }
   .chain { margin: 0 0 12px; font-size: calc(13px * var(--text-scale)); }
   .chain a { color: var(--accent); cursor: pointer; text-decoration: underline; }

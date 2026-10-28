@@ -12,6 +12,7 @@ import { Client, loadConfig } from '../../client.ts';
 import { randomId } from '../../core/crypto.ts';
 import type { Answer, Card, NewCard } from '../../core/types.ts';
 import { parseDialog, type Dialog } from './dialog.ts';
+import { herdrPlace } from './place.ts';
 
 const POLL_MS = Number(process.env['HERDR_BLOCKED_POLL_MS'] ?? 2000);
 const log = (...a: unknown[]): void => console.error(new Date().toISOString(), '[herdr-blocked]', ...a);
@@ -136,7 +137,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
           title: `${where} is waiting for you`,
           ...fields,
           priority: 'now',
-          origin: { harness: a.agent ?? 'agent', herdrPane: a.pane_id, name: where },
+          origin: { harness: a.agent ?? 'agent', herdrPane: a.pane_id, name: where, ...(await herdrPlace(a.pane_id, herdr)) },
         });
         open.set(a.pane_id, { card, screen: fields.screen ?? '', dialog, listen: listen(card) });
         log('card', card.id, 'for', a.pane_id);

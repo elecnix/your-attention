@@ -514,3 +514,20 @@ describe('sign-in codes for a phone', () => {
     assert.throws(() => inbox.createSignInCode(owner), (e: unknown) => e instanceof InboxError && e.status === 429);
   });
 });
+
+describe('who a card is from', () => {
+  it('keeps the name the agent gives itself, trimmed and capped', () => {
+    const { inbox, agent } = setup();
+    const card = inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q', from: `  the release agent ${'x'.repeat(200)}` });
+    assert.equal(card.from?.startsWith('the release agent'), true);
+    assert.equal(card.from?.length, 80);
+    assert.equal(inbox.postCard(agent, { id: 'c2', agent: 's1', title: 'q', from: '   ' }).from, undefined);
+  });
+
+  it('keeps only the origin fields it knows, as capped strings', () => {
+    const { inbox, agent } = setup();
+    const origin = { harness: 'claude-code', herdrWorkspace: 'first mate', herdrTab: 'w'.repeat(500), extra: 'dropped', name: 7 } as never;
+    const card = inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q', origin });
+    assert.deepEqual(card.origin, { harness: 'claude-code', herdrWorkspace: 'first mate', herdrTab: 'w'.repeat(200), name: '7' });
+  });
+});

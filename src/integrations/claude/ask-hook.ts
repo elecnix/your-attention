@@ -14,6 +14,7 @@ import { randomId } from '../../core/crypto.ts';
 import type { AskQuestion, CloseKind } from '../../core/types.ts';
 import { homeDir } from '../../node/home.ts';
 import { claudeSessionName } from './session-name.ts';
+import { herdrPlace } from '../herdr/place.ts';
 
 interface HookInput {
   session_id?: string;
@@ -64,7 +65,7 @@ export async function main(mode: string): Promise<void> {
         title: questions[0]?.question ?? 'A question from the agent',
         questions,
         priority: 'now',
-        origin: { harness: 'claude-code', session: sid, name: claudeSessionName(sid), host: os.hostname(), cwd: process.cwd(), herdrPane: process.env['HERDR_PANE_ID'] },
+        origin: { harness: 'claude-code', session: sid, name: claudeSessionName(sid), host: os.hostname(), cwd: process.cwd(), herdrPane: process.env['HERDR_PANE_ID'], ...(await herdrPlace(process.env['HERDR_PANE_ID'])) },
       });
       fs.mkdirSync(path.dirname(pendingFile), { recursive: true });
       fs.writeFileSync(pendingFile, id);

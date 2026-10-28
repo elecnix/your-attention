@@ -85,8 +85,18 @@ describe('FileBlobs', () => {
 describe('card tools', () => {
   it('reports an argument the tool does not take', async () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
-    const ctx = { inbox: {} as never, secrets: {} as never, agent: 's1', origin: undefined, arrival: 'as a test' };
+    const ctx = { inbox: {} as never, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' };
     await assert.rejects(runTool(ctx, 'card_guidance', { text: 'x' }), /card_guidance does not take text\. It takes propose/);
+  });
+
+  it('posts the name the agent gives itself, and the origin the integration found', async () => {
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    let posted: Record<string, unknown> = {};
+    const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
+    const origin = async () => ({ harness: 'claude-code', herdrWorkspace: 'DevEx', herdrTab: 'login fix' });
+    await runTool({ inbox, secrets: {} as never, agent: 's1', origin, arrival: 'as a test' }, 'card_post', { title: 'q', from: 'the release agent' });
+    assert.equal(posted['from'], 'the release agent');
+    assert.deepEqual(posted['origin'], { harness: 'claude-code', herdrWorkspace: 'DevEx', herdrTab: 'login fix' });
   });
 });
 

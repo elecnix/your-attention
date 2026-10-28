@@ -14,6 +14,7 @@ import { Client, describeAnswer, loadConfig } from '../../client.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { claudeSessionName } from './session-name.ts';
+import { herdrPlace } from '../herdr/place.ts';
 import { cardTools } from '../tools.ts';
 
 const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
@@ -49,7 +50,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const text = (t: unknown) => ({ content: [{ type: 'text' as const, text: typeof t === 'string' ? t : JSON.stringify(t, null, 2) }] });
   try {
     // Read the name at each call: Claude Code titles a session after its first prompts, and the person can rename it.
-    return text(await runTool({ inbox, secrets, agent, origin: { ...origin, name: claudeSessionName(session) }, arrival: 'as a channel event' }, req.params.name, args));
+    const place = async () => ({ ...origin, name: claudeSessionName(session), ...(await herdrPlace(pane)) });
+    return text(await runTool({ inbox, secrets, agent, origin: place, arrival: 'as a channel event' }, req.params.name, args));
   } catch (e) {
     return { ...text(String((e as Error).message)), isError: true };
   }

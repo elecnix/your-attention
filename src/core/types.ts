@@ -31,6 +31,9 @@ export interface Origin {
   host?: string;
   cwd?: string;
   herdrPane?: string;
+  /** The labels of the herdr workspace and tab the pane sat in when the card was posted. */
+  herdrWorkspace?: string;
+  herdrTab?: string;
 }
 
 export interface Reply {
@@ -177,6 +180,8 @@ export interface Card {
   /** On a system card that proposes new guidance: the text and the agents it would reach. */
   broadcast?: { text: string; agents: string[] };
   origin?: Origin;
+  /** The name the agent gives itself, such as "the release agent". The page shows it as written. */
+  from?: string;
   /** Other properties the agent attaches, for grouping. */
   tags?: Record<string, string>;
   /** The card this one follows, and the card that follows it. */
@@ -294,6 +299,7 @@ export interface NewCard {
   expiresAt?: number;
   rating?: number;
   origin?: Origin;
+  from?: string;
   tags?: Record<string, string>;
   follows?: string;
   deliver?: 'stream' | 'none';

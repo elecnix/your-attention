@@ -23,6 +23,7 @@ export const cardTools: CardTool[] = [
         body: { type: 'string', description: 'Optional OpenUI Lang source for a card that needs other components. Place a saved widget with a line of its own: `pr = widget pull-request {"title": "Add stop"}`, or `widget pull-request@2` for one version.' },
         tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Properties for grouping, such as topic.' },
         id: { type: 'string', description: 'Reuse an id to revise your own card.' },
+        from: { type: 'string', description: 'Optional. The name you give yourself, such as "the release agent", shown on the card. The card already shows your session name and where you run.' },
         attachments: {
           type: 'array',
           description: 'Files to show on the card: images, PDF, Markdown, text, CSV, JSON, or any file to download. At most 10, 8 MB each.',

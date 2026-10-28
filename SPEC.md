@@ -92,7 +92,8 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `rating` | How much the card matters to the agent, from 1 to 5. Priority rules can read it. |
 | `screen` | The terminal screen of a blocked agent. |
 | `priority` | The id of a priority level: `now`, `soon` (the default) or `later` unless the levels changed. |
-| `origin` | Where the session runs: `harness`, `session`, `name`, `host`, `cwd`, `herdrPane`. |
+| `origin` | Where the session runs: `harness`, `session`, `name`, `host`, `cwd`, `herdrPane`, and the labels of the herdr workspace and tab, `herdrWorkspace` and `herdrTab`. The integration fills it in when the agent posts, and the inbox keeps each field to 200 characters. |
+| `from` | The name the agent gives itself, such as `the release agent`, at most 80 characters. It is only a label: the token that posted the card owns it. |
 | `tags` | String properties for grouping. |
 | `follows` | The card this one follows up on. The inbox sets `followedBy` on that card. |
 | `deliver` | `stream` (the default) or `none` for a card that only shows state. |

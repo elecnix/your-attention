@@ -9,7 +9,7 @@ import { isSealed } from './sealed.ts';
 import { distinctWidgets, expandWidgets, fill, type WidgetSource } from './widgets.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import type {
-  AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, PageEvent, Pairing, Presence,
+  AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, PersonPresence, PriorityLevel, Role, Settings, Template, Token,
 } from './types.ts';
 
@@ -64,6 +64,7 @@ export const MIN_FILE_CHARGE = 64 * 1024;
 /** The largest card, as stored, without its files. */
 export const MAX_CARD_BYTES = 256 * 1024;
 export const MAX_SOURCE_BYTES = 64 * 1024;
+export const MAX_FROM_CHARS = 80;
 export const MAX_VERSIONS = 50;
 export const MAX_REPLY_BYTES = 4096;
 export const MAX_REPLIES = 200;
@@ -353,7 +354,8 @@ export class Inbox {
       triage: before?.triage,
       history: history.length ? history : undefined,
       broadcast: before?.broadcast,
-      origin: input.origin,
+      origin: cleanOrigin(input.origin),
+      from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
       tags: input.tags,
       follows: input.follows ?? before?.follows,
       followedBy: before?.followedBy,
@@ -1216,6 +1218,19 @@ const index = (i: number): number => i + 1;
 function searchText(card: Card): string {
   return [card.title, card.text, card.recommendation, card.body, card.status, ...Object.entries(card.tags ?? {}).map(([k, v]) => `${k} ${v}`), ...(card.attachments ?? []).map((a) => a.name)]
     .filter(Boolean).join('\n');
+}
+
+const ORIGIN_FIELDS = ['harness', 'session', 'name', 'host', 'cwd', 'herdrPane', 'herdrWorkspace', 'herdrTab'] as const;
+
+/** The origin fields the page knows, each a string of at most 200 characters. */
+function cleanOrigin(origin: unknown): Origin | undefined {
+  if (!origin || typeof origin !== 'object') return undefined;
+  const out: Origin = {};
+  for (const k of ORIGIN_FIELDS) {
+    const v = (origin as Record<string, unknown>)[k];
+    if (v !== undefined && v !== null && v !== '') out[k] = String(v).slice(0, 200);
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function cleanName(name: unknown): string {

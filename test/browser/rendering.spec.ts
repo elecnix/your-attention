@@ -197,6 +197,16 @@ test('the queue names an agent by its session name, and by its id when it has no
   await expect(page.locator('.queue h3', { hasText: 'claude:0000-named' })).toHaveCount(0);
 });
 
+test('a card says which agent it is from, and where it sits in herdr', async ({ page }) => {
+  await inbox.agent.post({ id: 'placed', agent: 'claude:0000-placed', title: 'Placed card', from: 'the release agent',
+    origin: { harness: 'claude-code', name: 'Release prep', herdrPane: 'w3:p2', herdrWorkspace: 'DevEx', herdrTab: 'login fix' } });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Placed card' }).click();
+  await expect(page.locator('.focus-card .from')).toHaveText('From the release agent');
+  await expect(page.locator('.focus-card .origin')).toContainText('Release prep · claude-code');
+  await expect(page.locator('.focus-card .herdr-place')).toHaveText('herdr: workspace DevEx › tab login fix');
+});
+
 test('a line rewritten from scratch shows as removed and added, with no words marked', async ({ page }) => {
   await inbox.agent.post({ id: 'rewrite', agent: 's-rewrite', title: 'Rewrite the plan', text: 'Ship it Friday.', priority: 'now' });
   await inbox.agent.post({ id: 'rewrite', agent: 's-rewrite', title: 'Rewrite the plan', text: 'Wait until QA signs off.', priority: 'now' });
