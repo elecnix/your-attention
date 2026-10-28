@@ -484,3 +484,18 @@ test('the selected card shows a filled hand, and the other waiting cards an outl
   await expect.poll(() => filled('Filled hand two')).toBe(1);
   expect(await filled('Filled hand one')).toBe(0);
 });
+
+test('the card shows its rough age at the top right, and the age moves on with the clock', async ({ page }) => {
+  await page.clock.install({ time: Date.now() });
+  await inbox.agent.post({ id: 'aged', agent: 's-age', title: 'How old am I', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'How old am I' }).click();
+  const age = page.locator('.focus-card .meta .age');
+  await expect(age).toHaveText('just now');
+  await page.clock.fastForward(15 * 60_000);
+  await expect(age).toHaveText('15 min ago');
+  await page.clock.fastForward(60 * 60_000);
+  await expect(age).toHaveText('1 h 20 min ago');
+  const [right, meta] = await Promise.all([age.evaluate((el) => el.getBoundingClientRect().right), page.locator('.focus-card .meta').evaluate((el) => el.getBoundingClientRect().right)]);
+  expect(meta - right).toBeLessThan(2);
+});

@@ -1,5 +1,6 @@
 // The parts of the page, each one renderable alone, as the stories do.
 import { BASE, CLOSED_LABEL, Icon, J, api, h, notifyOn, store } from './env.js';
+import { cardAge } from './age.js';
 import { SESSION_LINK, renderMarkdown } from './markdown.js';
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
@@ -285,6 +286,21 @@ export function SecretForm({ card, onSent, onSkip }) {
       h('button', { className: 'btn', type: 'button', onClick: () => send(false) }, 'Decline'),
       h('button', { className: 'btn', type: 'button', onClick: onSkip }, 'Skip for now')),
     h('p', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the model sees a file path, never the value.'));
+}
+
+// How long ago the agent sent the card, roughly. It moves on at each turn of the clock's minute.
+export function CardAge({ card }) {
+  // The tick only re-renders: each render reads the clock, so a card opened between ticks shows its own age.
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    let timer;
+    const tick = () => { setTick((n) => n + 1); timer = setTimeout(tick, 60_000 - (Date.now() % 60_000)); };
+    timer = setTimeout(tick, 60_000 - (Date.now() % 60_000));
+    return () => clearTimeout(timer);
+  }, []);
+  const sent = `Sent ${new Date(card.createdAt).toLocaleString()}`;
+  const tip = card.updatedAt > card.createdAt + 60_000 ? `${sent}, revised ${new Date(card.updatedAt).toLocaleString()}` : sent;
+  return h('span', { className: 'age', title: tip }, cardAge(Date.now() - card.createdAt));
 }
 
 // A session link opens another agent's session in herdr through the inbox, which runs herdr on this computer.

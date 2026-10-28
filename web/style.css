@@ -69,6 +69,7 @@
   .card-text, .file .markdown { color: var(--body-text); }
   .card-text :is(strong, b, h1, h2, h3, h4, h5, h6), .file .markdown :is(strong, b, h1, h2, h3, h4, h5, h6),
   .focus-card :is(.openui-header-top-left, .openui-label, .openui-callout-title) { color: var(--ink); }
+  .meta .age { margin-left: auto; white-space: nowrap; }
   .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .prio { font-weight: 700; white-space: nowrap; padding: 2px 8px; border-radius: 6px; font-size: calc(12px * var(--text-scale)); }
   .prio.now { color: var(--bad); background: var(--bad-bg); }
