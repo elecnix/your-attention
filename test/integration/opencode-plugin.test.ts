@@ -40,7 +40,7 @@ describe('the OpenCode plugin', () => {
     assert.equal(args.safeParse({ title: 'Ship it?' }).success, true);
     assert.equal(args.safeParse({}).success, false);
     assert.equal(args.safeParse({ title: 'q', priority: 'whenever' }).success, false);
-    assert.equal(args.safeParse({ title: 'q', options: ['Yes', 'No'], tags: { topic: 'release' }, attachments: [{ path: '/tmp/a.png' }] }).success, true);
+    assert.equal(args.safeParse({ title: 'q', options: [{ label: 'Yes', description: 'I merge it.' }, { label: 'No' }], tags: { topic: 'release' }, attachments: [{ path: '/tmp/a.png' }] }).success, true);
     for (const t of cardTools) assert.doesNotThrow(() => z.toJSONSchema(z.object(toolArgs(z, t.schema))), t.name);
   });
 

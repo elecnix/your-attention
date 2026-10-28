@@ -112,6 +112,15 @@ describe('card tools', () => {
     assert.equal(posted['from'], 'the release agent');
     assert.deepEqual(posted['origin'], { harness: 'claude-code', herdrWorkspace: 'DevEx', herdrTab: 'login fix' });
   });
+
+  it('posts each option with the explanation that shows inside its box, and still takes a plain label', async () => {
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    let posted: Record<string, unknown> = {};
+    const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
+    await runTool({ inbox, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post',
+      { title: 'q', options: [{ label: 'Close both', description: 'I close **#2671**.' }, 'Keep it', null] });
+    assert.deepEqual(posted['options'], [{ id: 'o1', label: 'Close both', description: 'I close **#2671**.' }, { id: 'o2', label: 'Keep it' }, { id: 'o3', label: '' }]);
+  });
 });
 
 describe('the Claude Code session name', () => {

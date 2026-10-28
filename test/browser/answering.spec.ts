@@ -202,3 +202,19 @@ test('Command or Control with Enter in the comment box sends the answer, and Shi
   const a = ev.events.find((e) => e.type === 'answer');
   expect(a?.type === 'answer' && a.answer.comment).toBe('first line\nsecond line');
 });
+
+test('an option shows its explanation inside its box, and a click on the explanation picks it', async ({ page }) => {
+  await inbox.agent.post({ id: 'opt-detail', agent: 's-opt', title: 'Close both?', priority: 'now',
+    options: [{ id: 'o1', label: 'Close both', description: 'I close **#2671** and cancel the ticket.' }, { id: 'o2', label: 'Keep #2671', description: 'It stays a draft.' }] });
+  const ev = inbox.listen('s-opt');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Close both?' }).click();
+  const box = page.locator('.focus-card .openui-option-card', { hasText: 'Close both' });
+  await expect(box.locator('strong', { hasText: '#2671' })).toBeVisible();
+  await box.getByText('cancel the ticket', { exact: false }).click();
+  await expect(box).toHaveAttribute('aria-checked', 'true');
+  await page.locator('.focus-card').getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(() => ev.events.find((e) => e.type === 'answer')?.type).toBe('answer');
+  const a = ev.events.find((e) => e.type === 'answer');
+  expect(a?.type === 'answer' && a.answer.values['choice']).toBe('o1');
+});
