@@ -19,7 +19,10 @@ describe('a laptop inbox on every interface', () => {
       const owner = fs.readFileSync(path.join(home, 'owner-token'), 'utf8').trim();
       const { addresses } = (await (await fetch(`${server.url}/v1/addresses`, { headers: { authorization: `Bearer ${owner}` } })).json()) as { addresses: string[] };
       assert.match(addresses[0] ?? '', /\.local:\d+$/);
-      const globalV6 = Object.values(os.networkInterfaces()).flat().some((i) => i?.family === 'IPv6' && !i.internal && !i.address.startsWith('fe80'));
+      // Only a LAN interface's address counts: the inbox leaves tunnels and bridges out.
+      const globalV6 = Object.entries(os.networkInterfaces())
+        .filter(([iface]) => /^(en|eth|wlan|wl)/i.test(iface))
+        .some(([, list]) => (list ?? []).some((i) => i.family === 'IPv6' && !i.internal && !/^fe80/i.test(i.address)));
       if (globalV6) assert.ok(addresses.some((a) => /^http:\/\/\[[0-9a-f:]+\]:\d+$/.test(a)), addresses.join(' '));
     } finally {
       await server.close();
