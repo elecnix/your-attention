@@ -47,8 +47,8 @@ export const MESSAGE_RESERVATION_MS = 30_000;
 /** An open card whose agent has been offline this long is orphaned. */
 export const ORPHAN_MS = 60 * 60 * 1000;
 export const DEFAULT_PRIORITIES: PriorityLevel[] = [
-  { id: 'now', label: 'Decide now', definition: 'The agent cannot go on without the answer.' },
-  { id: 'soon', label: 'Decide soon', definition: 'The agent needs the answer before it finishes.' },
+  { id: 'now', label: 'Decide now', definition: 'The agent cannot go on without the answer.', color: '#e5484d' },
+  { id: 'soon', label: 'Decide soon', definition: 'The agent needs the answer before it finishes.', color: '#c9a100' },
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
 export const DEFAULT_GUIDANCE = [
@@ -707,7 +707,10 @@ export class Inbox {
   }
 
   priorities(): PriorityLevel[] {
-    return this.store.get<PriorityLevel[]>('meta', 'priorities') ?? DEFAULT_PRIORITIES;
+    const saved = this.store.get<PriorityLevel[]>('meta', 'priorities');
+    if (!saved) return DEFAULT_PRIORITIES;
+    // A default level saved without a color keeps its default color.
+    return saved.map((l) => (l.color ? l : { ...l, color: DEFAULT_PRIORITIES.find((d) => d.id === l.id)?.color }));
   }
 
   /** An agent proposes new priority levels. They reorder the whole queue, so the person approves them on a system card. */
@@ -752,7 +755,9 @@ export class Inbox {
       if (rule) {
         try { parse(rule); } catch (e) { throw new InboxError(400, `level ${i + 1}: ${(e as Error).message}`); }
       }
-      return { id, label, definition: String(l.definition ?? ''), rule };
+      const color = l.color ? String(l.color).toLowerCase() : undefined;
+      if (color && !/^#[0-9a-f]{6}$/.test(color)) throw new InboxError(400, `level ${i + 1}: color must be #rrggbb`);
+      return { id, label, definition: String(l.definition ?? ''), rule, ...(color ? { color } : {}) };
     });
     return clean;
   }

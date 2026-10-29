@@ -432,6 +432,30 @@ test('an answer opens the card after the one you answered, not the card you skip
   }
 });
 
+test('a waiting card raises its hand in its level\'s color, and the person can change a level\'s color', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    for (const p of ['now', 'soon', 'later']) await own.agent.post({ id: `hand-${p}`, agent: `s-hand-${p}`, title: `Hand ${p}`, priority: p });
+    await own.open(page);
+    const hand = (p: string) => page.locator('nav.queue button.q', { hasText: `Hand ${p}` }).locator('.ico').evaluate((el) => getComputedStyle(el).color);
+    expect(await hand('now')).toBe('rgb(229, 72, 77)');
+    expect(await hand('soon')).toBe('rgb(201, 161, 0)');
+    expect(['rgb(229, 72, 77)', 'rgb(201, 161, 0)']).not.toContain(await hand('later'));
+    const levels = (await (await fetch(`${own.server.url}/v1/priorities`, { headers: { authorization: `Bearer ${own.server.ownerToken}` } })).json()) as { id: string }[];
+    await fetch(`${own.server.url}/v1/priorities`, { method: 'PUT', headers: { authorization: `Bearer ${own.server.ownerToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify(levels.map((l) => (l.id === 'later' ? { ...l, color: '#00aa00' } : l))) });
+    await expect.poll(() => hand('later')).toBe('rgb(0, 170, 0)');
+  } finally {
+    await own.close();
+  }
+});
+
+test('the line under a queue header is brighter than the panel border', async ({ page }) => {
+  await inbox.open(page);
+  const [line, panel] = await page.locator('nav.queue h3').first().evaluate((el) => [getComputedStyle(el).borderBottomColor, getComputedStyle(el.closest('nav')!).borderTopColor]);
+  expect(line).not.toBe(panel);
+});
+
 test('a line under each queue header sets its section apart', async ({ page }) => {
   await inbox.agent.post({ id: 'header-line', agent: 's-line', title: 'Under a header', priority: 'now' });
   await inbox.open(page);

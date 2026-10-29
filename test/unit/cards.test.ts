@@ -102,6 +102,21 @@ describe('priority levels', () => {
     assert.equal(inbox.state().priorities['c1'], 'urgent');
   });
 
+  it('gives each level a color: red for now and dark yellow for soon by default, and the person may set any level\'s color', () => {
+    const { inbox } = setup();
+    assert.deepEqual(inbox.priorities().map((l) => [l.id, l.color]), [['now', '#e5484d'], ['soon', '#c9a100'], ['later', undefined]]);
+    inbox.setPriorities([
+      { id: 'now', label: 'Decide now', definition: '', color: '#FF00AA' },
+      { id: 'soon', label: 'Decide soon', definition: '' },
+      { id: 'mine', label: 'Mine', definition: '', color: '#123abc' },
+    ]);
+    // A color is kept in lower case. A default level saved without one keeps its default color.
+    assert.deepEqual(inbox.priorities().map((l) => [l.id, l.color]), [['now', '#ff00aa'], ['soon', '#c9a100'], ['mine', '#123abc']]);
+    for (const color of ['red', '#12345', 'url(x)', '#1234567']) {
+      assert.throws(() => inbox.setPriorities([{ id: 'x', label: 'X', definition: '', color }]), /level 1: color/);
+    }
+  });
+
   it('refuses a rule that does not parse', () => {
     const { inbox } = setup();
     assert.throws(() => inbox.setPriorities([{ id: 'x', label: 'X', definition: '', rule: 'process.exit()' }]), /level 1/);

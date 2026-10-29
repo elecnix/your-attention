@@ -96,6 +96,8 @@ export interface PriorityLevel {
   definition: string;
   /** A rule in the language of src/core/expr.ts. A card it matches takes this level. */
   rule?: string;
+  /** The color of the raised hand of a card at this level, as #rrggbb. */
+  color?: string;
 }
 
 export interface TemplateVersion {

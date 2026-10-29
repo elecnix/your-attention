@@ -292,9 +292,11 @@ export function App() {
     const hand = current && current.id === c.id ? 'open-filled' : 'open';
     const icon = s === 'closed' ? c.closed.kind : waiting(s) && s !== 'reply' ? hand : s;
     const tip = s === 'closed' ? CLOSED_LABEL[c.closed.kind] : STATE_LABEL[s];
+    // A raised hand takes the color of the card's priority level.
+    const color = icon === hand ? (levels.find((l) => l.id === levelOf(c)) || {}).color : undefined;
     return h('button', { key: c.id, className: `q${current && current.id === c.id ? ' focus' : ''}${dim ? ' dim' : ''}`, onClick: () => open(c.id) },
       h('span', { className: 't' }, c.title, fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio),
-      h(Icon, { name: icon, tip, cls: `s ${s}` }));
+      h(Icon, { name: icon, tip, cls: `s ${s}`, color }));
   };
   const group = (title, items, empty, cls, action) => h(React.Fragment, { key: title },
     h('h3', { className: cls }, title, action),

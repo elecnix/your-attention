@@ -181,7 +181,7 @@ pr = widget pull-request {"title": "Add stop", "subtitle": "#12", "state": "CI g
 
 ## Priority levels
 
-`GET /v1/priorities` returns the levels as `{id, label, definition, rule}`. Agents and the owner replace them with `PUT /v1/priorities`. A `rule` is an expression over the card: `kind`, `agent`, `priority`, `status`, `rating`, `tags`, `blocked`, `answered`, `waitMinutes` and `harness`. The grammar has comparisons, `&&`, `||`, `!`, arithmetic and `in`, and `src/core/expr.ts` parses it without `eval`. A card shows the first level whose rule matches it. Without a match, it shows the level that the agent gave. `GET /v1/state` returns that level per card in `priorities`.
+`GET /v1/priorities` returns the levels as `{id, label, definition, rule, color}`. A `color` is `#rrggbb`, and a waiting card raises its hand in its level's color. Decide now is red (`#e5484d`) and Decide soon is dark yellow (`#c9a100`) by default. A default level saved without a color keeps its default color. Agents and the owner replace them with `PUT /v1/priorities`. A `rule` is an expression over the card: `kind`, `agent`, `priority`, `status`, `rating`, `tags`, `blocked`, `answered`, `waitMinutes` and `harness`. The grammar has comparisons, `&&`, `||`, `!`, arithmetic and `in`, and `src/core/expr.ts` parses it without `eval`. A card shows the first level whose rule matches it. Without a match, it shows the level that the agent gave. `GET /v1/state` returns that level per card in `priorities`.
 
 ## Card guidance
 

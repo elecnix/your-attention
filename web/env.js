@@ -58,6 +58,6 @@ export const ICONS = {
   'answered-in-terminal': ['M4 17l6-6-6-6', 'M12 19h8'],
   resolved: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'm9 12 2 2 4-4'],
 };
-export const Icon = ({ name, tip, cls = '', dim = false }) => h('span', { className: `ico ${cls} ${dim ? 'dim' : ''}`, 'data-tip': tip, role: 'img', 'aria-label': tip, tabIndex: 0 },
+export const Icon = ({ name, tip, cls = '', dim = false, color }) => h('span', { className: `ico ${cls} ${dim ? 'dim' : ''}`, style: color ? { color } : undefined, 'data-tip': tip, role: 'img', 'aria-label': tip, tabIndex: 0 },
   h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, (ICONS[name] || ICONS.circle).map((p) => (typeof p === 'string' ? h('path', { key: p, d: p }) : h('path', { key: p.d, d: p.d, className: p.cls })))));
 
