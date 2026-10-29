@@ -33,6 +33,9 @@ export function App() {
   // While the page sets a PIN, the inbox closes the page socket, and the page must not show the lock screen meanwhile.
   const settingPinRef = React.useRef(false);
   const connRef = React.useRef(null);
+  // A locked tab keeps its connections closed, even when the address changes.
+  const lockedRef = React.useRef(false);
+  lockedRef.current = auth === 'locked';
 
   const refresh = React.useCallback(() => { const sent = unlockToken.get(); return fetch(BASE + 'v1/state').then((r) => {
     if (r.status === 401) { setAuth('needed'); return null; }
@@ -185,9 +188,10 @@ export function App() {
     });
     connRef.current = { connect, stop };
     connect();
-    window.addEventListener('hashchange', connect);
+    const onHash = () => { if (!lockedRef.current) connect(); };
+    window.addEventListener('hashchange', onHash);
     const watchdog = setInterval(() => { if (Date.now() - last > 5000) setUp(false); }, 1000);
-    return () => { closed = true; stop(); clearInterval(watchdog); window.removeEventListener('hashchange', connect); };
+    return () => { closed = true; stop(); clearInterval(watchdog); window.removeEventListener('hashchange', onHash); };
   }, []);
 
   // A locked tab stops its connections until the PIN unlocks it. A signed-in tab reads the PIN state once, and offers to set one.

@@ -161,8 +161,10 @@ export class PinLock {
     if (!secret) return undefined;
     const id = secret.split('.')[0] ?? '';
     if (!/^[0-9a-f]{16}$/.test(id)) return undefined;
+    // Hash before the read, so a PIN change between the read and the touch below cannot bring a dropped token back.
+    const hash = await sha256(secret);
     const u = this.store.get<Unlock>('meta', `unlock:${id}`);
-    if (!u || u.token !== token || !same(await sha256(secret), u.hash)) return undefined;
+    if (!u || u.token !== token || !same(hash, u.hash)) return undefined;
     const now = this.now();
     if (now - u.seen > UNLOCK_IDLE_MS) { this.store.delete('meta', u.key); return undefined; }
     if (now - u.seen > TOUCH_MS) this.store.put<Unlock>('meta', u.key, { ...u, seen: now });
@@ -178,8 +180,9 @@ export class PinLock {
   /** End one tab's unlock token. */
   async lock(secret: string): Promise<void> {
     const id = String(secret).split('.')[0] ?? '';
+    const hash = await sha256(String(secret));
     const u = /^[0-9a-f]{16}$/.test(id) ? this.store.get<Unlock>('meta', `unlock:${id}`) : undefined;
-    if (u && same(await sha256(secret), u.hash)) this.store.delete('meta', u.key);
+    if (u && same(hash, u.hash)) this.store.delete('meta', u.key);
   }
 
   /** End every unlock token, or those of one owner token, such as one that was revoked. */

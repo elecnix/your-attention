@@ -47,7 +47,7 @@ export function terminal(input: NodeJS.ReadStream = process.stdin, output: NodeJ
           let typed = '';
           const onData = (chunk: Buffer): void => {
             for (const ch of chunk.toString('utf8')) {
-              if (ch === '\u0003') { output.write('\n'); process.exit(130); }
+              if (ch === '\u0003') { input.setRawMode(false); output.write('\n'); process.exit(130); }
               if (ch === '\r' || ch === '\n' || ch === '\u0004') { input.off('data', onData); output.write('\n'); return resolve(typed); }
               if (ch === '\u007f' || ch === '\b') typed = typed.slice(0, -1);
               else if (ch >= ' ') typed += ch;

@@ -117,6 +117,18 @@ describe('the PIN lock', () => {
     assert.equal(dropped, 2 + 1, 'set, set, clear');
   });
 
+  it('never brings back a token that a PIN change dropped while a request checked it', async () => {
+    const { pin, tick } = setup();
+    await pin.set('2468');
+    const r = await pin.unlock('2468', 'o');
+    const token = r.ok ? r.token : '';
+    tick(5 * 60_000);
+    const checking = pin.verifyUnlock(token, 'o');
+    pin.clear();
+    assert.equal(await checking, undefined);
+    assert.equal(pin.live(token.split('.')[0]), false);
+  });
+
   it('ends one tab\'s unlock token on lock', async () => {
     const { pin } = setup();
     await pin.set('2468');

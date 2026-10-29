@@ -205,6 +205,8 @@
   .openui-tool-call__request, .openui-tool-call__response, .openui-tool-code-block__code, .openui-tool-result__output {
     font-family: var(--font-code) !important; letter-spacing: normal !important;
   }
+  /* The PIN field is monospace with wide tracking, so each typed digit shows as its own dot. */
+  .pin-input { font-family: var(--font-code) !important; letter-spacing: .3em !important; }
   :root {
     --openui-text-body-default: 400 calc(16px * var(--text-scale))/1.5 var(--font-text);
     --openui-text-body-default-heavy: 560 calc(16px * var(--text-scale))/1.5 var(--font-text);
