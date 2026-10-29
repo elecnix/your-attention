@@ -6,7 +6,7 @@ import type { ElementNode, ParseResult } from '@openuidev/lang-core';
 import { Doc, type Span } from './doc.ts';
 import { editKey, editPaste, editRows, cursorPos, indexAt, type EditState } from './edit.ts';
 import type { KeyEvent } from './input.ts';
-import { codeBlock, inlineSpans, markdown, table, type MdContext } from './md.ts';
+import { codeBlock, diagram, inlineSpans, markdown, table, type MdContext } from './md.ts';
 import type { Style } from './screen.ts';
 import { sanitize, textWidth } from './text.ts';
 import type { Theme } from './theme.ts';
@@ -219,6 +219,9 @@ export class BodyRenderer {
         if (str(p['description'])) doc.para(inlineSpans(str(p['description']), this.ctx.md), { first: bar, rest: bar });
         return;
       }
+      case 'Mermaid':
+        diagram(doc, str(p['source']), this.pad(), this.ctx.theme);
+        return;
       case 'CodeBlock':
         codeBlock(doc, str(p['codeString']), this.pad(), this.ctx.theme);
         return;

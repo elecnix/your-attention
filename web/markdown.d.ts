@@ -5,7 +5,10 @@ export interface MarkdownOptions<T> {
   cardLink?: (id: string, key: string) => T | string;
   /** Keep a line break inside a paragraph. */
   breaks?: boolean;
+  /** What a ```mermaid block becomes, from its source. */
+  diagram?: (source: string, key: string) => T;
 }
 export const SESSION_LINK: RegExp;
+export const MERMAID_FENCE: RegExp;
 export function renderInline<T>(h: Hyperscript<T>, text: string | undefined, opts?: MarkdownOptions<T>): (T | string)[];
 export function renderMarkdown<T>(h: Hyperscript<T>, src: string, opts?: MarkdownOptions<T>): T[];

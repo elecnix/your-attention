@@ -256,6 +256,9 @@
   },
   "CheckWithText": {
    "$ref": "#/$defs/CheckWithText"
+  },
+  "Mermaid": {
+   "$ref": "#/$defs/Mermaid"
   }
  },
  "required": [
@@ -343,7 +346,8 @@
   "CompositeCardBlock",
   "VisualCardItem",
   "VisualCardBlock",
-  "CheckWithText"
+  "CheckWithText",
+  "Mermaid"
  ],
  "additionalProperties": false,
  "$defs": {
@@ -470,6 +474,9 @@
        },
        {
         "$ref": "#/$defs/CheckWithText"
+       },
+       {
+        "$ref": "#/$defs/Mermaid"
        }
       ]
      }
@@ -3487,6 +3494,9 @@
        },
        {
         "$ref": "#/$defs/Accordion"
+       },
+       {
+        "$ref": "#/$defs/Mermaid"
        }
       ]
      }
@@ -3636,6 +3646,9 @@
        },
        {
         "$ref": "#/$defs/Accordion"
+       },
+       {
+        "$ref": "#/$defs/Mermaid"
        }
       ]
      }
@@ -3782,6 +3795,9 @@
        },
        {
         "$ref": "#/$defs/FollowUpBlock"
+       },
+       {
+        "$ref": "#/$defs/Mermaid"
        }
       ]
      }
@@ -3794,6 +3810,19 @@
    ],
    "additionalProperties": false,
    "description": "value is unique id, trigger is section title"
+  },
+  "Mermaid": {
+   "type": "object",
+   "properties": {
+    "source": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "source"
+   ],
+   "additionalProperties": false,
+   "description": "A diagram drawn from Mermaid source."
   },
   "Carousel": {
    "type": "object",
@@ -3908,6 +3937,9 @@
         },
         {
          "$ref": "#/$defs/FollowUpBlock"
+        },
+        {
+         "$ref": "#/$defs/Mermaid"
         }
        ]
       }

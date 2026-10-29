@@ -34,6 +34,7 @@ export function inlineSpans(text: string, ctx: MdContext, base: Style = {}): Spa
 function cardLinkOpts(ctx: MdContext) {
   return {
     cardLink: (id: string) => h('cardlink', { id }, ctx.cardTitle?.(id) ?? id),
+    diagram: (source: string) => h('diagram', { source }),
     breaks: true,
   };
 }
@@ -105,6 +106,7 @@ function block(doc: Doc, b: MdNode, ctx: MdContext, pad: Span[], width: number, 
     doc.para(kids(b, { ...base, ...s.dim }), { first: bar, rest: bar });
     return;
   }
+  if (b.type === 'diagram') { diagram(doc, String(b.props['source'] ?? ''), pad, ctx.theme); return; }
   if (b.type === 'pre') {
     const code = b.children.map((c) => (typeof c === 'string' ? c : c.children.join(''))).join('');
     codeBlock(doc, code, pad, ctx.theme);
@@ -121,6 +123,12 @@ function block(doc: Doc, b: MdNode, ctx: MdContext, pad: Span[], width: number, 
     }
     table(doc, rows, pad, ctx.theme);
   }
+}
+
+/** A Mermaid diagram: the terminal shows its source, and says the page draws it. */
+export function diagram(doc: Doc, source: string, pad: Span[], theme: Theme): void {
+  doc.para([{ text: 'A diagram, drawn on the page in the browser. Its source:', style: theme.s.dim }], { first: pad });
+  codeBlock(doc, source, pad, theme);
 }
 
 /** Code as it is, line by line, behind a bar. A line wider than the pane breaks. */

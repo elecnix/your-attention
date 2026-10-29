@@ -176,4 +176,11 @@ describe('Markdown in the card pane', () => {
     const c = card({ id: 'q', title: 'Q', questions: [{ question: 'Runner?', options: [{ label: 'node:test' }] }], body: 'root = Card([f])\nf = Form("f", b, [fc])\nb = Buttons([])\nfc = FormControl("Pick", OptionCards("pick", "single", [OptionCard("a", "Alpha")]))' });
     assert.equal(describeAnswer(c, { card: 'q', version: 1, values: { pick: 'a' }, comment: '', delivery: 'default', savedAt: 1, deliveredAt: null, readAt: null, forcedAt: null, previous: [] }), 'Pick: Alpha');
   });
+
+  it('shows a Mermaid diagram as its source, in text and in a body, and says the page draws it', () => {
+    const t = setup(card({ id: 'mm', title: 'Flow', text: '```mermaid\ngraph TD\n  A-->B\n```', body: 'root = Card([d])\nd = Mermaid("sequenceDiagram\\n  A->>B: hi")' }));
+    const text = t.text();
+    assert.match(text, /A diagram, drawn on the page in the browser\. Its source:\n│ graph TD\n│   A-->B/);
+    assert.match(text, /Its source:\n│ sequenceDiagram\n│   A->>B: hi/);
+  });
 });

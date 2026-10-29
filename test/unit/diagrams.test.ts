@@ -6,7 +6,6 @@ import { checkMermaid, MERMAID_VERSION } from '../../src/adapters/mermaid.ts';
 import { findDiagrams } from '../../src/core/diagrams.ts';
 import { Inbox, InboxError } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
-// @ts-expect-error The page's renderer is plain JavaScript.
 import { renderMarkdown } from '../../web/markdown.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
