@@ -94,4 +94,13 @@ describe('the cell grid', () => {
     vt.write('a\x7fb');
     assert.equal(vt.lines()[0], 'ab');
   });
+
+  it('keeps one grapheme per cell through an empty fill and a wide character cut at the edge', () => {
+    const g = new Grid(5, 1);
+    g.text(2, 0, '日', {});
+    g.fill(3, 0, 0, 'x');
+    assert.equal(g.row(0), '  日 ');
+    g.text(3, 0, '日', {}, 4);
+    assert.equal(g.row(0), '     ');
+  });
 });

@@ -386,6 +386,8 @@ export class BodyRenderer {
     const password = str(p['type']) === 'password';
     const initial = str(p['value']);
     const uiKey = `${id}:text`;
+    // The indent this field is drawn at, for a click that comes after the drawing.
+    const indent = this.indent;
     // A date field keeps what the person types, and stores the date once it reads as one, as the page's picker does.
     const shown = (): string => (kind === 'date' ? ((this.ctx.ui.get(uiKey) as string | undefined) ?? initial) : String(store.has(form, name) ? store.get(form, name) ?? '' : initial));
     const value = shown();
@@ -419,7 +421,7 @@ export class BodyRenderer {
       paste: (text) => save(editPaste({ value: shown(), cursor: (this.ctx.ui.get(`${id}:cur`) as number | undefined) ?? shown().length }, sanitize(text.replace(/\r\n?/g, '\n')).replace(/\t/g, '  '), multiline)),
       click: (_part, row, col) => {
         const top = (this.ctx.ui.get(`${id}:top`) as number | undefined) ?? row;
-        this.ctx.ui.set(`${id}:cur`, indexAt(password ? '•'.repeat(shown().length) : shown(), inner, row - top, col - this.indent - 2));
+        this.ctx.ui.set(`${id}:cur`, indexAt(password ? '•'.repeat(shown().length) : shown(), inner, row - top, col - indent - 2));
       },
     });
     const display = password ? '•'.repeat(value.length) : value;
@@ -641,7 +643,8 @@ export class BodyRenderer {
     const open = this.ctx.ui.get(openKey) === true;
     const check = els(p['check'])[0];
     if (check) this.node(check, form);
-    this.ctx.widgets.set(id, { id, key: (ev) => { if (ev.name === 'enter' || ev.name === 'space') { this.ctx.ui.set(openKey, !open); return true; } return false; }, click: () => this.ctx.ui.set(openKey, !open) });
+    const flip = () => this.ctx.ui.set(openKey, this.ctx.ui.get(openKey) !== true);
+    this.ctx.widgets.set(id, { id, key: (ev) => { if (ev.name === 'enter' || ev.name === 'space') { flip(); return true; } return false; }, click: flip });
     const focused = this.ctx.focused === id;
     this.doc.begin(id);
     this.doc.para([{ text: `${open ? g.open : g.shut} `, style: s.accent, target: id }, ...inlineSpans(str(p['label']), this.ctx.md, { ...s.link, ...(focused ? { inverse: true } : {}) }).map((sp) => ({ ...sp, target: id }))], { first: [...this.pad(), { text: focused ? `${g.marker} ` : '  ', style: s.focus, target: id }] });

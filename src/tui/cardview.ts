@@ -332,7 +332,7 @@ export class CardView {
     if (f.type === 'text/markdown') markdown(sub, text, md);
     else if (f.type === 'application/json') { let pretty = text; try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* shown as it is */ } codeBlock(sub, pretty, [], this.host.theme); }
     else if (f.type === 'text/csv') {
-      const rows = text.trim().split(/\r?\n/).slice(0, 200).map((l) => l.split(',').map((c) => [{ text: c }]));
+      const rows = text.trim().split(/\r?\n/).slice(0, 200).map((l) => l.split(',').map((c) => [{ text: sanitize(c) }]));
       table(sub, rows, [], this.host.theme);
     } else codeBlock(sub, text, [], this.host.theme);
     for (const l of sub.lines) doc.push({ spans: [{ text: '  ' }, ...l.spans] });

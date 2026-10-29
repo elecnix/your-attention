@@ -71,19 +71,23 @@ export class Grid {
     this.styles.fill(0);
   }
 
+  /**
+   * Set one cell. Every write goes through here, so a row stays one grapheme per cell: writing over either half of a
+   * wide character blanks its other half.
+   */
+  private put(x: number, y: number, ch: string, id: number): void {
+    const row = y * this.width;
+    if (this.chars[row + x] === '' && x > 0) this.chars[row + x - 1] = ' ';
+    if (x + 1 < this.width && this.chars[row + x + 1] === '' && ch !== '') this.chars[row + x + 1] = ' ';
+    this.chars[row + x] = ch;
+    this.styles[row + x] = id;
+  }
+
   /** Fill `w` cells from (x, y) with one character. */
   fill(x: number, y: number, w: number, ch: string, style: Style = {}): void {
     if (y < 0 || y >= this.height) return;
     const id = styleId(style);
-    const from = Math.max(0, x);
-    const to = Math.min(this.width, x + w);
-    // A wide character cut by the fill loses its other half too, so the row stays one grapheme per cell.
-    if (from < to && this.chars[y * this.width + from] === '' && from > 0) this.chars[y * this.width + from - 1] = ' ';
-    if (to < this.width && this.chars[y * this.width + to] === '') this.chars[y * this.width + to] = ' ';
-    for (let i = from; i < to; i++) {
-      this.chars[y * this.width + i] = ch;
-      this.styles[y * this.width + i] = id;
-    }
+    for (let i = Math.max(0, x); i < Math.min(this.width, x + w); i++) this.put(i, y, ch, id);
   }
 
   /** Add a style to cells that already hold text, such as the inverse video of a selected row. */
@@ -107,16 +111,12 @@ export class Grid {
       const w = clusterWidth(g);
       if (w === 0) continue;
       if (x + w > end) {
-        if (x >= 0 && x < end) { this.chars[y * this.width + x] = ' '; this.styles[y * this.width + x] = id; x++; }
+        if (x >= 0 && x < end) { this.put(x, y, ' ', id); x++; }
         break;
       }
       if (x >= 0) {
-        // Writing over half of a wide character blanks its other half, so the row stays one grapheme per cell.
-        if (this.chars[y * this.width + x] === '' && x > 0) this.chars[y * this.width + x - 1] = ' ';
-        if (x + w < this.width && this.chars[y * this.width + x + w] === '') this.chars[y * this.width + x + w] = ' ';
-        this.chars[y * this.width + x] = g;
-        this.styles[y * this.width + x] = id;
-        if (w === 2) { this.chars[y * this.width + x + 1] = ''; this.styles[y * this.width + x + 1] = id; }
+        this.put(x, y, g, id);
+        if (w === 2) this.put(x + 1, y, '', id);
       }
       x += w;
     }
