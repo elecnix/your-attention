@@ -931,8 +931,7 @@ export class Inbox {
   }
 
   /** The level a card shows: the first level whose rule matches it, or the level the agent gave. */
-  effectivePriority(card: Card, levels = this.priorities()): string {
-    const answer = this.store.get<Answer>('answers', card.id);
+  effectivePriority(card: Card, levels = this.priorities(), answer = this.store.get<Answer>('answers', card.id)): string {
     const scope: Record<string, Value> = {
       kind: card.kind, agent: card.agent, priority: card.priority, status: card.status ?? null, rating: card.rating ?? null,
       tags: card.tags ?? {}, blocked: card.kind === 'blocked', answered: !!answer,
@@ -1395,7 +1394,8 @@ export class Inbox {
       return [c.id, orphaned ? 'orphaned' : s];
     }));
     const levels = this.priorities();
-    const priorities = Object.fromEntries(cards.map((c) => [c.id, this.effectivePriority(c, levels)]));
+    // The answers are read already, so each card costs no storage read of its own.
+    const priorities = Object.fromEntries(cards.map((c) => [c.id, this.effectivePriority(c, levels, answers[c.id])]));
     return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance() };
   }
 }

@@ -12,7 +12,7 @@ Messages are JSON over HTTP. Agents receive events in whichever of three ways th
 
 Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one. The inbox reports an agent offline 2 seconds after its last connection closes, so a reconnect or the next poll does not flicker its presence.
 
-`GET /v1/info` returns `{"name":"your-attention","protocol":1,"id":"<inbox id>","pair":"/v1/pair"}`. The id stays the same over every link to the inbox.
+`GET /v1/info` returns `{"name":"your-attention","protocol":1,"id":"<inbox id>","pair":"/v1/pair","checks":{"diagrams":true,"body":true}}`. The id stays the same over every link to the inbox. `checks` says what the inbox checks itself before it takes a card, as [Checks on the client](#checks-on-the-client) describes. An inbox whose answer has no `checks` checks both.
 
 ## One message over several links
 
@@ -79,18 +79,23 @@ The inbox refuses a request with 423 `{error, locked: true}` when the request si
 
 | Route | Who | Does |
 | -- | -- | -- |
-| `GET /v1/pin` | owner | `{set, neverAsk, unlocked, lockedUntil, triesLeft, exempt}` |
-| `POST /v1/unlock {pin}` | owner | `{unlock, idleMs}`, or 401 `{triesLeft}`, or 429 `{lockedUntil}` with `retry-after` |
-| `PUT /v1/pin {pin, current}` | owner | Sets the PIN. A gated caller sends `current` when a PIN exists, and gets a fresh `unlock`. |
+| `GET /v1/pin` | owner | `{set, salt, iterations, neverAsk, unlocked, lockedUntil, triesLeft, exempt}` |
+| `POST /v1/unlock {key}` | owner | `{unlock, idleMs}`, or 401 `{triesLeft}`, or 429 `{lockedUntil}` with `retry-after` |
+| `PUT /v1/pin {key, salt, iterations, current}` | owner | Sets the PIN. A gated caller sends `current` when a PIN exists, and gets a fresh `unlock`. |
 | `DELETE /v1/pin {current}` | owner | Removes the PIN, with the same rule for `current`. |
 | `PUT /v1/pin/never-ask {neverAsk}` | owner | Stores whether the page and the CLI offer to set a PIN. |
 | `POST /v1/lock` | owner | Ends the unlock token in the request's header. |
 
 The page sends its unlock token in the `x-your-attention-unlock` header. The page socket and the event stream can't send headers, so they put it in `unlock=`. The page keeps the token in `sessionStorage` under `ya-unlock:<page path>`, never in `localStorage` or a cookie, so closing the tab ends it. Each unlock token belongs to the owner token that unlocked, and the inbox stores its SHA-256 hash in `meta`. The inbox ends a token after 12 hours without a request, at `POST /v1/lock`, when someone revokes its owner token, and when the PIN changes or goes. Then the inbox closes each page socket and event stream that opened with it, with code 4423 on a socket. The message memory never keeps a PIN route's response.
 
-The inbox keeps the PIN in `meta` under `pin` as PBKDF2-SHA256 with a random 16-byte salt, in the form `{hash, salt, iterations, setAt, neverAsk}`. A laptop runs 800,000 iterations, about 100 ms. The Cloudflare build runs 100,000, the most the Workers runtime computes. The comparison takes the same time wherever the bytes differ. The inbox never logs or returns a PIN.
+The PIN never leaves the client. The page, the landing page and the CLI derive a key from it with PBKDF2-SHA256, 32 bytes sent as 64 lowercase hex digits. They send the key in `key` and `current`, never the PIN:
 
-Each wrong PIN counts in `meta` under `pin-tries` before the hash runs, so tries sent at once all count. The fifth wrong try starts a lockout of 1 minute. Each later lockout lasts twice as long as the one before, up to 24 hours, and even the right PIN waits it out. The right PIN, a new PIN, and removing the PIN reset the count, and a restart keeps it. With an exempt token, `your-attention pin reset` sets or removes a forgotten PIN without `current`, during a lockout too.
+- To unlock, or to prove the current PIN, the client derives with the `salt` and `iterations` that `GET /v1/pin` returns for the PIN that is set.
+- For a new PIN, the client draws a random 16-byte salt and derives with the `iterations` that `GET /v1/pin` returns. It sends the key with the salt and the count, and the inbox answers 400 for any other count.
+
+Both builds hand out 800,000 iterations, about 100 ms on a laptop, so the hosted inbox doesn't run a slow hash in its 10 ms of CPU time. `web/pin-key.js` derives the key on the page, and `src/core/pin.ts` derives the same key in Node. The inbox keeps the PIN in `meta` under `pin` as `{key, salt, iterations, setAt, neverAsk}`, where `key` is the SHA-256 of the derived key. A laptop PIN set before clients derived keys is stored as `{hash, salt, iterations}`, where `hash` is the derived key itself, and it keeps working: the inbox compares against the SHA-256 of `hash`. The comparison takes the same time wherever the bytes differ. The inbox never logs or returns a PIN or a key.
+
+Each wrong key counts in `meta` under `pin-tries` before the hash runs, so tries sent at once all count. The fifth wrong try starts a lockout of 1 minute. Each later lockout lasts twice as long as the one before, up to 24 hours, and even the right PIN waits it out. The right PIN, a new PIN, and removing the PIN reset the count, and a restart keeps it. With an exempt token, `your-attention pin reset` sets or removes a forgotten PIN without `current`, during a lockout too.
 
 The page offers to set a PIN each time it opens, as long as the inbox has none and `neverAsk` is false. It shows **Skip** and **Never ask again**. In a terminal, `serve` and `start` ask the same, with the PIN typed hidden and twice. A run without a terminal never asks. `your-attention pin status|set|reset|clear` reads and changes the PIN with the `owner-token` file, or with the token of a machine paired as owner. `set` refuses to replace a PIN, and `reset` replaces it without the old one.
 
@@ -147,7 +152,7 @@ The inbox refuses any other value on a secret card, so plain text never reaches 
 
 ### Body check
 
-The OpenUI parser drops a statement it can't read. An unclosed string also hides every later statement from it. The page would then draw part of a body and say nothing. The inbox reads each body with that parser, `@openuidev/lang-core` 1.0.1, and with the page's own component list. It refuses a body with 400 when a string never closes, when a statement uses a name the body never defines, when a call breaks a component's signature, or when the body has no `root` statement. The check runs after the inbox fills a template and places widgets, on `POST /v1/cards` and on `card_patch`. Its message lists each fault on its own line and names the statement:
+The OpenUI parser drops a statement it can't read. An unclosed string also hides every later statement from it. The page would then draw part of a body and say nothing. The laptop inbox reads each body with that parser, `@openuidev/lang-core` 1.0.1, and with the page's own component list. It refuses a body with 400 when a string never closes, when a statement uses a name the body never defines, when a call breaks a component's signature, or when the body has no `root` statement. The check runs after the inbox fills a template and places widgets, on `POST /v1/cards` and on `card_patch`. Its message lists each fault on its own line and names the statement:
 
 ```text
 the page cannot draw all of this body:
@@ -155,7 +160,9 @@ the page cannot draw all of this body:
 - `f2` is used but never defined.
 ```
 
-`scripts/openui-library.ts` writes the component list from the page itself, and a browser test fails when the two differ. Some cards stored before the check have a body the page can't draw whole. For such a card, `GET /v1/state` adds `bodyFallback: {body, faults}`, which the inbox computes and never stores. Its `body` starts with the statements before the first broken one, unchanged. A code block of the source from the broken statement on comes last. The page draws it below a warning, with the source lines wrapped and the comment box with **Send answer** below. A revision with a body that draws whole drops `bodyFallback`.
+`scripts/openui-library.ts` writes the component list from the page itself, and a browser test fails when the two differ. `web/body-faults.js` turns the parser's result into these faults. The inbox runs it on the result of `@openuidev/lang-core`, and the page runs it on the result its Renderer reports, so both find the same faults. On the hosted inbox, the client and the page check bodies in its place, as [Checks on the client](#checks-on-the-client) describes.
+
+Some cards stored before the check have a body the page can't draw whole. For such a card, the laptop inbox's `GET /v1/state` adds `bodyFallback: {body, faults}`, which the inbox computes and never stores. When a card has no `bodyFallback`, the page reads the body itself and computes the same fallback. Its `body` starts with the statements before the first broken one, unchanged. A code block of the source from the broken statement on comes last. The page draws it below a warning, with the source lines wrapped and the comment box with **Send answer** below. A revision with a body that draws whole drops `bodyFallback`.
 
 The fold under a card that follows another one shows the earlier card's text as Markdown, as the card itself does.
 
@@ -233,7 +240,7 @@ A card draws [Mermaid](https://mermaid.js.org) diagrams in two places:
 
 Every inbox has the built-in widget `mermaid`, version 1, which places `Mermaid` with its `source` value: `flow = widget mermaid {"source": "flowchart TD\n  A --> B"}`. `GET /v1/widgets` lists it first, with `builtin: true`, and the catalog in `GET /v1/guidance` lists it with the saved widgets. Saving a widget named `mermaid` answers 400.
 
-When an agent posts or patches a card, the inbox parses each diagram with mermaid 11.17.2, after it fills a template and places widgets. That covers `POST /v1/cards`, `card_patch`, and a widget or template that expands into a diagram. The inbox refuses a diagram that does not parse with 400. Its message names where the diagram is and quotes mermaid's error. For a dotted link with text and a pipe label, mermaid's error reads:
+When an agent posts or patches a card, the laptop inbox parses each diagram with mermaid 11.17.2, after it fills a template and places widgets. That covers `POST /v1/cards`, `card_patch`, and a widget or template that expands into a diagram. The inbox refuses a diagram that does not parse with 400. Its message names where the diagram is and quotes mermaid's error. For a dotted link with text and a pipe label, mermaid's error reads:
 
 ```
 The Mermaid diagram in text, the diagram on line 3 does not parse, so the inbox did not take the card. Mermaid 11.17.2 says:
@@ -245,9 +252,27 @@ Expecting 'AMP', 'COLON', 'DOWN', 'DEFAULT', 'NUM', 'COMMA', 'NODE_STRING', 'BRK
 
 The check also refuses a diagram over mermaid's limits, which the page would refuse to draw: more than 500 edges, or more than 50,000 characters. A card shows at most 20 diagrams. The inbox checks a card's diagrams before it commits the card, with no await between the commit and the reads it depends on. A widget that changes during the check makes the post answer 409, and the agent posts again.
 
-Both builds parse with the same mermaid package, in the inbox process. On a laptop that is Node, and on Cloudflare it is the Durable Object. Mermaid's parser calls DOMPurify on labels, and DOMPurify needs a DOM, which neither runtime has. Where DOMPurify doesn't find a usable DOM, it returns the text unchanged, and the inbox gives it that behavior here. The inbox doesn't set a browser global. Mermaid loads on the first diagram, so an inbox without diagrams never loads it.
+The laptop inbox parses in its Node process. The hosted inbox doesn't parse diagrams: the posting client parses them in Node with the same mermaid package, as [Checks on the client](#checks-on-the-client) describes. Mermaid's parser calls DOMPurify on labels, and DOMPurify needs a DOM, which Node doesn't have. Where DOMPurify doesn't find a usable DOM, it returns the text unchanged, and `src/adapters/mermaid.ts` gives it that behavior here. It doesn't set a browser global. Mermaid loads on the first diagram, so a process without diagrams never loads it.
 
-The page draws each diagram with `vendor/mermaid.min.js`, which the inbox serves from its own mermaid package. So the page draws offline, with mermaid 11.17.2, as the check used. It loads the file when it first shows a diagram. It draws with `securityLevel: "strict"`, and with mermaid's `base` theme set from the page's color tokens, so a diagram reads in the light theme and in the dark one, and draws again when the theme changes. A system card shows a Mermaid block as code, since it quotes an agent's words without a check.
+The page draws each diagram with `vendor/mermaid.min.js`, which the inbox serves from its own mermaid package. So the page draws offline, with mermaid 11.17.2, as the check used. When mermaid loads and still can't draw a diagram, the page shows its source and reports it, as [Checks on the client](#checks-on-the-client) describes. A renderer that doesn't load says nothing about the diagram, so the page doesn't report it. It loads the file when it first shows a diagram. It draws with `securityLevel: "strict"`, and with mermaid's `base` theme set from the page's color tokens, so a diagram reads in the light theme and in the dark one, and draws again when the theme changes. A system card shows a Mermaid block as code, since it quotes an agent's words without a check.
+
+## Checks on the client
+
+A hosted inbox runs on the Workers Free plan, which gives each request 10 ms of CPU time. Parsing a large body or a diagram takes longer, so the hosted inbox takes both unchecked, and its `GET /v1/info` says `"checks":{"diagrams":false,"body":false}`. The laptop inbox checks both itself, and says `true` for each. On the hosted inbox, these clients check in its place:
+
+1. The posting client in `src/client.ts`, which every integration and the CLI use, reads `checks` once. When the inbox doesn't check, the client sends `POST /v1/preview` before each post and each patch. Its answer has the `text`, `recommendation` and `body` the inbox would store, after it fills a template and places widgets. The inbox doesn't store them. The client checks them with the laptop inbox's checks, and fails with the same message, before it sends the card. `POST /v1/preview` takes `{card}` for a post, and `{id, edits, field}` for a patch.
+2. The page checks what it draws. When mermaid loads and can't draw a diagram, or when a body has faults and the card has no `bodyFallback`, the page sends `POST /v1/cards/<id>/draw-fault {version, renderer, diagrams: [{source, error}], body: [fault]}`. `renderer` is the page's mermaid version. Only the owner may call it.
+
+The inbox takes a report for the card's current version only, and answers 409 for any other. It keeps each diagram whose source the card shows, and answers 400 when the report has none and no body faults. Then it closes the card as `returned` and sends its agent a `returned` event with `by: "The inbox page"`. The reason reads as the laptop inbox's refusal does, and says the inbox sent the card back:
+
+```text
+The Mermaid diagram in text, the diagram on line 3 does not parse, so the page could not draw it, and the inbox sent the card back. Mermaid 11.17.2 says:
+Parse error on line 2:
+```
+
+The inbox ignores a report on a closed or answered card, so a second page that draws the same card doesn't send it back twice. A system card shows its diagrams as source, and the inbox refuses a report on one with 400. A raw HTTP post that skips the client check still gets its error this way, once the page shows the card.
+
+`npm run cpu-budget` measures the CPU time of the hosted request paths, on the largest inputs the inbox takes, against the 10 ms.
 
 ## Priority levels
 
@@ -390,7 +415,7 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 
 ## The Cloudflare build
 
-`src/cloudflare/worker.ts` runs the same core on Workers. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. The object hibernates when idle:
+`src/cloudflare/worker.ts` runs the same core on Workers. It doesn't bundle mermaid or the OpenUI parser, since the clients check diagrams and bodies, as [Checks on the client](#checks-on-the-client) describes. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. The object hibernates when idle:
 
 - Each agent WebSocket keeps its agent id and token in the socket attachment, so the object reconnects every socket to the inbox when it wakes, and presence stays as it was.
 - The object answers `{"type":"ping"}` with `{"type":"pong"}` through the runtime's auto-response, which does not wake it. An alarm every 30 seconds closes a socket whose last pong is older than 60 seconds.
@@ -398,7 +423,7 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 
 With `MODE` set to `single`, the Worker serves one inbox, whose owner token is the `OWNER_TOKEN` secret. With `MODE` set to `hosted`, it serves many:
 
-- `POST /new {invite, pin?, neverAsk?}` takes one use of an invite code and returns the address of a new inbox and its owner sign-in link. With a `pin`, the inbox starts with that PIN, and the answer adds `unlock`, which the landing page puts in the tab's `sessionStorage` before it opens the inbox. KV keeps `invite:<code>` with the number of uses the operator allows, and a registry Durable Object counts the uses taken, one request at a time.
+- `POST /new {invite, pin?, neverAsk?}` takes one use of an invite code and returns the address of a new inbox and its owner sign-in link. `pin` is `{key, salt, iterations}`, which the landing page derives with `/pin-key.js`, as for `PUT /v1/pin`. With a `pin`, the inbox starts with that PIN, and the answer adds `unlock`, which the landing page puts in the tab's `sessionStorage` before it opens the inbox. KV keeps `invite:<code>` with the number of uses the operator allows, and a registry Durable Object counts the uses taken, one request at a time.
 - Each inbox is at `/i/<id>/`. The person bookmarks the address and keeps it private. The address signs a browser in, and the PIN, when there is one, unlocks each tab.
 - The operator manages invites with `wrangler kv key put invite:<code> <uses> --binding INVITES --remote`. Codes need 20 characters or more, such as the 128 random bits of `openssl rand -hex 16`, and the Worker refuses a shorter one before any lookup.
 - An address is 20 random hex digits and 12 hex digits of an HMAC over them, keyed by the `INBOX_ID_SECRET` secret. The Worker checks the HMAC, so a guessed address costs no KV read and reaches no Durable Object. Changing the secret makes every address invalid.

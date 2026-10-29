@@ -8,7 +8,7 @@ One inbox for the questions all your coding agents ask you. An agent posts a car
 
 With 100 sessions open, a question waits in whichever terminal asked it, and you find it late or never. Your Attention puts every question on one queue, sorted by priority, one card at a time. Each card shows whether its agent is listening, busy or offline, and where your answer is: stored, delivered, or read by the model. An answer to an offline agent waits until its session resumes.
 
-Claude Code and pi post cards through tools, and herdr turns any blocked agent into a card. A card can draw Mermaid diagrams, such as a flowchart of the choice on the card. The inbox parses each diagram when the agent posts the card and refuses one that doesn't parse, so you never see a broken diagram. A secret card requests a key: your browser encrypts it for that session, and the model sees the path of a private file instead of the value. Each new client pairs with a code you confirm.
+Claude Code and pi post cards through tools, and herdr turns any blocked agent into a card. A card can draw Mermaid diagrams, such as a flowchart of the choice on the card. A diagram that doesn't parse goes back to the agent with mermaid's error. The laptop inbox refuses it when the agent posts the card. On a hosted inbox, the agent's client checks it first, and the page sends back any card that skipped that check. A secret card requests a key: your browser encrypts it for that session, and the model sees the path of a private file instead of the value. Each new client pairs with a code you confirm.
 
 [PRINCIPLES.md](PRINCIPLES.md) states the design and [SPEC.md](SPEC.md) the protocol.
 
@@ -258,7 +258,7 @@ The PIN commands act on the inbox this machine runs, with its `owner-token` file
 
 - Closing the tab locks the inbox again. A tab also locks after 12 hours without a request, and every tab locks when the PIN changes.
 - After 5 wrong PINs, the page waits 1 minute before the next try. Each later lockout doubles the wait, up to a day. `your-attention pin reset` lifts the lockout from the computer that runs the inbox.
-- The inbox stores a slow salted hash of the PIN. Nobody can read the PIN back, including you.
+- The PIN never leaves your browser or terminal. The page and the CLI derive a key from it with a slow salted hash, and the inbox stores a hash of that key. Nobody can read the PIN back, including you.
 - Without a PIN, the page offers to set one each time it opens. **Skip** asks again next time, and **Never ask again** stops the offer for that inbox.
 
 The PIN guards the page and every sign-in link. Agents and their tokens, and the `owner-token` file on the laptop, work without it. A PIN does not protect the inbox from someone who can read files on the laptop, or from a person who watches you type it. A 4-digit PIN has 10,000 values, so the wait after wrong tries is what stops a guesser. After about 60 tries in the first day and a half, a guesser gets 5 tries a day.

@@ -225,7 +225,7 @@ Hibernation clears memory while the sockets remain open. Presence must not depen
 
 ### Platform details sit behind small adapter interfaces
 
-Storage, sockets, alarms, discovery, identity and the Mermaid diagram check are adapters. The laptop build uses SQLite, a WebSocket server and mDNS. The Cloudflare build uses Durable Object storage, hibernatable WebSockets and alarms.
+Storage, sockets, alarms, discovery, identity and the Mermaid diagram check are adapters. A build too small to run a check, such as the hosted Worker with its 10 ms of CPU time a request, leaves it to the posting client and the page. The laptop build uses SQLite, a WebSocket server and mDNS. The Cloudflare build uses Durable Object storage, hibernatable WebSockets and alarms.
 
 Adding a platform means writing adapters, and nobody changes the core.
 
