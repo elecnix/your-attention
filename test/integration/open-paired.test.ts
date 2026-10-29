@@ -104,10 +104,12 @@ describe('your-attention open on a paired machine', () => {
       const pair = spawn(process.execPath, [...CLI, 'pair', url, '--role', 'owner', '--name', 'desk'], { env: m.env, stdio: ['ignore', 'pipe', 'pipe'] });
       let out = '';
       pair.stdout.on('data', (d) => { out += d; });
+      // Listen before the approval, so an exit that comes at once is not missed.
+      const exited = new Promise((r) => pair.on('exit', r));
       const auth = { authorization: `Bearer ${owner}`, 'content-type': 'application/json' };
       const card = await until(async () => ((await (await fetch(`${url}/v1/state`, { headers: auth })).json()) as { cards: { id: string; title: string }[] }).cards.find((c) => c.id.startsWith('pair-') && c.title.includes('desk')));
       assert.equal((await fetch(`${url}/v1/cards/${card.id}/answer`, { method: 'POST', headers: auth, body: JSON.stringify({ values: { choice: 'approve' } }) })).ok, true);
-      await new Promise((r) => pair.on('exit', r));
+      await until(async () => (await Promise.race([exited.then(() => true), new Promise((r) => setTimeout(() => r(undefined), 100))])) as true | undefined);
       assert.match(out, /owner\.json/);
       const home = m.env.YOUR_ATTENTION_HOME;
       assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'client.json'), 'utf8')).token, agent);
@@ -117,6 +119,20 @@ describe('your-attention open on a paired machine', () => {
       const run = m.run('login-url');
       assert.equal(run.status, 0, run.stderr);
     } finally {
+      m.done();
+    }
+  });
+
+  it('runs a bridge to the inbox it paired with as owner, with no --upstream', async () => {
+    const m = machine({ owner });
+    const bridge = spawn(process.execPath, [...CLI, 'bridge', '--port', '0'], { env: m.env, stdio: ['ignore', 'ignore', 'pipe'] });
+    try {
+      let err = '';
+      bridge.stderr.on('data', (d) => { err += d; });
+      await until(() => (err.includes('leads to') ? true : undefined));
+      assert.match(err, new RegExp(`leads to ${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    } finally {
+      bridge.kill();
       m.done();
     }
   });

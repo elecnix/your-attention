@@ -351,7 +351,7 @@ switch (command) {
   }
   case 'bridge': {
     const { values } = parseArgs({ args: rest, options: { upstream: { type: 'string' }, port: { type: 'string', default: '4815' }, host: { type: 'string', default: '127.0.0.1' }, mdns: { type: 'boolean', default: false } } });
-    const upstream = values.upstream ?? loadConfig()?.url ?? fail('Give the inbox with --upstream <url>, or pair this machine first.');
+    const upstream = values.upstream ?? loadConfig()?.url ?? ownerPairing()?.url ?? fail('Give the inbox with --upstream <url>, or pair this machine first.');
     const b = await (await import('./node/links.ts')).bridge({ upstream, port: Number(values.port), host: values.host, mdns: values.mdns });
     console.error(`[bridge] ${b.url} leads to ${upstream}`);
     break;
