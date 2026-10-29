@@ -75,7 +75,12 @@ export class Grid {
   fill(x: number, y: number, w: number, ch: string, style: Style = {}): void {
     if (y < 0 || y >= this.height) return;
     const id = styleId(style);
-    for (let i = Math.max(0, x); i < Math.min(this.width, x + w); i++) {
+    const from = Math.max(0, x);
+    const to = Math.min(this.width, x + w);
+    // A wide character cut by the fill loses its other half too, so the row stays one grapheme per cell.
+    if (from < to && this.chars[y * this.width + from] === '' && from > 0) this.chars[y * this.width + from - 1] = ' ';
+    if (to < this.width && this.chars[y * this.width + to] === '') this.chars[y * this.width + to] = ' ';
+    for (let i = from; i < to; i++) {
       this.chars[y * this.width + i] = ch;
       this.styles[y * this.width + i] = id;
     }

@@ -77,4 +77,11 @@ describe('the cell grid', () => {
     vt.write('日b');
     assert.deepEqual(vt.find('b'), { x: 2, y: 0 });
   });
+
+  it('blanks both halves of a wide character that a fill cuts', () => {
+    const g = new Grid(4, 1);
+    g.text(0, 0, '日b', {});
+    g.fill(1, 0, 1, 'x');
+    assert.equal(g.row(0), ' xb ');
+  });
 });

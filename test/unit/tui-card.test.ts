@@ -192,4 +192,11 @@ describe('Markdown in the card pane', () => {
     t.key('backspace'); t.key('backspace'); t.type('28');
     assert.equal(t.view.answer().values['when'], new Date(2025, 1, 28).toISOString());
   });
+
+  it('stores a year under 100 as that year', () => {
+    const t = setup(card({ id: 'yr', title: 'Year', body: 'root = Card([f])\nf = Form("f", b, [fc])\nb = Buttons([])\nfc = FormControl("When?", DatePicker("when"))' }));
+    t.focus('field:f/when'); t.type('0042-06-15');
+    const d = new Date(String(t.view.answer().values['when']));
+    assert.deepEqual([d.getFullYear(), d.getMonth(), d.getDate()], [42, 5, 15]);
+  });
 });

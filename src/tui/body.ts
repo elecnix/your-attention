@@ -387,7 +387,7 @@ export class BodyRenderer {
     const initial = str(p['value']);
     const uiKey = `${id}:text`;
     // A date field keeps what the person types, and stores the date once it reads as one, as the page's picker does.
-    const shown = (): string => (kind === 'date' ? ((this.ctx.ui.get(uiKey) as string | undefined) ?? '') : String(store.has(form, name) ? store.get(form, name) ?? '' : initial));
+    const shown = (): string => (kind === 'date' ? ((this.ctx.ui.get(uiKey) as string | undefined) ?? initial) : String(store.has(form, name) ? store.get(form, name) ?? '' : initial));
     const value = shown();
     const cursor = Math.min(value.length, (this.ctx.ui.get(`${id}:cur`) as number | undefined) ?? value.length);
     const focused = this.ctx.focused === id;
@@ -401,7 +401,9 @@ export class BodyRenderer {
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(next.value.trim());
         // The picker stores the day at local midnight. A day the calendar does not have, such as February 30, is not a date.
         const day = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : undefined;
-        if (day && day.getMonth() === Number(m![2]) - 1 && day.getDate() === Number(m![3])) store.set(form, name, day.toISOString());
+        // The Date constructor reads years 0 to 99 as 1900 to 1999, so the year is set again on its own.
+        day?.setFullYear(Number(m?.[1]));
+        if (day && day.getFullYear() === Number(m![1]) && day.getMonth() === Number(m![2]) - 1 && day.getDate() === Number(m![3])) store.set(form, name, day.toISOString());
         else if (store.has(form, name)) store.set(form, name, undefined);
       } else store.set(form, name, next.value);
     };

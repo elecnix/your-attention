@@ -133,7 +133,7 @@ export function drawFrame(m: Model): Frame {
   x = grid.text(x + 2, 0, m.connected ? `${g.read} Inbox connected` : m.connecting ? `${g.triage} Connecting` : `${g.closed} Inbox unreachable`, st.bar);
   if (m.queue) x = grid.text(x + 2, 0, `${waiting} waiting`, st.bar);
   const helpText = '? help  q quit';
-  if (x + 2 + helpText.length < W) { grid.text(W - helpText.length - 1, 0, helpText, st.bar); hits.push({ x0: W - helpText.length - 1, x1: W - 7, y: 0, target: 'bar:help', col: 0, row: 0 }); }
+  if (x + 2 + helpText.length < W) { grid.text(W - helpText.length - 1, 0, helpText, st.bar); hits.push({ x0: W - helpText.length - 1, x1: W - helpText.length + 5, y: 0, target: 'bar:help', col: 0, row: 0 }); }
 
   const bodyTop = 1;
   const bodyH = Math.max(1, H - 2);
@@ -179,7 +179,7 @@ export function drawFrame(m: Model): Frame {
     if (!single) for (let y = bodyTop; y < bodyTop + bodyH; y++) grid.text(lw, y, g.box.v, st.dim);
     if (showCard) {
       if (!m.current || !m.view || !m.state || !m.queue) {
-        const msg = m.cleared && waiting ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.';
+        const msg = waiting ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.';
         grid.text(cardX + 2, bodyTop + 1, cut(m, msg, cardW - 3), st.dim);
       } else {
         const doc = m.view.build(cardW - 3, m.state, m.queue);
