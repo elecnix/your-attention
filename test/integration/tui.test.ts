@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
-import type { AgentEvent, NewCard } from '../../src/core/types.ts';
+import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
+import type { AgentEvent, NewCard, Sealed } from '../../src/core/types.ts';
 import { start, until, type Harness } from './harness.ts';
 import { startTui, type Tui } from './tui-pty.ts';
 
@@ -108,6 +109,26 @@ describe('your-attention tui', () => {
     assert.ok(b.type === 'answer' && b.answer.card === 'ce2');
     ev.stop();
     ev2.stop();
+    await t.stop();
+  });
+
+  it('seals a secret in the client, so the inbox stores only what the agent key opens, and never shows the value', async () => {
+    const keys = await newSealKeys();
+    await post({ id: 'secret', agent: 's-secret', kind: 'secret', title: 'The deploy key', priority: 'now', secret: { name: 'DEPLOY_KEY', publicKey: keys.publicKey } });
+    const ev = listen('s-secret');
+    const t = tui();
+    const row = await t.waitFor('The deploy key');
+    t.click(row.x, row.y);
+    await t.waitFor('[ Send sealed ]');
+    t.send('\r');
+    t.send('sk-test-123');
+    await t.waitFor('•••••••••••');
+    assert.equal(t.vt.text().includes('sk-test-123'), false);
+    t.send('\x13');
+    const a = await ev.answer();
+    assert.ok(a.type === 'answer');
+    assert.equal(await openSealed(keys.privateKey, a.answer.values['sealed'] as Sealed), 'sk-test-123');
+    ev.stop();
     await t.stop();
   });
 

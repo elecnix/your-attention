@@ -85,4 +85,16 @@ describe('the frame', () => {
     assert.ok(y !== undefined, Array.from({ length: 30 }, (_, i) => f.grid.row(i)).join('\n'));
     for (let i = 0; i < 30; i++) assert.match(f.grid.row(i), /^[\x20-\x7e]*$/);
   });
+
+  it('scrolls the list to the open card after another card opens, however far down it is', () => {
+    const m = model(100, 20);
+    const cards = Array.from({ length: 80 }, (_, i) => card(`k${i}`));
+    m.state = { ...m.state!, cards, states: Object.fromEntries(cards.map((c) => [c.id, 'open'])) };
+    m.queue = buildQueue(m.state, 'none');
+    m.current = m.queue.byId['k70']!;
+    m.revealList = true;
+    const f = drawFrame(m);
+    assert.ok(Array.from({ length: 20 }, (_, y) => f.grid.row(y)).some((r) => r.startsWith('▶ ◉ now   Card k70')));
+    assert.ok(m.listScroll > 0);
+  });
 });

@@ -154,6 +154,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     m.cleared = false;
     if (id) m.fresh.delete(id);
     m.cardScroll = id ? scrolls.get(id) ?? 0 : 0;
+    m.revealList = true;
     pick();
     schedule();
   };
@@ -177,7 +178,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const current = m.cleared ? null : (focus ? q.byId[focus] : undefined) ?? stillPinned ?? q.replied[0] ?? q.pending[0] ?? null;
     if (focus && !q.byId[focus]) focus = null;
     pinned = current ? current.id : null;
-    if (current?.id !== m.current?.id) { m.reveal = true; if (m.zone === 'card' && !current) m.zone = 'list'; }
+    if (current?.id !== m.current?.id) { m.reveal = true; m.revealList = true; if (m.zone === 'card' && !current) m.zone = 'list'; }
     m.current = current;
     if (!current) { m.view = null; reportFocus(null); return; }
     const a = m.state.answers[current.id];
@@ -294,19 +295,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const i = m.current ? ids.indexOf(m.current.id) : -1;
     const j = i < 0 ? 0 : Math.min(ids.length - 1, Math.max(0, i + dir * by));
     go(ids[j] ?? null);
-    revealListRow();
-  };
-  const revealListRow = () => {
-    // Keep the card on screen visible in the list.
-    const rows = frame ? Math.max(1, frame.listHeight) : 10;
-    const idx = m.current && frame ? frame.listCards.indexOf(m.current.id) : -1;
-    if (idx < 0) return;
-    // The list's rows hold headers too, so find the row from the last frame's hits.
-    const hit = frame?.hits.find((h) => h.target === `list:${m.current!.id}`);
-    const row = hit ? hit.row : null;
-    if (row === null) { m.listScroll = Math.max(0, m.listScroll + (idx > 0 ? 1 : -1)); return; }
-    if (row < m.listScroll + 1) m.listScroll = Math.max(0, row - 3);
-    if (row >= m.listScroll + rows - 1) m.listScroll = row - rows + 3;
+    
   };
   const enterCard = (last = false) => {
     if (!m.view) return;
@@ -405,8 +394,8 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       if (ev.name === 'down' || ev.name === 'j') { move(1); return; }
       if (ev.name === 'pageup') { move(-1, 10); return; }
       if (ev.name === 'pagedown') { move(1, 10); return; }
-      if (ev.name === 'home') { const ids = frame?.listCards ?? []; go(ids[0] ?? null); m.listScroll = 0; return; }
-      if (ev.name === 'end') { const ids = frame?.listCards ?? []; go(ids.at(-1) ?? null); revealListRow(); return; }
+      if (ev.name === 'home') { const ids = frame?.listCards ?? []; go(ids[0] ?? null); return; }
+      if (ev.name === 'end') { const ids = frame?.listCards ?? []; go(ids.at(-1) ?? null);  return; }
       if (ev.name === 'enter' || ev.name === 'right' || ev.name === 'l' || ev.name === 'space' || (ev.name === 'tab' && !ev.shift)) { enterCard(); return; }
       if (ev.name === 'tab' && ev.shift) { enterCard(true); return; }
       if (ev.name === 'escape') { focus = null; pinned = null; m.cleared = true; pick(); return; }
@@ -462,7 +451,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   }
 
   term.onInput = onInput;
-  term.onResize = () => { last = null; schedule(); };
+  term.onResize = () => { last = null; m.revealList = true; m.reveal = true; schedule(); };
   term.start();
   mark('start', { pid: process.pid });
   schedule();

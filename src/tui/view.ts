@@ -34,6 +34,8 @@ export interface Model {
   now: number;
   /** Scroll the card so its focused stop shows, after the focus moved. */
   reveal?: boolean;
+  /** Scroll the list so the open card shows, after another card opened. */
+  revealList?: boolean;
 }
 
 export interface Frame {
@@ -154,6 +156,10 @@ export function drawFrame(m: Model): Frame {
       const rows = listRows(m, listW - 1);
       for (const r of rows) if (r.card) listCards.push(r.card);
       const maxScroll = Math.max(0, rows.length - bodyH);
+      const at = m.revealList ? rows.findIndex((r) => r.selected) : -1;
+      if (at >= 0 && at < m.listScroll + 1) m.listScroll = at - 3;
+      else if (at >= 0 && at > m.listScroll + bodyH - 2) m.listScroll = at - bodyH + 3;
+      m.revealList = false;
       m.listScroll = Math.min(Math.max(0, m.listScroll), maxScroll);
       for (let i = 0; i < bodyH; i++) {
         const r = rows[m.listScroll + i];
