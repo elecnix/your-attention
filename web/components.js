@@ -8,9 +8,8 @@ const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
   // A body with forms of its own keeps them where the agent placed them, and gets the comment and buttons below.
-  if (c.body && /\bForm\(/.test(c.body)) return withAnswerFooter(c.body);
-  // A body without a form of its own gets the generated answer form below it, so the card stays answerable.
-  if (c.body && !c.options?.length && !c.questions?.length) return c.body;
+  // So does a body with no form and no options or questions, so the card stays answerable.
+  if (c.body && (/\bForm\(/.test(c.body) || (!c.options?.length && !c.questions?.length))) return withAnswerFooter(c.body);
   if (c.kind === 'blocked' && c.options && c.options.length) {
     // The sidecar read these choices from the agent's dialog, and presses the one you pick in that pane.
     return [

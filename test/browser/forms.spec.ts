@@ -82,3 +82,14 @@ test('the example in the card_post description renders and answers', async ({ pa
   expect(a?.type === 'answer' && a.answer.values).toEqual({ merge12: 'yes', note12: 'after the release' });
   await expect(page.locator('.note.ok')).toContainText('Comment on #12: after the release');
 });
+
+test('a body with no form of its own still gets the comment box, Send answer and Skip for now', async ({ page }) => {
+  await inbox.agent.post({ id: 'bare-body', agent: 's-bare', title: 'Only a table', priority: 'now', body: 'root = Card([t])\nt = TextContent("Two layouts measured.")' });
+  const ev = inbox.listen('s-bare');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Only a table' }).click();
+  await expect(page.locator('.focus-card').getByRole('button', { name: 'Skip for now' })).toBeVisible();
+  await page.locator('.focus-card textarea').fill('Layout B.');
+  await page.locator('.focus-card').getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(() => { const a = ev.events.find((e) => e.type === 'answer'); return a?.type === 'answer' ? a.answer.comment : undefined; }).toBe('Layout B.');
+});
