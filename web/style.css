@@ -142,6 +142,9 @@
   .card-text { white-space: pre-wrap; margin: 0 0 12px; }
   .card-text > :first-child { margin-top: 0; }
   .card-text p, .card-text ul, .card-text ol { margin: 0 0 8px; }
+  .recommendation { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--info-bg); padding: 10px 14px; margin: 0 0 12px; }
+  .recommendation .label { display: block; color: var(--accent); margin-bottom: 4px; }
+  .recommendation .card-text, .recommendation .card-text > :last-child { margin-bottom: 0; }
   .card-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
   /* A link to another agent's session, in a card's text, body or file. A click opens it in herdr. */
   a[href^="https://herdr.invalid/v1/"] { color: var(--accent); cursor: pointer; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 0 .35em; white-space: nowrap; display: inline-flex; align-items: center; gap: .3em; vertical-align: bottom; }

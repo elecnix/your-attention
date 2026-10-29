@@ -39,7 +39,6 @@ export function cardSource(c) {
   const parts = [];
   const L = [];
   if (c.body) { parts.push('custom'); L.push(c.body.replace(/^\s*root\s*=/m, 'custom =')); }
-  if (c.recommendation) { parts.push('rec'); L.push(`rec = TextContent(${J(`Recommendation: ${c.recommendation}`)})`); }
   const controls = [];
   (c.questions || []).forEach((q, i) => {
     controls.push(`fc${i}`);

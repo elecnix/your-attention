@@ -391,6 +391,28 @@ test('skip for now walks down the queue in its order, and wraps around at the en
   }
 });
 
+test('the recommendation stands out: a labeled callout at the card text size, above the options, on every kind of card', async ({ page }) => {
+  await inbox.agent.post({ id: 'rec-plain', agent: 's-rec', title: 'Merge the fix?', priority: 'now', text: 'The stream ends early.',
+    recommendation: 'Merge it.', options: [{ id: 'y', label: 'Merged' }] });
+  await inbox.agent.post({ id: 'rec-html', agent: 's-rec', title: 'An HTML card with a recommendation', priority: 'now', html: '<p>Hi</p>', recommendation: 'Read it first.' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Merge the fix?' }).click();
+  const rec = page.locator('.focus-card .recommendation');
+  await expect(rec).toHaveText(/Recommendation\s*Merge it\./);
+  const size = (l: import('@playwright/test').Locator) => l.evaluate((el) => getComputedStyle(el).fontSize);
+  const weight = (l: import('@playwright/test').Locator) => l.evaluate((el) => Number(getComputedStyle(el).fontWeight));
+  // The label is bold in the page's type, heavier than the text, and in the accent color.
+  expect(await weight(rec.locator('.label'))).toBeGreaterThan(await weight(rec.locator('.markdown p')));
+  expect(await rec.locator('.label').evaluate((el) => getComputedStyle(el).color)).not.toBe(await rec.locator('.markdown p').evaluate((el) => getComputedStyle(el).color));
+  expect(await size(rec.locator('.markdown p'))).toBe(await size(page.locator('.focus-card .card-text p').first()));
+  // The page draws it once, above the options.
+  await expect(page.locator('.focus-card').getByText('Recommendation: Merge it.')).toHaveCount(0);
+  const recY = (await rec.boundingBox())!.y;
+  expect(recY).toBeLessThan((await page.locator('.focus-card').getByText('Merged').first().boundingBox())!.y);
+  await page.locator('.q', { hasText: 'An HTML card with a recommendation' }).click();
+  await expect(page.locator('.focus-card .recommendation')).toHaveText(/Read it first\./);
+});
+
 test('an answer opens the card after the one you answered, not the card you skipped', async ({ page }) => {
   const own = await startInbox();
   try {
