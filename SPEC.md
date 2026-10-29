@@ -197,6 +197,51 @@ The page adds one component to OpenUI's: `CheckWithText(label, check, [content])
 
 `GET /v1/settings` returns `{allowHtml}`. Only the owner changes it, with `PUT /v1/settings`.
 
+## Usage counts
+
+Each inbox counts how much it was used per UTC day, and sends one report for each finished day. The counts live in the inbox's own storage, under the `telemetry` key of `meta`. The keys of the distinct counts, such as agent names and token ids, stay there too. The report gives how many there were. The report has fixed fields, and every value is a number, a fixed word, a UUID, a version, a day or a 16-digit hex id:
+
+```json
+{
+  "schema": 1,
+  "source": "laptop",
+  "installId": "0b5e8c1e-6f0a-4d43-9a7e-3f1d2c4b5a69",
+  "invite": "",
+  "version": "0.1.0",
+  "day": "2026-10-28",
+  "counts": { "cards": 3, "answers": 2, "pairings": 0, "pages": 1, "agents": 2, "instances": 2, "tokens": 1 }
+}
+```
+
+- `cards` counts new cards from agents. A revision of a card doesn't count.
+- `answers` counts answers saved, and `pairings` counts pairing requests.
+- `pages`, `agents`, `instances` and `tokens` count distinct page ids, agent names, agent processes and tokens seen that day, up to 1,000 each.
+- `installId` is a random UUID per inbox. `invite` is empty on a laptop. A hosted inbox reports the first 16 hex digits of the SHA-256 of the invite code that created it.
+
+The counts start on. The inbox sends a report only after the person has read the notice, which happens in one of these places:
+
+- `your-attention serve` in a terminal, and `your-attention start` or `your-attention telemetry status` in one, print the notice and record that the person read it.
+- The hosted landing page asks with a checkbox, ticked by default, before it creates the inbox.
+- Otherwise the inbox page shows the notice until the person picks "Keep usage counts on" or "Turn usage counts off". A launchd or systemd service has no terminal, so its inbox doesn't send until the page or a terminal command has shown the notice.
+
+Turning the counts off deletes the counts of today and every day not yet sent, and the inbox doesn't count while they are off. An inbox keeps unsent days for a week at most, and a day without activity doesn't produce a report.
+
+`GET /v1/telemetry` returns `{enabled, notified, notice, blocked, source, destination, installId, invite, next}` to the owner, where `next` is the report for today so far. `notice` is true while the page must show the notice. `blocked` is null, or says why this build doesn't send. `PUT /v1/telemetry {enabled?, notified?, resetId?}` changes the setting, and setting `enabled` also records that the person read the notice. `resetId: true` picks a new install id. Other tokens get 403, and a build without usage counts answers 404.
+
+The laptop build tries to send the finished days 30 seconds after it starts and then every hour. It posts each report to `https://telemetry.your-attention.workers.dev/v1/report`, or to `YOUR_ATTENTION_TELEMETRY_URL`. It keeps a day the collector didn't take because of a network error, a 5xx or a 429, and forgets it after any other answer. With `DO_NOT_TRACK=1` or `YOUR_ATTENTION_TELEMETRY=off`, the laptop build doesn't send, whatever the inbox says. `YOUR_ATTENTION_TELEMETRY_DEBUG=1` prints each report to stderr in place of sending it.
+
+The collector is `src/cloudflare/collector.ts`, a Worker apart from the inbox Worker, configured in `wrangler.telemetry.jsonc`. `POST /v1/report` takes a body of at most 2 KB and checks it against the fields above. A good report gets 204. A report that doesn't match gets 400, and so does a report with an `invite`, since only a laptop posts there. A larger body gets 413, and an address past 10 reports a minute gets 429. It uses the address as the rate limiter's key and never stores it.
+
+A hosted inbox writes its own reports to the `TELEMETRY` binding at its next request or alarm after the day ends. A single-mode deployment doesn't write any. Hosted inboxes and the collector write one data point per report to the `your_attention_usage` Analytics Engine dataset:
+
+| Column | Value |
+| --- | --- |
+| `index1` | the invite id, or `laptop` |
+| `blob1` to `blob5` | source, version, day, install id, invite id |
+| `double1` to `double7` | cards, answers, pairings, pages, agents, instances, tokens |
+
+`your-attention telemetry report [--days 30] [--invites FILE]` reads the dataset with the Analytics Engine SQL API, with `CLOUDFLARE_ACCOUNT_ID` and a `CLOUDFLARE_API_TOKEN` that has Account Analytics Read. It prints one line per invite id with the inboxes, active days, sums and the peak distinct counts in one inbox and day. It flags an invite with more than 30 agent processes, 10 tokens or 20 pairing requests in one inbox and day, which suggests a shared or leaked invite code or token. Each line of the invites file is a code, then an optional label. The command hashes each code the same way, and prints the label in place of the id.
+
 ## Card states
 
 | State | Meaning |

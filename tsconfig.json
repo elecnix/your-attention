@@ -16,5 +16,5 @@
     "noEmit": true
   },
   "include": ["src", "test", "bin", "scripts/*.ts"],
-  "exclude": ["src/cloudflare", "test/cloudflare/object.test.ts"]
+  "exclude": ["src/cloudflare", "test/cloudflare/object.test.ts", "test/cloudflare/collector.test.ts"]
 }

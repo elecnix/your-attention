@@ -8,6 +8,7 @@ import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration
 import { isSealed } from './sealed.ts';
 import { distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
+import { Usage } from './telemetry.ts';
 import type {
   AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, PersonPresence, PriorityLevel, Role, Settings, Template, Token,
@@ -114,6 +115,8 @@ export class Inbox {
   private readonly extensions = new Map<string, { reg: ExtensionRegistration; token: string; send: (ev: HookEvent) => void }>();
   /** Webhook deliveries still running, so tests and shutdown can wait for them. */
   readonly deliveries = new Set<Promise<boolean>>();
+  /** The usage counts the platform sends once a day, when the person left them on. */
+  readonly usage: Usage;
 
   /** `keepPresence` is for a platform whose sockets outlive the object, such as a Durable Object that wakes from hibernation.
    * `uploadLimitBytes` caps the bytes of every file this inbox ever stores. Deleting a file gives none back.
@@ -126,6 +129,7 @@ export class Inbox {
     this.uploadLimit = opts.uploadLimitBytes;
     this.storageLimit = opts.storageLimitBytes;
     this.readsPerDay = opts.attachmentReadsPerDay;
+    this.usage = new Usage(store, now);
     // On a laptop, connections do not survive a restart, so nobody is online at start.
     if (!opts.keepPresence) {
       for (const p of store.list<Presence>('presence')) {
@@ -225,6 +229,7 @@ export class Inbox {
     if (pending.length >= MAX_PENDING_PAIRINGS) throw new InboxError(429, 'too many pairing requests are waiting');
     const pairing: Pairing = { id: randomId(8), name: clean, role, code: pairingCode(), status: 'pending', createdAt: this.now() };
     this.store.put('pairings', pairing.id, pairing);
+    this.usage.record('pairings');
     this.postCard({ token: '', role: 'owner' }, {
       id: `pair-${pairing.id}`,
       agent: SYSTEM_AGENT,
@@ -381,6 +386,10 @@ export class Inbox {
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
     this.store.put('cards', id, card);
     this.store.index(id, searchText(card));
+    if (card.version === 1 && caller.token !== '') {
+      this.usage.record('cards');
+      this.usage.saw('tokens', caller.token);
+    }
     if (card.follows && card.follows !== id) {
       const prev = this.store.get<Card>('cards', card.follows);
       if (prev) {
@@ -926,6 +935,7 @@ export class Inbox {
     for (const p of answer.previous) delete (p as Partial<Answer>).previous;
     this.store.put('answers', id, answer);
     this.store.index(id, `${searchText(card)}\n${answer.comment}`);
+    this.usage.record('answers');
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
@@ -1022,6 +1032,9 @@ export class Inbox {
     if (!set) this.agents.set(k, (set = new Set()));
     set.add(send);
     if (instance) this.instances.set(send, instance);
+    this.usage.saw('agents', agent);
+    if (instance) this.usage.saw('instances', instance);
+    if (caller.token) this.usage.saw('tokens', caller.token);
     this.setPresence(agent, true);
     send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     this.flush(agent);
@@ -1074,6 +1087,7 @@ export class Inbox {
   /** A page opens its event stream. `viewer` is the page's own id, for its presence reports. */
   subscribePage(send: PageSend, viewer?: string): () => void {
     this.pages.add(send);
+    if (viewer) this.usage.saw('pages', viewer);
     if (viewer) { this.viewers.set(viewer, this.viewers.get(viewer) ?? { visible: true, activeAt: this.now(), focus: null }); this.personChanged(); }
     return () => {
       this.pages.delete(send);

@@ -19,9 +19,10 @@ export interface TestInbox {
   close(): Promise<void>;
 }
 
-export async function startInbox(): Promise<TestInbox> {
+/** A test inbox sends no usage counts and shows no notice, unless a test passes `usage` to check them. */
+export async function startInbox(opts: { usage?: boolean } = {}): Promise<TestInbox> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-browser-'));
-  const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {} });
+  const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report', ...(opts.usage ? {} : { blocked: 'a test inbox sends nothing' }) } });
   const agent = new Client({ url: server.url, token: fs.readFileSync(path.join(home, 'agent-token'), 'utf8').trim() });
   const stops: (() => void)[] = [];
   return {

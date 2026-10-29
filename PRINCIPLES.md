@@ -188,6 +188,12 @@ On the hosted service, an inbox is created without a login, and its unguessable 
 
 No sign-up keeps onboarding to one step, and near-zero idle cost makes a free public service possible.
 
+### Usage counts leave the inbox only after you were told, and never what you wrote
+
+Once a day, an inbox sends counts of how much it was used. It counts new cards, answers, pairing requests and page opens, and how many agents, agent processes and tokens connected. The counts start on. A terminal, the hosted landing page or the inbox page tells you what they contain and how to turn them off, and the inbox sends a report only after that. Card text, answers, agent names, paths, host names and inbox addresses stay in the inbox. Turning the counts off deletes the days not yet sent.
+
+The maintainers need to know the product is used, and the hosted service needs to spot a leaked invite code or token. Once a person turns the counts off, their inbox doesn't send them.
+
 ## Runs anywhere
 
 ### The core uses web standards only

@@ -1,0 +1,11 @@
+// The usage collector, a Worker apart from the inbox. Laptop inboxes post their daily report here.
+// Deploy it with `npx wrangler deploy -c wrangler.telemetry.jsonc`. See SPEC.md, "Usage counts".
+{
+  "name": "telemetry",
+  "main": "src/cloudflare/collector.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "analytics_engine_datasets": [{ "binding": "USAGE", "dataset": "your_attention_usage" }],
+  // Ten reports a minute per sender address: a laptop sends one a day, and at most a week of them after it was offline.
+  "ratelimits": [{ "name": "LIMITER", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } }]
+}

@@ -4,6 +4,7 @@
 import { COOKIE, createHandler } from '../core/http.ts';
 import { Inbox } from '../core/inbox.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
+import { dataPoint } from '../core/telemetry.ts';
 import type { Role } from '../core/types.ts';
 import { DurableSqlStorage, R2Blobs } from './storage.ts';
 import type { Env } from './worker.ts';
@@ -84,7 +85,7 @@ export class InboxObject {
       attachmentReadsPerDay: limit(env.ATTACHMENT_READS_PER_DAY),
     });
     // Open requests keep the object awake and billed, so events go over hibernating WebSockets only.
-    this.handle = createHandler(this.inbox, { heartbeatMs: 2000, streams: false });
+    this.handle = createHandler(this.inbox, { heartbeatMs: 2000, streams: false, telemetry: { source: 'hosted', destination: 'the operator of this hosted service', blocked: () => this.usageBlocked() } });
     // Heartbeats get their answer without waking the object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
     for (const ws of ctx.getWebSockets()) this.attach(ws);
@@ -103,7 +104,27 @@ export class InboxObject {
     return conn;
   }
 
+  /** Why this deployment sends no usage counts. Only the hosted service sends them, to its own operator. */
+  private usageBlocked(): string | undefined {
+    if (this.env.MODE !== 'hosted') return 'a single-inbox deployment sends nothing';
+    if (!this.env.TELEMETRY) return 'this deployment has no usage dataset';
+    return undefined;
+  }
+
+  /** Write each finished day to Analytics Engine, when the person was told and left it on. Other days are forgotten. */
+  private sendUsage(): void {
+    const usage = this.inbox.usage;
+    const due = usage.due();
+    if (!due.length) return;
+    const s = usage.settings();
+    for (const d of due) {
+      if (s.enabled && s.notified && !this.usageBlocked()) this.env.TELEMETRY?.writeDataPoint(dataPoint(usage.report(d, 'hosted')));
+      usage.done(d.day);
+    }
+  }
+
   private async schedule(): Promise<void> {
+    this.sendUsage();
     const next = this.inbox.nextDeadline();
     const heartbeat = this.ctx.getWebSockets().length ? Date.now() + HEARTBEAT_CHECK_MS : undefined;
     const at = [next, heartbeat].filter((x): x is number => x !== undefined);
@@ -114,7 +135,9 @@ export class InboxObject {
     const url = new URL(req.url);
     if (url.pathname === '/_init') {
       // The Worker calls this once per inbox. The object is never reachable from outside without the Worker.
-      const { ownerToken } = (await req.json()) as { ownerToken?: string };
+      const { ownerToken, usage } = (await req.json()) as { ownerToken?: string; usage?: { enabled?: boolean; invite?: string } };
+      // A hosted inbox learns its invite id here. The landing page told the person about usage counts when it sends `enabled`.
+      if (usage) this.inbox.usage.update({ invite: String(usage.invite ?? ''), ...(typeof usage.enabled === 'boolean' ? { enabled: usage.enabled, notified: true } : {}) });
       if (ownerToken) {
         try {
           if (!(await this.inbox.authenticate(ownerToken))) await this.inbox.adoptToken(ownerToken, 'owner from the deployment', 'owner');

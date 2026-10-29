@@ -28,6 +28,11 @@
   .notify { display: inline-flex; align-items: center; gap: 6px; font-size: calc(13px * var(--text-scale)); color: var(--muted); cursor: pointer; }
   .notify input { accent-color: var(--accent); }
   .repo { display: inline-flex; color: var(--muted); }
+  .usage-notice { margin: 16px 16px 0; padding: 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--info); border-radius: 8px; background: var(--panel); font-size: calc(14px * var(--text-scale)); }
+  .usage-notice p { margin: 0 0 8px; }
+  .usage-notice pre { font: calc(12px * var(--text-scale))/1.4 var(--font-code); background: var(--bg); padding: 8px; border-radius: 6px; overflow: auto; }
+  .usage-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .usage-toggle { margin: 16px 8px 4px; }
   .repo:hover, .repo:focus-visible { color: var(--ink); }
   .pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; font-size: calc(13px * var(--text-scale)); font-weight: 600; white-space: nowrap; }
   .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }

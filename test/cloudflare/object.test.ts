@@ -32,7 +32,7 @@ g['Response'] = class extends NodeResponse {
 
 const { InboxObject, uploadLimit } = await import('../../src/cloudflare/inbox-object.ts');
 
-function runtime() {
+function runtime(extra: Record<string, unknown> = {}) {
   const db = new DatabaseSync(':memory:');
   const sockets: FakeSocket[] = [];
   const blobs = new Map<string, { bytes: Uint8Array; type: string }>();
@@ -60,7 +60,7 @@ function runtime() {
       delete: async (k: string) => { blobs.delete(k); },
     },
   };
-  const make = () => new InboxObject(ctx as never, env as never);
+  const make = () => new InboxObject(ctx as never, { ...env, ...extra } as never);
   return { make, sockets, blobs, alarm: () => alarm };
 }
 
@@ -223,5 +223,72 @@ describe('fixes from the review of the limits', () => {
     const fresh = new DurableSqlStorage(sql);
     assert.equal(store.bytes(), fresh.bytes());
     assert.ok(store.bytes() - start < 1000);
+  });
+});
+
+describe('usage counts of a hosted inbox', () => {
+  // The object reads the clock it got when it was built, so the test moves that clock.
+  const realNow = Date.now;
+  let offset = 0;
+  const DAY = 24 * 60 * 60 * 1000;
+
+  function hosted(opts: { telemetry?: boolean } = {}) {
+    const points: { indexes: string[]; blobs: string[]; doubles: number[] }[] = [];
+    const rt = runtime({ MODE: 'hosted', ...(opts.telemetry === false ? {} : { TELEMETRY: { writeDataPoint: (p: never) => { points.push(p); } } }) });
+    return { rt, points };
+  }
+
+  it('writes each finished day to Analytics Engine with the invite id, once the person was told', async () => {
+    Date.now = () => realNow() + offset;
+    try {
+      const { rt, points } = hosted();
+      const obj = rt.make();
+      const { owner } = (await (await call(obj, 'POST', '/_init', undefined, { usage: { enabled: true, invite: '0123456789abcdef' } })).json()) as { owner: string };
+      await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 'private-agent', title: 'A private question' });
+      const status = (await (await call(obj, 'GET', '/v1/telemetry', owner)).json()) as { source: string; notice: boolean; invite: string };
+      assert.deepEqual([status.source, status.notice, status.invite], ['hosted', false, '0123456789abcdef']);
+      assert.equal(points.length, 0, 'today is not finished');
+      offset += DAY;
+      await obj.alarm();
+      assert.equal(points.length, 1);
+      assert.deepEqual(points[0]?.indexes, ['0123456789abcdef']);
+      assert.equal(points[0]?.blobs[0], 'hosted');
+      assert.equal(points[0]?.doubles[0], 1, 'one card');
+      assert.doesNotMatch(JSON.stringify(points), /private|"c1"/);
+      offset += DAY;
+      await obj.alarm();
+      assert.equal(points.length, 1, 'a day without activity sends no report');
+    } finally {
+      Date.now = realNow;
+      offset = 0;
+    }
+  });
+
+  it('sends nothing for an inbox whose owner turned it off at creation, or was never told', async () => {
+    Date.now = () => realNow() + offset;
+    try {
+      for (const init of [{ usage: { enabled: false, invite: '0123456789abcdef' } }, { usage: { invite: '0123456789abcdef' } }, {}]) {
+        const { rt, points } = hosted();
+        const obj = rt.make();
+        const { owner } = (await (await call(obj, 'POST', '/_init', undefined, init)).json()) as { owner: string };
+        await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 'a', title: 'q' });
+        offset += DAY;
+        await obj.alarm();
+        offset = 0;
+        assert.equal(points.length, 0, JSON.stringify(init));
+      }
+    } finally {
+      Date.now = realNow;
+      offset = 0;
+    }
+  });
+
+  it('shows no notice where the deployment sends nothing', async () => {
+    const single = runtime({ MODE: 'single', TELEMETRY: { writeDataPoint: () => assert.fail('a single-inbox deployment wrote a data point') } });
+    const obj = single.make();
+    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    const status = (await (await call(obj, 'GET', '/v1/telemetry', owner)).json()) as { notice: boolean; blocked: string };
+    assert.equal(status.notice, false);
+    assert.match(status.blocked, /single/);
   });
 });

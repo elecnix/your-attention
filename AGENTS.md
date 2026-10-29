@@ -23,7 +23,7 @@ src/client.ts      the client every integration uses
 src/cli.ts         the your-attention command
 web/               the built-in page: env.js, components.js and app.js, plain JavaScript modules on the OpenUI browser bundle
 web/stories/       Storybook stories for each component and for the whole page on a stand-in inbox
-src/cloudflare/    the Worker and the Durable Object, with their storage adapters
+src/cloudflare/    the Worker and the Durable Object, with their storage adapters, and the usage collector
 src/extensions/    the triage service
 test/unit/         fast tests with in-memory storage
 test/integration/  a real server, the CLI, the channel over MCP stdio, the pi extension, triage, links and mDNS

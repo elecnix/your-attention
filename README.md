@@ -206,6 +206,20 @@ your-attention stop             # stops the inbox, or its launchd or systemd ser
 
 `clear`, `reset`, `login-url` and `stop` act on the inbox this machine runs.
 
+## Usage counts
+
+Once a day, your inbox sends a report of usage counts to the maintainers. It counts cards posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected. It never sends card text, answers, agent names, paths, host names or inbox addresses. The first start in a terminal, or the inbox page, tells you before the first report goes out.
+
+```sh
+your-attention telemetry status     # on or off, where reports go, and the install id
+your-attention telemetry show       # prints the next report
+your-attention telemetry off        # turns reports off and deletes the days not yet sent
+your-attention telemetry on
+your-attention telemetry reset-id   # picks a new random install id
+```
+
+`DO_NOT_TRACK=1` or `YOUR_ATTENTION_TELEMETRY=off` turns reports off whatever the setting says, and `YOUR_ATTENTION_TELEMETRY_DEBUG=1` prints each report to stderr in place of sending it. On the hosted service, the landing page asks before it creates your inbox, and each report includes an id made from your invite code. The "Send usage counts" switch below the card list changes the setting. [SPEC.md](SPEC.md#usage-counts) lists every field.
+
 ## Run your own cloud inbox (optional)
 
 The Cloudflare build runs the same inbox on Workers. Each inbox is one Durable Object that sleeps when idle. Choose a mode when you deploy:
@@ -245,6 +259,8 @@ You need a Cloudflare account with R2 turned on once in the dashboard, a workers
    ```
 
    That command doesn't print the code. Put it in a variable first if you want to give it out.
+
+In hosted mode, each inbox writes its daily usage counts to the `your_attention_usage` Analytics Engine dataset in your account, with an id made from its invite code. `your-attention telemetry report --invites <file>` lists usage per invite and flags an invite with many clients in one inbox. Each line of the file is a code and a label. It needs `CLOUDFLARE_ACCOUNT_ID` and a `CLOUDFLARE_API_TOKEN` with Account Analytics Read.
 
 ### Limits of a cloud inbox
 

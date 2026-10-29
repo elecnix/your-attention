@@ -1,7 +1,7 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
-import { Attachments, BroadcastForm, agentName, CardAge, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, answerValues, cardSource, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, agentName, CardAge, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -25,6 +25,7 @@ export function App() {
   const [cleared, setCleared] = React.useState(false);
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
+  const [telemetry, changeTelemetry] = useTelemetry(auth === 'ok');
 
   const refresh = React.useCallback(() => fetch(BASE + 'v1/state').then((r) => {
     if (r.status === 401) { setAuth('needed'); return null; }
@@ -322,7 +323,8 @@ export function App() {
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent'),
     group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length })),
     dealt.length > 0 && h('button', { className: 'btn clear-dealt', onClick: () => api(`${BASE}v1/archive`, {}) },
-      `Clear ${dealt.length} answered or closed card${dealt.length === 1 ? '' : 's'}`));
+      `Clear ${dealt.length} answered or closed card${dealt.length === 1 ? '' : 's'}`),
+    h(UsageToggle, { telemetry, onChange: changeTelemetry }));
 
   let main;
   if (!current) {
@@ -394,6 +396,7 @@ export function App() {
       h(PhoneLink),
       h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: 'Your Attention on GitHub' },
         h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'currentColor' }, h('path', { d: OCTOCAT }))))),
+    h(UsageNotice, { telemetry, onChange: changeTelemetry }),
     h('div', { className: 'layout', style: { '--queue-w': `${queueWidth}px` } },
       queue, h(QueueResizer, { width: queueWidth, onResize: setQueueWidth }), h('main', null,
         // On a phone the queue sits below the card, so a button above the card says how many wait and jumps there.

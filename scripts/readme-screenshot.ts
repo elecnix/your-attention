@@ -31,7 +31,9 @@ function swatch(rgb: [number, number, number], w = 172, h = 138): string {
 }
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-screenshot-'));
-const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {} });
+const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report' } });
+// The screenshot shows the page after the person has read the usage notice.
+server.inbox.usage.update({ notified: true });
 const agent = new Client({ url: server.url, token: fs.readFileSync(path.join(home, 'agent-token'), 'utf8').trim() });
 const stop = new AbortController();
 try {

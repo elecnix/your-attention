@@ -4,6 +4,7 @@ import { randomId } from './crypto.ts';
 import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
 import { Inbox, InboxError, publicCard, type Caller } from './inbox.ts';
+import type { Source } from './telemetry.ts';
 import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
 import { PROTOCOL_VERSION } from './types.ts';
 
@@ -26,6 +27,8 @@ export interface HandlerOptions {
   streams?: boolean;
   /** Where a device on the same network reaches this inbox, such as http://laptop.local:4815. */
   networkAddresses?: () => string[];
+  /** Where this build sends usage counts, and why it sends none, such as DO_NOT_TRACK. Without it, GET /v1/telemetry answers 404. */
+  telemetry?: { source: Source; destination: string; blocked?: () => string | undefined };
 }
 
 /** The largest body each kind of route reads. A card post carries its files as data: URLs. */
@@ -257,6 +260,23 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (a === 'guidance') {
       if (method === 'GET') return json({ ...inbox.guidance(), widgets: inbox.widgetCatalog() });
       if (method === 'POST') return json(publicCard(inbox.proposeGuidance(String((await readJson<{ text?: string }>(req)).text ?? ''))), 201);
+    }
+    if (a === 'telemetry' && !b && (method === 'GET' || method === 'PUT')) {
+      owner();
+      const t = options.telemetry;
+      if (!t) return json({ error: 'this inbox sends no usage counts' }, 404);
+      if (method === 'PUT') {
+        const body = (await readJson<{ enabled?: unknown; notified?: unknown; resetId?: unknown } | null>(req, BODY_LIMIT.open)) ?? {};
+        for (const k of ['enabled', 'notified', 'resetId'] as const) {
+          if (body[k] !== undefined && typeof body[k] !== 'boolean') throw new InboxError(400, `${k} must be true or false`);
+        }
+        const enabled = body.enabled as boolean | undefined;
+        // Turning it on or off means the person read what it sends.
+        inbox.usage.update({ enabled, notified: enabled !== undefined || body.notified === true ? true : undefined, resetId: body.resetId === true });
+      }
+      const s = inbox.usage.settings();
+      const blocked = t.blocked?.() ?? null;
+      return json({ ...s, notice: s.enabled && !s.notified && !blocked, blocked, source: t.source, destination: t.destination, next: inbox.usage.report(inbox.usage.today(), t.source) });
     }
     if (a === 'settings') {
       if (method === 'GET') return json(inbox.settings());

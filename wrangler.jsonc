@@ -8,6 +8,8 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InboxObject", "RegistryObject"] }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "your-attention-files" }],
   "kv_namespaces": [{ "binding": "INVITES", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
+  // In hosted mode, each inbox writes its daily usage counts here. Single-inbox deployments write nothing. See SPEC.md, "Usage counts".
+  "analytics_engine_datasets": [{ "binding": "TELEMETRY", "dataset": "your_attention_usage" }],
   // Limits per inbox: 100 MB of files over its life (each file counts as at least 64 KB), 20 MB in its database, and
   // 2,000 file downloads a day. Signed-in calls get 300 a minute per inbox and client address, and calls without a token
   // 100 a minute per address. R2 deletes each file after 30 days (cloudflare/main.tf).

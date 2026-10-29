@@ -17,6 +17,7 @@ import { Inbox } from '../core/inbox.ts';
 import { focusHerdrPane, focusSessionLink } from '../integrations/herdr/focus.ts';
 import { homeDir, writePrivate } from './home.ts';
 import { relayClient } from './links.ts';
+import { NOTICE, sendDue, telemetryEnv, type TelemetryEnv } from './telemetry.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WEB = path.join(ROOT, 'web');
@@ -44,6 +45,10 @@ export interface ServeOptions {
   log?: (...args: unknown[]) => void;
   /** Runs when the owner asks the inbox to stop. The default closes the server. */
   onShutdown?: () => void;
+  /** Where usage counts go, and whether they may. The default reads the environment. */
+  telemetry?: TelemetryEnv;
+  /** The inbox runs in a terminal, where the person reads the usage notice before anything is sent. */
+  terminal?: boolean;
 }
 
 export interface RunningServer {
@@ -51,6 +56,8 @@ export interface RunningServer {
   port: number;
   ownerToken: string;
   inbox: Inbox;
+  /** Send the finished days of usage counts now, as the hourly timer does. */
+  sendUsage(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -106,7 +113,13 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
     const v4 = lan.filter((i) => i.family === 'IPv4').map((i) => `http://${i.address}:${listening}`);
     return [`http://${name}.local:${listening}`, ...v6, ...v4];
   };
-  const handle = createHandler(inbox, { openOrigin: (card) => focusHerdrPane(card), focusSession: (href) => focusSessionLink(href), networkAddresses });
+  const usage = opts.telemetry ?? telemetryEnv();
+  const handle = createHandler(inbox, {
+    openOrigin: (card) => focusHerdrPane(card),
+    focusSession: (href) => focusSessionLink(href),
+    networkAddresses,
+    telemetry: { source: 'laptop', destination: usage.url, blocked: () => usage.blocked },
+  });
 
   // One failed request must never stop the inbox: a client that drops its connection mid-body makes the read reject.
   const server = http.createServer((req, res) => {
@@ -231,14 +244,29 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   }
   const relay = opts.relay ? relayClient({ relay: opts.relay.url, key: opts.relay.key, inboxId: inbox.id(), local: url, log }) : undefined;
   log(`inbox on ${url}${opts.mdns ? ', advertised over mDNS' : ''}`);
+  // The first start in a terminal tells the person about usage counts. Without a terminal, the page tells them.
+  const told = inbox.usage.settings();
+  if (opts.terminal && told.enabled && !told.notified && !usage.blocked) {
+    log(`usage counts are on.\n${NOTICE}`);
+    inbox.usage.update({ notified: true });
+  }
+  // Store calls fail once the inbox has closed, so a send still running at shutdown is dropped.
+  const sendUsage = (): Promise<void> => sendDue(inbox.usage, { ...usage, log: (line) => log(line) }).catch(() => {});
+  const usageTimer = setInterval(() => void sendUsage(), 60 * 60 * 1000);
+  usageTimer.unref();
+  const firstSend = setTimeout(() => void sendUsage(), 30_000);
+  firstSend.unref();
 
   const running: RunningServer = {
     url,
     port,
     ownerToken: secret,
     inbox,
+    sendUsage,
     async close() {
       clearInterval(alarm);
+      clearInterval(usageTimer);
+      clearTimeout(firstSend);
       relay?.stop();
       watcher?.close();
       await ad?.stop();

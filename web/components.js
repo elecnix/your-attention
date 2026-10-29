@@ -588,6 +588,43 @@ export function NotifyToggle() {
     h('input', { type: 'checkbox', role: 'switch', checked: on, disabled: blocked, onChange: toggle }), 'Notify me');
 }
 
+// The usage counts of this inbox: GET /v1/telemetry, and PUT to change them. Null where the inbox sends none.
+export function useTelemetry(signedIn) {
+  const [t, setT] = React.useState(null);
+  React.useEffect(() => {
+    if (signedIn) fetch(`${BASE}v1/telemetry`).then((r) => (r.ok ? r.json() : null)).then(setT, () => setT(null));
+  }, [signedIn]);
+  // The switch moves at once. The inbox's answer then replaces the guess, and a failed change puts the old setting back.
+  const change = (body) => {
+    const before = t;
+    setT((x) => x && { ...x, ...body, notice: false });
+    return fetch(`${BASE}v1/telemetry`, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J(body) })
+      .then((r) => (r.ok ? r.json() : null)).then((next) => setT(next || before), () => setT(before));
+  };
+  return [t, change];
+}
+
+const usageWhere = (t) => (t.source === 'hosted' ? 'the operator of this hosted inbox, with an id made from the invite code that created it' : 'the Your Attention maintainers');
+
+// Shown until the person picks: nothing is sent before they have read it.
+export function UsageNotice({ telemetry: t, onChange }) {
+  if (!t || !t.notice) return null;
+  return h('section', { className: 'usage-notice', 'aria-label': 'Usage counts' },
+    h('p', null, `Usage counts are on. Once a day, this inbox sends ${usageWhere(t)} how many cards were posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected. It never sends card text, answers, agent names or addresses.`),
+    h('details', null, h('summary', null, 'The next report'), h('pre', null, J(t.next, null, 2))),
+    h('div', { className: 'usage-actions' },
+      h('button', { type: 'button', className: 'btn', onClick: () => onChange({ notified: true }) }, 'Keep usage counts on'),
+      h('button', { type: 'button', className: 'btn', onClick: () => onChange({ enabled: false }) }, 'Turn usage counts off')));
+}
+
+// The setting, after the person has seen the notice.
+export function UsageToggle({ telemetry: t, onChange }) {
+  if (!t || t.notice) return null;
+  const tip = t.blocked ? `This inbox sends nothing: ${t.blocked}` : `Once a day, send ${usageWhere(t)} counts of cards, answers and connections. Never card text or answers.`;
+  return h('label', { className: 'notify usage-toggle', title: tip },
+    h('input', { type: 'checkbox', role: 'switch', checked: t.enabled && !t.blocked, disabled: !!t.blocked, onChange: (e) => onChange({ enabled: e.target.checked }) }), 'Send usage counts');
+}
+
 export function presenceOf(card, state) {
   if (card.deliver === 'none') return null;
   const p = state.presence[card.agent];

@@ -15,7 +15,7 @@ export interface Harness {
 
 export async function start(): Promise<Harness> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'your-attention-'));
-  const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {} });
+  const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report', blocked: 'a test inbox sends nothing' } });
   const h: Harness = {
     home,
     server,

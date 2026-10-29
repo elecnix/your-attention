@@ -2,6 +2,7 @@
 // deploys their own. MODE "hosted" serves many: each inbox is created with an
 // invite code, lives at an unguessable /i/<id>/ address, and is one Durable
 // Object that hibernates when nobody uses it.
+import { inviteId } from '../core/telemetry.ts';
 import { InboxObject, RegistryObject } from './inbox-object.ts';
 
 export interface Env {
@@ -26,6 +27,8 @@ export interface Env {
   LIMITER?: RateLimit;
   /** Counts requests without a token per client address: pairing, sign-in, and new inboxes. */
   ANON_LIMITER?: RateLimit;
+  /** In hosted mode, where each inbox writes its daily usage counts. */
+  TELEMETRY?: AnalyticsEngineDataset;
 }
 
 /** Invite codes shorter than this are refused before any lookup, so guessing one takes too long to try. */
@@ -94,8 +97,9 @@ const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><met
 <title>Your Attention</title><style>body{font:16px system-ui,sans-serif;max-width:560px;margin:64px auto;padding:0 16px;background:#f6f6f4;color:#1d1d1b}
 @media (prefers-color-scheme: dark){body{background:#141413;color:#ececea}}input,button{font:inherit;padding:8px 12px}</style></head>
 <body><h1>Your Attention</h1><p>One inbox for the questions your coding agents ask you. Create an inbox with an invite code, then bookmark the address it opens: the address is the key.</p>
-<form id="f"><input id="code" placeholder="Invite code" autocomplete="off" required> <button>Create my inbox</button></form><p id="out"></p>
-<script>document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const r=await fetch('new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({invite:document.getElementById('code').value})});const d=await r.json();if(d.login){location.href=d.login}else{document.getElementById('out').textContent=d.error}}</script></body></html>`;
+<form id="f"><input id="code" placeholder="Invite code" autocomplete="off" required> <button>Create my inbox</button>
+<p><label><input type="checkbox" id="usage" checked> Send usage counts</label>: once a day, the inbox sends the operator of this service how many cards were posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected, with an id made from your invite code. It never sends card text, answers, agent names or addresses. You can change this later on the inbox page.</p></form><p id="out"></p>
+<script>document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const r=await fetch('new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({invite:document.getElementById('code').value,usage:document.getElementById('usage').checked})});const d=await r.json();if(d.login){location.href=d.login}else{document.getElementById('out').textContent=d.error}}</script></body></html>`;
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -119,13 +123,15 @@ export default {
     if (url.pathname === '/new' && req.method === 'POST') {
       if (!(await allowed(env, req, ''))) return tooMany();
       if (Number(req.headers.get('content-length') ?? 0) > 1024) return json({ error: 'body too large' }, 413);
-      const { invite } = (await req.json().catch(() => ({}))) as { invite?: string };
+      const { invite, usage } = (await req.json().catch(() => ({}))) as { invite?: string; usage?: unknown };
       const code = String(invite ?? '').trim().slice(0, 200);
       const redeemed = code.length >= MIN_INVITE_LENGTH ? (await (await env.REGISTRY.get(env.REGISTRY.idFromName('invites')).fetch('https://registry/redeem', { method: 'POST', body: JSON.stringify({ code }) })).json()) as { ok: boolean } : { ok: false };
       if (!redeemed.ok) return json({ error: 'That invite code is not valid.' }, 403);
       const id = await newAddress(secret);
       await env.INVITES.put(`inbox:${id}`, String(Date.now()));
-      const res = await env.INBOX.get(env.INBOX.idFromName(id)).fetch('https://inbox/_init', { method: 'POST', body: '{}' });
+      // A client that sends no `usage` choice never showed the notice, so the inbox page shows it before anything is sent.
+      const init = { usage: { invite: await inviteId(code), ...(typeof usage === 'boolean' ? { enabled: usage } : {}) } };
+      const res = await env.INBOX.get(env.INBOX.idFromName(id)).fetch('https://inbox/_init', { method: 'POST', body: JSON.stringify(init) });
       const { owner } = (await res.json()) as { owner: string };
       const base = `${url.origin}/i/${id}/`;
       return json({ url: base, login: `${base}#token=${owner}` }, 201);

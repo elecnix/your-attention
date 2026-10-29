@@ -9,6 +9,7 @@ import { Client, describeAnswer, loadConfig } from './client.ts';
 import type { Option, Priority } from './core/types.ts';
 import { homeDir, writePrivate } from './node/home.ts';
 import { serve } from './node/server.ts';
+import { NOTICE, queryUsage, summarize } from './node/telemetry.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
@@ -35,6 +36,8 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   offer ssh <host> [--remote-port 4815]               offer this inbox on another machine over SSH
   relay [--port 4900] [--key-env VAR]                 run a relay that inboxes dial out to
   serve --relay URL [--relay-key-env VAR]             also offer this inbox through a relay
+  telemetry status|on|off|show|reset-id               read or change the daily usage counts of this inbox
+  telemetry report [--days 30] [--invites FILE]       for the operator: usage per invite, from Analytics Engine
 
 Files live in ${homeDir()} (set YOUR_ATTENTION_HOME to move them).`;
 
@@ -66,6 +69,22 @@ async function runningUrl(): Promise<string | undefined> {
   return info && (await answers(info.url)) ? info.url : undefined;
 }
 
+interface TelemetryStatus { enabled: boolean; notified: boolean; notice: boolean; blocked: string | null; destination: string; installId: string; next: unknown }
+
+/** Read or change the usage setting of the inbox on this machine. */
+async function telemetry(body?: { enabled?: boolean; notified?: boolean; resetId?: boolean }): Promise<TelemetryStatus> {
+  const { url, owner } = localServer();
+  const res = await fetch(`${url}/v1/telemetry`, { method: body ? 'PUT' : 'GET', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) fail(`The inbox answered ${res.status}: ${((await res.json().catch(() => ({}))) as { error?: string }).error ?? ''}`);
+  return (await res.json()) as TelemetryStatus;
+}
+
+function describeTelemetry(t: TelemetryStatus): string {
+  if (!t.enabled) return 'Usage counts are off. Turn them on with: your-attention telemetry on';
+  if (t.blocked) return `Usage counts are on in this inbox, but ${t.blocked}, so this machine sends nothing.`;
+  return `Usage counts are on. One report a day goes to ${t.destination}.\nInstall id: ${t.installId}\n\n${NOTICE}`;
+}
+
 function localServer(): { url: string; owner: string } {
   try {
     const { url } = JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string };
@@ -80,7 +99,7 @@ switch (command) {
     const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '::' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
     const relayKey = values.relay ? process.env[String(values['relay-key-env'])] ?? fail(`--relay needs the relay key in $${values['relay-key-env']}`) : '';
     const stop = async (): Promise<void> => { await server.close(); process.exit(0); };
-    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop() });
+    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop(), terminal: process.stderr.isTTY === true });
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     break;
@@ -101,6 +120,11 @@ switch (command) {
       const info = readServerInfo();
       if (info && info.pid === child.pid && (await answers(info.url))) {
         console.log(`Started the inbox on ${info.url}. Its log is ${log}. Stop it with: your-attention stop`);
+        // The first start in a terminal tells the person about usage counts, before the inbox sends any.
+        if (process.stdout.isTTY) {
+          const t = await telemetry();
+          if (t.notice) { console.log(`\n${describeTelemetry(t)}`); await telemetry({ notified: true }); }
+        }
         break;
       }
       const tail = () => fs.readFileSync(log, 'utf8').slice(from).trim().split('\n').slice(-10).join('\n');
@@ -290,6 +314,46 @@ switch (command) {
   case 'herdr-blocked':
     await (await import('./integrations/herdr/blocked.ts')).main();
     break;
+  case 'telemetry': {
+    const [sub, ...args] = rest;
+    if (sub === 'report') {
+      // For the operator of the hosted service. Invite codes stay in the file: the report prints the label beside each one.
+      const { values } = parseArgs({ args, options: { days: { type: 'string', default: '30' }, invites: { type: 'string' } } });
+      const account = process.env['CLOUDFLARE_ACCOUNT_ID'];
+      const token = process.env['CLOUDFLARE_API_TOKEN'];
+      if (!account || !token) fail('Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN, a token with Account Analytics Read.');
+      const labels = new Map<string, string>();
+      if (values.invites) {
+        const { inviteId } = await import('./core/telemetry.ts');
+        const lines = fs.readFileSync(values.invites, 'utf8').split(/\r?\n/);
+        for (const [i, line] of lines.entries()) {
+          const [code, ...label] = line.trim().split(/\s+/);
+          if (code && !code.startsWith('#')) labels.set(await inviteId(code), label.join(' ') || `line ${i + 1}`);
+        }
+      }
+      const rows = summarize(await queryUsage(account, token, Number(values.days)), labels);
+      if (!rows.length) { console.log(`No usage reports in the last ${values.days} days.`); break; }
+      const cols = ['invite', 'inboxes', 'days', 'cards', 'answers', 'pairings', 'pages', 'peakAgents', 'peakInstances', 'peakTokens', 'flag'] as const;
+      const table = [cols.map(String), ...rows.map((r) => cols.map((c) => String(r[c])))];
+      const widths = cols.map((_, i) => Math.max(...table.map((row) => (row[i] ?? '').length)));
+      for (const row of table) console.log(row.map((cell, i) => cell.padEnd(widths[i] ?? 0)).join('  ').trimEnd());
+      break;
+    }
+    if (sub === undefined || sub === 'status') {
+      const t = await telemetry();
+      console.log(describeTelemetry(t));
+      if (t.notice) await telemetry({ notified: true });
+      break;
+    }
+    if (sub === 'on' || sub === 'off') {
+      const t = await telemetry({ enabled: sub === 'on' });
+      console.log(sub === 'on' ? describeTelemetry(t) : 'Usage counts are off. This inbox counts nothing and sends nothing.');
+      break;
+    }
+    if (sub === 'show') { console.log(JSON.stringify((await telemetry()).next, null, 2)); break; }
+    if (sub === 'reset-id') { console.log(`New install id: ${(await telemetry({ resetId: true })).installId}`); break; }
+    fail('Usage: your-attention telemetry status|on|off|show|reset-id, or telemetry report for the operator.');
+  }
   default:
     console.log(HELP);
     if (command && command !== 'help' && command !== '--help') process.exit(1);
