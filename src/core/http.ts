@@ -241,8 +241,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET' && b) return json(inbox.getWidget(b));
       if (method === 'POST' && !b) {
         if (me.role === 'extension') throw new InboxError(403, 'extensions cannot change widgets');
-        const w = await readJson<{ name?: string; source?: string; feedback?: string }>(req);
-        return json(inbox.saveWidget(String(w.name ?? ''), String(w.source ?? ''), w.feedback), 201);
+        const w = await readJson<{ name?: string; source?: string; feedback?: string; when?: string; response?: string }>(req);
+        return json(inbox.saveWidget(String(w.name ?? ''), String(w.source ?? ''), w.feedback, { when: w.when, response: w.response }), 201);
       }
     }
     if (a === 'priorities') {
@@ -255,7 +255,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       }
     }
     if (a === 'guidance') {
-      if (method === 'GET') return json(inbox.guidance());
+      if (method === 'GET') return json({ ...inbox.guidance(), widgets: inbox.widgetCatalog() });
       if (method === 'POST') return json(publicCard(inbox.proposeGuidance(String((await readJson<{ text?: string }>(req)).text ?? ''))), 201);
     }
     if (a === 'settings') {

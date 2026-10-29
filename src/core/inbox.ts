@@ -6,7 +6,7 @@ import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
-import { distinctWidgets, expandWidgets, fill, type WidgetSource } from './widgets.ts';
+import { distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import type {
   AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
@@ -307,10 +307,12 @@ export class Inbox {
       template = { name: t.name, version: v.version };
     }
     let widgets = before?.widgets;
+    let responses = before?.responses;
     if (body !== undefined) {
       const expanded = expandWidgets(String(body), (name, version) => this.widgetVersion(name, version));
       body = expanded.body;
       widgets = expanded.used.length ? distinctWidgets(expanded.used) : undefined;
+      responses = expanded.responses.length ? expanded.responses : undefined;
     }
     let attachments = before?.attachments;
     if (input.attachments !== undefined) {
@@ -353,6 +355,7 @@ export class Inbox {
       attachments: attachments?.length ? attachments : undefined,
       template: template ?? before?.template,
       widgets,
+      responses,
       priority,
       status: input.status ?? before?.status,
       expiresAt: input.expiresAt,
@@ -621,11 +624,12 @@ export class Inbox {
       if (count !== 1) throw new InboxError(409, `edit ${i + 1}: the old text occurs ${count} times in ${f}, and it must occur once`);
       text = text.replace(old, () => String(e.new ?? ''));
     }
-    const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, widgets: _w, ...rest } = card;
+    const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, widgets: _w, responses: _rs, ...rest } = card;
     const next = this.postCard(caller, { ...rest, [f]: text });
-    // A patch edits the body the widgets already filled, so the card still shows them, and any the patch placed.
+    // A patch edits the body the widgets already filled, so the card still shows them and keeps their responses, and any the patch placed.
     if (!card.widgets) return next;
-    const kept = { ...next, widgets: distinctWidgets([...card.widgets, ...(next.widgets ?? [])]) };
+    const responses = [...(card.responses ?? []), ...(next.responses ?? [])];
+    const kept = { ...next, widgets: distinctWidgets([...card.widgets, ...(next.widgets ?? [])]), ...(responses.length ? { responses } : {}) };
     this.store.put('cards', kept.id, kept);
     return kept;
   }
@@ -647,23 +651,37 @@ export class Inbox {
   }
 
   /** Templates and widgets keep every version, with the feedback each one answers. */
-  private saveVersion(kind: 'templates' | 'widgets', label: string, name: string, source: string, feedback?: string): Template {
+  private saveVersion(kind: 'templates' | 'widgets', label: string, name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Template {
     if (!/^[\w.-]{1,60}$/.test(String(name ?? ''))) throw new InboxError(400, `${label} name must be 1 to 60 letters, digits, dots, dashes or underscores`);
     if (!String(source ?? '').trim()) throw new InboxError(400, 'source is required');
     if (String(source).length > MAX_SOURCE_BYTES) throw new InboxError(413, `source must be at most ${MAX_SOURCE_BYTES} characters`);
     const before = this.store.get<Template>(kind, name);
     const versions = before?.versions ?? [];
     if (versions.length >= MAX_VERSIONS) throw new InboxError(400, `${label} ${name} has ${MAX_VERSIONS} versions, the most it keeps. Save it under a new name`);
-    const next: Template = { name, versions: [...versions, { version: versions.length + 1, source: String(source), feedback: feedback ? String(feedback) : undefined, at: this.now() }] };
+    for (const [k, v] of Object.entries(extra)) if (v !== undefined && String(v).length > MAX_SOURCE_BYTES) throw new InboxError(413, `${k} must be at most ${MAX_SOURCE_BYTES} characters`);
+    const when = String(extra.when ?? '').trim() || undefined;
+    const response = String(extra.response ?? '').trim() ? String(extra.response) : undefined;
+    const next: Template = { name, versions: [...versions, { version: versions.length + 1, source: String(source), feedback: feedback ? String(feedback) : undefined, ...(when ? { when } : {}), ...(response ? { response } : {}), at: this.now() }] };
     this.store.put(kind, name, next);
     return next;
   }
 
   // ---- widgets ----
 
-  saveWidget(name: string, source: string, feedback?: string): Template {
+  saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Template {
     if (!/^\s*root\s*=/m.test(String(source ?? ''))) throw new InboxError(400, 'a widget must define root, the part a card places');
-    return this.saveVersion('widgets', 'widget', name, source, feedback);
+    return this.saveVersion('widgets', 'widget', name, source, feedback, extra);
+  }
+
+  /** The widgets an agent can place, each with when to use it and the values it takes, as agents read them in the card guidance. */
+  widgetCatalog(): string {
+    const lines = this.listWidgets().map((w) => {
+      const v = w.versions.at(-1);
+      if (!v) return '';
+      const values = [...new Set([...v.source.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]))];
+      return `- ${w.name}: ${v.when ?? 'No hook: read its source with GET /v1/widgets/' + w.name + ' first.'}${values.length ? ` Its values: ${values.join(', ')}.` : ''}`;
+    }).filter(Boolean);
+    return lines.length ? `Widgets you can place in a card body with a line \`part = widget <name> {json values}\`:\n${lines.join('\n')}` : '';
   }
 
   getWidget(name: string): Template {
@@ -680,7 +698,7 @@ export class Inbox {
     const w = this.getWidget(name);
     const v = version === undefined ? w.versions.at(-1) : w.versions.find((x) => x.version === version);
     if (!v) throw new InboxError(404, `unknown version ${version} of widget ${name}`);
-    return { name, version: v.version, source: v.source };
+    return { name, version: v.version, source: v.source, ...(v.response ? { response: v.response } : {}) };
   }
 
   getTemplate(name: string): Template {
@@ -903,6 +921,8 @@ export class Inbox {
       forcedAt: null,
       previous: before ? [...before.previous, { ...before, previous: undefined } as Omit<Answer, 'previous'>] : [],
     };
+    const responses = (card.responses ?? []).map((r) => respond(r.template, values, r.values)).filter(Boolean);
+    if (responses.length) answer.responses = responses;
     for (const p of answer.previous) delete (p as Partial<Answer>).previous;
     this.store.put('answers', id, answer);
     this.store.index(id, `${searchText(card)}\n${answer.comment}`);

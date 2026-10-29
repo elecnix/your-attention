@@ -105,6 +105,10 @@ export interface TemplateVersion {
   source: string;
   /** The feedback this version answers. */
   feedback?: string;
+  /** For a widget: when an agent should place it, as the catalog shows it. */
+  when?: string;
+  /** For a widget: text for the agent, filled from the person's answer. See src/core/widgets.ts respond. */
+  response?: string;
   at: number;
 }
 
@@ -170,6 +174,8 @@ export interface Card {
   template?: { name: string; version: number };
   /** The widgets the body placed, each at the version it used. */
   widgets?: { name: string; version: number }[];
+  /** The responses of the widgets the body placed, with the values each was placed with. */
+  responses?: { widget: string; version: number; template: string; values: Record<string, unknown> }[];
   priority: Priority;
   /** A state label the agent sets, such as "waiting on CI". */
   status?: string;
@@ -207,6 +213,8 @@ export interface Answer {
   /** Form values by field name. Every field is optional. */
   values: Record<string, unknown>;
   comment: string;
+  /** The card's widget responses, filled from this answer. */
+  responses?: string[];
   delivery: Delivery;
   savedAt: number;
   deliveredAt: number | null;

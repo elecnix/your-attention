@@ -83,7 +83,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return `Saved template ${t.name} version ${t.versions.length}. Use it with card_post, template "${t.name}" and vars.`;
     }
     case 'card_widget_save': {
-      const w = await inbox.saveWidget(String(args['name'] ?? ''), String(args['source'] ?? ''), str(args['feedback']));
+      const w = await inbox.saveWidget(String(args['name'] ?? ''), String(args['source'] ?? ''), str(args['feedback']), { when: str(args['when']), response: str(args['response']) });
       return `Saved widget ${w.name} version ${w.versions.length}. Place it in a card body or a template with a line: part = widget ${w.name} {"name": "value"}.`;
     }
     case 'card_guidance': {
@@ -92,7 +92,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         return `Proposed the guidance on card ${card.id}. It changes only if the person approves it.`;
       }
       const g = await inbox.guidance();
-      return `Card guidance, version ${g.version}:\n${g.text}`;
+      return `Card guidance, version ${g.version}:\n${g.text}${g.widgets ? `\n\n${g.widgets}` : ''}`;
     }
     case 'card_ask_secret': {
       const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await origin() });

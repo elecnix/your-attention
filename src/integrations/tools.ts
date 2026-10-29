@@ -70,12 +70,16 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_widget_save',
-    description: 'Save a reusable part of a card, such as a pull request, in OpenUI Lang with {{name}} placeholders and a root statement. Cards and templates place it with a line `name = widget <widget> {json values}`, as often as they need. Saving the same name again makes a new version; give the feedback the new version answers.',
-    schema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string' }, feedback: { type: 'string' } }, required: ['name', 'source'] },
+    description: 'Save a reusable part of a card, such as a pull request, in OpenUI Lang with {{name}} placeholders and a root statement. Cards and templates place it with a line `name = widget <widget> {json values}`, as often as they need. Saving the same name again makes a new version; give the feedback the new version answers. card_guidance lists every widget with its `when`.',
+    schema: { type: 'object', properties: {
+      name: { type: 'string' }, source: { type: 'string' }, feedback: { type: 'string' },
+      when: { type: 'string', description: 'When an agent should place this widget, and how to fill its values. Agents read it in card_guidance.' },
+      response: { type: 'string', description: 'Text the agent gets with the answer, filled from it: {{field}} is a field\'s value, or the value the card placed the widget with. {{#field}}...{{/field}} shows when the field is on or filled, {{^field}}...{{/field}} when it is not.' },
+    }, required: ['name', 'source'] },
   },
   {
     name: 'card_guidance',
-    description: 'Read the shared guidance for writing cards, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it.',
+    description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it.',
     schema: { type: 'object', properties: { propose: { type: 'string', description: 'The new guidance text. Leave it out to read the current guidance.' } } },
   },
   {

@@ -12,6 +12,32 @@ export interface WidgetSource {
   name: string;
   version: number;
   source: string;
+  /** Text for the agent, filled from the person's answer. */
+  response?: string;
+}
+
+/** A placed widget's response, with the values the card placed it with. */
+export interface PlacedResponse {
+  widget: string;
+  version: number;
+  template: string;
+  values: Record<string, unknown>;
+}
+
+/** Whether an answer value counts as yes: true, text, a list or a check box group with an item on. */
+function truthy(v: unknown): boolean {
+  if (Array.isArray(v)) return v.length > 0;
+  if (v && typeof v === 'object') return Object.values(v).some(truthy);
+  return typeof v === 'string' ? v.trim() !== '' : Boolean(v);
+}
+
+/** Fill a response from the answer, and where the answer has no value, from the values the card placed the widget with.
+ * {{name}} is the value as text, {{#name}}...{{/name}} shows when the value counts as yes, and {{^name}}...{{/name}} when it does not. */
+export function respond(template: string, answer: Record<string, unknown>, placed: Record<string, unknown>): string {
+  const value = (k: string): unknown => (k in answer && answer[k] !== undefined && answer[k] !== '' ? answer[k] : placed[k]);
+  const text = (v: unknown): string => (v === undefined || v === null ? '' : typeof v === 'object' ? (Array.isArray(v) ? v.join(', ') : Object.keys(v).filter((x) => truthy((v as Record<string, unknown>)[x])).join(', ')) : String(v));
+  const sections = template.replace(/\{\{([#^])(\w+)\}\}([\s\S]*?)\{\{\/\2\}\}/g, (_, kind: string, k: string, inner: string) => (truthy(value(k)) === (kind === '#') ? inner : ''));
+  return sections.replace(/\{\{(\w+)\}\}/g, (_, k: string) => text(value(k))).trim();
 }
 
 const PLACE = /^(\s*)([A-Za-z_]\w*)\s*=\s*widget\s+([\w.-]+)(?:@(\d+))?\s*(.*)$/;
@@ -38,8 +64,9 @@ function rename(source: string, placed: string): string {
   return source.split(STRING).map((part, i) => (i % 2 ? part : part.replace(/(?<![@\w])[A-Za-z_]\w*/g, (n) => (defined.has(n) ? to(n) : n)))).join('');
 }
 
-export function expandWidgets(body: string, find: (name: string, version?: number) => WidgetSource, stack: string[] = [], budget = { left: MAX_PLACEMENTS }): { body: string; used: { name: string; version: number }[] } {
+export function expandWidgets(body: string, find: (name: string, version?: number) => WidgetSource, stack: string[] = [], budget = { left: MAX_PLACEMENTS }): { body: string; used: { name: string; version: number }[]; responses: PlacedResponse[] } {
   const used: { name: string; version: number }[] = [];
+  const responses: PlacedResponse[] = [];
   const lines = body.split('\n').map((line) => {
     const m = PLACE.exec(line);
     if (!m) return line;
@@ -55,7 +82,9 @@ export function expandWidgets(body: string, find: (name: string, version?: numbe
     const w = find(name, version === undefined ? undefined : Number(version));
     const inner = expandWidgets(fill(w.source, vars as Record<string, unknown>), find, [...stack, name], budget);
     used.push({ name: w.name, version: w.version }, ...inner.used);
+    if (w.response) responses.push({ widget: w.name, version: w.version, template: w.response, values: vars as Record<string, unknown> });
+    responses.push(...inner.responses);
     return rename(inner.body.trim(), placed).split('\n').map((l) => indent + l.trimStart()).join('\n');
   });
-  return { body: lines.join('\n'), used };
+  return { body: lines.join('\n'), used, responses };
 }

@@ -118,8 +118,9 @@ export class Client {
   patch(id: string, edits: { old: string; new: string }[], field?: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/patch`, { edits, field }); }
   status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
   saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
-  saveWidget(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback }); }
-  guidance(): Promise<Guidance> { return this.call('GET', '/v1/guidance'); }
+  saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
+  /** The card guidance, and the catalog of widgets an agent can place. */
+  guidance(): Promise<Guidance & { widgets?: string }> { return this.call('GET', '/v1/guidance'); }
   proposeGuidance(text: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text }); }
   reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
@@ -254,5 +255,7 @@ export function describeAnswer(card: Card, answer: Answer): string {
     lines.push(`${k}: ${label}`);
   }
   if (answer.comment) lines.push(`Comment: ${answer.comment}`);
+  // Each widget on the card can add text for the agent, filled from this answer, such as what to do next.
+  for (const r of answer.responses ?? []) lines.push('', r);
   return lines.join('\n') || 'An empty answer: the person sent nothing more.';
 }

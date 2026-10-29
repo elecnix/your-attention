@@ -5,6 +5,27 @@ import { SESSION_LINK, renderMarkdown } from './markdown.js';
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 
+// CheckWithText(label, check, [content]): a check box, and a label that shows the content when clicked, such as text the
+// person can edit before the agent uses it. Hovering the label previews the text. The label never ticks the box.
+function CheckWithText({ props, renderNode }) {
+  const [open, setOpen] = React.useState(false);
+  const [tip, setTip] = React.useState('');
+  const box = React.useRef(null);
+  const preview = () => setTip([...(box.current ? box.current.querySelectorAll('textarea, input') : [])].map((el) => el.value).filter(Boolean).join('\n\n'));
+  React.useEffect(preview, []);
+  return h('div', { className: 'check-with-text' },
+    h('div', { className: 'row' }, renderNode(props.check),
+      h('button', { type: 'button', className: 'reveal', 'aria-expanded': open, title: tip, onMouseEnter: preview, onFocus: preview, onClick: () => setOpen((o) => !o) }, props.label)),
+    // The content stays rendered while hidden, so its fields keep their values and send them with the answer.
+    h('div', { ref: box, className: 'revealed', hidden: !open, onInput: preview }, renderNode(props.content)));
+}
+const { FormControl, AccordionItem } = openuiChatLibrary.components;
+const checkWithTextProps = FormControl.props.pick({ label: true }).extend({ check: FormControl.props.shape.input, content: AccordionItem.props.shape.content });
+const library = openuiChatLibrary.extend({ components: { add: [{
+  component: { name: 'CheckWithText', props: checkWithTextProps, ref: checkWithTextProps, description: 'A check box with a label that shows editable content when clicked.', component: CheckWithText },
+  slots: ['Card.children', 'FormControl.input'],
+}] } });
+
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
   // A body with forms of its own keeps them where the agent placed them, and gets the comment and buttons below.
@@ -226,7 +247,7 @@ export function CardView({ draftKey, response, onAction }) {
     onStateUpdate: (s) => { stateRef.current = s; store.set(draftKey, s); },
     onAction: (ev) => actionRef.current({ ...ev, formState: stateRef.current || ev.formState }),
   }), [draftKey]);
-  return h(Renderer, { response, library: openuiChatLibrary, initialState, ...handlers });
+  return h(Renderer, { response, library, initialState, ...handlers });
 }
 
 // A card the agent closed while you looked at it: it collapses to its outcome, and opens again on demand.
