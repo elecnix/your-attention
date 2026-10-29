@@ -11,7 +11,8 @@ export function bodyErrors(body: string): string[] {
   parser ??= createParser(LIBRARY as Parameters<typeof createParser>[0], 'root');
   const { root, meta } = parser.parse(body);
   const starts = statementStarts(body);
-  if (!starts.some((s) => s.name === 'root')) return ['the body has no `root = ...` statement. Put Markdown in text, and OpenUI Lang in body.'];
+  // Any line that reads as a root statement counts, even one an unclosed string hides, so that error names the string.
+  if (!/^[ \t]*root[ \t]*=/m.test(body)) return ['the body has no `root = ...` statement. Put Markdown in text, and OpenUI Lang in body.'];
   const errors: string[] = [];
   if (meta.incomplete) {
     const last = starts[meta.statementCount - 1];

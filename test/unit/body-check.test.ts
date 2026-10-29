@@ -40,6 +40,8 @@ describe('card body check', () => {
 
   it('refuses a body with no root statement, such as Markdown', () => {
     assert.match(bodyErrors('I posted a preview.\n\n**What to check:** the thread.').join('\n'), /no `root = \.\.\.` statement.*text/);
+    // A root after an unclosed string is still there: the error names the string.
+    assert.match(bodyErrors('a = TextContent("oops)\nroot = Card([a])').join('\n'), /`a` \(line 1\) has a string that never closes/);
   });
 
   it('refuses such a card at post and at patch, and the error says how to fix it', () => {
