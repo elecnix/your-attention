@@ -38,7 +38,6 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 - Node runs the TypeScript sources directly, so write only syntax that Node can erase. Enums, namespaces and parameter properties fail at run time. Import local files with their `.ts` extension and types with `import type`.
 - Logs from the Claude Code channel go to stderr, because stdout carries the MCP protocol.
 - The herdr integration may send keys only to the pane of its own session. Never send keys to another pane.
-- Start or restart the laptop inbox outside your harness's command sandbox. A server started inside it answers on localhost, but a phone on the network gets a failed connection.
 - Each user-visible string names the thing it shows. The person may leave any answer field empty.
 
 ## Commands
