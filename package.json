@@ -45,7 +45,6 @@
     "dompurify": "3.4.17",
     "mermaid": "11.17.2",
     "qrcode-generator": "2.0.4",
-    "typebox": "1.4.3",
     "ws": "8.22.0"
   },
   "devDependencies": {
@@ -58,8 +57,12 @@
     "jsqr": "1.4.0",
     "storybook": "10.6.4",
     "tsc-rs": "0.8.0",
+    "typebox": "1.4.3",
     "vite": "8.3.5",
     "wrangler": "4.153.0",
     "zod": "4.6.7"
+  },
+  "peerDependencies": {
+    "typebox": "*"
   }
 }
