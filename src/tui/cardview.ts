@@ -267,7 +267,9 @@ export class CardView {
       address: this.host.address(card.id),
       onAction: (action) => this.host.act(this, action),
     };
-    const result = parse(terminalSource(card, s.cards));
+    // A body stored before the inbox checked bodies may not draw whole: the inbox sends what the page draws in its place.
+    if (card.bodyFallback) doc.para([{ text: 'Warning: part of this card did not draw, because its body has an error. The source from that error on is at the end of the card.', style: st.warn }]);
+    const result = parse(terminalSource(card.bodyFallback ? { ...card, body: card.bodyFallback.body } : card, s.cards));
     if (!result) doc.para([{ text: 'Loading the form…', style: st.dim }]);
     else {
       this.renderer = new BodyRenderer(doc, ctx);

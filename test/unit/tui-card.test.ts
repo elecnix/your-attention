@@ -199,4 +199,11 @@ describe('Markdown in the card pane', () => {
     const d = new Date(String(t.view.answer().values['when']));
     assert.deepEqual([d.getFullYear(), d.getMonth(), d.getDate()], [42, 5, 15]);
   });
+
+  it('draws the fallback the inbox sends for a body that does not draw whole, with the page warning', () => {
+    const t = setup(card({ id: 'fb', title: 'Broken', body: 'root = Card([a, b])\na = TextContent("ok")\nb = Nope(', bodyFallback: { body: 'root = Card([a, src])\na = TextContent("ok")\nsrc = CodeBlock("text", "b = Nope(")', faults: ['b'] } }));
+    const text = t.text();
+    assert.match(text, /Warning: part of this card did not draw/);
+    assert.match(text, /│ b = Nope\(/);
+  });
 });
