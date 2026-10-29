@@ -1,7 +1,8 @@
 // Measures the CPU time of the hosted inbox's request paths on the largest inputs it accepts, against the 10 ms that the
 // Workers Free plan gives each request. It runs the Durable Object's inbox, with its storage adapter on node:sqlite, and
 // each path in a fresh process, so the first request pays for compiling the code as it would in a new isolate.
-// Run it with `npm run cpu-budget`. It exits with 1 when a path goes over the budget.
+// Run it with `npm run cpu-budget`. It exits with 1 when the warm median of a path goes over the budget. The first request
+// prints for information only: in Node it also compiles the JavaScript fetch classes, which workerd implements natively.
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { DurableSqlStorage } from '../src/cloudflare/storage.ts';
