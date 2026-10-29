@@ -16,7 +16,7 @@ Reviewers, human or automated, check the diff against PRINCIPLES.md and block a 
 
 ```
 src/core/          the protocol: types, the single-writer inbox, the HTTP handler. Web standards only.
-src/adapters/      SQLite storage and mDNS discovery for the laptop build
+src/adapters/      SQLite storage and mDNS discovery for the laptop build, and the Mermaid check both builds use
 src/node/          the Node HTTP server and the home directory
 src/integrations/  Claude Code (MCP channel, AskUserQuestion hooks), pi, herdr
 src/client.ts      the client every integration uses

@@ -19,7 +19,76 @@ function CheckWithText({ props, renderNode }) {
     // The content stays rendered while hidden, so its fields keep their values and send them with the answer.
     h('div', { ref: box, className: 'revealed', hidden: !open, onInput: preview }, renderNode(props.content)));
 }
-const { FormControl, AccordionItem } = openuiChatLibrary.components;
+// Mermaid(source): a diagram, drawn with the mermaid build the inbox serves. The inbox checked the source with
+// this version when the card was posted, so it draws. Diagrams draw one at a time, since mermaid keeps one in progress.
+export const MERMAID_VERSION = '11.17.2';
+let mermaidLoad = null;
+let drawing = Promise.resolve();
+let drawn = 0;
+function loadMermaid() {
+  mermaidLoad ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = `${BASE}vendor/mermaid.min.js?v=${MERMAID_VERSION}`;
+    s.onload = () => resolve(window.mermaid);
+    s.onerror = () => { mermaidLoad = null; s.remove(); reject(new Error('the diagram renderer did not load')); };
+    document.head.append(s);
+  });
+  return mermaidLoad;
+}
+export const isDark = () => document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+// The base theme takes the page's colors, so a diagram reads in the light theme and in the dark one.
+function diagramTheme() {
+  const root = getComputedStyle(document.documentElement);
+  const t = (name) => root.getPropertyValue(name).trim();
+  const dark = isDark();
+  return { theme: 'base', darkMode: dark, fontFamily: t('--font-text'), themeVariables: {
+    darkMode: dark, fontFamily: t('--font-text'), background: t('--panel'), textColor: t('--ink'), titleColor: t('--ink'), lineColor: t('--muted'),
+    primaryColor: t('--info-bg'), primaryTextColor: t('--ink'), primaryBorderColor: t('--info'),
+    secondaryColor: t('--ok-bg'), secondaryTextColor: t('--ink'), secondaryBorderColor: t('--ok'),
+    tertiaryColor: t('--bg'), tertiaryTextColor: t('--ink'), tertiaryBorderColor: t('--line'),
+    clusterBkg: t('--bg'), clusterBorder: t('--line'), edgeLabelBackground: t('--panel'),
+    noteBkgColor: t('--warn-bg'), noteTextColor: t('--ink'), noteBorderColor: t('--warn'),
+    actorBkg: t('--info-bg'), actorBorder: t('--info'), actorTextColor: t('--ink'), actorLineColor: t('--muted'), signalColor: t('--ink'), signalTextColor: t('--ink'),
+  } };
+}
+function drawDiagram(source) {
+  const run = drawing.then(async () => {
+    const mermaid = await loadMermaid();
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true, ...diagramTheme() });
+    return (await mermaid.render(`diagram-${++drawn}`, source)).svg;
+  });
+  drawing = run.catch(() => {});
+  return run;
+}
+function useDark() {
+  const [dark, setDark] = React.useState(isDark);
+  React.useEffect(() => {
+    const q = matchMedia('(prefers-color-scheme: dark)');
+    const on = () => setDark(isDark());
+    q.addEventListener('change', on);
+    // A page that sets data-theme on the root switches the theme too.
+    const attr = new MutationObserver(on);
+    attr.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => { q.removeEventListener('change', on); attr.disconnect(); };
+  }, []);
+  return dark;
+}
+export function Diagram({ source }) {
+  const dark = useDark();
+  const [drawn, setDrawn] = React.useState({ svg: '', failed: '' });
+  React.useEffect(() => {
+    let live = true;
+    drawDiagram(source).then((svg) => live && setDrawn({ svg, failed: '' }), (e) => live && setDrawn({ svg: '', failed: String(e?.message || e) }));
+    return () => { live = false; };
+  }, [source, dark]);
+  // Should drawing fail all the same, such as when the renderer does not load, the person reads the source.
+  if (drawn.failed) return h('pre', { className: 'diagram-source', title: `The diagram did not draw: ${drawn.failed}` }, h('code', null, source));
+  // mermaid's strict security level sanitizes the SVG it returns.
+  return h('figure', { className: 'diagram', role: 'img', 'aria-label': `Diagram: ${source.split('\n')[0]}`, dangerouslySetInnerHTML: { __html: drawn.svg } });
+}
+
+const { FormControl, AccordionItem, CodeBlock } = openuiChatLibrary.components;
+const mermaidProps = FormControl.props.pick({}).extend({ source: CodeBlock.props.shape.codeString });
 const checkWithTextProps = FormControl.props.pick({ label: true }).extend({ check: FormControl.props.shape.input, content: AccordionItem.props.shape.content });
 // A field label reads Markdown, as card text does, so a label can link to the pull request it asks about.
 const PlainFormControl = FormControl.component;
@@ -28,6 +97,10 @@ const library = openuiChatLibrary.extend({ components: {
   add: [{
     component: { name: 'CheckWithText', props: checkWithTextProps, ref: checkWithTextProps, description: 'A check box with a label that shows editable content when clicked.', component: CheckWithText },
     slots: ['Card.children', 'FormControl.input'],
+  }, {
+    component: { name: 'Mermaid', props: mermaidProps, ref: mermaidProps, description: 'A diagram drawn from Mermaid source.', component: ({ props }) => h(Diagram, { source: String(props.source ?? '') }) },
+    // Wherever a CodeBlock can go.
+    slots: ['Card.children', 'SectionItem.content', 'TabItem.content', 'AccordionItem.content', 'Carousel.children'],
   }],
   override: [{ ...FormControl, component: MarkdownFormControl }],
 } });
@@ -341,14 +414,16 @@ export async function openSessionLink(href, el) {
 
 // Card text with [[card-id]] links. A link shows the linked card title, and its text on hover.
 // Card text is Markdown, and [[card-id]] links to another card by its title.
-export function LinkedText({ text, byId, open }) {
+// A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
+export function LinkedText({ text, byId, open, diagrams = true }) {
   const cardLink = (id, key) => {
     const target = byId[id];
     if (!target) return h('span', { key, className: 'dead-link', title: 'This card is not in the inbox' }, id);
     const preview = [target.title, target.text].filter(Boolean).join('\n\n').slice(0, 400);
     return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
   };
-  return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true }));
+  const diagram = diagrams ? (source, key) => h(Diagram, { key, source }) : undefined;
+  return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram }));
 }
 
 export const isImage = (t) => /^image\/(png|jpeg|gif|webp)$/.test(t);
@@ -426,7 +501,7 @@ function frameTheme() {
   document.body.append(probe);
   const bodyText = getComputedStyle(probe).color;
   probe.remove();
-  const dark = document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const dark = isDark();
   return `<style>:root{color-scheme:${dark ? 'dark' : 'light'}}`
     + `html,body{background:${token('--panel')} !important;color:${bodyText} !important;font-family:${token('--font-text')} !important;`
     + `font-size:${size} !important;line-height:1.5 !important;font-weight:200 !important;letter-spacing:.02em !important}`

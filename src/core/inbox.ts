@@ -6,7 +6,8 @@ import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
-import { distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
+import { checkDiagrams, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
+import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { Usage } from './telemetry.ts';
@@ -35,6 +36,8 @@ export interface InboxOptions {
   attachmentReadsPerDay?: number | undefined;
   /** PBKDF2 iterations for a new PIN hash. The Workers runtime computes at most 100,000. */
   pinIterations?: number | undefined;
+  /** Checks each Mermaid diagram before the inbox takes the card. Without it, the inbox takes no card with a diagram. */
+  checkDiagram?: DiagramCheck | undefined;
 }
 
 export const SYSTEM_AGENT = 'system';
@@ -109,6 +112,7 @@ export class Inbox {
   private readonly uploadLimit: number | undefined;
   private readonly storageLimit: number | undefined;
   private readonly readsPerDay: number | undefined;
+  private readonly checkDiagram: DiagramCheck | undefined;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
@@ -136,6 +140,7 @@ export class Inbox {
     this.uploadLimit = opts.uploadLimitBytes;
     this.storageLimit = opts.storageLimitBytes;
     this.readsPerDay = opts.attachmentReadsPerDay;
+    this.checkDiagram = opts.checkDiagram;
     this.usage = new Usage(store, now);
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
@@ -311,7 +316,8 @@ export class Inbox {
 
   // ---- cards ----
 
-  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>): Card {
+  /** `checked` holds what checkCard found for the card's diagrams. A card with a diagram it does not hold is refused. */
+  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams): Card {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
     const title = String(input.title ?? '').trim();
     if (!title) throw new InboxError(400, 'title is required');
@@ -338,20 +344,10 @@ export class Inbox {
     const now = this.now();
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
-    let body = input.body;
-    let template: Card['template'];
-    if (input.template) {
-      const t = this.getTemplate(String(input.template.name));
-      const v = input.template.version === undefined ? t.versions.at(-1) : t.versions.find((x) => x.version === input.template?.version);
-      if (!v) throw new InboxError(404, 'unknown template version');
-      body = fill(v.source, input.template.vars ?? {});
-      template = { name: t.name, version: v.version };
-    }
+    const { body, template, expanded } = this.cardBody(input);
     let widgets = before?.widgets;
     let responses = before?.responses;
-    if (body !== undefined) {
-      const expanded = expandWidgets(String(body), (name, version) => this.widgetVersion(name, version));
-      body = expanded.body;
+    if (expanded) {
       widgets = expanded.used.length ? distinctWidgets(expanded.used) : undefined;
       responses = expanded.responses.length ? expanded.responses : undefined;
     }
@@ -417,6 +413,8 @@ export class Inbox {
       closed: before?.closed?.kind === 'returned' ? undefined : before?.closed,
       replies: before?.replies ?? [],
     };
+    // The inbox's own system cards quote an agent's words, such as proposed guidance, and the page shows a diagram there as its source.
+    if (kind !== 'system' || caller.token !== '') requireChecked(findDiagrams(card), checked);
     // Replies and history have their own caps, so a card with many replies can still be revised.
     const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined })).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
@@ -437,6 +435,27 @@ export class Inbox {
     // Agent cards go through the card.created hook before the person sees them.
     if ((kind === 'ask' || kind === 'secret') && caller.token !== '') return this.requestTriage(card);
     return card;
+  }
+
+  /** The body a card shows: its template filled, and its widgets placed. */
+  private cardBody(input: NewCard): { body: string | undefined; template?: Card['template']; expanded?: ReturnType<typeof expandWidgets> } {
+    let body = input.body;
+    let template: Card['template'];
+    if (input.template) {
+      const t = this.getTemplate(String(input.template.name));
+      const v = input.template.version === undefined ? t.versions.at(-1) : t.versions.find((x) => x.version === input.template?.version);
+      if (!v) throw new InboxError(404, 'unknown template version');
+      body = fill(v.source, input.template.vars ?? {});
+      template = { name: t.name, version: v.version };
+    }
+    if (body === undefined) return { body, template };
+    const expanded = expandWidgets(String(body), (name, version) => this.widgetVersion(name, version));
+    return { body: expanded.body, template, expanded };
+  }
+
+  /** Parse every diagram the card would show, before the card commits. An await sits here, so the commit reads everything again. */
+  private checkCard(input: NewCard): Promise<CheckedDiagrams> {
+    return checkDiagrams(findDiagrams({ text: input.text, recommendation: input.recommendation, body: this.cardBody(input).body }), this.checkDiagram);
   }
 
   // ---- extensions and hooks ----
@@ -571,8 +590,10 @@ export class Inbox {
   /** Post a card whose attachments include data: URLs. The bytes go to the blob store first,
    * then the card commits in one synchronous step, and the files it replaced are deleted. */
   async postCardWithFiles(caller: Caller, input: NewCard): Promise<Card> {
+    if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
+    const checked = await this.checkCard(input);
     const files = input.attachments;
-    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input);
+    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input, undefined, checked);
     if (files.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
     const id = input.id ? String(input.id) : randomId(8);
     // Check the id before it goes into a blob key.
@@ -614,7 +635,7 @@ export class Inbox {
     try {
       // Read the card again right before the commit, with no await between: another update may have landed meanwhile.
       prior = this.store.get<Card>('cards', id);
-      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')));
+      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')), checked);
     } catch (e) {
       await refund();
       throw e;
@@ -655,7 +676,25 @@ export class Inbox {
   }
 
   /** Edit a card the way a coding agent edits a file: each edit replaces text that occurs exactly once. */
-  patchCard(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string): Card {
+  patchCard(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string, checked?: CheckedDiagrams): Card {
+    const { card, input } = this.patched(caller, id, edits, field);
+    const next = this.postCard(caller, input, undefined, checked);
+    // A patch edits the body the widgets already filled, so the card still shows them and keeps their responses, and any the patch placed.
+    if (!card.widgets) return next;
+    const responses = [...(card.responses ?? []), ...(next.responses ?? [])];
+    const kept = { ...next, widgets: distinctWidgets([...card.widgets, ...(next.widgets ?? [])]), ...(responses.length ? { responses } : {}) };
+    this.store.put('cards', kept.id, kept);
+    return kept;
+  }
+
+  /** patchCard, with the diagrams of the patched card checked first. */
+  async patchCardChecked(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string): Promise<Card> {
+    const checked = await this.checkCard(this.patched(caller, id, edits, field).input);
+    return this.patchCard(caller, id, edits, field, checked);
+  }
+
+  /** The card a patch would post, and the card it edits. */
+  private patched(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string): { card: Card; input: NewCard } {
     const card = this.owned(caller, id);
     const f = field ?? (card.body !== undefined ? 'body' : card.html !== undefined ? 'html' : 'text');
     if (!PATCH_FIELDS.has(f)) throw new InboxError(400, `field must be one of ${[...PATCH_FIELDS].join(', ')}`);
@@ -670,13 +709,7 @@ export class Inbox {
       text = text.replace(old, () => String(e.new ?? ''));
     }
     const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, widgets: _w, responses: _rs, ...rest } = card;
-    const next = this.postCard(caller, { ...rest, [f]: text });
-    // A patch edits the body the widgets already filled, so the card still shows them and keeps their responses, and any the patch placed.
-    if (!card.widgets) return next;
-    const responses = [...(card.responses ?? []), ...(next.responses ?? [])];
-    const kept = { ...next, widgets: distinctWidgets([...card.widgets, ...(next.widgets ?? [])]), ...(responses.length ? { responses } : {}) };
-    this.store.put('cards', kept.id, kept);
-    return kept;
+    return { card, input: { ...rest, [f]: text } };
   }
 
   /** The agent sets a state label on its own card. An empty label clears it. */
@@ -715,6 +748,7 @@ export class Inbox {
 
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Template {
     if (!/^\s*root\s*=/m.test(String(source ?? ''))) throw new InboxError(400, 'a widget must define root, the part a card places');
+    if (BUILTIN_WIDGETS.some((w) => w.name === name)) throw new InboxError(400, `${name} is a built-in widget: save yours under another name`);
     return this.saveVersion('widgets', 'widget', name, source, feedback, extra);
   }
 
@@ -730,13 +764,14 @@ export class Inbox {
   }
 
   getWidget(name: string): Template {
-    const w = this.store.get<Template>('widgets', name);
+    const w = BUILTIN_WIDGETS.find((x) => x.name === name) ?? this.store.get<Template>('widgets', name);
     if (!w) throw new InboxError(404, `unknown widget ${name}`);
     return w;
   }
 
+  /** The built-in widgets first, then the saved ones. */
   listWidgets(): Template[] {
-    return this.store.list<Template>('widgets');
+    return [...BUILTIN_WIDGETS, ...this.store.list<Template>('widgets').filter((w) => !BUILTIN_WIDGETS.some((b) => b.name === w.name))];
   }
 
   private widgetVersion(name: string, version?: number): WidgetSource {

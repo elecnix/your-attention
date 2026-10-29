@@ -2,6 +2,7 @@
 // at a time, and it hibernates when idle: agent sockets stay open, and the
 // object rebuilds each connection from the socket's attachment when it wakes.
 import { COOKIE, createHandler } from '../core/http.ts';
+import { checkMermaid } from '../adapters/mermaid.ts';
 import { Inbox } from '../core/inbox.ts';
 import { WORKERS_PIN_ITERATIONS, validPin } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
@@ -88,6 +89,7 @@ export class InboxObject {
       storageLimitBytes: limit(env.STORAGE_LIMIT_BYTES),
       attachmentReadsPerDay: limit(env.ATTACHMENT_READS_PER_DAY),
       pinIterations: WORKERS_PIN_ITERATIONS,
+      checkDiagram: checkMermaid,
     });
     // Open requests keep the object awake and billed, so events go over hibernating WebSockets only.
     this.handle = createHandler(this.inbox, { heartbeatMs: 2000, streams: false, telemetry: { source: 'hosted', destination: 'the operator of this hosted service', blocked: () => this.usageBlocked() } });

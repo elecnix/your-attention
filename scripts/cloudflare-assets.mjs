@@ -13,4 +13,6 @@ const vendor = path.resolve('node_modules/@openuidev/browser-bundle/dist');
 for (const f of fs.readdirSync(vendor)) fs.copyFileSync(path.join(vendor, f), path.join(out, 'vendor', f));
 // The QR encoder the phone link draws with.
 fs.copyFileSync(path.resolve('node_modules/qrcode-generator/dist/qrcode.mjs'), path.join(out, 'vendor', 'qrcode.mjs'));
+// The diagram renderer, the version the inbox checks diagrams with.
+fs.copyFileSync(path.resolve('node_modules/mermaid/dist/mermaid.min.js'), path.join(out, 'vendor', 'mermaid.min.js'));
 console.log(`assets in ${out}`);

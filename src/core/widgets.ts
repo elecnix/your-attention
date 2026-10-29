@@ -7,6 +7,19 @@
 // the way a template is. The widget's root takes the placed name, and its other
 // names get the placed name as a prefix, so one widget can appear twice in a card.
 import { InboxError } from './inbox.ts';
+import type { Template } from './types.ts';
+
+/** Widgets every inbox has. The page draws the components they place. */
+export const BUILTIN_WIDGETS: Template[] = [{
+  name: 'mermaid',
+  builtin: true,
+  versions: [{
+    version: 1,
+    source: 'root = Mermaid({{source}})',
+    when: 'A diagram drawn from Mermaid source, such as a flowchart, a sequence or a state diagram. Put the source in `source`, or write `name = Mermaid("flowchart TD\\n  A --> B")` in the body. In card text, a ```mermaid block draws the same diagram. The inbox parses each diagram with mermaid when the card is posted or patched, and answers 400 with mermaid\'s error for one it cannot draw.',
+    at: 0,
+  }],
+}];
 
 export interface WidgetSource {
   name: string;

@@ -41,6 +41,8 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "@openuidev/browser-bundle": "0.2.1",
     "bonjour-service": "1.4.4",
+    "dompurify": "3.4.17",
+    "mermaid": "11.17.2",
     "qrcode-generator": "2.0.4",
     "typebox": "1.4.3",
     "ws": "8.22.0"

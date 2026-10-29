@@ -169,6 +169,18 @@ describe('the hosted Cloudflare build', () => {
     assert.equal(await res.text(), '# From R2');
   });
 
+  it('checks each Mermaid diagram with mermaid in workerd, and serves the renderer the page draws with', async () => {
+    const client = new Client({ url: inbox, token: agent });
+    const flow = 'flowchart TD\n  A[Agent] --> B{Parses?}\n  B -- yes --> C[Shown]';
+    const card = await client.post({ id: 'cf-diagram', agent: 'cf', title: 'Diagram', text: `\`\`\`mermaid\n${flow}\n\`\`\``, body: `root = Card([seq])\nseq = Mermaid(${JSON.stringify('sequenceDiagram\n  A->>B: hi')})` });
+    assert.equal(card.version, 1);
+    await assert.rejects(client.post({ id: 'cf-bad-diagram', agent: 'cf', title: 'Bad', text: '```mermaid\nflowchart TD\n  A -. text .->|label| B\n```' }), /text, the diagram on line 1 does not parse[\s\S]*Parse error on line 2/);
+    await assert.rejects(client.patch('cf-diagram', [{ old: 'B -- yes --> C[Shown]', new: 'B -. text .->|label| C' }], 'text'), /does not parse/);
+    const renderer = await fetch(`${inbox}/vendor/mermaid.min.js`);
+    assert.equal(renderer.status, 200);
+    assert.ok((await renderer.arrayBuffer()).byteLength > 1_000_000);
+  });
+
   it('searches past answers in the Durable Object storage', async () => {
     const hits = await new Client({ url: inbox, token: agent }).search('workerd');
     assert.ok(hits.some((h) => h.card.id === 'cf-ws'));

@@ -3,6 +3,8 @@
 // inline code, bold, italic, links to http, https and mailto addresses, and bare
 // http and https addresses. With a cardLink option, [[card-id]] becomes what it returns.
 // A herdr link, https://herdr.invalid/v1/..., is a session link: the page opens it in herdr.
+// With a diagram option, a ```mermaid block becomes what it returns. src/core/diagrams.ts finds the same blocks to check them.
+export const MERMAID_FENCE = /^```\s*mermaid(\s|$)/i;
 export const SESSION_LINK = /^https:\/\/herdr\.invalid\/v1\//;
 const URL_TAIL = /[.,;:!?'"*_]+$/;
 const WORD_CHAR = /[\p{L}\p{N}]/u;
@@ -69,7 +71,8 @@ export function renderMarkdown(h, src, opts = {}) {
       const code = [];
       for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
       i++;
-      blocks.push(h('pre', { key: key() }, h('code', null, code.join('\n'))));
+      if (opts.diagram && MERMAID_FENCE.test(line)) blocks.push(opts.diagram(code.join('\n'), key()));
+      else blocks.push(h('pre', { key: key() }, h('code', null, code.join('\n'))));
     } else if (/^#{1,6}\s/.test(line)) {
       const level = /^#+/.exec(line)[0].length;
       blocks.push(h(`h${Math.min(level + 2, 6)}`, { key: key() }, ins(line.replace(/^#+\s*/, ''), key())));

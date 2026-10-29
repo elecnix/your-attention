@@ -115,6 +115,8 @@ export interface TemplateVersion {
 export interface Template {
   name: string;
   versions: TemplateVersion[];
+  /** A widget every inbox has, such as mermaid. No one can save over it. */
+  builtin?: true;
 }
 
 export interface Guidance {

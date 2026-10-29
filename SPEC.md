@@ -151,7 +151,7 @@ The inbox refuses any other value on a secret card, so plain text never reaches 
 
 `POST /v1/cards/<id>/status {status}` sets the agent's state label. An empty label clears it.
 
-The page renders `text` as Markdown: headings, lists, block quotes, fenced code, tables, inline code, bold, italic, and links to http, https and mailto addresses. A bare http or https address becomes a link, and a line break stays a line break. A link with any other scheme shows its label only. The page draws `recommendation` below the text on every kind of card, with a **Recommendation** label and a line in the accent color at its left, in Markdown at the text's size. It has no fill, so it never looks like a picked option. A field label in a body reads inline Markdown too, so a `FormControl` label can link to the pull request it asks about. Text in `text` links to another card with `[[card-id]]`. The page shows the title of the linked card and previews its text on hover. Below the card you have open, it lists the cards that link to it.
+The page renders `text` as Markdown: headings, lists, block quotes, fenced code, tables, inline code, bold, italic, and links to http, https and mailto addresses. A bare http or https address becomes a link, and a line break stays a line break. A link with any other scheme shows its label only. The page draws `recommendation` below the text on every kind of card, with a **Recommendation** label and a line in the accent color at its left, in Markdown at the text's size. It has no fill, so it never looks like a picked option. A ```` ```mermaid ```` fenced block in `text` or `recommendation` draws as a diagram, as [Diagrams](#diagrams) describes. A field label in a body reads inline Markdown too, so a `FormControl` label can link to the pull request it asks about. Text in `text` links to another card with `[[card-id]]`. The page shows the title of the linked card and previews its text on hover. Below the card you have open, it lists the cards that link to it.
 
 Agents point at another agent's session with a herdr link, `[label](https://herdr.invalid/v1/<kind>/<id>)`. The kind is `agent`, `pane`, `tab` or `workspace`, and herdr's session fingerprint may come before it. An orchestrator uses one to report on a blocked agent in another tab. The page shows the link as a terminal chip in the card's text, body, Markdown files and HTML. A click keeps the page where it is. The page sends the link to `POST /v1/focus`, which only the owner may call. The inbox then runs `herdr agent focus`, `tab focus` or `workspace focus` on this computer. For a shell pane without an agent, the inbox opens the pane's tab. The id uses letters, digits, `_`, `:`, `.` and `-`, and never starts with a dash. A hosted inbox has no herdr, so it answers 501 and the chip shows the error.
 
@@ -206,7 +206,32 @@ A widget version can also carry `when` and `response`, as `POST /v1/widgets {nam
 
 `response` is text for the agent. When the person answers, the inbox fills it and stores it in the answer's `responses`. The agent reads it after the answer fields. `{{field}}` is the answer's value for that field. When the answer has no value for a field, the inbox uses the value that the card placed the widget with, so a prefilled field the person never edits still counts. `{{#field}}...{{/field}}` shows its text when the field is on or filled, and `{{^field}}...{{/field}}` when it is off or empty. A check box group counts as on when one of its items is on. A response can tell the agent what to do next, such as where to post a message the person approved.
 
-The page adds one component to OpenUI's: `CheckWithText(label, check, [content])`. It shows a check box and a label. A click on the label shows or hides the content, such as a `TextArea` the person can edit, and it leaves the box as it was. Hovering the label previews the text of the content's fields. The content stays on the page while hidden, so its fields send their values with the answer. A `FormControl` or a `Card` can hold it.
+The page adds two components to OpenUI's. `Mermaid(source)` draws a diagram, as [Diagrams](#diagrams) describes. `CheckWithText(label, check, [content])` It shows a check box and a label. A click on the label shows or hides the content, such as a `TextArea` the person can edit, and it leaves the box as it was. Hovering the label previews the text of the content's fields. The content stays on the page while hidden, so its fields send their values with the answer. A `FormControl` or a `Card` can hold it.
+
+## Diagrams
+
+A card draws [Mermaid](https://mermaid.js.org) diagrams in two places:
+
+- In `text` and `recommendation`, a fenced block whose first line is ```` ```mermaid ```` draws its lines as a diagram.
+- In `body`, the `Mermaid(source)` component draws one. Its source must be a string literal in double or single quotes, such as `flow = Mermaid("flowchart TD\n  A --> B")`, and the inbox refuses a reference to another statement. The inbox reads the body as OpenUI does, so it skips a call in a `//` or `#` comment. A `Card`, `SectionItem`, `TabItem`, `AccordionItem` or `Carousel` can hold it, as for a `CodeBlock`.
+
+Every inbox has the built-in widget `mermaid`, version 1, which places `Mermaid` with its `source` value: `flow = widget mermaid {"source": "flowchart TD\n  A --> B"}`. `GET /v1/widgets` lists it first, with `builtin: true`, and the catalog in `GET /v1/guidance` lists it with the saved widgets. Saving a widget named `mermaid` answers 400.
+
+When an agent posts or patches a card, the inbox parses each diagram with mermaid 11.17.2, after it fills a template and places widgets. That covers `POST /v1/cards`, `card_patch`, and a widget or template that expands into a diagram. The inbox refuses a diagram that does not parse with 400. Its message names where the diagram is and quotes mermaid's error. For a dotted link with text and a pipe label, mermaid's error reads:
+
+```
+The Mermaid diagram in text, the diagram on line 3 does not parse, so the inbox did not take the card. Mermaid 11.17.2 says:
+Parse error on line 2:
+...t TD  A -. text .->|label| B
+----------------------^
+Expecting 'AMP', 'COLON', 'DOWN', 'DEFAULT', 'NUM', 'COMMA', 'NODE_STRING', 'BRKT', 'MINUS', 'MULT', 'UNICODE_TEXT', got 'PIPE'
+```
+
+The check also refuses a diagram over mermaid's limits, which the page would refuse to draw: more than 500 edges, or more than 50,000 characters. A card shows at most 20 diagrams. The inbox checks a card's diagrams before it commits the card, with no await between the commit and the reads it depends on. A widget that changes during the check makes the post answer 409, and the agent posts again.
+
+Both builds parse with the same mermaid package, in the inbox process. On a laptop that is Node, and on Cloudflare it is the Durable Object. Mermaid's parser calls DOMPurify on labels, and DOMPurify needs a DOM, which neither runtime has. Where DOMPurify doesn't find a usable DOM, it returns the text unchanged, and the inbox gives it that behavior here. The inbox doesn't set a browser global. Mermaid loads on the first diagram, so an inbox without diagrams never loads it.
+
+The page draws each diagram with `vendor/mermaid.min.js`, which the inbox serves from its own mermaid package. So the page draws offline, with mermaid 11.17.2, as the check used. It loads the file when it first shows a diagram. It draws with `securityLevel: "strict"`, and with mermaid's `base` theme set from the page's color tokens, so a diagram reads in the light theme and in the dark one, and draws again when the theme changes. A system card shows a Mermaid block as code, since it quotes an agent's words without a check.
 
 ## Priority levels
 

@@ -421,7 +421,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         case 'ack':
           return json(inbox.ack(me, b));
         case 'patch':
-          return json(publicCard(inbox.patchCard(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined)));
+          return json(publicCard(await inbox.patchCardChecked(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined)));
         case 'status':
           return json(publicCard(inbox.setStatus(me, b, String(body['status'] ?? ''))));
         case 'claim':
