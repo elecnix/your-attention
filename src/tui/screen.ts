@@ -78,7 +78,7 @@ export class Grid {
   private put(x: number, y: number, ch: string, id: number): void {
     const row = y * this.width;
     if (this.chars[row + x] === '' && x > 0) this.chars[row + x - 1] = ' ';
-    if (x + 1 < this.width && this.chars[row + x + 1] === '' && ch !== '') this.chars[row + x + 1] = ' ';
+    if (x + 1 < this.width && this.chars[row + x + 1] === '') this.chars[row + x + 1] = ' ';
     this.chars[row + x] = ch;
     this.styles[row + x] = id;
   }

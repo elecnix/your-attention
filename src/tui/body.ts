@@ -384,7 +384,7 @@ export class BodyRenderer {
     const { s } = this.ctx.theme;
     const store = this.ctx.store;
     const password = str(p['type']) === 'password';
-    const initial = str(p['value']);
+    const initial = sanitize(str(p['value']));
     const uiKey = `${id}:text`;
     // The indent this field is drawn at, for a click that comes after the drawing.
     const indent = this.indent;

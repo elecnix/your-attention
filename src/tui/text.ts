@@ -3,7 +3,7 @@
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
-const EMOJI = /\p{Emoji_Presentation}|\p{Extended_Pictographic}️|\p{Regional_Indicator}{2}/u;
+const EMOJI = /\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F|\p{Regional_Indicator}{2}|[0-9#*]\uFE0F?\u20E3/u;
 const ZERO = /^[\p{Mn}\p{Me}\p{Cf}]/u;
 
 /** East Asian wide and fullwidth ranges, as [first, last] code points. */

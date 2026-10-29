@@ -103,4 +103,14 @@ describe('the cell grid', () => {
     g.text(3, 0, '日', {}, 4);
     assert.equal(g.row(0), '     ');
   });
+
+  it('leaves no orphan half when a wide character overwrites the first half of another', () => {
+    const g = new Grid(6, 1);
+    g.text(1, 0, '日x', {});
+    g.text(0, 0, '日', {});
+    g.text(3, 0, 'y', {});
+    const vt = new Vt(6, 1);
+    vt.write(encodeFrame(null, g, caps(3)));
+    assert.equal(vt.lines()[0], '日 y');
+  });
 });

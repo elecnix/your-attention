@@ -11,6 +11,7 @@ describe('terminal text', () => {
     assert.equal(textWidth('é'), 1);
     assert.equal(textWidth('👍🏽'), 2);
     assert.equal(textWidth('→'), 1);
+    assert.equal(textWidth('1\uFE0F\u20E3'), 2);
     assert.deepEqual(graphemes('aéb'), ['a', 'é', 'b']);
   });
 

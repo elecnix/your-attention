@@ -203,7 +203,7 @@ export class CardView {
     if (card.status) meta.push({ text: '  ' }, { text: `[${sanitize(card.status)}]`, style: st.dim });
     if (['in-triage', 'held', 'orphaned'].includes(state)) meta.push({ text: '  ' }, { text: `Warning: ${STATE_LABEL[state]}`, style: st.warn });
     const pres = presenceOf(card, s);
-    if (pres) meta.push({ text: '  ' }, { text: `${pres[0] === 'on' ? g.read : pres[0] === 'busy' ? g.delivered : g.stored} ${pres[1].split(':')[0]}`, style: pres[0] === 'on' ? st.ok : st.dim });
+    if (pres) meta.push({ text: '  ' }, { text: `${pres[0] === 'on' ? g.read : pres[0] === 'busy' ? g.delivered : g.stored} ${sanitize(pres[1].split(':')[0] ?? '')}`, style: pres[0] === 'on' ? st.ok : st.dim });
     const age = cardAge(this.host.now() - card.createdAt);
     const metaW = meta.reduce((w, x) => w + textWidth(x.text), 0);
     if (metaW + 2 + textWidth(age) <= width) meta.push({ text: ' '.repeat(width - metaW - textWidth(age)) }, { text: age, style: st.dim });
