@@ -144,7 +144,8 @@ describe('your-attention tui', () => {
     await t.stop();
   });
 
-  it('opens a herdr session link through the inbox, which focuses that tab', async () => {
+  // The stand-in for herdr is a shell script, which Windows does not run.
+  it('opens a herdr session link through the inbox, which focuses that tab', { skip: process.platform === 'win32' }, async () => {
     await post({ id: 'link', agent: 's-link', title: 'Look at the release agent', priority: 'now', text: 'See [the release agent](https://herdr.invalid/v1/tab/w7:t3).' });
     const t = tui();
     const row = await t.waitFor('Look at the release');
@@ -187,6 +188,8 @@ describe('your-attention tui', () => {
     t.send('q');
     await until(() => (t.vt.modes.has(1049) ? undefined : true));
     assert.equal(t.vt.modes.has(1000) || t.vt.modes.has(1006) || t.vt.modes.has(2004) || t.vt.modes.has(1004), false);
+    // Windows has no signal a process can catch for this, so only the quit half runs there.
+    if (process.platform === 'win32') return;
     const u = tui();
     await u.waitFor('Waiting for you');
     const pid = (u.events().find((e) => e.event === 'start') as { pid?: number } | undefined)?.pid;
