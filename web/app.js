@@ -344,8 +344,8 @@ export function App() {
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), r.text)),
       a && s !== 'reply' && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
-      current.kind !== 'secret' && h('h2', { className: 'card-title' }, current.title),
-      current.kind !== 'secret' && !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open }),
+      h('h2', { className: 'card-title' }, current.title),
+      !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open }),
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
       current.broadcast && !current.closed
@@ -353,10 +353,7 @@ export function App() {
         : current.html !== undefined
         ? h(HtmlCard, { key: current.id, card: current, onSkip: next, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
         : current.kind === 'secret'
-        ? h(React.Fragment, null,
-          h('h2', { className: 'secret-title' }, current.title),
-          current.text && h('p', null, current.text),
-          h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: next, onSent: () => setTimeout(() => { pinnedRef.current = null; setFocus(null); }, 700) }))
+        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: next, onSent: () => setTimeout(() => { pinnedRef.current = null; setFocus(null); }, 700) })
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current), onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),

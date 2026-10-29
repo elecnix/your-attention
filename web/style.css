@@ -131,7 +131,6 @@
   .html-answer textarea,
   .secret input, .secret textarea { font: inherit; font-weight: 400; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
   .secret .hint { margin: 0; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
-  .secret-title { font-size: calc(18px * var(--text-scale)); margin: 4px 0 8px; }
   .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn:disabled { opacity: .5; cursor: default; }
   .group-by { display: flex; gap: 6px; align-items: center; font-size: calc(12px * var(--text-scale)); color: var(--muted); padding: 4px 8px; }

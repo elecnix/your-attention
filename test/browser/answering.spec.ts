@@ -218,3 +218,16 @@ test('an option shows its explanation inside its box, and a click on the explana
   const a = ev.events.find((e) => e.type === 'answer');
   expect(a?.type === 'answer' && a.answer.values['choice']).toBe('o1');
 });
+
+test('a secret request reads its text as Markdown, as every other card does', async ({ page }) => {
+  const secrets = new SecretRequests();
+  await secrets.ask(inbox.agent, { agent: 's-secret-md', name: 'API_KEY', title: 'Paste the key', priority: 'now',
+    text: 'Use the **production** key.\n\nWith it, I will:\n1. Create the secret.\n2. Set `KEY_ARN`.' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Paste the key' }).click();
+  const card = page.locator('.focus-card');
+  await expect(card.locator('strong', { hasText: 'production' })).toBeVisible();
+  await expect(card.locator('ol li')).toHaveCount(2);
+  await expect(card.locator('code', { hasText: 'KEY_ARN' })).toBeVisible();
+  await expect(card.locator('h2', { hasText: 'Paste the key' })).toHaveCount(1);
+});
