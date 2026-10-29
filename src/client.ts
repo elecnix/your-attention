@@ -109,13 +109,14 @@ export class Client {
     return true;
   }
 
-  post(card: NewCard): Promise<Card> { return this.call('POST', '/v1/cards', card); }
+  /** The posted card. A revision the person won't see carries `warning`. */
+  post(card: NewCard): Promise<Card & { warning?: string }> { return this.call('POST', '/v1/cards', card); }
   list(): Promise<{ card: Card; state: string }[]> { return this.call('GET', '/v1/cards'); }
   get(id: string): Promise<{ card: Card; state: string }> { return this.call('GET', `/v1/cards/${encodeURIComponent(id)}`); }
   close(id: string, kind: CloseKind, outcome: string, ifUnanswered = false): Promise<Card> {
     return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/close`, { kind, outcome, ifUnanswered });
   }
-  patch(id: string, edits: { old: string; new: string }[], field?: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/patch`, { edits, field }); }
+  patch(id: string, edits: { old: string; new: string }[], field?: string): Promise<Card & { warning?: string }> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/patch`, { edits, field }); }
   status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
   saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }

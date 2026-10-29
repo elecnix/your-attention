@@ -69,11 +69,12 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         origin: await origin(),
       };
       const posted = await inbox.post(card);
+      if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. Warning: ${posted.warning}`;
       return `Posted card ${posted.id}. The answer arrives ${ctx.arrival}; keep working meanwhile.`;
     }
     case 'card_patch': {
       const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']));
-      return `Card ${card.id} is now version ${card.version}.`;
+      return `Card ${card.id} is now version ${card.version}.${card.warning ? ` Warning: ${card.warning}` : ''}`;
     }
     case 'card_status':
       await inbox.status(String(args['card_id']), String(args['status'] ?? ''));

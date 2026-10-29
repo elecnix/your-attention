@@ -235,6 +235,12 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     return json({ error: 'not found' }, 404);
   }
 
+  /** A revised card, with the warning for the agent when the person won't see the revision. */
+  const withWarning = (card: Card): Card & { warning?: string } => {
+    const warning = inbox.revisionWarning(card.id);
+    return warning ? { ...card, warning } : card;
+  };
+
   async function routeAuthed(req: Request, url: URL, me: Caller, gate: { gated: boolean; locked: boolean; unlock?: string }): Promise<Response> {
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     const [, a, b, c] = parts;
@@ -397,7 +403,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'DELETE' && a === 'tokens' && b) { owner(); inbox.revokeToken(b); return json({ ok: true }); }
 
     if (a === 'cards') {
-      if (method === 'POST' && !b) return json(publicCard(await inbox.postCardWithFiles(me, await readJson<NewCard>(req, BODY_LIMIT.card))), 201);
+      if (method === 'POST' && !b) return json(withWarning(publicCard(await inbox.postCardWithFiles(me, await readJson<NewCard>(req, BODY_LIMIT.card)))), 201);
       if (method === 'GET' && !b) return json(inbox.listCards(me));
       if (!b) return json({ error: 'not found' }, 404);
       if (method === 'GET' && !c) {
@@ -423,7 +429,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         case 'ack':
           return json(inbox.ack(me, b));
         case 'patch':
-          return json(publicCard(await inbox.patchCardChecked(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined)));
+          return json(withWarning(publicCard(await inbox.patchCardChecked(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined))));
         case 'status':
           return json(publicCard(inbox.setStatus(me, b, String(body['status'] ?? ''))));
         case 'claim':

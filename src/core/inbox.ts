@@ -688,6 +688,16 @@ export class Inbox {
     return { file, bytes: blob.bytes };
   }
 
+  /** Why the person won't see a revision of this card, when they answered it or it is closed. The page keeps such a card in
+   * Sent and never asks again, so the agent hears it with the revision instead. */
+  revisionWarning(id: string): string | undefined {
+    const card = this.store.get<Card>('cards', id);
+    if (!card) return undefined;
+    const s = cardState(card, this.store.get<Answer>('answers', id));
+    if (s === 'open' || s === 'in-triage' || s === 'held') return undefined;
+    return `Card ${id} ${s === 'closed' ? 'is closed' : 'was already answered'}, so this revision stays in the person's Sent list: the person is not notified, and won't answer it again. To ask again, post a new card with follows: "${id}".`;
+  }
+
   /** Edit a card the way a coding agent edits a file: each edit replaces text that occurs exactly once. */
   patchCard(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string, checked?: CheckedDiagrams): Card {
     const { card, input } = this.patched(caller, id, edits, field);
