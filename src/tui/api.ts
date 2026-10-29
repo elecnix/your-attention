@@ -1,13 +1,15 @@
 // The terminal client talks to the inbox the way the page does, as the owner: GET /v1/state, the page socket for live
 // changes, and the answer, seen, open, focus and presence routes. It finds the inbox like the other commands: the
 // YOUR_ATTENTION_URL and YOUR_ATTENTION_TOKEN variables, then the owner pairing from `your-attention pair --role owner`,
-// then the inbox on this machine with its owner-token file. An inbox with a PIN asks for it; the client keeps the
-// unlock token in memory only, and never stores or prints the PIN.
+// then the inbox on this machine with its owner-token file. An inbox with a PIN asks for it. The client derives the key
+// from it, as the page does, and sends only the key. It keeps the unlock token in memory only, and never stores, prints
+// or sends the PIN.
 import fs from 'node:fs';
 import path from 'node:path';
 import WebSocket from 'ws';
 import type { InboxState } from '../../web/queue.js';
 import { ownerPairing } from '../client.ts';
+import { pinKey } from '../core/pin.ts';
 import { homeDir } from '../node/home.ts';
 
 export interface OwnerConfig { url: string; token: string; source: string }
@@ -83,7 +85,8 @@ export class InboxApi {
 
   /** Unlock an inbox that has a PIN. The answer says how many tries are left, or until when the inbox waits. */
   async unlockWith(pin: string): Promise<void> {
-    const r = await this.call<{ unlock?: string }>('POST', '/v1/unlock', { pin });
+    const s = await this.call<{ salt?: string | null; iterations?: number }>('GET', '/v1/pin');
+    const r = await this.call<{ unlock?: string }>('POST', '/v1/unlock', { key: await pinKey(pin, s.salt ?? '', Number(s.iterations)) });
     if (typeof r.unlock === 'string') this.unlock = r.unlock;
   }
 

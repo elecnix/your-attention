@@ -135,7 +135,8 @@ describe('your-attention tui', () => {
   it('asks for the PIN of a locked inbox, never shows it, and answers with the unlock token after', async () => {
     const own = await start();
     try {
-      assert.equal((await own.owner('PUT', '/v1/pin', { pin: '2468' })).status, 200);
+      // The inbox refuses a PIN sent as it is, so the unlock below works only with the key the terminal derives.
+      await own.server.inbox.pin.set('2468');
       // An owner token that is not the laptop's file, like a sign-in link's, needs the PIN.
       const { secret } = await own.server.inbox.createToken('tui test', 'owner');
       const ownAgent = new Client({ url: own.server.url, token: own.agentToken });
