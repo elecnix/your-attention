@@ -432,6 +432,14 @@ test('an answer opens the card after the one you answered, not the card you skip
   }
 });
 
+test('a line under each queue header sets its section apart', async ({ page }) => {
+  await inbox.agent.post({ id: 'header-line', agent: 's-line', title: 'Under a header', priority: 'now' });
+  await inbox.open(page);
+  const headers = page.locator('nav.queue h3');
+  expect(await headers.count()).toBeGreaterThan(1);
+  for (const border of await headers.evaluateAll((els) => els.map((el) => { const c = getComputedStyle(el); return `${c.borderBottomStyle} ${c.borderBottomWidth}`; }))) expect(border).toBe('solid 1px');
+});
+
 test('the queue headers use the text color, and the cards you sent are dimmer than the ones that wait', async ({ page }) => {
   await inbox.agent.post({ id: 'waits-dim', agent: 's-dim', title: 'Still waits', priority: 'now' });
   await inbox.agent.post({ id: 'sent-dim', agent: 's-dim', title: 'Already sent', priority: 'now' });
