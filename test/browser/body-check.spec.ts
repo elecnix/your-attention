@@ -40,6 +40,19 @@ test('a stored body the page cannot draw whole shows its source, and the card st
   await expect.poll(() => heard.events.some((e) => e.type === 'answer' && e.answer.comment === 'Fix the body.')).toBe(true);
 });
 
+test('a stored broken body that the agent fixes draws as a card again', async ({ page }) => {
+  await inbox.agent.post({ id: 'fixed-later', agent: 's-fixed', title: 'Fixed later', priority: 'now', body: 'root = Card([a])\na = TextContent("x")' });
+  const store = inbox.server.inbox['store'];
+  store.put('cards', 'fixed-later', { ...store.get<Card>('cards', 'fixed-later'), body: 'root = Card([a, b])\na = TextContent("x")\nb = TextContent(\\"y\\")' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Fixed later' }).click();
+  const card = page.locator('.focus-card');
+  await expect(card.locator('.note.warn')).toContainText('did not draw');
+  await inbox.agent.post({ id: 'fixed-later', agent: 's-fixed', title: 'Fixed later', priority: 'now', body: 'root = Card([a, b])\na = TextContent("x")\nb = TextContent("The fixed body.")' });
+  await expect(card).toContainText('The fixed body.');
+  await expect(card.locator('.note.warn')).toHaveCount(0);
+});
+
 test('the card a card follows shows its text as Markdown, with its table and code', async ({ page }) => {
   await inbox.agent.post({ id: 'before', agent: 's-chain', title: 'Apply the tables first?', priority: 'soon',
     text: '**Why:** the tables gain columns.\n\n| Table | New column |\n| -- | -- |\n| `EVENTS` | `HASH` |\n\n```\ngh workflow run apply.yml\n```' });

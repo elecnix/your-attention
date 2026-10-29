@@ -28,6 +28,11 @@ describe('card body check', () => {
     assert.ok(errors.some((e) => /`f2`/.test(e) && /never defined/.test(e)), errors.join('\n'));
   });
 
+  it('counts a line inside a string as part of its statement, so it names the statement whose string never closes', () => {
+    const body = 'root = Card([a, b, c])\na = TextContent("Two lines:\nx = y")\nb = TextContent(\\"open)\nc = TextContent("c")';
+    assert.match(bodyErrors(body).join('\n'), /`b` \(line 4\) has a string that never closes/);
+  });
+
   it('refuses a reference to a statement the body never defines, and a component it does not know', () => {
     assert.match(bodyErrors('root = Card([a, b])\na = TextContent("hi")').join('\n'), /`b` is used but never defined/);
     assert.match(bodyErrors('root = Card([a])\na = Banner("hi")').join('\n'), /Banner/);

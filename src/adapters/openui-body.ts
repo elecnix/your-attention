@@ -10,9 +10,7 @@ let parser: Parser | undefined;
 export function bodyErrors(body: string): string[] {
   parser ??= createParser(LIBRARY as Parameters<typeof createParser>[0], 'root');
   const { root, meta } = parser.parse(body);
-  const lines = body.split('\n');
-  // Each line that starts a statement, in order, as the parser counts them.
-  const starts = lines.flatMap((l, i) => { const m = /^\s*([A-Za-z_]\w*)\s*=/.exec(l); return m ? [{ name: m[1]!, line: i + 1 }] : []; });
+  const starts = statementStarts(body);
   if (!starts.some((s) => s.name === 'root')) return ['the body has no `root = ...` statement. Put Markdown in text, and OpenUI Lang in body.'];
   const errors: string[] = [];
   if (meta.incomplete) {
@@ -24,4 +22,25 @@ export function bodyErrors(body: string): string[] {
   for (const e of meta.errors) errors.push(`\`${e.statementId ?? 'root'}\`: ${e.message}.`);
   if (!root && !errors.length) errors.push('the page draws nothing from this body.');
   return errors;
+}
+
+/** Each line that starts a statement, in order, as the parser counts them. A line inside a string belongs to the statement before it. */
+function statementStarts(body: string): { name: string; line: number }[] {
+  const starts: { name: string; line: number }[] = [];
+  let quote = '';
+  let line = 1;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i]!;
+    if (c === '\n') line++;
+    if (quote) {
+      if (c === '\\') { if (body[i + 1] === '\n') line++; i++; } else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (i === 0 || body[i - 1] === '\n') {
+      const m = /^[ \t]*([A-Za-z_]\w*)[ \t]*=/.exec(body.slice(i, i + 200));
+      if (m) starts.push({ name: m[1]!, line });
+    }
+  }
+  return starts;
 }

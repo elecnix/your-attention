@@ -317,10 +317,12 @@ export function sourceCard(c) {
 // One rendered card. Its initial state is read once, so later renders keep what you typed.
 // The inbox refuses a body the page cannot draw whole, but one it stored before it checked bodies still shows, as `fallback`.
 export function CardView({ draftKey, response, fallback, onAction }) {
-  const [broken, setBroken] = React.useState(false);
+  // The source the parser found broken. A revision brings new source, which draws as a card again.
+  const [brokenSource, setBrokenSource] = React.useState(null);
+  const broken = brokenSource === response;
   const onParseResult = React.useCallback((r) => {
-    if (fallback && r && (r.meta.incomplete || r.meta.unresolved.length)) setBroken(true);
-  }, [fallback]);
+    if (fallback && r && (r.meta.incomplete || r.meta.unresolved.length)) setBrokenSource(response);
+  }, [fallback, response]);
   const [initialState] = React.useState(() => store.get(draftKey) || undefined);
   const actionRef = React.useRef(onAction);
   actionRef.current = onAction;
