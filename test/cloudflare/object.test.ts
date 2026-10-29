@@ -238,19 +238,20 @@ describe('usage counts of a hosted inbox', () => {
     return { rt, points };
   }
 
-  it('writes each finished day to Analytics Engine with the invite id, once the person was told', async () => {
+  it('writes each finished day to Analytics Engine with the invite id, and has no off switch', async () => {
     Date.now = () => realNow() + offset;
     try {
       const { rt, points } = hosted();
       const obj = rt.make();
-      const { owner } = (await (await call(obj, 'POST', '/_init', undefined, { usage: { enabled: true, invite: '0123456789abcdef' } })).json()) as { owner: string };
+      const { owner } = (await (await call(obj, 'POST', '/_init', undefined, { usage: { invite: '0123456789abcdef' } })).json()) as { owner: string };
       await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 'private-agent', title: 'A private question' });
-      const status = (await (await call(obj, 'GET', '/v1/telemetry', owner)).json()) as { source: string; notice: boolean; invite: string };
-      assert.deepEqual([status.source, status.notice, status.invite], ['hosted', false, '0123456789abcdef']);
+      const status = (await (await call(obj, 'GET', '/v1/telemetry', owner)).json()) as { source: string; enabled: boolean; alwaysOn: boolean; notice: boolean; invite: string };
+      assert.deepEqual([status.source, status.enabled, status.alwaysOn, status.notice, status.invite], ['hosted', true, true, true, '0123456789abcdef'], 'the page tells the person once');
+      assert.equal((await call(obj, 'PUT', '/v1/telemetry', owner, { enabled: false })).status, 400);
       assert.equal(points.length, 0, 'today is not finished');
       offset += DAY;
       await obj.alarm();
-      assert.equal(points.length, 1);
+      assert.equal(points.length, 1, 'a hosted inbox sends whether or not the page has shown the notice yet');
       assert.deepEqual(points[0]?.indexes, ['0123456789abcdef']);
       assert.equal(points[0]?.blobs[0], 'hosted');
       assert.equal(points[0]?.doubles[0], 1, 'one card');
@@ -264,19 +265,16 @@ describe('usage counts of a hosted inbox', () => {
     }
   });
 
-  it('sends nothing for an inbox whose owner turned it off at creation, or was never told', async () => {
+  it('keeps counting in an inbox created before the counts had no off switch', async () => {
     Date.now = () => realNow() + offset;
     try {
-      for (const init of [{ usage: { enabled: false, invite: '0123456789abcdef' } }, { usage: { invite: '0123456789abcdef' } }, {}]) {
-        const { rt, points } = hosted();
-        const obj = rt.make();
-        const { owner } = (await (await call(obj, 'POST', '/_init', undefined, init)).json()) as { owner: string };
-        await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 'a', title: 'q' });
-        offset += DAY;
-        await obj.alarm();
-        offset = 0;
-        assert.equal(points.length, 0, JSON.stringify(init));
-      }
+      const { rt, points } = hosted();
+      const obj = rt.make();
+      const { owner } = (await (await call(obj, 'POST', '/_init', undefined, { usage: { invite: '0123456789abcdef', enabled: false } })).json()) as { owner: string };
+      await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 'a', title: 'q' });
+      offset += DAY;
+      await obj.alarm();
+      assert.equal(points.length, 1);
     } finally {
       Date.now = realNow;
       offset = 0;

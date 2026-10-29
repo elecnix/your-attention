@@ -52,8 +52,8 @@ export interface ServeOptions {
   onShutdown?: () => void;
   /** Where usage counts go, and whether they may. The default reads the environment. */
   telemetry?: TelemetryEnv;
-  /** The inbox runs in a terminal, where the person reads the usage notice before anything is sent. */
-  terminal?: boolean;
+  /** Offer usage counts in the terminal the inbox runs in, once. Without it, the page offers them. */
+  ask?: (question: string) => Promise<boolean>;
 }
 
 export interface RunningServer {
@@ -257,11 +257,12 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   }
   const relay = opts.relay ? relayClient({ relay: opts.relay.url, key: opts.relay.key, inboxId: inbox.id(), local: url, log }) : undefined;
   log(`inbox on ${url}${opts.mdns ? ', advertised over mDNS' : ''}`);
-  // The first start in a terminal tells the person about usage counts. Without a terminal, the page tells them.
-  const told = inbox.usage.settings();
-  if (opts.terminal && told.enabled && !told.notified && !usage.blocked) {
-    log(`usage counts are on.\n${NOTICE}`);
-    inbox.usage.update({ notified: true });
+  // The first start in a terminal offers usage counts. Without a terminal, the page offers them. They stay off until the person says yes.
+  const offered = inbox.usage.settings();
+  if (opts.ask && !offered.notified && !usage.blocked) {
+    log(NOTICE);
+    // An answer that comes after the inbox closed has no store to go to, so it is dropped.
+    void opts.ask('Send anonymous usage counts?').then((yes) => inbox.usage.update({ enabled: yes, notified: true })).catch(() => {});
   }
   // Store calls fail once the inbox has closed, so a send still running at shutdown is dropped.
   const sendUsage = (): Promise<void> => sendDue(inbox.usage, { ...usage, log: (line) => log(line) }).catch(() => {});

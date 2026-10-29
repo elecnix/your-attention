@@ -230,17 +230,19 @@ The PIN guards the page and every sign-in link. Agents and their tokens, and the
 
 ## Usage counts
 
-Once a day, your inbox sends a report of usage counts to the maintainers. It counts cards posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected. It never sends card text, answers, agent names, paths, host names or inbox addresses. The first start in a terminal, or the inbox page, tells you before the first report goes out.
+A laptop inbox sends nothing unless you turn usage counts on. The first start in a terminal asks once, and the inbox page offers them until you pick. When on, the inbox sends the maintainers one anonymous report a day. It counts cards posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected, with a random install id. It never sends card text, answers, agent names, paths, host names, addresses or anything else that says who you are.
 
 ```sh
 your-attention telemetry status     # on or off, where reports go, and the install id
+your-attention telemetry on         # turns anonymous reports on
 your-attention telemetry show       # prints the next report
 your-attention telemetry off        # turns reports off and deletes the days not yet sent
-your-attention telemetry on
 your-attention telemetry reset-id   # picks a new random install id
 ```
 
-`DO_NOT_TRACK=1` or `YOUR_ATTENTION_TELEMETRY=off` turns reports off whatever the setting says, and `YOUR_ATTENTION_TELEMETRY_DEBUG=1` prints each report to stderr in place of sending it. On the hosted service, the landing page asks before it creates your inbox, and each report includes an id made from your invite code. The "Send usage counts" switch below the card list changes the setting. [SPEC.md](SPEC.md#usage-counts) lists every field.
+`DO_NOT_TRACK=1` or `YOUR_ATTENTION_TELEMETRY=off` keeps reports off whatever the setting says, and `YOUR_ATTENTION_TELEMETRY_DEBUG=1` prints each report to stderr in place of sending it.
+
+The hosted service always sends the same counts, with an id made from the invite code that created the inbox, and has no off switch. Its landing page and the inbox page say so. To keep the counts to yourself, run the inbox on your laptop. [SPEC.md](SPEC.md#usage-counts) lists every field.
 
 ## Run your own cloud inbox (optional)
 

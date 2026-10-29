@@ -679,25 +679,34 @@ export function useTelemetry(signedIn) {
   return [t, change];
 }
 
-const usageWhere = (t) => (t.source === 'hosted' ? 'the operator of this hosted inbox, with an id made from the invite code that created it' : 'the Your Attention maintainers');
+const WHAT_COUNTS = 'how many cards were posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected';
 
-// Shown until the person picks: nothing is sent before they have read it.
+// Shown until the person picks. On a laptop it offers the counts, which stay off unless they say yes.
+// On the hosted service it says once that the counts are always on.
 export function UsageNotice({ telemetry: t, onChange }) {
   if (!t || !t.notice) return null;
+  const report = h('details', null, h('summary', null, 'The next report'), h('pre', null, J(t.next, null, 2)));
+  if (t.alwaysOn) {
+    return h('section', { className: 'usage-notice', 'aria-label': 'Usage counts' },
+      h('p', null, `This hosted inbox always sends the operator of this service, once a day, ${WHAT_COUNTS}, with an id made from the invite code that created it. There is no off switch. It never sends card text, answers, agent names or addresses.`),
+      report,
+      h('div', { className: 'usage-actions' }, h('button', { type: 'button', className: 'btn', onClick: () => onChange({ notified: true }) }, 'OK')));
+  }
   return h('section', { className: 'usage-notice', 'aria-label': 'Usage counts' },
-    h('p', null, `Usage counts are on. Once a day, this inbox sends ${usageWhere(t)} how many cards were posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected. It never sends card text, answers, agent names or addresses.`),
-    h('details', null, h('summary', null, 'The next report'), h('pre', null, J(t.next, null, 2))),
+    h('p', null, `Usage counts are off. If you turn them on, this inbox sends the Your Attention maintainers one anonymous report a day: ${WHAT_COUNTS}, with a random install id. It never sends card text, answers, agent names, paths, host names, addresses or anything else that says who you are.`),
+    report,
     h('div', { className: 'usage-actions' },
-      h('button', { type: 'button', className: 'btn', onClick: () => onChange({ notified: true }) }, 'Keep usage counts on'),
-      h('button', { type: 'button', className: 'btn', onClick: () => onChange({ enabled: false }) }, 'Turn usage counts off')));
+      h('button', { type: 'button', className: 'btn', onClick: () => onChange({ enabled: true }) }, 'Turn usage counts on'),
+      h('button', { type: 'button', className: 'btn', onClick: () => onChange({ notified: true }) }, 'Keep them off')));
 }
 
-// The setting, after the person has seen the notice.
+// The setting, after the person has seen the notice. A hosted inbox shows that the counts are always on.
 export function UsageToggle({ telemetry: t, onChange }) {
   if (!t || t.notice) return null;
-  const tip = t.blocked ? `This inbox sends nothing: ${t.blocked}` : `Once a day, send ${usageWhere(t)} counts of cards, answers and connections. Never card text or answers.`;
+  if (t.alwaysOn) return h('p', { className: 'notify usage-toggle', title: `Once a day, this hosted inbox sends the operator of this service ${WHAT_COUNTS}. Never card text or answers.` }, 'Usage counts: always on');
+  const tip = t.blocked ? `This inbox sends nothing: ${t.blocked}` : `Once a day, send the maintainers an anonymous report: ${WHAT_COUNTS}. Never card text or answers.`;
   return h('label', { className: 'notify usage-toggle', title: tip },
-    h('input', { type: 'checkbox', role: 'switch', checked: t.enabled && !t.blocked, disabled: !!t.blocked, onChange: (e) => onChange({ enabled: e.target.checked }) }), 'Send usage counts');
+    h('input', { type: 'checkbox', role: 'switch', checked: t.enabled && !t.blocked, disabled: !!t.blocked, onChange: (e) => onChange({ enabled: e.target.checked }) }), 'Send anonymous usage counts');
 }
 
 export function presenceOf(card, state) {

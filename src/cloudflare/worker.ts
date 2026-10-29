@@ -101,10 +101,10 @@ const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><met
 <form id="f"><input id="code" placeholder="Invite code" autocomplete="off" required> <button>Create my inbox</button>
 <p><label>PIN <input id="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="4 digits" size="6"></label> <label>Again <input id="pin2" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="4 digits" size="6"></label></p>
 <p>The inbox page asks for the PIN in each new tab, so someone who gets the address or a sign-in link still cannot answer your agents' cards. Leave it empty to skip, and the page asks again when it opens. <label><input type="checkbox" id="never"> Never ask me for a PIN</label></p>
-<p><label><input type="checkbox" id="usage" checked> Send usage counts</label>: once a day, the inbox sends the operator of this service how many cards were posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected, with an id made from your invite code. It never sends card text, answers, agent names or addresses. You can change this later on the inbox page.</p></form><p id="out"></p>
+<p>Usage counts: a hosted inbox always sends the operator of this service, once a day, how many cards were posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected, with an id made from your invite code. There is no off switch. It never sends card text, answers, agent names or addresses. To keep even these counts to yourself, run the inbox on your laptop. <a href="https://github.com/elecnix/your-attention#usage-counts">What the counts contain</a>.</p></form><p id="out"></p>
 <script>document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const v=(id)=>document.getElementById(id).value,out=document.getElementById('out');
 if(v('pin')!==v('pin2')){out.textContent='The two PINs differ.';return}if(v('pin')&&!/^[0-9]{4}$/.test(v('pin'))){out.textContent='A PIN is 4 digits.';return}
-const r=await fetch('new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({invite:v('code'),usage:document.getElementById('usage').checked,...(v('pin')?{pin:v('pin')}:{neverAsk:document.getElementById('never').checked})})});const d=await r.json();
+const r=await fetch('new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({invite:v('code'),...(v('pin')?{pin:v('pin')}:{neverAsk:document.getElementById('never').checked})})});const d=await r.json();
 if(d.unlock){try{sessionStorage.setItem('ya-unlock:'+new URL(d.url).pathname,d.unlock)}catch{}}if(d.login){location.href=d.login}else{out.textContent=d.error}}</script></body></html>`;
 
 export default {
@@ -129,15 +129,14 @@ export default {
     if (url.pathname === '/new' && req.method === 'POST') {
       if (!(await allowed(env, req, ''))) return tooMany();
       if (Number(req.headers.get('content-length') ?? 0) > 1024) return json({ error: 'body too large' }, 413);
-      const { invite, usage, pin, neverAsk } = (await req.json().catch(() => ({}))) as { invite?: string; usage?: unknown; pin?: unknown; neverAsk?: unknown };
+      const { invite, pin, neverAsk } = (await req.json().catch(() => ({}))) as { invite?: string; pin?: unknown; neverAsk?: unknown };
       if (pin !== undefined && !validPin(pin)) return json({ error: 'A PIN is 4 digits.' }, 400);
       const code = String(invite ?? '').trim().slice(0, 200);
       const redeemed = code.length >= MIN_INVITE_LENGTH ? (await (await env.REGISTRY.get(env.REGISTRY.idFromName('invites')).fetch('https://registry/redeem', { method: 'POST', body: JSON.stringify({ code }) })).json()) as { ok: boolean } : { ok: false };
       if (!redeemed.ok) return json({ error: 'That invite code is not valid.' }, 403);
       const id = await newAddress(secret);
       await env.INVITES.put(`inbox:${id}`, String(Date.now()));
-      // A client that sends no `usage` choice never showed the notice, so the inbox page shows it before anything is sent.
-      const init = { usage: { invite: await inviteId(code), ...(typeof usage === 'boolean' ? { enabled: usage } : {}) }, pin, neverAsk: neverAsk === true };
+      const init = { usage: { invite: await inviteId(code) }, pin, neverAsk: neverAsk === true };
       const res = await env.INBOX.get(env.INBOX.idFromName(id)).fetch('https://inbox/_init', { method: 'POST', body: JSON.stringify(init) });
       const { owner, unlock } = (await res.json()) as { owner: string; unlock?: string };
       const base = `${url.origin}/i/${id}/`;

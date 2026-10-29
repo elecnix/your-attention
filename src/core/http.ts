@@ -338,12 +338,14 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           if (body[k] !== undefined && typeof body[k] !== 'boolean') throw new InboxError(400, `${k} must be true or false`);
         }
         const enabled = body.enabled as boolean | undefined;
+        if (enabled === false && inbox.usage.settings().alwaysOn) throw new InboxError(400, 'a hosted inbox always sends usage counts');
         // Turning it on or off means the person read what it sends.
         inbox.usage.update({ enabled, notified: enabled !== undefined || body.notified === true ? true : undefined, resetId: body.resetId === true });
       }
       const s = inbox.usage.settings();
       const blocked = t.blocked?.() ?? null;
-      return json({ ...s, notice: s.enabled && !s.notified && !blocked, blocked, source: t.source, destination: t.destination, next: inbox.usage.report(inbox.usage.today(), t.source) });
+      // A laptop offers the counts once. A hosted inbox tells the person once that they are always on.
+      return json({ ...s, notice: !s.notified && !blocked, blocked, source: t.source, destination: t.destination, next: inbox.usage.report(inbox.usage.today(), t.source) });
     }
     if (a === 'settings') {
       if (method === 'GET') return json(inbox.settings());

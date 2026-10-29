@@ -38,6 +38,8 @@ export interface InboxOptions {
   pinIterations?: number | undefined;
   /** Checks each Mermaid diagram before the inbox takes the card. Without it, the inbox takes no card with a diagram. */
   checkDiagram?: DiagramCheck | undefined;
+  /** The inbox always counts usage and has no off switch, as on the hosted service. */
+  usageAlwaysOn?: boolean;
 }
 
 export const SYSTEM_AGENT = 'system';
@@ -141,7 +143,7 @@ export class Inbox {
     this.storageLimit = opts.storageLimitBytes;
     this.readsPerDay = opts.attachmentReadsPerDay;
     this.checkDiagram = opts.checkDiagram;
-    this.usage = new Usage(store, now);
+    this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
     this.pin.onChange(() => this.closeLockedPages());

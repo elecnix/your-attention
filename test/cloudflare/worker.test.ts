@@ -83,23 +83,21 @@ describe('the hosted Cloudflare build', () => {
     assert.equal(all.filter((r) => r.status === 201).length, 1);
   });
 
-  it('asks about usage counts on the landing page, and ties them to the invite id, never the code', async () => {
-    assert.match(await (await fetch(`${base}/`)).text(), /Send usage counts/);
-    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:usage-code-0123456789ab', '3', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
+  it('says on the landing page that usage counts are always on, and ties them to the invite id, never the code', async () => {
+    const landing = await (await fetch(`${base}/`)).text();
+    assert.match(landing, /always sends/);
+    assert.match(landing, /href="https:\/\/github\.com\/elecnix\/your-attention#usage-counts"/);
+    assert.doesNotMatch(landing, /id="usage"|Send usage counts/, 'the landing page has no usage switch');
+    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:usage-code-0123456789ab', '1', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
     assert.equal(seed.status, 0, seed.stderr);
-    const make = async (body: object) => {
-      const made = (await (await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'usage-code-0123456789ab', ...body }) })).json()) as { url: string; login: string };
-      const token = decodeURIComponent(made.login.split('#token=')[1] ?? '');
-      return (await (await fetch(`${made.url}v1/telemetry`, { headers: { authorization: `Bearer ${token}` } })).json()) as { enabled: boolean; notice: boolean; invite: string; source: string; blocked: string | null };
-    };
-    const on = await make({ usage: true });
-    assert.deepEqual([on.enabled, on.notice, on.source, on.blocked], [true, false, 'hosted', null]);
-    assert.match(on.invite, /^[0-9a-f]{16}$/);
-    assert.doesNotMatch(JSON.stringify(on), /usage-code/);
-    const off = await make({ usage: false });
-    assert.deepEqual([off.enabled, off.notice], [false, false]);
-    const unasked = await make({});
-    assert.deepEqual([unasked.enabled, unasked.notice], [true, true], 'the inbox page tells a person the landing page did not');
+    const made = (await (await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'usage-code-0123456789ab', usage: false }) })).json()) as { url: string; login: string };
+    const token = decodeURIComponent(made.login.split('#token=')[1] ?? '');
+    const telemetry = (method: string, body?: unknown) => fetch(`${made.url}v1/telemetry`, { method, headers: { authorization: `Bearer ${token}`, 'x-your-attention': '1' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const t = (await (await telemetry('GET')).json()) as { enabled: boolean; alwaysOn: boolean; notice: boolean; invite: string; source: string; blocked: string | null };
+    assert.deepEqual([t.enabled, t.alwaysOn, t.notice, t.source, t.blocked], [true, true, true, 'hosted', null], 'a client cannot opt out at creation either');
+    assert.match(t.invite, /^[0-9a-f]{16}$/);
+    assert.doesNotMatch(JSON.stringify(t), /usage-code/);
+    assert.equal((await telemetry('PUT', { enabled: false })).status, 400);
   });
 
   it('serves the page under the inbox address, and nothing at an address nobody created', async () => {

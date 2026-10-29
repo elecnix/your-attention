@@ -22,6 +22,7 @@ describe('usage counts', () => {
     const c = clock();
     const store = new MemoryStorage();
     const inbox = new Inbox(store, c.now);
+    inbox.usage.update({ enabled: true, notified: true });
     inbox.postCard({ token: 'ta', role: 'agent' }, { id: 'c1', agent: 'secret-agent-name', title: 'a private title' });
     inbox.postCard({ token: 'ta', role: 'agent' }, { id: 'c1', agent: 'secret-agent-name', title: 'a revision is not a new card' });
     await inbox.answer('c1', { comment: 'a private answer' });
@@ -44,6 +45,7 @@ describe('usage counts', () => {
   it('holds a finished day until the platform sends it, then forgets it', () => {
     const c = clock();
     const usage = new Usage(new MemoryStorage(), c.now);
+    usage.update({ enabled: true });
     usage.record('cards');
     assert.deepEqual(usage.due(), []);
     c.advance(DAY);
@@ -63,6 +65,7 @@ describe('usage counts', () => {
   it('keeps at most a week of unsent days', () => {
     const c = clock();
     const usage = new Usage(new MemoryStorage(), c.now);
+    usage.update({ enabled: true });
     for (let i = 0; i < 10; i++) { usage.record('answers'); c.advance(DAY); }
     const due = usage.due();
     assert.equal(due.length, 7);
@@ -72,6 +75,7 @@ describe('usage counts', () => {
   it('counts nothing and forgets what it had once the person turns it off', () => {
     const c = clock();
     const usage = new Usage(new MemoryStorage(), c.now);
+    usage.update({ enabled: true });
     usage.record('cards');
     c.advance(DAY);
     usage.record('cards');
@@ -83,17 +87,31 @@ describe('usage counts', () => {
     assert.deepEqual(usage.due(), []);
   });
 
-  it('starts on but unannounced, and a new install id replaces the old one', () => {
-    const usage = new Usage(new MemoryStorage(), clock().now);
+  it('starts off on a laptop and counts nothing until the person turns it on', () => {
+    const c = clock();
+    const usage = new Usage(new MemoryStorage(), c.now);
     const first = usage.settings();
-    assert.equal(first.enabled, true);
-    assert.equal(first.notified, false);
+    assert.deepEqual([first.enabled, first.notified, first.alwaysOn], [false, false, false]);
+    usage.record('cards');
+    c.advance(DAY);
+    assert.deepEqual(usage.due(), []);
     const next = usage.update({ resetId: true });
     assert.notEqual(next.installId, first.installId);
   });
 
+  it('stays on in a hosted inbox, which has no off switch', () => {
+    const c = clock();
+    const usage = new Usage(new MemoryStorage(), c.now, { alwaysOn: true });
+    assert.deepEqual([usage.settings().enabled, usage.settings().alwaysOn], [true, true]);
+    usage.record('cards');
+    assert.throws(() => usage.update({ enabled: false }), /always/);
+    assert.equal(usage.settings().enabled, true);
+    c.advance(DAY);
+    assert.equal(usage.due().length, 1);
+  });
+
   it('caps each set so one busy day cannot grow the inbox', () => {
-    const usage = new Usage(new MemoryStorage(), clock().now);
+    const usage = new Usage(new MemoryStorage(), clock().now, { alwaysOn: true });
     for (let i = 0; i < 2000; i++) usage.saw('instances', `p${i}`);
     assert.equal(usage.today().counts.instances, 1000);
   });
@@ -143,27 +161,35 @@ describe('the report the collector accepts', () => {
 });
 
 describe('the telemetry routes', () => {
-  async function setup(opts: { blocked?: string } = {}) {
-    const inbox = new Inbox(new MemoryStorage(), clock().now);
-    const handle = createHandler(inbox, { telemetry: { source: 'laptop', destination: 'https://collector.test/v1/report', blocked: () => opts.blocked } });
+  async function setup(opts: { blocked?: string; hosted?: boolean } = {}) {
+    const inbox = new Inbox(new MemoryStorage(), clock().now, undefined, { usageAlwaysOn: opts.hosted });
+    const handle = createHandler(inbox, { telemetry: { source: opts.hosted ? 'hosted' : 'laptop', destination: 'https://collector.test/v1/report', blocked: () => opts.blocked } });
     const owner = (await inbox.createToken('page', 'owner')).secret;
     const agent = (await inbox.createToken('agents', 'agent')).secret;
     const call = (method: string, token: string, body?: unknown) => handle(new Request('http://inbox.test/v1/telemetry', { method, headers: { authorization: `Bearer ${token}` }, body: body === undefined ? undefined : JSON.stringify(body) }));
     return { call, owner, agent };
   }
 
-  it('shows the owner the setting and the next report, and lets only the owner change it', async () => {
+  it('offers the laptop owner to turn counts on, and lets only the owner change it', async () => {
     const { call, owner, agent } = await setup();
     assert.equal((await call('GET', agent)).status, 403);
-    assert.equal((await call('PUT', agent, { enabled: false })).status, 403);
-    const status = (await (await call('GET', owner)).json()) as { enabled: boolean; notice: boolean; destination: string; next: { counts: object } };
-    assert.equal(status.enabled, true);
-    assert.equal(status.notice, true, 'the page tells the person before anything goes out');
+    assert.equal((await call('PUT', agent, { enabled: true })).status, 403);
+    const status = (await (await call('GET', owner)).json()) as { enabled: boolean; alwaysOn: boolean; notice: boolean; destination: string; next: { counts: object } };
+    assert.deepEqual([status.enabled, status.alwaysOn, status.notice], [false, false, true], 'the page offers the counts once');
     assert.equal(status.destination, 'https://collector.test/v1/report');
     assert.deepEqual(Object.keys(status.next.counts), [...COUNTS]);
-    const off = (await (await call('PUT', owner, { enabled: false })).json()) as { enabled: boolean; notified: boolean; notice: boolean };
-    assert.deepEqual([off.enabled, off.notified, off.notice], [false, true, false]);
+    const on = (await (await call('PUT', owner, { enabled: true })).json()) as { enabled: boolean; notified: boolean; notice: boolean };
+    assert.deepEqual([on.enabled, on.notified, on.notice], [true, true, false]);
     assert.equal((await call('PUT', owner, { enabled: 'yes' })).status, 400);
+  });
+
+  it('tells the hosted owner the counts are always on, and refuses to turn them off', async () => {
+    const { call, owner } = await setup({ hosted: true });
+    const status = (await (await call('GET', owner)).json()) as { enabled: boolean; alwaysOn: boolean; notice: boolean };
+    assert.deepEqual([status.enabled, status.alwaysOn, status.notice], [true, true, true]);
+    assert.equal((await call('PUT', owner, { enabled: false })).status, 400);
+    const seen = (await (await call('PUT', owner, { notified: true })).json()) as { enabled: boolean; notice: boolean };
+    assert.deepEqual([seen.enabled, seen.notice], [true, false]);
   });
 
   it('shows no notice where nothing can be sent', async () => {
@@ -175,15 +201,17 @@ describe('the telemetry routes', () => {
 });
 
 describe('the laptop sender', () => {
-  function due() {
+  /** A usage counter with one finished day. `chosen` says the person turned counts on themselves. */
+  function due(chosen = false) {
     const c = clock();
     const usage = new Usage(new MemoryStorage(), c.now);
+    usage.update({ enabled: true, notified: chosen });
     usage.record('cards');
     c.advance(DAY);
     return usage;
   }
 
-  it('sends nothing before the person was told, and drops the day', async () => {
+  it('sends nothing on a laptop until the person chose to turn counts on, and drops the day', async () => {
     const usage = due();
     const sent: string[] = [];
     await sendDue(usage, { url: 'https://collector.test/v1/report', fetch: async (_u, init) => { sent.push(String(init?.body)); return new Response(null, { status: 204 }); } });
@@ -191,9 +219,8 @@ describe('the laptop sender', () => {
     assert.deepEqual(usage.due(), []);
   });
 
-  it('sends a finished day once the person was told, and keeps it when the collector is down', async () => {
-    const usage = due();
-    usage.update({ notified: true });
+  it('sends a finished day once the person turned counts on, and keeps it when the collector is down', async () => {
+    const usage = due(true);
     let up = false;
     const sent: unknown[] = [];
     const fetch = async (_u: string | URL | Request, init?: RequestInit) => {
@@ -212,8 +239,7 @@ describe('the laptop sender', () => {
 
   it('sends nothing when blocked, and prints the report instead in debug mode', async () => {
     for (const opts of [{ blocked: 'DO_NOT_TRACK is set' }, { debug: true }]) {
-      const usage = due();
-      usage.update({ notified: true });
+      const usage = due(true);
       const printed: string[] = [];
       let calls = 0;
       await sendDue(usage, { url: 'https://collector.test/v1/report', fetch: async () => { calls++; return new Response(null, { status: 204 }); }, log: (s) => printed.push(s), ...opts });

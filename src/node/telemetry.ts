@@ -1,5 +1,6 @@
-// Usage counts on a laptop: send each finished day to the collector, and read the
-// counts back for the operator. src/core/telemetry.ts counts; this file only sends.
+// Usage counts on a laptop: offer them once, send each finished day to the collector, and
+// read the counts back for the operator. src/core/telemetry.ts counts; this file only sends.
+import readline from 'node:readline/promises';
 import { COUNTS, type Counts, type Usage } from '../core/telemetry.ts';
 
 /** The collector the maintainers run: src/cloudflare/collector.ts, deployed as the "telemetry" Worker. */
@@ -7,11 +8,22 @@ export const DEFAULT_COLLECTOR = 'https://telemetry.your-attention.workers.dev/v
 /** The Analytics Engine dataset that hosted inboxes and the collector write. */
 export const DATASET = 'your_attention_usage';
 
-export const NOTICE = `Your Attention sends one report a day of usage counts: how many cards were posted and answered,
-pairing requests, page opens, and how many agents, agent processes and tokens connected. It never
-sends card text, answers, agent names, paths, host names or addresses.
+export const NOTICE = `Usage counts are off unless you turn them on. When on, this inbox sends the maintainers one
+anonymous report a day: how many cards were posted and answered, pairing requests, page opens, and
+how many agents, agent processes and tokens connected, with a random install id. It never sends
+card text, answers, agent names, paths, host names, addresses or anything else that says who you are.
   your-attention telemetry show   prints the next report
-  your-attention telemetry off    turns it off (DO_NOT_TRACK=1 does too)`;
+  your-attention telemetry on     turns them on, and off turns them off again`;
+
+/** Ask a yes-or-no question on the terminal. Anything but yes is no. */
+export async function askYesNo(question: string): Promise<boolean> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim());
+  } finally {
+    rl.close();
+  }
+}
 
 export interface TelemetryEnv {
   url: string;
@@ -30,7 +42,7 @@ export function telemetryEnv(env: Record<string, string | undefined> = process.e
   return { url: env['YOUR_ATTENTION_TELEMETRY_URL'] || DEFAULT_COLLECTOR, ...(blocked ? { blocked } : {}), ...(off(env['YOUR_ATTENTION_TELEMETRY_DEBUG']) ? { debug: true } : {}) };
 }
 
-/** Send each finished day, oldest first. A day goes out only when the person was told and left it on.
+/** Send each finished day, oldest first. A day goes out only when the person turned the counts on.
  * A day that cannot go out is forgotten. A day the collector did not take for a network or server error waits for the next try. */
 export async function sendDue(usage: Usage, opts: TelemetryEnv & { fetch?: typeof fetch; log?: (line: string) => void }): Promise<void> {
   const send = opts.fetch ?? fetch;

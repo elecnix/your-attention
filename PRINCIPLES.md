@@ -188,11 +188,14 @@ On the hosted service, an inbox is created without a login, and its unguessable 
 
 No sign-up keeps onboarding to one step, and near-zero idle cost makes a free public service possible.
 
-### Usage counts leave the inbox only after you were told, and never what you wrote
+### Usage counts are anonymous and yours to turn on, except on the hosted service
 
-Once a day, an inbox sends counts of how much it was used. It counts new cards, answers, pairing requests and page opens, and how many agents, agent processes and tokens connected. The counts start on. A terminal, the hosted landing page or the inbox page tells you what they contain and how to turn them off, and the inbox sends a report only after that. Card text, answers, agent names, paths, host names and inbox addresses stay in the inbox. Turning the counts off deletes the days not yet sent.
+Once a day, an inbox can send counts of how much it was used. It counts new cards, answers, pairing requests and page opens, and how many agents, agent processes and tokens connected. Card text, answers, agent names, paths, host names and inbox addresses stay in the inbox.
 
-The maintainers need to know the product is used, and the hosted service needs to spot a leaked invite code or token. Once a person turns the counts off, their inbox doesn't send them.
+- A laptop inbox sends counts only after you turn them on. Its reports have a random install id, and nothing that says who you are.
+- A hosted inbox always sends counts, with an id made from its invite code, and says so when you create it and when you first open it.
+
+The maintainers need to know the product is used, and the hosted service needs to spot a leaked invite code or token. On your own machine, the choice is yours.
 
 ## Runs anywhere
 

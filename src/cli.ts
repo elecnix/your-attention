@@ -10,7 +10,7 @@ import type { Option, Priority } from './core/types.ts';
 import { homeDir, writePrivate } from './node/home.ts';
 import { serve } from './node/server.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
-import { NOTICE, queryUsage, summarize } from './node/telemetry.ts';
+import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
@@ -38,7 +38,7 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   offer ssh <host> [--remote-port 4815]               offer this inbox on another machine over SSH
   relay [--port 4900] [--key-env VAR]                 run a relay that inboxes dial out to
   serve --relay URL [--relay-key-env VAR]             also offer this inbox through a relay
-  telemetry status|on|off|show|reset-id               read or change the daily usage counts of this inbox
+  telemetry status|on|off|show|reset-id               read or change the anonymous usage counts, off unless you turn them on
   telemetry report [--days 30] [--invites FILE]       for the operator: usage per invite, from Analytics Engine
 
 Files live in ${homeDir()} (set YOUR_ATTENTION_HOME to move them).`;
@@ -76,15 +76,16 @@ interface TelemetryStatus { enabled: boolean; notified: boolean; notice: boolean
 /** Read or change the usage setting of the inbox on this machine. */
 async function telemetry(body?: { enabled?: boolean; notified?: boolean; resetId?: boolean }): Promise<TelemetryStatus> {
   const { url, owner } = localServer();
-  const res = await fetch(`${url}/v1/telemetry`, { method: body ? 'PUT' : 'GET', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(`${url}/v1/telemetry`, { method: body ? 'PUT' : 'GET', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).catch(() => undefined);
+  if (!res) fail('No inbox runs on this machine. Start one with `your-attention serve`.');
   if (!res.ok) fail(`The inbox answered ${res.status}: ${((await res.json().catch(() => ({}))) as { error?: string }).error ?? ''}`);
   return (await res.json()) as TelemetryStatus;
 }
 
 function describeTelemetry(t: TelemetryStatus): string {
-  if (!t.enabled) return 'Usage counts are off. Turn them on with: your-attention telemetry on';
-  if (t.blocked) return `Usage counts are on in this inbox, but ${t.blocked}, so this machine sends nothing.`;
-  return `Usage counts are on. One report a day goes to ${t.destination}.\nInstall id: ${t.installId}\n\n${NOTICE}`;
+  if (t.blocked) return `This machine sends no usage counts: ${t.blocked}.`;
+  if (!t.enabled) return `Usage counts are off.\n\n${NOTICE}`;
+  return `Usage counts are on. One anonymous report a day goes to ${t.destination}.\nInstall id: ${t.installId}\n\n${NOTICE}`;
 }
 
 /** A one-time link that signs a browser in, so the owner token stays out of the address bar and the browser history. */
@@ -123,7 +124,7 @@ switch (command) {
     const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '::' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
     const relayKey = values.relay ? process.env[String(values['relay-key-env'])] ?? fail(`--relay needs the relay key in $${values['relay-key-env']}`) : '';
     const stop = async (): Promise<void> => { await server.close(); process.exit(0); };
-    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop(), terminal: process.stderr.isTTY === true });
+    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop(), ...(process.stdin.isTTY && process.stderr.isTTY ? { ask: askYesNo } : {}) });
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     // In a terminal, the inbox asks for a PIN until it has one or the person says never. A service has no terminal and never waits here.
@@ -151,10 +152,10 @@ switch (command) {
       const info = readServerInfo();
       if (info && info.pid === child.pid && (await answers(info.url))) {
         console.log(`Started the inbox on ${info.url}. Its log is ${log}. Stop it with: your-attention stop`);
-        // The first start in a terminal tells the person about usage counts, before the inbox sends any.
-        if (process.stdout.isTTY) {
+        // The first start in a terminal offers usage counts. They stay off unless the person says yes.
+        if (process.stdin.isTTY && process.stdout.isTTY) {
           const t = await telemetry();
-          if (t.notice) { console.log(`\n${describeTelemetry(t)}`); await telemetry({ notified: true }); }
+          if (t.notice) { console.log(`\n${NOTICE}`); await telemetry({ enabled: await askYesNo('Send anonymous usage counts?') }); }
         }
         if (process.stdin.isTTY && process.stdout.isTTY) {
           const t = terminal(process.stdin, process.stdout);
@@ -404,7 +405,7 @@ switch (command) {
     }
     if (sub === 'on' || sub === 'off') {
       const t = await telemetry({ enabled: sub === 'on' });
-      console.log(sub === 'on' ? describeTelemetry(t) : 'Usage counts are off. This inbox counts nothing and sends nothing.');
+      console.log(sub === 'on' ? describeTelemetry(t) : 'Usage counts are off. This inbox stops counting and deleted the days not yet sent.');
       break;
     }
     if (sub === 'show') { console.log(JSON.stringify((await telemetry()).next, null, 2)); break; }

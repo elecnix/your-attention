@@ -1,7 +1,8 @@
 // Usage counts: one report a day of how much an inbox was used, never what it holds.
 // The inbox counts in its own storage. The platform sends each finished day: the laptop
 // build posts it to the collector, and a hosted inbox writes it to Analytics Engine.
-// Nothing goes out before the person was told, and nothing is counted while it is off.
+// A laptop inbox counts only after the person turns the counts on, and its reports carry a
+// random install id only. A hosted inbox always counts, with its invite id, and says so.
 import { sha256 } from './crypto.ts';
 import type { Storage } from './storage.ts';
 import { VERSION } from './version.ts';
@@ -21,7 +22,7 @@ export type Source = 'laptop' | 'hosted';
 export interface TelemetryReport {
   schema: 1;
   source: Source;
-  /** A random UUID for this inbox. `telemetry reset-id` replaces it. */
+  /** A random UUID for this inbox, the only id a laptop report carries. `telemetry reset-id` replaces it. */
   installId: string;
   /** The invite id that created a hosted inbox, or empty on a laptop. */
   invite: string;
@@ -33,8 +34,10 @@ export interface TelemetryReport {
 
 export interface TelemetrySettings {
   enabled: boolean;
-  /** Whether the person has seen the notice. Nothing goes out before. */
+  /** Whether the person has seen the notice: on a laptop, the offer to turn counts on. */
   notified: boolean;
+  /** A hosted inbox has no off switch. */
+  alwaysOn: boolean;
   installId: string;
   invite: string;
 }
@@ -50,7 +53,7 @@ interface Today {
   sets: Record<SetName, string[]>;
 }
 
-interface Stored extends TelemetrySettings {
+interface Stored extends Omit<TelemetrySettings, 'alwaysOn'> {
   today?: Today;
   pending: DayCounts[];
 }
@@ -83,16 +86,19 @@ const fresh = (day: string): Today => ({ day, events: { cards: 0, answers: 0, pa
 export class Usage {
   private readonly store: Storage;
   private readonly now: () => number;
+  private readonly alwaysOn: boolean;
 
-  constructor(store: Storage, now: () => number = Date.now) {
+  /** `alwaysOn` is for a hosted inbox, which counts whatever is stored. A laptop inbox starts off. */
+  constructor(store: Storage, now: () => number = Date.now, opts: { alwaysOn?: boolean } = {}) {
     this.store = store;
     this.now = now;
+    this.alwaysOn = opts.alwaysOn === true;
   }
 
   private load(): Stored {
     const s = this.store.get<Stored>('meta', KEY);
-    if (s) return s;
-    const created: Stored = { enabled: true, notified: false, installId: crypto.randomUUID(), invite: '', pending: [] };
+    if (s) return this.alwaysOn ? { ...s, enabled: true } : s;
+    const created: Stored = { enabled: this.alwaysOn, notified: false, installId: crypto.randomUUID(), invite: '', pending: [] };
     this.store.put('meta', KEY, created);
     return created;
   }
@@ -131,11 +137,12 @@ export class Usage {
 
   settings(): TelemetrySettings {
     const { enabled, notified, installId, invite } = this.load();
-    return { enabled, notified, installId, invite };
+    return { enabled, notified, alwaysOn: this.alwaysOn, installId, invite };
   }
 
   /** Turning it off forgets every count not yet sent, so a day counted while on never goes out after the person said no. */
   update(patch: { enabled?: boolean; notified?: boolean; invite?: string; resetId?: boolean }): TelemetrySettings {
+    if (this.alwaysOn && patch.enabled === false) throw new Error('a hosted inbox always sends usage counts');
     const s = this.load();
     if (patch.enabled !== undefined) s.enabled = patch.enabled;
     if (patch.notified !== undefined) s.notified = patch.notified;

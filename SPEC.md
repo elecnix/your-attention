@@ -266,21 +266,20 @@ Each inbox counts how much it was used per UTC day, and sends one report for eac
 - `pages`, `agents`, `instances` and `tokens` count distinct page ids, agent names, agent processes and tokens seen that day, up to 1,000 each.
 - `installId` is a random UUID per inbox. `invite` is empty on a laptop. A hosted inbox reports the first 16 hex digits of the SHA-256 of the invite code that created it.
 
-The counts start on. The inbox sends a report only after the person has read the notice, which happens in one of these places:
+Laptop and hosted inboxes treat the counts differently:
 
-- `your-attention serve` in a terminal, and `your-attention start` or `your-attention telemetry status` in one, print the notice and record that the person read it.
-- The hosted landing page asks with a checkbox, ticked by default, before it creates the inbox.
-- Otherwise the inbox page shows the notice until the person picks "Keep usage counts on" or "Turn usage counts off". A launchd or systemd service has no terminal, so its inbox doesn't send until the page or a terminal command has shown the notice.
+- **A laptop inbox** starts with the counts off, and doesn't count or send until the person turns them on. Its report has a random install id and an empty `invite`. No field says who the person is or which machine sent it. `your-attention serve` and `your-attention start`, run in a terminal, show the offer once and ask `Send anonymous usage counts? [y/N]`. Any answer but yes keeps them off. Without a terminal, such as under launchd or systemd, the inbox page shows the offer until the person picks "Turn usage counts on" or "Keep them off". `your-attention telemetry status` shows it too.
+- **A hosted inbox** always counts and sends, with its invite id, and has no off switch. The landing page says so above the button that creates the inbox, and the inbox page says so once, until the person picks "OK". `PUT /v1/telemetry {enabled: false}` answers 400. A single-mode deployment doesn't count or send.
 
-Turning the counts off deletes the counts of today and every day not yet sent, and the inbox doesn't count while they are off. An inbox keeps unsent days for a week at most, and a day without activity doesn't produce a report.
+Turning the counts off on a laptop deletes the counts of today and every day not yet sent, and the inbox doesn't count while they are off. An inbox keeps unsent days for a week at most, and a day without activity doesn't produce a report.
 
-`GET /v1/telemetry` returns `{enabled, notified, notice, blocked, source, destination, installId, invite, next}` to the owner, where `next` is the report for today so far. `notice` is true while the page must show the notice. `blocked` is null, or says why this build doesn't send. `PUT /v1/telemetry {enabled?, notified?, resetId?}` changes the setting, and setting `enabled` also records that the person read the notice. `resetId: true` picks a new install id. Other tokens get 403, and a build without usage counts answers 404.
+`GET /v1/telemetry` returns `{enabled, notified, alwaysOn, notice, blocked, source, destination, installId, invite, next}` to the owner, where `next` is the report for today so far. `notice` is true while the page must show the offer or the always-on notice. `alwaysOn` is true on the hosted service. `blocked` is null, or says why this build doesn't send. `PUT /v1/telemetry {enabled?, notified?, resetId?}` changes the setting, and setting `enabled` also records that the person read the notice. `resetId: true` picks a new install id. Other tokens get 403, and a build without usage counts answers 404.
 
 The laptop build tries to send the finished days 30 seconds after it starts and then every hour. It posts each report to `https://telemetry.your-attention.workers.dev/v1/report`, or to `YOUR_ATTENTION_TELEMETRY_URL`. It keeps a day the collector didn't take because of a network error, a 5xx or a 429, and forgets it after any other answer. With `DO_NOT_TRACK=1` or `YOUR_ATTENTION_TELEMETRY=off`, the laptop build doesn't send, whatever the inbox says. `YOUR_ATTENTION_TELEMETRY_DEBUG=1` prints each report to stderr in place of sending it.
 
 The collector is `src/cloudflare/collector.ts`, a Worker apart from the inbox Worker, configured in `wrangler.telemetry.jsonc`. `POST /v1/report` takes a body of at most 2 KB and checks it against the fields above. A good report gets 204. A report that doesn't match gets 400, and so does a report with an `invite`, since only a laptop posts there. A larger body gets 413, and an address past 10 reports a minute gets 429. It uses the address as the rate limiter's key and never stores it.
 
-A hosted inbox writes its own reports to the `TELEMETRY` binding at its next request or alarm after the day ends. A single-mode deployment doesn't write any. Hosted inboxes and the collector write one data point per report to the `your_attention_usage` Analytics Engine dataset:
+A hosted inbox writes its own reports to the `TELEMETRY` binding at its next request or alarm after the day ends, whether or not the page has shown the notice yet. A single-mode deployment doesn't write any. Hosted inboxes and the collector write one data point per report to the `your_attention_usage` Analytics Engine dataset:
 
 | Column | Value |
 | --- | --- |

@@ -90,6 +90,8 @@ export class InboxObject {
       attachmentReadsPerDay: limit(env.ATTACHMENT_READS_PER_DAY),
       pinIterations: WORKERS_PIN_ITERATIONS,
       checkDiagram: checkMermaid,
+      // The hosted service always counts usage. A single-inbox deployment sends nothing.
+      usageAlwaysOn: env.MODE === 'hosted',
     });
     // Open requests keep the object awake and billed, so events go over hibernating WebSockets only.
     this.handle = createHandler(this.inbox, { heartbeatMs: 2000, streams: false, telemetry: { source: 'hosted', destination: 'the operator of this hosted service', blocked: () => this.usageBlocked() } });
@@ -118,14 +120,14 @@ export class InboxObject {
     return undefined;
   }
 
-  /** Write each finished day to Analytics Engine, when the person was told and left it on. Other days are forgotten. */
+  /** Write each finished day to Analytics Engine. A hosted inbox always sends: its Usage reads as enabled whatever is stored. */
   private sendUsage(): void {
     const usage = this.inbox.usage;
     const due = usage.due();
     if (!due.length) return;
     const s = usage.settings();
     for (const d of due) {
-      if (s.enabled && s.notified && !this.usageBlocked()) this.env.TELEMETRY?.writeDataPoint(dataPoint(usage.report(d, 'hosted')));
+      if (s.enabled && !this.usageBlocked()) this.env.TELEMETRY?.writeDataPoint(dataPoint(usage.report(d, 'hosted')));
       usage.done(d.day);
     }
   }
@@ -142,9 +144,9 @@ export class InboxObject {
     const url = new URL(req.url);
     if (url.pathname === '/_init') {
       // The Worker calls this once per inbox. The object is never reachable from outside without the Worker.
-      const { ownerToken, usage, pin, neverAsk } = (await req.json()) as { ownerToken?: string; usage?: { enabled?: boolean; invite?: string }; pin?: string; neverAsk?: boolean };
-      // A hosted inbox learns its invite id here. The landing page told the person about usage counts when it sends `enabled`.
-      if (usage) this.inbox.usage.update({ invite: String(usage.invite ?? ''), ...(typeof usage.enabled === 'boolean' ? { enabled: usage.enabled, notified: true } : {}) });
+      const { ownerToken, usage, pin, neverAsk } = (await req.json()) as { ownerToken?: string; usage?: { invite?: string }; pin?: string; neverAsk?: boolean };
+      // A hosted inbox learns its invite id here.
+      if (usage) this.inbox.usage.update({ invite: String(usage.invite ?? '') });
       if (ownerToken) {
         try {
           if (!(await this.inbox.authenticate(ownerToken))) await this.inbox.adoptToken(ownerToken, 'owner from the deployment', 'owner');
