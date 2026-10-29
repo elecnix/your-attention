@@ -153,19 +153,21 @@ export class CardView {
     const { s: st, g } = theme;
     const doc = new Doc(width);
     this.widgets = new Map();
-    const links: string[] = [];
+    // Each link with the line its paragraph starts on, so Tab scrolls to the link.
+    const links: { t: string; line: number }[] = [];
     const md: MdContext = {
       theme,
       cardTitle: (id) => q.byId[id]?.title,
       focused: this.focus,
-      onLink: (t) => { if (!links.includes(t)) links.push(t); },
+      onLink: (t) => { if (!links.some((l) => l.t === t)) links.push({ t, line: doc.lines.length }); },
     };
     // A link is a Tab stop too, so the keyboard reaches every session link.
     const linkStops = () => {
-      for (const t of links.splice(0)) {
+      for (const { t, line } of links.splice(0)) {
         if (this.widgets.has(t)) continue;
         this.widgets.set(t, { id: t, key: (ev) => { if (ev.name === 'enter' || ev.name === 'space') { this.host.act(this, { kind: 'open', target: t }); return true; } return false; }, click: () => this.host.act(this, { kind: 'open', target: t }) });
-        doc.stops.push({ id: t, top: Math.max(0, doc.lines.length - 1), bottom: Math.max(0, doc.lines.length - 1) });
+        const at = Math.min(line, Math.max(0, doc.lines.length - 1));
+        doc.stops.push({ id: t, top: at, bottom: at });
       }
     };
     const button = (id: string, label: string, run: () => void, style: Style = {}): Span => {

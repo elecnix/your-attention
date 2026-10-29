@@ -52,7 +52,7 @@ export class Vt {
       }
       if (c === '\r') { this.x = 0; i++; continue; }
       if (c === '\n') { this.y = Math.min(this.rows - 1, this.y + 1); i++; continue; }
-      if (c < ' ') { i++; continue; }
+      if (c < ' ' || c === '\x7f') { i++; continue; }
       // One grapheme: read up to the next control character.
       let j = i;
       while (j < s.length && s[j]! >= ' ' && s[j] !== '\x7f' && s[j] !== '\x1b') j++;

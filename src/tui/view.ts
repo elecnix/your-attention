@@ -251,7 +251,7 @@ function drawHelp(grid: Grid, m: Model): void {
   const y0 = Math.max(1, Math.floor((m.height - h) / 2));
   box(grid, x0, y0, w, h, g.focusBox, st.focus);
   grid.text(x0 + 2, y0, ' Keys ', st.bold);
-  HELP.slice(0, h - 4).forEach(([k, d], i) => {
+  HELP.slice(0, Math.max(0, h - 4)).forEach(([k, d], i) => {
     const y = y0 + 1 + i;
     const keyText = m.theme.caps.unicode ? k : k.replace(/↑/g, 'Up').replace(/↓/g, 'Down').replace(/→/g, 'Right');
     if (!d) { grid.text(x0 + 2, y, keyText, st.heading); return; }

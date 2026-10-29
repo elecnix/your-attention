@@ -111,6 +111,9 @@ export class Grid {
         break;
       }
       if (x >= 0) {
+        // Writing over half of a wide character blanks its other half, so the row stays one grapheme per cell.
+        if (this.chars[y * this.width + x] === '' && x > 0) this.chars[y * this.width + x - 1] = ' ';
+        if (x + w < this.width && this.chars[y * this.width + x + w] === '') this.chars[y * this.width + x + w] = ' ';
         this.chars[y * this.width + x] = g;
         this.styles[y * this.width + x] = id;
         if (w === 2) { this.chars[y * this.width + x + 1] = ''; this.styles[y * this.width + x + 1] = id; }

@@ -84,4 +84,14 @@ describe('the cell grid', () => {
     g.fill(1, 0, 1, 'x');
     assert.equal(g.row(0), ' xb ');
   });
+
+  it('blanks the other half of a wide character that text writes over', () => {
+    const g = new Grid(4, 1);
+    g.text(0, 0, '日x', {});
+    g.text(0, 0, 'a', {});
+    assert.equal(g.row(0), 'a x ');
+    const vt = new Vt(4, 1);
+    vt.write('a\x7fb');
+    assert.equal(vt.lines()[0], 'ab');
+  });
 });

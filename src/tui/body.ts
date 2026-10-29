@@ -42,7 +42,7 @@ export class FormStore {
   }
 
   has(form: string, name: string): boolean {
-    return !!this.data[form] && name in this.data[form];
+    return !!this.data[form] && Object.hasOwn(this.data[form], name);
   }
 
   set(form: string, name: string, value: unknown, componentType?: string): void {
