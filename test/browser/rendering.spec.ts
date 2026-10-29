@@ -405,6 +405,9 @@ test('the recommendation stands out: a labeled callout at the card text size, ab
   expect(await weight(rec.locator('.label'))).toBeGreaterThan(await weight(rec.locator('.markdown p')));
   expect(await rec.locator('.label').evaluate((el) => getComputedStyle(el).color)).not.toBe(await rec.locator('.markdown p').evaluate((el) => getComputedStyle(el).color));
   expect(await size(rec.locator('.markdown p'))).toBe(await size(page.locator('.focus-card .card-text p').first()));
+  // A light marker: a line at its left and no fill, so it never looks like the selected card or a picked option.
+  expect(await rec.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+  expect(await rec.evaluate((el) => [getComputedStyle(el).borderTopWidth, getComputedStyle(el).borderLeftStyle])).toEqual(['0px', 'solid']);
   // The page draws it once, above the options.
   await expect(page.locator('.focus-card').getByText('Recommendation: Merge it.')).toHaveCount(0);
   const recY = (await rec.boundingBox())!.y;
