@@ -208,6 +208,41 @@ your-attention stop             # stops the inbox, or its launchd or systemd ser
 
 `clear`, `reset`, `login-url` and `stop` act on the inbox this machine runs.
 
+### Answer in a terminal
+
+`your-attention tui` shows the inbox full screen in a terminal, beside your agents in herdr, tmux or any terminal tab. The card list is on the left, in the page's sections and order. The open card is on the right, with its text, the recommendation, its files and its form. Your answer goes to the agent with the same values the page would send.
+
+```sh
+your-attention tui              # the inbox on this machine, as its owner
+your-attention tui --mono       # no colors
+your-attention tui --ascii      # ASCII symbols and borders, for a terminal without Unicode
+```
+
+Like the other commands, the client reads `YOUR_ATTENTION_URL` and `YOUR_ATTENTION_TOKEN` first. Without them, it uses a pairing made with `your-attention pair <url> --role owner`, then the inbox this machine runs, with its `owner-token` file.
+
+| Key | In the list | In the card |
+| -- | -- | -- |
+| Up, Down, `j`, `k` | open the card above or below | move between fields, or inside a choice |
+| Enter, Right, Tab | move into the card | pick a choice, press a button |
+| Space | move into the card | pick a choice or tick a box |
+| Tab, Shift+Tab | move into the card | the next or previous field, button or link |
+| Esc | | back to the list |
+| PgUp, PgDn | ten cards up or down | scroll the card |
+| Ctrl+Enter, Ctrl+S | send the answer | send the answer |
+| Ctrl+N | skip for now | skip for now |
+| `g` | group by nothing, priority, agent or a tag | |
+| `C` | clear the answered and closed cards | |
+| `o` | open the card in the browser | |
+| `?`, `q`, Ctrl+C | help, quit, quit | Ctrl+C quits |
+
+Ctrl+Enter needs a terminal that reports it, such as iTerm2, Ghostty, cmux, kitty or WezTerm, and tmux with `extended-keys` on. Ctrl+S works in every terminal. In a text field, letters type text, and the Ctrl keys still work.
+
+A click opens a card or presses a button. In a form, a click picks a choice, ticks a box or puts the cursor in a text field. The wheel scrolls the pane under the pointer. A click on a herdr session link opens that session in herdr, as on the page. A click on any other link opens it in the browser.
+
+Color is never the only sign. Each state has a symbol of its own: `●` waits for you, `◉` is the card on screen, and `↩` has a new reply. In the Outbox and Sent sections, `○` means the inbox stored your answer, `◑` that the agent got it, `✓` that the model read it, and `×` that the card closed. Each waiting card shows its priority level in words, such as `now` or `soon`, beside the level's color. The card on screen has a marker, `▶`, and inverse video while the list has the keys. Set `NO_COLOR=1` or pass `--mono` for no colors at all, and pass `--ascii`, or set `YOUR_ATTENTION_TUI_ASCII=1`, for symbols such as `*`, `@`, `<` and `>`. `YOUR_ATTENTION_TUI_COLOR` forces a color depth: `mono`, `16`, `256` or `truecolor`.
+
+The client works in iTerm2, cmux, Apple Terminal, tmux and herdr panes, and Linux terminals. From 60 columns it shows the list beside the card, and below that one pane at a time. A card part that a terminal can't draw, such as a chart or an HTML card, shows a line with the card's address on the page. On a laptop, the first frame of an inbox with 200 cards appears about 130 ms after the command starts. `YOUR_ATTENTION_TUI_TRACE=<file>` writes that time and the time of each frame to the file.
+
 ## Protect the inbox with a PIN
 
 An answer on a card goes straight into a coding agent's session. Someone who gets the inbox address or a sign-in link, from a bookmark, the browser history or a pasted message, could open the page and answer as you. A 4-digit PIN stops that: the address or link signs a browser in, and each new tab must also type the PIN before it shows a card or takes an answer.

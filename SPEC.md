@@ -362,6 +362,14 @@ The phone button, left of the GitHub mark, opens a QR code that opens the inbox 
 
 On a screen 760 pixels wide or less, the page puts the queue below the card, and a button above the card says how many cards wait and scrolls to the queue. The bar scrolls away with the page. A connected inbox shows as a dot, and a lost connection keeps its words. Fields use 16-pixel text, so iOS does not zoom into them.
 
+## The terminal client
+
+`your-attention tui` is a second front-end, for a terminal. It calls the page's routes, with an owner token in the `Authorization` header: `GET /v1/state`, `POST /v1/cards/<id>/answer`, `/seen`, `/open`, `/release`, `/force`, `POST /v1/archive`, `POST /v1/focus` for herdr session links, and `GET /v1/attachments/<id>` for the text of Markdown, CSV, JSON and plain files. It follows `/v1/ws?page=1&viewer=<page id>`, with `GET /v1/events` when the socket never opens, and refetches the state on each `change`. Its page id starts with `tui-`, and it reports `POST /v1/person/<page id>` as a page does. The terminal's focus reports set `visible`.
+
+The client builds each card's OpenUI Lang with `cardSource` from `web/answers.js`, the page's own code, and parses it with `@openuidev/lang-core` and `src/tui/openui-schema.json`. That file is the page's component library as a JSON schema, `CheckWithText` included. `scripts/openui-schema.ts` writes it from the page, and a browser test fails when it differs from the page's. Each field keeps its value as the page's renderer stores it, in `{form: {field: {value}}}`, so `formValues` and `answerValues` from `web/answers.js` give the same answer for the same picks. Secret, broadcast and HTML cards get forms of their own, with the page's buttons. A secret card seals its value with `web/sealed.js` in the client's process. The client queue comes from `web/queue.js`, also shared with the page, so the sections, Skip for now and the card after an answer follow the page's order.
+
+The client never runs an HTML card's scripts. For an HTML card, a chart or another component it can't draw, it shows a line with the card's address on the page, `<inbox url>/#card=<id>`. It drops escape sequences, other control characters and bidirectional overrides from every card field before it writes them to the terminal.
+
 ## Search
 
 `GET /v1/search?q=<words>` matches each word as a prefix, over card text and answer comments. The laptop build uses SQLite FTS5.
