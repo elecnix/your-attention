@@ -177,7 +177,7 @@
   details.changes .add mark { background: var(--ok-bg); }
   .broadcast pre { white-space: pre-wrap; background: var(--bg); padding: 10px; border-radius: 8px; }
   .broadcast .agents { display: grid; gap: 4px; margin: 8px 0; font-size: calc(14px * var(--text-scale)); }
-  .markdown a, .card-text a { color: var(--accent); }
+  .markdown a, .card-text a, .focus-card label a { color: var(--accent); }
   .card-title { font-size: calc(18px * var(--text-scale)); margin: 4px 0 8px; }
   details.changes .step { margin: 6px 0; }
   details.changes .step-head { font-weight: 600; }

@@ -93,3 +93,23 @@ test('a body with no form of its own still gets the comment box, Send answer and
   await page.locator('.focus-card').getByRole('button', { name: 'Send answer' }).click();
   await expect.poll(() => { const a = ev.events.find((e) => e.type === 'answer'); return a?.type === 'answer' ? a.answer.comment : undefined; }).toBe('Layout B.');
 });
+
+test('a field label renders its Markdown, such as a link to a pull request', async ({ page }) => {
+  await inbox.agent.post({ id: 'label-md', agent: 's-label', title: 'Merge these?', priority: 'now',
+    body: 'root = Card([f])\nnone = Buttons([])\nf = Form("p1", none, [c])\nc = FormControl("[PR #200](https://example.com/pull/200): fix the **ack**", RadioGroup("m200", [RadioItem("Merge it", "", "yes")]))' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Merge these?' }).click();
+  const link = page.locator('.focus-card a', { hasText: 'PR #200' });
+  await expect(link).toHaveAttribute('href', 'https://example.com/pull/200');
+  // The link takes the page's link color, so it reads on a dark page too.
+  expect(await link.evaluate((el) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--accent)';
+    el.parentElement!.appendChild(probe);
+    const accent = getComputedStyle(probe).color;
+    probe.remove();
+    return getComputedStyle(el).color === accent;
+  })).toBe(true);
+  await expect(page.locator('.focus-card strong', { hasText: 'ack' })).toBeVisible();
+  await expect(page.locator('.focus-card')).not.toContainText('](https://');
+});

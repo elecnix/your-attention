@@ -50,6 +50,11 @@ function inline(h, text, key, opts = {}) {
 }
 
 // With breaks, a line break inside a paragraph stays a line break, as in a chat message.
+/** One line of inline Markdown, such as a field label: links, code, bold and italic, with no paragraph around it. */
+export function renderInline(h, text, opts = {}) {
+  return inline(h, String(text ?? ''), 'i', opts);
+}
+
 export function renderMarkdown(h, src, opts = {}) {
   const ins = (text, k) => inline(h, text, k, opts);
   const lines = String(src).replace(/\r\n/g, '\n').split('\n');

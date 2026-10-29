@@ -1,7 +1,7 @@
 // The parts of the page, each one renderable alone, as the stories do.
 import { BASE, CLOSED_LABEL, Icon, J, api, h, notifyOn, store } from './env.js';
 import { cardAge } from './age.js';
-import { SESSION_LINK, renderMarkdown } from './markdown.js';
+import { SESSION_LINK, renderInline, renderMarkdown } from './markdown.js';
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 
@@ -21,10 +21,16 @@ function CheckWithText({ props, renderNode }) {
 }
 const { FormControl, AccordionItem } = openuiChatLibrary.components;
 const checkWithTextProps = FormControl.props.pick({ label: true }).extend({ check: FormControl.props.shape.input, content: AccordionItem.props.shape.content });
-const library = openuiChatLibrary.extend({ components: { add: [{
-  component: { name: 'CheckWithText', props: checkWithTextProps, ref: checkWithTextProps, description: 'A check box with a label that shows editable content when clicked.', component: CheckWithText },
-  slots: ['Card.children', 'FormControl.input'],
-}] } });
+// A field label reads Markdown, as card text does, so a label can link to the pull request it asks about.
+const PlainFormControl = FormControl.component;
+const MarkdownFormControl = (args) => PlainFormControl({ ...args, props: { ...args.props, label: h(React.Fragment, null, renderInline(h, args.props.label)) } });
+const library = openuiChatLibrary.extend({ components: {
+  add: [{
+    component: { name: 'CheckWithText', props: checkWithTextProps, ref: checkWithTextProps, description: 'A check box with a label that shows editable content when clicked.', component: CheckWithText },
+    slots: ['Card.children', 'FormControl.input'],
+  }],
+  override: [{ ...FormControl, component: MarkdownFormControl }],
+} });
 
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
