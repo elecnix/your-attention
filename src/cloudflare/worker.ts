@@ -20,6 +20,7 @@ export interface Env {
   UPLOAD_LIMIT_BYTES?: string;
   /** The bytes each inbox may keep in its database. */
   STORAGE_LIMIT_BYTES?: string;
+  SHOWN_CARDS_LIMIT?: string;
   /** The files each inbox may serve in a day. */
   ATTACHMENT_READS_PER_DAY?: string;
   /** In hosted mode, the key that signs inbox addresses, so the Worker checks an address without a KV read. */

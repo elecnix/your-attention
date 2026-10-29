@@ -69,6 +69,14 @@ async function call(obj: InstanceType<typeof InboxObject>, method: string, path:
 }
 
 describe('the inbox Durable Object', () => {
+  it('shows at most SHOWN_CARDS_LIMIT cards, so the state fits its CPU time', async () => {
+    const rt = runtime({ SHOWN_CARDS_LIMIT: '2' });
+    const obj = rt.make();
+    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    for (const id of ['c1', 'c2']) assert.equal((await call(obj, 'POST', '/v1/cards', owner, { id, agent: 's', title: id })).status, 201);
+    assert.equal((await call(obj, 'POST', '/v1/cards', owner, { id: 'c3', agent: 's', title: 'c3' })).status, 507);
+  });
+
   it('refuses a PIN key it cannot check before it creates the owner token', async () => {
     const rt = runtime();
     const obj = rt.make();

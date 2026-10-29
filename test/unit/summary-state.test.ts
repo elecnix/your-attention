@@ -5,11 +5,13 @@ import { describe, it } from 'node:test';
 import { createHandler } from '../../src/core/http.ts';
 import { Inbox } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
-import { MAX_SHOWN_CARDS, type CardSummary } from '../../src/core/summary.ts';
+import type { CardSummary } from '../../src/core/summary.ts';
+
+const LIMIT = 50;
 import type { Answer, Card } from '../../src/core/types.ts';
 
-async function setup(store = new MemoryStorage()) {
-  const inbox = new Inbox(store, Date.now);
+async function setup(store = new MemoryStorage(), shownCardLimit?: number) {
+  const inbox = new Inbox(store, Date.now, undefined, { shownCardLimit });
   const handle = createHandler(inbox, { heartbeatMs: 50 });
   const owner = (await inbox.createToken('page', 'owner', { pinExempt: true })).secret;
   const agent = (await inbox.createToken('agents', 'agent')).secret;
@@ -77,9 +79,16 @@ describe('the state sends card summaries', () => {
     assert.equal((await state()).cards[0]?.title, 'Old card');
   });
 
-  it(`shows at most ${MAX_SHOWN_CARDS} cards, and a new one waits until the person clears some`, async () => {
-    const { inbox, call, agent, owner } = await setup();
-    for (let i = 0; i < MAX_SHOWN_CARDS; i++) inbox.postCard({ token: 'a', role: 'agent' }, { id: `c${i}`, agent: 's', title: `Card ${i}` });
+  it('shows every card on an inbox without a limit, as the laptop has', async () => {
+    const { inbox, call, agent, state } = await setup();
+    for (let i = 0; i < 600; i++) inbox.postCard({ token: 'a', role: 'agent' }, { id: `c${i}`, agent: 's', title: `Card ${i}` });
+    assert.equal((await call('POST', '/v1/cards', agent, { id: 'one-more', agent: 's', title: 'One more' })).status, 201);
+    assert.equal((await state()).cards.length, 601);
+  });
+
+  it('with a limit, as the hosted inbox has, a new card past it waits until the person clears some', async () => {
+    const { inbox, call, agent, owner } = await setup(new MemoryStorage(), LIMIT);
+    for (let i = 0; i < LIMIT; i++) inbox.postCard({ token: 'a', role: 'agent' }, { id: `c${i}`, agent: 's', title: `Card ${i}` });
     const full = await call<{ error: string }>('POST', '/v1/cards', agent, { id: 'one-more', agent: 's', title: 'One more' });
     assert.equal(full.status, 507);
     assert.match(full.body.error, /clear answered or closed cards/);

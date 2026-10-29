@@ -86,6 +86,7 @@ export class InboxObject {
       keepPresence: true,
       uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES),
       storageLimitBytes: limit(env.STORAGE_LIMIT_BYTES),
+      shownCardLimit: limit(env.SHOWN_CARDS_LIMIT),
       attachmentReadsPerDay: limit(env.ATTACHMENT_READS_PER_DAY),
       // A request gets 10 ms of CPU time on the Workers Free plan, too little to parse a large body or a diagram.
       // So the posting client checks them, and the page reports what it cannot draw. See SPEC.md, "Checks on the client".

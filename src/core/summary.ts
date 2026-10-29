@@ -6,8 +6,8 @@ import { randomId } from './crypto.ts';
 import type { Collection, SearchHit, Storage } from './storage.ts';
 import type { Answer, Card } from './types.ts';
 
-/** The most cards the state shows. A new card past it waits until the person clears answered or closed cards. */
-export const MAX_SHOWN_CARDS = 500;
+/** The most cards the hosted inbox's state shows, so its request fits 10 ms of CPU time. wrangler.jsonc sets it in SHOWN_CARDS_LIMIT. */
+export const HOSTED_SHOWN_CARDS = 500;
 /** How much of the text a link to a card previews on hover. */
 const PREVIEW_CHARS = 300;
 const MAX_LINKS = 20;

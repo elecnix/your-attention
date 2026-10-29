@@ -10,7 +10,7 @@ import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findD
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
-import { MAX_SHOWN_CARDS, SummarizedStorage, type AnswerSummary, type CardSummary } from './summary.ts';
+import { SummarizedStorage, type AnswerSummary, type CardSummary } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import type {
   AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
@@ -46,6 +46,9 @@ export interface InboxOptions {
   /** The posting client checks diagrams and bodies, and the inbox takes them unchecked, as on the hosted service, whose
    * requests have too little CPU time to parse them. The page reports what it cannot draw, and the card goes back to its agent. */
   clientChecks?: boolean;
+  /** The most cards the state shows. A new card past it waits until the person clears answered or closed cards.
+   * The hosted inbox sets it, so GET /v1/state fits its CPU time. Without it, the inbox shows every card. */
+  shownCardLimit?: number | undefined;
   /** The inbox always counts usage and has no off switch, as on the hosted service. */
   usageAlwaysOn?: boolean;
 }
@@ -126,6 +129,7 @@ export class Inbox {
   private readonly checkBody: ((body: string) => string[]) | undefined;
   private readonly fallbackBody: ((body: string) => Card['bodyFallback']) | undefined;
   private readonly clientChecks: boolean;
+  private readonly shownCardLimit: number | undefined;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
@@ -158,6 +162,7 @@ export class Inbox {
     this.checkBody = opts.checkBody;
     this.fallbackBody = opts.fallbackBody;
     this.clientChecks = opts.clientChecks === true;
+    this.shownCardLimit = opts.shownCardLimit;
     this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
@@ -343,9 +348,10 @@ export class Inbox {
     if (agent.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     if (title.length > 300) throw new InboxError(400, 'title must be at most 300 characters');
     if (agent === SYSTEM_AGENT && caller.token !== '') throw new InboxError(403, 'the system agent is reserved');
-    // The state shows at most MAX_SHOWN_CARDS cards, so its request fits the hosted inbox's CPU time. The inbox's own cards always go in.
-    if (caller.token !== '' && !this.store.get('cards', String(input.id ?? '')) && (this.store.count?.('summaries') ?? 0) >= MAX_SHOWN_CARDS) {
-      throw new InboxError(507, `the inbox shows ${MAX_SHOWN_CARDS} cards, the most it shows. The person must clear answered or closed cards before a new one fits`);
+    // An inbox with a limit shows at most that many cards, so its state fits the hosted inbox's CPU time. Its own cards always go in.
+    const limit = this.shownCardLimit;
+    if (limit !== undefined && caller.token !== '' && !this.store.get('cards', String(input.id ?? '')) && (this.store.count?.('summaries') ?? 0) >= limit) {
+      throw new InboxError(507, `the inbox shows ${limit} cards, the most it shows. The person must clear answered or closed cards before a new one fits`);
     }
     const levels = this.priorities();
     const priority = input.priority ?? (levels.some((l) => l.id === 'soon') ? 'soon' : levels[0]?.id ?? 'soon');

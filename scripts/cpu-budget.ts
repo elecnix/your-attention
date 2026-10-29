@@ -9,7 +9,7 @@ import { DurableSqlStorage } from '../src/cloudflare/storage.ts';
 import { createHandler } from '../src/core/http.ts';
 import { Inbox, MAX_CARD_BYTES } from '../src/core/inbox.ts';
 import { newPinKey, pinKey } from '../src/core/pin.ts';
-import { MAX_SHOWN_CARDS } from '../src/core/summary.ts';
+import { HOSTED_SHOWN_CARDS } from '../src/core/summary.ts';
 import { MemoryBlobs } from '../src/core/storage.ts';
 import { dataPoint } from '../src/core/telemetry.ts';
 
@@ -26,7 +26,7 @@ function durableStorage(): DurableSqlStorage {
 /** The inbox as src/cloudflare/inbox-object.ts builds it, with no storage limit so the setup can fill it. */
 async function hosted() {
   const store = durableStorage();
-  const inbox = new Inbox(store, Date.now, new MemoryBlobs(), { keepPresence: true, clientChecks: true, usageAlwaysOn: true });
+  const inbox = new Inbox(store, Date.now, new MemoryBlobs(), { keepPresence: true, clientChecks: true, usageAlwaysOn: true, shownCardLimit: HOSTED_SHOWN_CARDS });
   const handle = createHandler(inbox, { heartbeatMs: 2000, streams: false, telemetry: { source: 'hosted', destination: 'the operator', blocked: () => undefined } });
   const owner = (await inbox.createToken('owner', 'owner', { pinExempt: true })).secret;
   const agent = (await inbox.createToken('agents', 'agent')).secret;
@@ -87,10 +87,10 @@ const PATHS: Path[] = [
     for (let i = 0; h.store.bytes() < 20 * 1024 * 1024; i++) await h.inbox.postCardWithFiles({ token: 'budget', role: 'agent' }, maxCard(`s${i}`));
     return { run: () => h.call('GET', '/v1/state', h.owner) };
   } },
-  { name: `GET /v1/state, ${MAX_SHOWN_CARDS} cards, the most it shows, each with the largest summary`, setup: async () => {
+  { name: `GET /v1/state, ${HOSTED_SHOWN_CARDS} cards, the most it shows, each with the largest summary`, setup: async () => {
     const h = await hosted();
     const long = (n: number, i: number) => `${i} ${'w'.repeat(n)}`.slice(0, n);
-    for (let i = 0; i < MAX_SHOWN_CARDS; i++) {
+    for (let i = 0; i < HOSTED_SHOWN_CARDS; i++) {
       const links = Array.from({ length: 20 }, (_, j) => `[[${long(78, i * 20 + j)}]]`).join(' ');
       h.inbox.postCard({ token: 'budget', role: 'agent' }, {
         id: `m${i}`, agent: `a${i % 50}`, title: long(300, i), text: `${links} ${'x'.repeat(4000)}`, status: long(200, i), from: long(80, i),
