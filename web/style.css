@@ -66,6 +66,8 @@
   .empty { color: var(--muted); font-size: calc(13px * var(--text-scale)); padding: 4px 8px; }
   main { min-width: 0; }
   .focus-card pre, .focus-card code { max-width: 100%; overflow-x: auto; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
+  /* The code block sets white-space inline, so wrapping the source of a body that did not draw needs !important. */
+  .body-source .openui-code-block-syntax-highlighter, .body-source .openui-code-block-syntax-highlighter code { white-space: pre-wrap !important; overflow-wrap: anywhere; }
   .closed-line .o { overflow-wrap: anywhere; }
   .focus-card { min-width: 0; overflow-x: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   /* A card's body reads in a dim text color, 5% brighter than the cards you sent, so it reads well without glare. The title, headings, bold words, card

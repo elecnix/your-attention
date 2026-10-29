@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { FileBlobs } from '../adapters/files.ts';
 import { advertise, type Advertisement } from '../adapters/mdns.ts';
 import { checkMermaid } from '../adapters/mermaid.ts';
+import { bodyErrors } from '../adapters/openui-body.ts';
 import { SqliteStorage } from '../adapters/sqlite.ts';
 import { randomId } from '../core/crypto.ts';
 import { createHandler } from '../core/http.ts';
@@ -100,7 +101,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');

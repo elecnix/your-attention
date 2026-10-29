@@ -1,6 +1,7 @@
 // The parts of the page, each one renderable alone, as the stories do.
 import { BASE, CLOSED_LABEL, Icon, J, api, h, notifyOn, store } from './env.js';
 import { cardAge } from './age.js';
+import { extendLibrary } from './library-spec.js';
 import { SESSION_LINK, renderInline, renderMarkdown } from './markdown.js';
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
@@ -87,23 +88,16 @@ export function Diagram({ source }) {
   return h('figure', { className: 'diagram', role: 'img', 'aria-label': `Diagram: ${source.split('\n')[0]}`, dangerouslySetInnerHTML: { __html: drawn.svg } });
 }
 
-const { FormControl, AccordionItem, CodeBlock } = openuiChatLibrary.components;
-const mermaidProps = FormControl.props.pick({}).extend({ source: CodeBlock.props.shape.codeString });
-const checkWithTextProps = FormControl.props.pick({ label: true }).extend({ check: FormControl.props.shape.input, content: AccordionItem.props.shape.content });
 // A field label reads Markdown, as card text does, so a label can link to the pull request it asks about.
-const PlainFormControl = FormControl.component;
+const PlainFormControl = openuiChatLibrary.components.FormControl.component;
 const MarkdownFormControl = (args) => PlainFormControl({ ...args, props: { ...args.props, label: h(React.Fragment, null, renderInline(h, args.props.label)) } });
-const library = openuiChatLibrary.extend({ components: {
-  add: [{
-    component: { name: 'CheckWithText', props: checkWithTextProps, ref: checkWithTextProps, description: 'A check box with a label that shows editable content when clicked.', component: CheckWithText },
-    slots: ['Card.children', 'FormControl.input'],
-  }, {
-    component: { name: 'Mermaid', props: mermaidProps, ref: mermaidProps, description: 'A diagram drawn from Mermaid source.', component: ({ props }) => h(Diagram, { source: String(props.source ?? '') }) },
-    // Wherever a CodeBlock can go.
-    slots: ['Card.children', 'SectionItem.content', 'TabItem.content', 'AccordionItem.content', 'Carousel.children'],
-  }],
-  override: [{ ...FormControl, component: MarkdownFormControl }],
-} });
+const library = extendLibrary(openuiChatLibrary, {
+  CheckWithText,
+  Mermaid: ({ props }) => h(Diagram, { source: String(props.source ?? '') }),
+  FormControl: MarkdownFormControl,
+});
+/** The page's component list, as the inbox reads it from src/adapters/openui-library.ts. */
+export const librarySchema = () => library.toJSONSchema();
 
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
@@ -315,8 +309,18 @@ export function describe(card, a) {
   return [...picks, a.comment].filter(Boolean).join('\n') || 'Empty answer';
 }
 
+/** The card with its body shown as source, for a body the page cannot draw whole. */
+export function sourceCard(c) {
+  return cardSource({ ...c, body: ['root = Card([yaSource])', `yaSource = CodeBlock("text", ${J(c.body)})`].join('\n') });
+}
+
 // One rendered card. Its initial state is read once, so later renders keep what you typed.
-export function CardView({ draftKey, response, onAction }) {
+// The inbox refuses a body the page cannot draw whole, but one it stored before it checked bodies still shows, as `fallback`.
+export function CardView({ draftKey, response, fallback, onAction }) {
+  const [broken, setBroken] = React.useState(false);
+  const onParseResult = React.useCallback((r) => {
+    if (fallback && r && (r.meta.incomplete || r.meta.unresolved.length)) setBroken(true);
+  }, [fallback]);
   const [initialState] = React.useState(() => store.get(draftKey) || undefined);
   const actionRef = React.useRef(onAction);
   actionRef.current = onAction;
@@ -326,7 +330,12 @@ export function CardView({ draftKey, response, onAction }) {
     onStateUpdate: (s) => { stateRef.current = s; store.set(draftKey, s); },
     onAction: (ev) => actionRef.current({ ...ev, formState: stateRef.current || ev.formState }),
   }), [draftKey]);
-  return h(Renderer, { response, library, initialState, ...handlers });
+  if (broken) {
+    return h(React.Fragment, null,
+      h('div', { className: 'note warn' }, 'Part of this card did not draw, because its body has an error. Here is the source the agent sent.'),
+      h('div', { className: 'body-source' }, h(Renderer, { response: fallback, library, initialState, ...handlers })));
+  }
+  return h(Renderer, { response, library, initialState, onParseResult, ...handlers });
 }
 
 // A card the agent closed while you looked at it: it collapses to its outcome, and opens again on demand.

@@ -145,13 +145,27 @@ To seal the value, the page encrypts it with a new AES-256-GCM key, then wraps t
 
 The inbox refuses any other value on a secret card, so plain text never reaches storage. An answer without `values.sealed` declines the request. A page on plain HTTP from another machine cannot seal, because browsers give Web Crypto to secure origins only.
 
+### Body check
+
+The OpenUI parser drops a statement it can't read. An unclosed string also hides every later statement from it. The page would then draw part of a body and say nothing. The inbox reads each body with that parser, `@openuidev/lang-core` 1.0.1, and with the page's own component list. It refuses a body with 400 when a string never closes, when a statement uses a name the body never defines, when a call breaks a component's signature, or when the body has no `root` statement. The check runs after the inbox fills a template and places widgets, on `POST /v1/cards` and on `card_patch`. Its message lists each fault on its own line and names the statement:
+
+```text
+the page cannot draw all of this body:
+- `f1` (line 4) has a string that never closes, so the page drops it and every statement after it. Open and close each string with a plain quote, and escape only for a quote inside a string.
+- `f2` is used but never defined.
+```
+
+`scripts/openui-library.ts` writes the component list from the page itself, and a browser test fails when the two differ. A card stored before the check, whose body the page can't draw whole, shows a warning, the body's source with its lines wrapped, and the comment box with **Send answer**.
+
+The fold under a card that follows another one shows the earlier card's text as Markdown, as the card itself does.
+
 ## Editing cards
 
 `POST /v1/cards/<id>/patch {edits: [{old, new}], field}` edits one field, `text` by default or `body` when the card has one. Each `old` must occur exactly once, or the inbox refuses the whole patch with 409. A revision, by patch or by posting the same id, adds 1 to `version` and keeps the version before it in `history`, up to 20 versions.
 
 `POST /v1/cards/<id>/status {status}` sets the agent's state label. An empty label clears it.
 
-The page renders `text` as Markdown: headings, lists, block quotes, fenced code, tables, inline code, bold, italic, and links to http, https and mailto addresses. A bare http or https address becomes a link, and a line break stays a line break. A link with any other scheme shows its label only. The page draws `recommendation` below the text on every kind of card, with a **Recommendation** label and a line in the accent color at its left, in Markdown at the text's size. It has no fill, so it never looks like a picked option. A ```` ```mermaid ```` fenced block in `text` or `recommendation` draws as a diagram, as [Diagrams](#diagrams) describes. A field label in a body reads inline Markdown too, so a `FormControl` label can link to the pull request it asks about. Text in `text` links to another card with `[[card-id]]`. The page shows the title of the linked card and previews its text on hover. Below the card you have open, it lists the cards that link to it.
+The page renders `text` as Markdown: headings, lists, block quotes, fenced code, tables, inline code, bold, italic, and links to http, https and mailto addresses. A bare http or https address becomes a link, and a line break stays a line break. A link with any other scheme shows its label only. On every kind of card, `recommendation` sits below `text`, with a **Recommendation** label and an accent-colored line at its left. It reads as Markdown, as large as `text`. It has no fill, so it never looks like a picked option. A ```` ```mermaid ```` fenced block in `text` or `recommendation` draws as a diagram, as [Diagrams](#diagrams) describes. A field label in a body reads inline Markdown too, so a `FormControl` label can link to the pull request it asks about. Text in `text` links to another card with `[[card-id]]`. The page shows the title of the linked card and previews its text on hover. Below the card you have open, it lists the cards that link to it.
 
 Agents point at another agent's session with a herdr link, `[label](https://herdr.invalid/v1/<kind>/<id>)`. The kind is `agent`, `pane`, `tab` or `workspace`, and herdr's session fingerprint may come before it. An orchestrator uses one to report on a blocked agent in another tab. The page shows the link as a terminal chip in the card's text, body, Markdown files and HTML. A click keeps the page where it is. The page sends the link to `POST /v1/focus`, which only the owner may call. The inbox then runs `herdr agent focus`, `tab focus` or `workspace focus` on this computer. For a shell pane without an agent, the inbox opens the pane's tab. The id uses letters, digits, `_`, `:`, `.` and `-`, and never starts with a dash. A hosted inbox has no herdr, so it answers 501 and the chip shows the error.
 

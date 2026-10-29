@@ -38,6 +38,8 @@ export interface InboxOptions {
   pinIterations?: number | undefined;
   /** Checks each Mermaid diagram before the inbox takes the card. Without it, the inbox takes no card with a diagram. */
   checkDiagram?: DiagramCheck | undefined;
+  /** Lists what keeps the page from drawing all of a card body. The inbox refuses a body with any. */
+  checkBody?: ((body: string) => string[]) | undefined;
   /** The inbox always counts usage and has no off switch, as on the hosted service. */
   usageAlwaysOn?: boolean;
 }
@@ -115,6 +117,7 @@ export class Inbox {
   private readonly storageLimit: number | undefined;
   private readonly readsPerDay: number | undefined;
   private readonly checkDiagram: DiagramCheck | undefined;
+  private readonly checkBody: ((body: string) => string[]) | undefined;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
@@ -143,6 +146,7 @@ export class Inbox {
     this.storageLimit = opts.storageLimitBytes;
     this.readsPerDay = opts.attachmentReadsPerDay;
     this.checkDiagram = opts.checkDiagram;
+    this.checkBody = opts.checkBody;
     this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
@@ -347,6 +351,9 @@ export class Inbox {
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
     const { body, template, expanded } = this.cardBody(input);
+    // The page drops what it cannot read of a body without a word, so the agent hears it here.
+    const bodyProblems = body === undefined || !this.checkBody ? [] : this.checkBody(String(body));
+    if (bodyProblems.length) throw new InboxError(400, `the page cannot draw all of this body:\n- ${bodyProblems.join('\n- ')}`);
     let widgets = before?.widgets;
     let responses = before?.responses;
     if (expanded) {
