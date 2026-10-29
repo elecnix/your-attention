@@ -77,8 +77,10 @@ test('the page sends a key derived from the PIN, never the PIN', async ({ page }
   await expect(page.locator('.bar .pill.on')).toBeVisible();
   expect(bodies).toHaveLength(2);
   for (const b of bodies) {
-    expect(b).not.toContain('2468');
-    expect(JSON.parse(b).key).toMatch(/^[0-9a-f]{64}$/);
+    const sent = JSON.parse(b) as Record<string, unknown>;
+    expect(Object.values(sent)).not.toContain('2468');
+    expect(Object.keys(sent)).not.toContain('pin');
+    expect(sent['key']).toMatch(/^[0-9a-f]{64}$/);
   }
 });
 

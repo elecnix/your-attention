@@ -3,7 +3,7 @@
 // object rebuilds each connection from the socket's attachment when it wakes.
 import { COOKIE, createHandler } from '../core/http.ts';
 import { Inbox } from '../core/inbox.ts';
-import type { PinKey } from '../core/pin.ts';
+import { pinKeyError, type PinKey } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
 import { dataPoint } from '../core/telemetry.ts';
 import type { Role } from '../core/types.ts';
@@ -155,11 +155,14 @@ export class InboxObject {
         }
         return Response.json({ ok: true });
       }
+      // The Worker checked the key's form already. A key the object refuses creates no inbox.
+      const pinError = pin === undefined ? undefined : pinKeyError(pin, this.inbox.pin.iterations);
+      if (pinError) return Response.json({ error: `pin: ${pinError}` }, { status: 400 });
       const { token, secret } = await this.inbox.createToken('owner of this hosted inbox', 'owner');
       // The landing page set the PIN as it created the inbox, and the tab it opens in starts unlocked.
       if (neverAsk === true) this.inbox.pin.setNeverAsk(true);
       if (pin === undefined) return Response.json({ owner: secret });
-      // The landing page derived the key, and the Worker checked its form. The object stores only its SHA-256.
+      // The landing page derived the key. The object stores only its SHA-256.
       await this.inbox.pin.setKey(pin);
       return Response.json({ owner: secret, unlock: await this.inbox.pin.issue(token.id) });
     }

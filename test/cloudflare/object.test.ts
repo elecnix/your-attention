@@ -69,6 +69,15 @@ async function call(obj: InstanceType<typeof InboxObject>, method: string, path:
 }
 
 describe('the inbox Durable Object', () => {
+  it('refuses a PIN key it cannot check before it creates the owner token', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    const res = await call(obj, 'POST', '/_init', undefined, { pin: { key: 'x', salt: 'y', iterations: 1 } });
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as { error: string }).error, /^pin: key must be/);
+    assert.equal(obj['inbox'].listTokens().length, 0, 'no owner token without an inbox to sign in to');
+  });
+
   it('keeps answering agents across hibernation', async () => {
     const rt = runtime();
     let obj = rt.make();

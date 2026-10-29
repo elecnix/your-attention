@@ -493,8 +493,9 @@ export class Inbox {
 
   /** The page could not draw a card it shows: a diagram that mermaid cannot parse, or a body the OpenUI parser reads in part.
    * The card goes back to its agent with the errors, as a laptop inbox would have refused the post. Only the owner reports. */
-  drawFault(caller: Caller, id: string, report: { version?: unknown; renderer?: unknown; diagrams?: unknown; body?: unknown }): Card {
+  drawFault(caller: Caller, id: string, sent: { version?: unknown; renderer?: unknown; diagrams?: unknown; body?: unknown } | null): Card {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the page reports what it cannot draw');
+    const report = sent && typeof sent === 'object' ? sent : {};
     const card = this.getCard(id);
     if (card.kind === 'system') throw new InboxError(400, 'a system card shows its diagrams as source');
     if (Number(report.version) !== card.version) throw new InboxError(409, `the card is at version ${card.version}, and the page drew version ${String(report.version)}`);

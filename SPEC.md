@@ -79,7 +79,7 @@ The inbox refuses a request with 423 `{error, locked: true}` when the request si
 
 | Route | Who | Does |
 | -- | -- | -- |
-| `GET /v1/pin` | owner | `{set, salt, iterations, neverAsk, unlocked, lockedUntil, triesLeft, exempt}` |
+| `GET /v1/pin` | owner | `{set, salt, iterations, newIterations, neverAsk, unlocked, lockedUntil, triesLeft, exempt}` |
 | `POST /v1/unlock {key}` | owner | `{unlock, idleMs}`, or 401 `{triesLeft}`, or 429 `{lockedUntil}` with `retry-after` |
 | `PUT /v1/pin {key, salt, iterations, current}` | owner | Sets the PIN. A gated caller sends `current` when a PIN exists, and gets a fresh `unlock`. |
 | `DELETE /v1/pin {current}` | owner | Removes the PIN, with the same rule for `current`. |
@@ -91,7 +91,7 @@ The page sends its unlock token in the `x-your-attention-unlock` header. The pag
 The PIN never leaves the client. The page, the landing page and the CLI derive a key from it with PBKDF2-SHA256, 32 bytes sent as 64 lowercase hex digits. They send the key in `key` and `current`, never the PIN:
 
 - To unlock, or to prove the current PIN, the client derives with the `salt` and `iterations` that `GET /v1/pin` returns for the PIN that is set.
-- For a new PIN, the client draws a random 16-byte salt and derives with the `iterations` that `GET /v1/pin` returns. It sends the key with the salt and the count, and the inbox answers 400 for any other count.
+- For a new PIN, the client draws a random 16-byte salt and derives with the `newIterations` that `GET /v1/pin` returns. It sends the key with the salt and the count, and the inbox answers 400 for any other count.
 
 Both builds hand out 800,000 iterations, about 100 ms on a laptop, so the hosted inbox doesn't run a slow hash in its 10 ms of CPU time. `web/pin-key.js` derives the key on the page, and `src/core/pin.ts` derives the same key in Node. The inbox keeps the PIN in `meta` under `pin` as `{key, salt, iterations, setAt, neverAsk}`, where `key` is the SHA-256 of the derived key. A laptop PIN set before clients derived keys is stored as `{hash, salt, iterations}`, where `hash` is the derived key itself, and it keeps working: the inbox compares against the SHA-256 of `hash`. The comparison takes the same time wherever the bytes differ. The inbox never logs or returns a PIN or a key.
 
@@ -254,7 +254,7 @@ The check also refuses a diagram over mermaid's limits, which the page would ref
 
 The laptop inbox parses in its Node process. The hosted inbox doesn't parse diagrams: the posting client parses them in Node with the same mermaid package, as [Checks on the client](#checks-on-the-client) describes. Mermaid's parser calls DOMPurify on labels, and DOMPurify needs a DOM, which Node doesn't have. Where DOMPurify doesn't find a usable DOM, it returns the text unchanged, and `src/adapters/mermaid.ts` gives it that behavior here. It doesn't set a browser global. Mermaid loads on the first diagram, so a process without diagrams never loads it.
 
-The page draws each diagram with `vendor/mermaid.min.js`, which the inbox serves from its own mermaid package. So the page draws offline, with mermaid 11.17.2, as the check used. When mermaid loads and still can't draw a diagram, the page shows its source and reports it, as [Checks on the client](#checks-on-the-client) describes. A renderer that doesn't load says nothing about the diagram, so the page doesn't report it. It loads the file when it first shows a diagram. It draws with `securityLevel: "strict"`, and with mermaid's `base` theme set from the page's color tokens, so a diagram reads in the light theme and in the dark one, and draws again when the theme changes. A system card shows a Mermaid block as code, since it quotes an agent's words without a check.
+The page draws each diagram with `vendor/mermaid.min.js`, a static file that the inbox serves from its own mermaid package. The hosted Worker serves it from its assets and doesn't run it. So the page draws offline, with mermaid 11.17.2, as the check used. When mermaid loads and still can't draw a diagram, the page shows its source and reports it, as [Checks on the client](#checks-on-the-client) describes. A renderer that doesn't load says nothing about the diagram, so the page doesn't report it. It loads the file when it first shows a diagram. It draws with `securityLevel: "strict"`, and with mermaid's `base` theme set from the page's color tokens, so a diagram reads in the light theme and in the dark one, and draws again when the theme changes. A system card shows a Mermaid block as code, since it quotes an agent's words without a check.
 
 ## Checks on the client
 

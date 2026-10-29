@@ -113,12 +113,12 @@ export function httpPinApi(url: string, token: string): PinApi & { raw(method: s
     if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `the inbox answered ${res.status}`);
     return res;
   };
-  const status = async () => (await (await ok(await raw('GET', '/v1/pin'))).json()) as { set: boolean; neverAsk: boolean; lockedUntil: number | null; iterations: number };
+  const status = async () => (await (await ok(await raw('GET', '/v1/pin'))).json()) as { set: boolean; neverAsk: boolean; lockedUntil: number | null; newIterations: number };
   return {
     raw,
     status,
     // The PIN stays here: the CLI derives the key with the iterations the inbox hands out, and sends the key.
-    async set(pin) { await ok(await raw('PUT', '/v1/pin', await newPinKey(pin, (await status()).iterations))); },
+    async set(pin) { await ok(await raw('PUT', '/v1/pin', await newPinKey(pin, (await status()).newIterations))); },
     async clear() { await ok(await raw('DELETE', '/v1/pin', {})); },
     async neverAsk() { await ok(await raw('PUT', '/v1/pin/never-ask', { neverAsk: true })); },
   };

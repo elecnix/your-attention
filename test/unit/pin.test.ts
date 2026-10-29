@@ -50,6 +50,16 @@ describe('PIN keys', () => {
     await assert.rejects(pin.setKey({ ...good, iterations: 10 }), /iterations must be 1000/);
   });
 
+  it('hands out the count for a new PIN apart from the count of the PIN that is set', async () => {
+    const { pin, store } = setup();
+    const old = await newPinKey('2468', 500);
+    store.put('meta', 'pin', { key: await sha256(old.key), salt: old.salt, iterations: 500, setAt: 1 });
+    assert.equal(pin.status().iterations, 500);
+    assert.equal(pin.status().newIterations, 1000);
+    await pin.setKey(await newPinKey('1357', pin.status().newIterations));
+    assert.equal(pin.status().iterations, 1000);
+  });
+
   it('keeps a PIN that an older laptop inbox stored as the derived key itself', async () => {
     const { pin, store } = setup();
     const k = await newPinKey('2468', 800_000);
@@ -65,7 +75,7 @@ describe('PIN keys', () => {
 describe('the PIN lock', () => {
   it('starts with no PIN, and remembers "never ask"', async () => {
     const { pin, store } = setup();
-    assert.deepEqual(pin.status(), { set: false, salt: null, iterations: 1000, neverAsk: false, lockedUntil: null, triesLeft: PIN_TRIES });
+    assert.deepEqual(pin.status(), { set: false, salt: null, iterations: 1000, newIterations: 1000, neverAsk: false, lockedUntil: null, triesLeft: PIN_TRIES });
     pin.setNeverAsk(true);
     assert.equal(new PinLock(store, Date.now, 1000).status().neverAsk, true, 'the choice is in storage');
   });
@@ -113,7 +123,7 @@ describe('the PIN lock', () => {
     assert.equal(again.status().lockedUntil, now() + 2 * FIRST_LOCKOUT_MS, 'the second lockout is twice as long');
     tick(2 * FIRST_LOCKOUT_MS);
     assert.equal((await again.unlockPin('2468', 'o')).ok, true);
-    assert.deepEqual({ ...again.status(), salt: null }, { set: true, salt: null, iterations: 1000, neverAsk: false, lockedUntil: null, triesLeft: PIN_TRIES }, 'the right PIN clears the count');
+    assert.deepEqual({ ...again.status(), salt: null }, { set: true, salt: null, iterations: 1000, newIterations: 1000, neverAsk: false, lockedUntil: null, triesLeft: PIN_TRIES }, 'the right PIN clears the count');
   });
 
   it('caps the lockout at a day', async () => {

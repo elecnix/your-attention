@@ -94,14 +94,21 @@ export function drawFaultsOf(card) {
     let body = null;
     let timer = null;
     // Faults that show up together go in one report, so the agent reads them in one message.
+    // Each fault goes out once: `sent` remembers it, and a flush sends only what came since the last one.
+    const sent = new Set();
     const flush = () => {
       timer = null;
-      api(`${BASE}v1/cards/${encodeURIComponent(card.id)}/draw-fault`, { version: card.version, renderer: MERMAID_VERSION, diagrams: [...diagrams].map(([source, error]) => ({ source, error })), ...(body ? { body } : {}) }).catch(() => {});
+      const report = { version: card.version, renderer: MERMAID_VERSION, diagrams: [...diagrams].map(([source, error]) => ({ source, error })), ...(body ? { body } : {}) };
+      diagrams.clear();
+      body = null;
+      api(`${BASE}v1/cards/${encodeURIComponent(card.id)}/draw-fault`, report).catch(() => {});
     };
     const later = () => { timer ??= setTimeout(flush, 300); };
+    // A page open for days shows many card versions, so it forgets the oldest reporters.
+    if (reporters.size >= 200) reporters.delete(reporters.keys().next().value);
     reporters.set(key, {
-      diagram(source, error) { if (!diagrams.has(source)) { diagrams.set(source, error); later(); } },
-      body(faults) { if (!body) { body = faults; later(); } },
+      diagram(source, error) { if (!sent.has(`d:${source}`)) { sent.add(`d:${source}`); diagrams.set(source, error); later(); } },
+      body(faults) { if (!sent.has('body')) { sent.add('body'); body = faults; later(); } },
     });
   }
   return reporters.get(key);

@@ -113,9 +113,9 @@ const PATHS: Path[] = [
 async function cpu(run: () => Promise<Response>): Promise<number> {
   const start = process.cpuUsage();
   const res = await run();
-  await res.arrayBuffer();
+  const body = await res.arrayBuffer();
   const d = process.cpuUsage(start);
-  if (res.status >= 400) throw new Error(`the request answered ${res.status}: ${await res.clone().text().catch(() => '')}`);
+  if (res.status >= 400) throw new Error(`the request answered ${res.status}: ${new TextDecoder().decode(body)}`);
   return (d.user + d.system) / 1000;
 }
 

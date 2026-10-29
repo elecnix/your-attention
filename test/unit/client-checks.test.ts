@@ -90,6 +90,7 @@ describe('checks on the client', () => {
     assert.equal((await report(hosted.agent, { version: card.version, diagrams: [diagram] })).status, 403, 'only the page reports');
     assert.equal((await report(hosted.owner, { version: card.version + 1, diagrams: [diagram] })).status, 409, 'a report on another version changes nothing');
     assert.equal((await report(hosted.owner, { version: card.version, diagrams: [{ source: 'graph LR; X', error: 'no' }] })).status, 400, 'a diagram the card does not show is not its fault');
+    assert.equal((await report(hosted.owner, null)).status, 409, 'a report without a version is for no version');
     const ok = await report(hosted.owner, { version: card.version, renderer: '11.17.2', diagrams: [diagram], body: ['`b` is used but never defined.'] });
     assert.equal(ok.status, 200);
     const back = heard.find((e) => e.type === 'returned');

@@ -76,7 +76,7 @@ export function PinForm({ set, offer, onDone, onSkip, onNever, onBusy = () => {}
     if (pin !== again) return setError('The two PINs differ.');
     onBusy(true);
     const r = await pinState()
-      .then(async (s) => ({ ...(await newPinKey(pin, s.iterations)), ...(set ? { current: await pinKey(current, s.salt, s.iterations) } : {}) }))
+      .then(async (s) => ({ ...(await newPinKey(pin, s.newIterations)), ...(set ? { current: await pinKey(current, s.salt, s.iterations) } : {}) }))
       .then((body) => send('PUT', 'v1/pin', body))
       .catch(() => ({ status: 0, body: { error: 'The inbox did not answer.' } }));
     if (r.status !== 200) { onBusy(false); return setError(r.body.error || 'The inbox refused the PIN.'); }

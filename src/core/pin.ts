@@ -30,9 +30,11 @@ interface Unlock { key: string; hash: string; token: string; seen: number }
 
 export interface PinStatus {
   set: boolean;
-  /** What a client derives the key with: the salt of the PIN that is set, and its iterations, or the iterations for a new PIN. */
+  /** What a client derives the key of the PIN that is set with: its salt, or null, and its iterations. */
   salt: string | null;
   iterations: number;
+  /** The iterations a new PIN's key must use. */
+  newIterations: number;
   /** The person chose to never be asked to set a PIN. */
   neverAsk: boolean;
   /** Until when wrong tries locked the PIN, or null. */
@@ -75,7 +77,7 @@ export function pinKeyError(k: unknown, iterations = PIN_ITERATIONS): string | u
   const v = (k && typeof k === 'object' ? k : {}) as Partial<PinKey>;
   if (!validKey(v.key)) return 'key must be the PIN derived with PBKDF2-SHA256, 32 bytes in lowercase hex';
   if (typeof v.salt !== 'string' || !/^[0-9a-f]{32}$/.test(v.salt)) return 'salt must be 16 random bytes in lowercase hex';
-  if (v.iterations !== iterations) return `iterations must be ${iterations}, as GET /v1/pin says`;
+  if (v.iterations !== iterations) return `iterations must be ${iterations}, the newIterations of GET /v1/pin`;
   return undefined;
 }
 
@@ -111,7 +113,7 @@ export class PinLock {
     const locked = t.until > this.now();
     const set = this.isSet();
     return {
-      set, salt: set ? r.salt ?? null : null, iterations: set ? r.iterations ?? this.iterations : this.iterations,
+      set, salt: set ? r.salt ?? null : null, iterations: set ? r.iterations ?? this.iterations : this.iterations, newIterations: this.iterations,
       neverAsk: r.neverAsk === true, lockedUntil: locked ? t.until : null, triesLeft: locked ? 0 : PIN_TRIES - t.failures,
     };
   }

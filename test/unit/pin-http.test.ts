@@ -24,7 +24,7 @@ async function setup() {
     }));
   // The client derives each key with the salt and iterations that GET /v1/pin hands out. The PIN never travels.
   const key = (pin: string) => pinKey(pin, inbox.pin.status().salt ?? '', inbox.pin.status().iterations);
-  const newKey = (pin: string) => newPinKey(pin, inbox.pin.status().iterations);
+  const newKey = (pin: string) => newPinKey(pin, inbox.pin.status().newIterations);
   const unlock = async (pin: string, as: { token?: string; cookie?: string }) => {
     const res = await call('POST', '/v1/unlock', { ...as, body: { key: await key(pin) } });
     return { status: res.status, body: (await res.json()) as { unlock?: string; triesLeft?: number; lockedUntil?: number; error?: string }, headers: res.headers };
@@ -37,7 +37,7 @@ describe('the PIN gate', () => {
     const { call, link, key, newKey } = await setup();
     assert.equal((await call('GET', '/v1/state', { cookie: link })).status, 200);
     const s = (await (await call('GET', '/v1/pin', { cookie: link })).json()) as Record<string, unknown>;
-    assert.deepEqual(s, { set: false, salt: null, iterations: 1000, neverAsk: false, unlocked: true, lockedUntil: null, triesLeft: PIN_TRIES, exempt: false });
+    assert.deepEqual(s, { set: false, salt: null, iterations: 1000, newIterations: 1000, neverAsk: false, unlocked: true, lockedUntil: null, triesLeft: PIN_TRIES, exempt: false });
   });
 
   it('stores "never ask" for the inbox', async () => {
