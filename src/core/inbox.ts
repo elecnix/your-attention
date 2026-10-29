@@ -290,6 +290,8 @@ export class Inbox {
     const pending = this.store.list<Pairing>('pairings').filter((p) => p.status === 'pending');
     if (pending.length >= MAX_PENDING_PAIRINGS) throw new InboxError(429, 'too many pairing requests are waiting');
     const pairing: Pairing = { id: randomId(8), name: clean, role, code: pairingCode(), status: 'pending', createdAt: this.now() };
+    // The request shows as a card, so it needs room before it counts as waiting.
+    this.makeRoom(`pair-${pairing.id}`);
     this.store.put('pairings', pairing.id, pairing);
     this.usage.record('pairings');
     this.postCard({ token: '', role: 'owner' }, {
@@ -348,11 +350,7 @@ export class Inbox {
     if (agent.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     if (title.length > 300) throw new InboxError(400, 'title must be at most 300 characters');
     if (agent === SYSTEM_AGENT && caller.token !== '') throw new InboxError(403, 'the system agent is reserved');
-    // An inbox with a limit shows at most that many cards, so its state fits the hosted inbox's CPU time. Its own cards always go in.
-    const limit = this.shownCardLimit;
-    if (limit !== undefined && caller.token !== '' && !this.store.get('cards', String(input.id ?? '')) && (this.store.count?.('summaries') ?? 0) >= limit) {
-      throw new InboxError(507, `the inbox shows ${limit} cards, the most it shows. The person must clear answered or closed cards before a new one fits`);
-    }
+    this.makeRoom(input.id);
     const levels = this.priorities();
     const priority = input.priority ?? (levels.some((l) => l.id === 'soon') ? 'soon' : levels[0]?.id ?? 'soon');
     if (!levels.some((l) => l.id === priority)) throw new InboxError(400, `priority must be one of ${levels.map((l) => l.id).join(', ')}`);
@@ -465,6 +463,16 @@ export class Inbox {
     // Agent cards go through the card.created hook before the person sees them.
     if ((kind === 'ask' || kind === 'secret') && caller.token !== '') return this.requestTriage(card);
     return card;
+  }
+
+  /** An inbox with a limit shows at most that many cards, so its state fits the hosted inbox's CPU time. The limit counts
+   * the inbox's own cards too, such as pairing requests, which a client without a token can make. A revision always fits. */
+  private makeRoom(id: string | undefined): void {
+    const limit = this.shownCardLimit;
+    if (limit === undefined || (id && this.store.get('cards', String(id)))) return;
+    if ((this.store.count?.('summaries') ?? 0) >= limit) {
+      throw new InboxError(507, `the inbox shows ${limit} cards, the most it shows. The person must clear answered or closed cards before a new one fits`);
+    }
   }
 
   /** The body a card shows: its template filled, and its widgets placed. */

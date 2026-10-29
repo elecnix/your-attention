@@ -79,6 +79,16 @@ describe('the state sends card summaries', () => {
     assert.equal((await state()).cards[0]?.title, 'Old card');
   });
 
+  it('counts the inbox\'s own cards, so pairing requests cannot pile up past the limit', async () => {
+    const { inbox, state } = await setup(new MemoryStorage(), 3);
+    const refused: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      try { await inbox.requestPairing(`device ${i}`, 'agent'); } catch (e) { refused.push((e as { status: number }).status); }
+    }
+    assert.ok((await state()).cards.length <= 3);
+    assert.ok(refused.includes(507));
+  });
+
   it('shows every card on an inbox without a limit, as the laptop has', async () => {
     const { inbox, call, agent, state } = await setup();
     for (let i = 0; i < 600; i++) inbox.postCard({ token: 'a', role: 'agent' }, { id: `c${i}`, agent: 's', title: `Card ${i}` });
