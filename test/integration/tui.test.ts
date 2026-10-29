@@ -132,6 +132,37 @@ describe('your-attention tui', () => {
     await t.stop();
   });
 
+  it('asks for the PIN of a locked inbox, never shows it, and answers with the unlock token after', async () => {
+    const own = await start();
+    try {
+      assert.equal((await own.owner('PUT', '/v1/pin', { pin: '2468' })).status, 200);
+      // An owner token that is not the laptop's file, like a sign-in link's, needs the PIN.
+      const { secret } = await own.server.inbox.createToken('tui test', 'owner');
+      const ownAgent = new Client({ url: own.server.url, token: own.agentToken });
+      await ownAgent.post({ id: 'locked', agent: 's-locked', title: 'Behind the PIN', priority: 'now', options: [{ id: 'y', label: 'Yes' }] });
+      const events: AgentEvent[] = [];
+      const ctl = new AbortController();
+      void ownAgent.stream('s-locked', (e) => { events.push(e); }, ctl.signal);
+      const t = startTui({ url: own.server.url, token: secret });
+      running.push(t);
+      await t.waitFor('This inbox is locked. Type its PIN:');
+      t.send('1111\r');
+      await t.waitFor('Wrong PIN. 4 tries left.');
+      t.send('2468\r');
+      await t.waitFor('Behind the PIN');
+      t.send('\r ');
+      await t.waitFor('(•) Yes');
+      t.send('\x13');
+      const a = await until(() => events.find((e) => e.type === 'answer'), 8000);
+      assert.ok(a.type === 'answer' && a.answer.values['choice'] === 'y');
+      assert.equal(t.vt.raw.includes('2468'), false, 'the PIN never reaches the screen');
+      ctl.abort();
+      await t.stop();
+    } finally {
+      await own.stop();
+    }
+  });
+
   it('shows a new card and an agent reply live, without a restart', async () => {
     const t = tui();
     await t.waitFor('Your attention');
