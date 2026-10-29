@@ -42,16 +42,24 @@ export function fallbackBody(body: string): BodyFallback | undefined {
   let out: BodyFallback | undefined;
   if (faults.length) {
     const { meta } = read(body);
-    // An unclosed string hides every statement from its own on, so the page draws the ones before it.
-    const cut = meta.incomplete ? (statementStarts(body)[meta.statementCount - 1]?.at ?? 0) : body.length;
-    const kept = body.slice(0, cut).replace(/\n+$/, '');
-    const source = (rest: string) => `yaSource = CodeBlock("text", ${JSON.stringify(rest)})`;
-    // The root keeps the children the kept statements define, then the source, after what did draw.
-    const defined = new Set(statementStarts(kept).map((st) => st.name));
-    const children = (kids: string) => [...kids.split(',').map((k) => k.trim()).filter((k) => defined.has(k)), 'yaSource'].join(', ');
-    const partial = cut < body.length && `${kept.replace(/^([ \t]*root[ \t]*=[ \t]*Card\(\[)([^\]\n]*)\]/m, (_, open: string, kids: string) => `${open}${children(kids)}]`)}\n${source(body.slice(cut))}`;
+    const starts = statementStarts(body);
+    // An unclosed string hides every statement from its own on. Before it, a statement with a broken call draws nothing.
+    const cut = meta.incomplete ? (starts[meta.statementCount - 1]?.at ?? 0) : body.length;
+    const failed = new Set(meta.errors.map((e) => e.statementId).filter((id): id is string => !!id && id !== 'root'));
+    const segments = starts.filter((st) => st.at < cut).map((st, i, all) => ({ ...st, text: body.slice(st.at, all[i + 1]?.at ?? cut).replace(/\n+$/, '') }));
+    const kept = segments.filter((st) => !failed.has(st.name));
+    const shown = [...segments.filter((st) => failed.has(st.name)).map((st) => st.text), body.slice(cut).replace(/\n+$/, '')].filter(Boolean).join('\n');
+    const source = (text: string) => `yaSource = CodeBlock("text", ${JSON.stringify(text)})`;
     const whole = `root = Card([yaSource])\n${source(body)}`;
-    out = { body: partial && /yaSource\]/.test(partial) && !bodyErrors(partial).length ? partial : whole, faults };
+    // The root keeps the children the kept statements define, then the source, after what did draw.
+    const defined = new Set(kept.map((st) => st.name));
+    let joined = false;
+    const lines = kept.map((st) => st.name !== 'root' ? st.text : st.text.replace(/^([ \t]*root[ \t]*=[ \t]*Card\(\[)([^\]\n]*)\]/, (_, open: string, kids: string) => {
+      joined = true;
+      return `${open}${[...kids.split(',').map((k) => k.trim()).filter((k) => defined.has(k)), 'yaSource'].join(', ')}]`;
+    }));
+    const partial = `${lines.join('\n')}\n${source(shown || faults.join('\n'))}`;
+    out = { body: joined && !bodyErrors(partial).length ? partial : whole, faults };
   }
   if (fallbacks.size > 500) fallbacks.clear();
   fallbacks.set(body, out);

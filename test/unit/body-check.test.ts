@@ -84,6 +84,21 @@ describe('fallback for a stored broken body', () => {
     assert.equal(fallbackBody('root = Card([a])\na = TextContent("x")'), undefined);
   });
 
+  it('draws the statements that parse around one with a broken call or a name it never defines, and shows that statement', () => {
+    const f = fallbackBody('root = Card([a, b, c, gone])\na = TextContent("First.")\nb = Form("b")\nc = TextContent("Last.")');
+    assert.ok(f);
+    assert.deepEqual(bodyErrors(f.body), []);
+    assert.match(f.body, /^root = Card\(\[a, c, yaSource\]\)/m);
+    assert.match(f.body, /yaSource = CodeBlock\("text", "b = Form\(/);
+    assert.doesNotMatch(f.body, /^b = /m);
+  });
+
+  it('shows the whole source when it cannot add the source to the root, even when a string reads yaSource]', () => {
+    const f = fallbackBody('root = Card([\n  a, b])\na = TextContent("note yaSource] here")\nb = TextContent(\\"x\\")');
+    assert.ok(f);
+    assert.match(f.body, /^root = Card\(\[yaSource\]\)/m);
+  });
+
   it('hands the page the fallback with each stored card whose body does not draw whole', () => {
     const inbox = new Inbox(new MemoryStorage(), () => 1000, undefined, { checkBody: bodyErrors, fallbackBody });
     inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Old?', body: GOOD });
