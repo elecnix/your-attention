@@ -134,7 +134,7 @@ export class CardView {
   click(target: string, row: number, col: number): void {
     const [id, part] = target.split('#') as [string, string | undefined];
     // A field id has a slash and can hold #, so look for the longest widget id the target starts with.
-    const widget = this.widgets.get(target) ?? this.widgets.get(id) ?? [...this.widgets.values()].find((w) => target.startsWith(`${w.id}#`));
+    const widget = this.widgets.get(target) ?? [...this.widgets.values()].filter((w) => target.startsWith(`${w.id}#`)).sort((a, b) => b.id.length - a.id.length)[0] ?? this.widgets.get(id);
     if (widget) {
       this.focus = widget.id;
       widget.click?.(widget.id === target ? undefined : target.slice(widget.id.length + 1) || part, row, col);

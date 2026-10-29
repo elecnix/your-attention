@@ -150,7 +150,7 @@ export class Decoder {
       if (s[1] === '\x1b') { out.push(key('escape')); this.buf = s.slice(1); continue; }
       // Escape and another key: Alt and that key.
       const next = graphemes(s.slice(1))[0] ?? '';
-      const k = next < ' ' || next === '\x7f' ? controlKey(next) : key(next, { shift: /^[A-Z]$/.test(next) });
+      const k = next < ' ' || next === '\x7f' ? controlKey(next) : key(next === ' ' ? 'space' : next, { shift: /^[A-Z]$/.test(next) });
       out.push({ ...k, alt: true, text: undefined });
       this.buf = s.slice(1 + next.length);
     }

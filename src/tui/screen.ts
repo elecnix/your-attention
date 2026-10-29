@@ -102,7 +102,7 @@ export class Grid {
       const w = clusterWidth(g);
       if (w === 0) continue;
       if (x + w > end) {
-        if (x < end) { this.chars[y * this.width + x] = ' '; this.styles[y * this.width + x] = id; x++; }
+        if (x >= 0 && x < end) { this.chars[y * this.width + x] = ' '; this.styles[y * this.width + x] = id; x++; }
         break;
       }
       if (x >= 0) {

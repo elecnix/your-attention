@@ -68,7 +68,7 @@ export class Terminal {
       process.stderr.write(`your-attention tui stopped: ${e instanceof Error ? e.stack ?? e.message : String(e)}\n`);
       process.exit(1);
     };
-    const signal = (sig: NodeJS.Signals) => () => { this.stop(); process.exit(sig === 'SIGINT' ? 130 : 143); };
+    const signal = (sig: NodeJS.Signals) => () => { this.stop(); process.exit(sig === 'SIGINT' ? 130 : sig === 'SIGHUP' ? 129 : 143); };
     const onInt = signal('SIGINT');
     const onTerm = signal('SIGTERM');
     const onHup = signal('SIGHUP');

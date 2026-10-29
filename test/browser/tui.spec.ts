@@ -1,24 +1,16 @@
-// The terminal client parses card bodies with the page's component library and must answer as the page does.
-// These tests hold the two together: the library schema it reads, and the values each one sends for the same picks.
-import fs from 'node:fs';
+// The terminal client parses card bodies with the page's component list and must answer as the page does:
+// for the same picks, both send the same values.
 import { expect, test } from '@playwright/test';
 import { buildQueue, type InboxState } from '../../web/queue.js';
 import type { Card } from '../../src/core/types.ts';
 import { loadParser } from '../../src/tui/body.ts';
 import { CardView } from '../../src/tui/cardview.ts';
 import { makeTheme } from '../../src/tui/theme.ts';
-import { pageSchema, SCHEMA_FILE } from '../../scripts/openui-schema.ts';
 import { startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
 test.beforeAll(async () => { inbox = await startInbox(); await loadParser(); });
 test.afterAll(async () => { await inbox.close(); });
-
-test('the schema the terminal client parses with is the page library, CheckWithText included', async ({ page }) => {
-  const schema = await pageSchema(`${inbox.server.url}/`, page);
-  // After an upgrade of the OpenUI bundle, run: node scripts/openui-schema.ts
-  expect(JSON.parse(fs.readFileSync(SCHEMA_FILE, 'utf8'))).toEqual(schema);
-});
 
 /** The terminal client's answer for a card, after picking with keys: each step focuses a stop, then presses keys. */
 function terminalAnswer(card: Card, steps: [string, string[]][], typed: Record<string, string> = {}) {

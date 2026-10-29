@@ -54,4 +54,8 @@ describe('input decoding', () => {
     assert.deepEqual(keys('\x1b[1;1:3A', '\x1b[3;1:3~', '\x1b[97;1:3u', 'x'), ['x']);
     assert.deepEqual(keys('\x1b[1114112u', '\x1b[27;5;1114112~'), ['unknown', 'C-unknown']);
   });
+
+  it('names Alt+Space space', () => {
+    assert.deepEqual(keys('\x1b '), ['M-space']);
+  });
 });

@@ -183,4 +183,13 @@ describe('Markdown in the card pane', () => {
     assert.match(text, /A diagram, drawn on the page in the browser\. Its source:\n│ graph TD\n│   A-->B/);
     assert.match(text, /Its source:\n│ sequenceDiagram\n│   A->>B: hi/);
   });
+
+  it('drops a pick for a question a revision removed, and stores no day the calendar lacks', () => {
+    const t = setup(card({ id: 'rev', title: 'Rev', questions: [{ question: 'One?', options: [{ label: 'a' }] }], body: 'root = Card([f])\nf = Form("f", b, [fc])\nb = Buttons([])\nfc = FormControl("When?", DatePicker("when"))' }));
+    t.view.store.set('f', 'q1', 'gone');
+    t.focus('field:f/when'); t.type('2025-02-30');
+    assert.deepEqual(t.view.answer().values, {});
+    t.key('backspace'); t.key('backspace'); t.type('28');
+    assert.equal(t.view.answer().values['when'], new Date(2025, 1, 28).toISOString());
+  });
 });

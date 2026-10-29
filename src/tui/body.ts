@@ -1,5 +1,5 @@
 // A card's OpenUI Lang, drawn as terminal widgets. The source is what the page renders (web/answers.js cardSource),
-// parsed by OpenUI's own parser with the page's component library (openui-schema.json). Each form field keeps its
+// parsed by OpenUI's own parser with the page's component list (src/adapters/openui-library.ts). Each form field keeps its
 // value in a store shaped like the page renderer's, {form: {field: {value}}}, so web/answers.js turns it into the
 // same answer the page sends. A component the terminal cannot draw says so, with the card's address in the browser.
 import type { ElementNode, ParseResult } from '@openuidev/lang-core';
@@ -15,13 +15,15 @@ type Lang = typeof import('@openuidev/lang-core');
 let lang: Lang | undefined;
 let parser: { parse(s: string): ParseResult } | undefined;
 
-/** Load OpenUI's parser. It takes about 50 ms, so the client starts it at once and draws the list meanwhile. */
+/**
+ * Load OpenUI's parser with the page's component list, the one the inbox checks bodies against. It takes about 50 ms,
+ * so the client starts it at once and draws the list meanwhile.
+ */
 export async function loadParser(): Promise<void> {
   if (parser) return;
-  const fs = await import('node:fs');
   lang = await import('@openuidev/lang-core');
-  const schema = JSON.parse(fs.readFileSync(new URL('./openui-schema.json', import.meta.url), 'utf8')) as Parameters<Lang['createParser']>[0];
-  parser = lang.createParser(schema, 'Card');
+  const { LIBRARY } = await import('../adapters/openui-library.ts');
+  parser = lang.createParser(LIBRARY as Parameters<Lang['createParser']>[0], 'root');
 }
 
 export const parserReady = (): boolean => parser !== undefined;
@@ -397,7 +399,9 @@ export class BodyRenderer {
       if (kind === 'date') {
         this.ctx.ui.set(uiKey, next.value);
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(next.value.trim());
-        if (m) store.set(form, name, new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toISOString());
+        // The picker stores the day at local midnight. A day the calendar does not have, such as February 30, is not a date.
+        const day = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : undefined;
+        if (day && day.getMonth() === Number(m![2]) - 1 && day.getDate() === Number(m![3])) store.set(form, name, day.toISOString());
         else if (store.has(form, name)) store.set(form, name, undefined);
       } else store.set(form, name, next.value);
     };
@@ -592,8 +596,10 @@ export class BodyRenderer {
     const store = this.ctx.store;
     const { s, g } = this.ctx.theme;
     const min = Number(lit(p['min'])) || 0;
-    const max = Number(lit(p['max']));
+    const top = Number(lit(p['max']));
     const step = Number(lit(p['step'])) || 1;
+    // A max the terminal cannot read, such as an expression, leaves a hundred steps above the min.
+    const max = Number.isFinite(top) ? top : min + 100 * step;
     const value = (): number => {
       const v = (store.get(form, name) as number[] | undefined) ?? (lit(p['defaultValue']) as number[] | undefined);
       return Array.isArray(v) && typeof v[0] === 'number' ? v[0] : min;

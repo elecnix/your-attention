@@ -170,6 +170,8 @@ export function answerValues(card, values) {
   };
   keep('choice', new Map((card.options || []).map((o) => [optionValue(o), o.id])));
   (card.questions || []).forEach((q, i) => keep(`q${i}`, new Map((q.options || []).map((o) => [o.label, o.label]))));
+  // A pick for a question a revision removed goes too.
+  if (card.questions) for (const k of Object.keys(out)) { const m = /^q(\d+)$/.exec(k); if (m && Number(m[1]) >= card.questions.length) delete out[k]; }
   return out;
 }
 
