@@ -165,7 +165,7 @@ your-attention discover
 your-attention pair http://<host>:4815
 ```
 
-To pair a front-end that answers cards instead of an agent, add `--role owner`. A machine paired as owner runs the `pin` commands against a hosted inbox, such as `your-attention pin reset` for a forgotten PIN. Its token works without the PIN, so pair a machine as owner only while you sit at it.
+To pair a front-end that answers cards instead of an agent, add `--role owner`. The machine saves that token in `~/.your-attention/owner.json`, beside its agent pairing, so its agents keep their own token. A machine paired as owner signs a browser in with `your-attention open`, and opens `your-attention tui`. It also runs the `pin` commands against a hosted inbox, such as `your-attention pin reset` for a forgotten PIN. Its token works without the PIN, so pair a machine as owner only while you sit at it.
 
 #### Check your cards before you see them (optional)
 
@@ -206,7 +206,7 @@ your-attention login-url        # prints a sign-in link that works once, within 
 your-attention stop             # stops the inbox, or its launchd or systemd service
 ```
 
-`clear`, `reset`, `login-url` and `stop` act on the inbox this machine runs.
+`clear`, `reset` and `stop` act on the inbox this machine runs. `login-url` and `open` sign in to that inbox, or, on a machine that runs none, to the inbox it paired with as owner, such as a cloud inbox: `your-attention pair <url> --role owner`.
 
 ### Answer in a terminal
 

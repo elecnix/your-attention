@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import { after, buildQueue, type InboxState, type Queue } from '../../web/queue.js';
 import type { Attachment, Card } from '../core/types.ts';
+import { notOwnerAdvice } from '../client.ts';
 import { ApiError, InboxApi, ownerConfig } from './api.ts';
 import { loadParser, parserReady, type Action } from './body.ts';
 import { CardView, type CardViewHost } from './cardview.ts';
@@ -229,7 +230,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
         } catch (e) {
           if (e instanceof ApiError && e.status === 423) { m.pin = m.pin ?? { typed: 0 }; m.blank = 'This inbox is locked.'; }
           else if (e instanceof ApiError && e.status === 401) m.blank = `The inbox at ${config.url} refused the token in ${config.source}.\nPair again, or start the inbox on this machine.`;
-          else if (e instanceof ApiError && e.status === 403) m.blank = `The token in ${config.source} is not an owner token.\nPair this machine with \`your-attention pair <url> --role owner\`.`;
+          else if (e instanceof ApiError && e.status === 403) m.blank = notOwnerAdvice(config.url);
           else if (!m.state) m.blank = `The inbox at ${config.url} does not answer. Trying again…`;
           m.connected = false;
           m.connecting = false;

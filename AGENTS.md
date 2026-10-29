@@ -41,6 +41,58 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 - The herdr integration may send keys only to the pane of its own session. Never send keys to another pane.
 - Each user-visible string names the thing it shows. The person may leave any answer field empty.
 
+## Trust boundaries
+
+Each box is a place that stores a secret, and each arrow is a secret crossing into it. A step that needs a box the person has no way into is friction. When a change touches sign-in, pairing or tokens, update this diagram in the same commit.
+
+```mermaid
+flowchart TB
+  subgraph HOME["inbox machine: ~/.your-attention, mode 0600"]
+    OT["owner-token: owner, PIN-exempt"]
+    AT["agent-token: agent"]
+    ET["extension-token: extension"]
+  end
+  subgraph INBOX["inbox: laptop server, or hosted Durable Object at /i/inbox-id/"]
+    DB[("SHA-256 of each token, PIN hash, sign-in codes, pairings")]
+  end
+  subgraph WORKER["hosted Worker"]
+    KV[("invite codes, uses left")]
+    SIGN["inbox id, signed with the Worker secret"]
+  end
+  subgraph BROWSER["browser"]
+    CK["cookie: owner token, HttpOnly, 1 year"]
+    UT["sessionStorage: unlock token, per tab"]
+  end
+  subgraph CLIENT["paired machine: ~/.your-attention"]
+    CJ["client.json: agent token"]
+    OJ["owner.json: owner token, PIN-exempt"]
+  end
+  PERSON(("person"))
+
+  HOME -. "written by serve" .- INBOX
+  OT -- "POST /v1/sign-in-codes" --> SC["sign-in code: once, 5 min"]
+  CK -- "POST /v1/sign-in-codes, phone QR" --> SC
+  OJ -- "POST /v1/sign-in-codes" --> SC
+  SC -- "#signin=code, then POST /v1/login" --> CK
+  PERSON -- "invite code" --> WORKER
+  WORKER -- "POST /new: #token=owner token, once, then POST /v1/login" --> CK
+  CLIENT -- "POST /v1/pair: name, role" --> PC["pairing id + 6-digit code: 10 min"]
+  PC -- "system card shows the code" --> PERSON
+  PERSON -- "approves on a signed-in page" --> INBOX
+  INBOX -- "GET /v1/pair/id: token, once" --> CLIENT
+  BROWSER -- "PIN: POST /v1/unlock" --> INBOX
+  INBOX -- "unlock token" --> UT
+  AT -- "bearer" --> INBOX
+  CJ -- "bearer" --> INBOX
+  ET -- "bearer" --> INBOX
+```
+
+- The inbox stores a hash of each token, never the token. Only the machine or tab named in its box holds the secret.
+- An owner token is the only key that signs in a new browser. A browser gets one from a sign-in code, or once from `POST /new`. The page removes `#token=` and `#signin=` from the address bar, so a bookmarked address signs nobody in.
+- An agent token can't make a sign-in code, approve a pairing or read the state. On a machine paired only as an agent, the owner commands, `open`, `tui` and `pin`, say to pair as owner. That pairing goes in `owner.json` and leaves `client.json` to the agents.
+- A token minted at `serve` or by pairing as owner skips the PIN. When the inbox has a PIN, a browser's owner token needs an unlock token as well, which the tab sends as `x-your-attention-unlock`. An unlock token ends after 12 hours without use.
+- An invite code is the operator's secret. The hosted inbox keeps only its invite id, the first 16 hex digits of the code's SHA-256, for usage counts.
+
 ## Commands
 
 ```sh

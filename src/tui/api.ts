@@ -1,12 +1,13 @@
 // The terminal client talks to the inbox the way the page does, as the owner: GET /v1/state, the page socket for live
 // changes, and the answer, seen, open, focus and presence routes. It finds the inbox like the other commands: the
-// YOUR_ATTENTION_URL and YOUR_ATTENTION_TOKEN variables, then a machine paired with `your-attention pair --role owner`,
+// YOUR_ATTENTION_URL and YOUR_ATTENTION_TOKEN variables, then the owner pairing from `your-attention pair --role owner`,
 // then the inbox on this machine with its owner-token file. An inbox with a PIN asks for it; the client keeps the
 // unlock token in memory only, and never stores or prints the PIN.
 import fs from 'node:fs';
 import path from 'node:path';
 import WebSocket from 'ws';
 import type { InboxState } from '../../web/queue.js';
+import { ownerPairing } from '../client.ts';
 import { homeDir } from '../node/home.ts';
 
 export interface OwnerConfig { url: string; token: string; source: string }
@@ -17,13 +18,8 @@ export function ownerConfig(env: NodeJS.ProcessEnv = process.env, home = homeDir
   const token = env['YOUR_ATTENTION_TOKEN'];
   if (url && token) return { url: url.replace(/\/$/, ''), token, source: 'YOUR_ATTENTION_URL' };
   const read = (f: string): string | undefined => { try { return fs.readFileSync(path.join(home, f), 'utf8').trim(); } catch { return undefined; } };
-  const paired = read('client.json');
-  if (paired) {
-    try {
-      const c = JSON.parse(paired) as { url: string; token: string };
-      return { url: c.url.replace(/\/$/, ''), token: c.token, source: path.join(home, 'client.json') };
-    } catch { /* fall through to the local inbox */ }
-  }
+  const paired = ownerPairing(home);
+  if (paired) return { url: paired.url, token: paired.token, source: paired.source };
   const server = read('server.json');
   const owner = read('owner-token');
   if (server && owner) {

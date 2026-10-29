@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { Client, describeAnswer, loadConfig } from './client.ts';
+import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerPairing } from './client.ts';
 import type { Option, Priority } from './core/types.ts';
 import { homeDir, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
@@ -87,26 +87,34 @@ function describeTelemetry(t: TelemetryStatus): string {
   return `Usage counts are on. One anonymous report a day goes to ${t.destination}.\nInstall id: ${t.installId}\n\n${NOTICE}`;
 }
 
-/** A one-time link that signs a browser in, so the owner token stays out of the address bar and the browser history. */
+/** A one-time link that signs a browser in, so the owner token stays out of the address bar and the browser history.
+ * It signs in to the inbox this machine runs, or else to the inbox this machine paired with, such as a cloud inbox. */
 async function signInLink(): Promise<string> {
-  const { url, owner } = localServer();
-  const res = await fetch(`${url}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json', 'x-your-attention': '1' }, body: '{}' }).catch(() => undefined);
-  if (!res) fail('No inbox runs on this machine. Start one with `your-attention start`.');
+  const local = runningHere();
+  const paired = local ? undefined : ownerPairing();
+  const target = local ?? paired ?? fail('No inbox runs on this machine. Start one with `your-attention start`, or pair this machine with your inbox as owner: `your-attention pair <url> --role owner`.');
+  const res = await fetch(`${target.url}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${target.token}`, 'content-type': 'application/json', 'x-your-attention': '1' }, body: '{}' }).catch(() => undefined);
+  if (!res) fail(local ? 'No inbox runs on this machine. Start one with `your-attention start`.' : `The inbox this machine paired with, ${target.url}, did not answer.`);
+  // An agent token cannot sign a browser in: only the owner's can.
+  if (res.status === 403 && !local) fail(notOwnerAdvice(target.url));
   const { code, error } = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
   if (!res.ok || !code) fail(`Could not make a sign-in code: ${error ?? res.status}`);
-  return `${url}/#signin=${encodeURIComponent(code)}`;
+  return `${target.url}/#signin=${encodeURIComponent(code)}`;
 }
 
-/** The inbox the PIN commands change: the one this machine runs, or else the one this machine paired with as owner. */
-function pinTarget(): { url: string; token: string } {
+/** The inbox this machine runs, with its owner token, or undefined when it runs none. */
+function runningHere(): { url: string; token: string } | undefined {
   try {
     const { url } = JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string };
     return { url, token: fs.readFileSync(path.join(homeDir(), 'owner-token'), 'utf8').trim() };
   } catch {
-    const paired = loadConfig();
-    if (!paired) fail('No inbox runs on this machine. Start one with `your-attention serve`, or pair as owner with `your-attention pair <url> --role owner`.');
-    return paired;
+    return undefined;
   }
+}
+
+/** The inbox the PIN commands change: the one this machine runs, or else the one this machine paired with as owner. */
+function pinTarget(): { url: string; token: string } {
+  return runningHere() ?? ownerPairing() ?? fail('No inbox runs on this machine. Start one with `your-attention serve`, or pair as owner with `your-attention pair <url> --role owner`.');
 }
 
 function localServer(): { url: string; owner: string } {
@@ -281,8 +289,10 @@ switch (command) {
       if (s.status === 'denied') fail('The pairing was denied.');
       if (s.token) {
         const info = (await (await fetch(`${url}/v1/info`)).json()) as { id?: string };
-        writePrivate(path.join(homeDir(), 'client.json'), JSON.stringify({ url, token: s.token, id: info.id }));
-        console.log(`Paired. The token is in ${path.join(homeDir(), 'client.json')}.`);
+        // An owner pairing gets a file of its own, so it never replaces the agent pairing the agents on this machine use.
+        const file = path.join(homeDir(), values.role === 'owner' ? 'owner.json' : 'client.json');
+        writePrivate(file, JSON.stringify({ url, token: s.token, id: info.id }));
+        console.log(`Paired. The token is in ${file}.`);
         break;
       }
     }

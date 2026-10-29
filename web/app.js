@@ -227,8 +227,13 @@ export function App() {
         h('p', null, 'In your usual browser, ', h('code', null, 'your-attention open'), ' opens the page signed in, with no link to copy.'),
         phone);
     }
+    // The address the person bookmarks carries no token: the page drops it from the address bar on sign-in.
     return h('div', { className: 'signin' }, h('h2', null, 'Sign in to your inbox'),
-      h('p', null, 'This inbox runs in the cloud. To sign in this browser, open the sign-in link you got when you created the inbox.'),
+      h('p', null, 'This inbox runs in the cloud. This address does not sign a browser in by itself. To sign in this browser:'),
+      h('ol', null,
+        h('li', null, 'On a computer paired with this inbox as owner, run ', h('code', null, 'your-attention open --link'), '. It prints a sign-in link that works once, within 5 minutes.'),
+        h('li', null, 'Open that link in this browser.')),
+      h('p', null, 'To pair a computer as owner, run ', h('code', null, `your-attention pair ${location.origin}${location.pathname.replace(/\/$/, '')} --role owner`), ' on it, then approve its card in a browser that is signed in.'),
       phone);
   }
   if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });

@@ -97,7 +97,7 @@ function asset(env: Env, req: Request, path: string): Promise<Response> {
 const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Your Attention</title><style>body{font:16px system-ui,sans-serif;max-width:560px;margin:64px auto;padding:0 16px;background:#f6f6f4;color:#1d1d1b}
 @media (prefers-color-scheme: dark){body{background:#141413;color:#ececea}}input,button{font:inherit;padding:8px 12px}</style></head>
-<body><h1>Your Attention</h1><p>One inbox for the questions your coding agents ask you. Create an inbox with an invite code, then bookmark the address it opens. The address signs you in, so keep it private.</p>
+<body><h1>Your Attention</h1><p>One inbox for the questions your coding agents ask you. Create an inbox with an invite code. This browser stays signed in to it. Bookmark the address it opens: in another browser, the address shows how to sign in, and it does not sign anyone in by itself.</p>
 <form id="f"><input id="code" placeholder="Invite code" autocomplete="off" required> <button>Create my inbox</button>
 <p><label>PIN <input id="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="4 digits" size="6"></label> <label>Again <input id="pin2" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="4 digits" size="6"></label></p>
 <p>The inbox page asks for the PIN in each new tab, so someone who gets the address or a sign-in link still cannot answer your agents' cards. Leave it empty to skip, and the page asks again when it opens. <label><input type="checkbox" id="never"> Never ask me for a PIN</label></p>

@@ -1,5 +1,5 @@
 // The page on a phone, and the QR code that brings the inbox there.
-import { devices, expect, test, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, type Page } from '@playwright/test';
 import * as jsqr from 'jsqr';
 import { startInbox, type TestInbox } from './inbox.ts';
 
@@ -200,4 +200,24 @@ test('the dialog fits a full IPv6 address on one line, and never scrolls sideway
   expect(await scrolls()).toBe(false);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await scrolls()).toBe(false);
+});
+
+test('the sign-in page of a cloud inbox says the address alone does not sign in, and how to sign this browser in', async () => {
+  // A name that is not a laptop's, which the browser resolves to the test inbox.
+  const port = new URL(inbox.server.url).port;
+  const cloud = await chromium.launch({ args: ['--host-resolver-rules=MAP inbox.example.com 127.0.0.1'] });
+  try {
+    const p = await cloud.newPage();
+    await p.goto(`http://inbox.example.com:${port}/`);
+    await expect(p.getByRole('heading', { name: 'Sign in to your inbox' })).toBeVisible();
+    const steps = p.locator('.signin');
+    await expect(steps).toContainText('This address does not sign a browser in by itself.');
+    await expect(steps).toContainText('your-attention open --link');
+    await expect(steps).toContainText('your-attention pair');
+    await expect(steps).toContainText('--role owner');
+    await expect(steps).toContainText('phone button');
+    await expect(steps).not.toContainText('the sign-in link you got when you created the inbox');
+  } finally {
+    await cloud.close();
+  }
 });

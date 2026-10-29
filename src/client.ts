@@ -44,6 +44,23 @@ export function loadConfig(home = homeDir()): ClientConfig | undefined {
   return undefined;
 }
 
+/** The inbox this machine paired with as owner, for the commands that act as the person: owner.json, written by
+ * `your-attention pair --role owner`, or an owner pairing that an older version saved in client.json. */
+export function ownerPairing(home = homeDir()): (ClientConfig & { source: string }) | undefined {
+  for (const f of ['owner.json', 'client.json']) {
+    try {
+      const c = JSON.parse(fs.readFileSync(path.join(home, f), 'utf8')) as ClientConfig;
+      if (c.url && c.token) return { ...c, url: c.url.replace(/\/$/, ''), source: path.join(home, f) };
+    } catch { /* no such pairing */ }
+  }
+  return undefined;
+}
+
+/** What to do on a machine whose only pairing with `url` is an agent's. */
+export function notOwnerAdvice(url: string): string {
+  return `This machine is paired with ${url} as an agent, so it can't act as you. Pair it as owner with \`your-attention pair ${url} --role owner\`, which keeps the agent pairing. Or open the inbox on your phone from the phone button of a page that is signed in.`;
+}
+
 export type Transport = 'auto' | 'sse' | 'ws' | 'poll';
 
 export class Client {
