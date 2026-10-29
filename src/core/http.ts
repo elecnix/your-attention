@@ -4,7 +4,7 @@ import { randomId } from './crypto.ts';
 import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
 import { Inbox, InboxError, publicCard, type Caller } from './inbox.ts';
-import { UNLOCK_HEADER, UNLOCK_IDLE_MS, validPin } from './pin.ts';
+import { UNLOCK_HEADER, UNLOCK_IDLE_MS, pinKeyError, validKey, type PinKey } from './pin.ts';
 import type { Source } from './telemetry.ts';
 import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
 import { PROTOCOL_VERSION } from './types.ts';
@@ -34,6 +34,7 @@ export interface HandlerOptions {
 
 /** The largest body each kind of route reads. A card post carries its files as data: URLs. */
 const BODY_LIMIT = { open: 4096, card: 16_000_000, other: 1_000_000 };
+const KEY_HELP = 'key must be the PIN derived with PBKDF2-SHA256 and the salt and iterations from GET /v1/pin, 32 bytes in lowercase hex';
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers } });
@@ -201,9 +202,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (a === 'pin' && !b && method === 'GET') return json(status());
     if (a === 'unlock' && !b && method === 'POST') {
       if (!pin.isSet()) return json({ error: 'this inbox has no PIN' }, 409);
-      const body = (await readJson<{ pin?: unknown } | null>(req, BODY_LIMIT.open)) ?? {};
-      if (!validPin(body.pin)) return json({ error: 'a PIN is 4 digits' }, 400);
-      const r = await pin.unlock(body.pin, me.token);
+      const body = (await readJson<{ key?: unknown } | null>(req, BODY_LIMIT.open)) ?? {};
+      if (!validKey(body.key)) return json({ error: KEY_HELP }, 400);
+      const r = await pin.unlock(body.key, me.token);
       return r.ok ? json({ unlock: r.token, idleMs: UNLOCK_IDLE_MS }) : refused(r);
     }
     if (a === 'lock' && !b && method === 'POST') {
@@ -218,15 +219,16 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       return json(status());
     }
     if (a === 'pin' && !b && (method === 'PUT' || method === 'DELETE')) {
-      const body = (await readJson<{ pin?: unknown; current?: unknown } | null>(req, BODY_LIMIT.open)) ?? {};
-      if (method === 'PUT' && !validPin(body.pin)) return json({ error: 'a PIN is 4 digits' }, 400);
+      const body = (await readJson<Partial<PinKey> & { current?: unknown } | null>(req, BODY_LIMIT.open)) ?? {};
+      const error = method === 'PUT' ? pinKeyError(body, pin.iterations) : undefined;
+      if (error) return json({ error }, 400);
       // The page proves it knows the PIN it changes. A token kept on this machine, such as the owner-token file, resets a forgotten one.
       if (pin.isSet() && gate.gated) {
-        if (typeof body.current !== 'string') return json({ error: 'type the current PIN to change it, or reset it on the computer that runs the inbox: your-attention pin reset' }, 403);
+        if (!validKey(body.current)) return json({ error: 'send the current PIN\'s key to change it, or reset it on the computer that runs the inbox: your-attention pin reset' }, 403);
         const r = await pin.check(body.current);
         if (!r.ok) return refused(r);
       }
-      if (method === 'PUT') await pin.set(body.pin as string);
+      if (method === 'PUT') await pin.setKey({ key: String(body.key), salt: String(body.salt), iterations: Number(body.iterations) });
       else pin.clear();
       // The tab that changed the PIN stays unlocked. Every other tab types the new one.
       const unlock = method === 'PUT' && gate.gated ? await pin.issue(me.token) : undefined;

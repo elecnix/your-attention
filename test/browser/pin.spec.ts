@@ -64,6 +64,24 @@ test('setting a PIN keeps this tab open, and a new tab must unlock', async ({ pa
   await other.close();
 });
 
+test('the page sends a key derived from the PIN, never the PIN', async ({ page }) => {
+  const bodies: string[] = [];
+  page.on('request', (r) => { if (/\/v1\/(pin|unlock)$/.test(new URL(r.url()).pathname) && r.method() !== 'GET') bodies.push(r.postData() ?? ''); });
+  await signIn(page);
+  await typePin(page, '2468');
+  await expect(offer(page)).toBeHidden();
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload();
+  await page.getByLabel('PIN').fill('2468');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await expect(page.locator('.bar .pill.on')).toBeVisible();
+  expect(bodies).toHaveLength(2);
+  for (const b of bodies) {
+    expect(b).not.toContain('2468');
+    expect(JSON.parse(b).key).toMatch(/^[0-9a-f]{64}$/);
+  }
+});
+
 test('wrong PINs lock the screen and say how long to wait', async ({ page }) => {
   await inbox.server.inbox.pin.set('2468');
   await signIn(page);

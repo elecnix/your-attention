@@ -1,11 +1,15 @@
 // The PIN of the inbox, on the page: the screen that unlocks a new tab, the
 // prompt that offers to set a PIN, and the controls to change it or lock the tab.
 import { BASE, J, h, unlockToken } from './env.js';
+import { newPinKey, pinKey } from './pin-key.js';
 
 const { React } = window.__OpenUI;
 
 const send = (method, path, body) => fetch(BASE + path, { method, headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J(body) })
   .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+// The PIN never leaves the page. It derives a key with the salt and iterations of GET /v1/pin, and sends the key.
+const pinState = () => fetch(`${BASE}v1/pin`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`the inbox answered ${r.status}`))));
+const currentKey = async (pin) => { const s = await pinState(); return pinKey(pin, s.salt, s.iterations); };
 
 // A loopback, private network or .local address means a computer runs the inbox, and its CLI resets the PIN.
 const LAPTOP = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|\[f[cd][0-9a-f:]*\]|\[fe80:[0-9a-f:]*\]|[\w-]+\.local)$/i;
@@ -40,7 +44,7 @@ export function PinUnlock({ onUnlocked }) {
     e.preventDefault();
     if (pin.length !== 4 || locked || busy) return;
     setBusy(true);
-    const r = await send('POST', 'v1/unlock', { pin }).catch(() => ({ status: 0, body: { error: 'The inbox did not answer.' } }));
+    const r = await currentKey(pin).then((key) => send('POST', 'v1/unlock', { key })).catch(() => ({ status: 0, body: { error: 'The inbox did not answer.' } }));
     setBusy(false);
     setPin('');
     if (r.status === 200 && r.body.unlock) { unlockToken.set(r.body.unlock); onUnlocked(); return; }
@@ -52,7 +56,7 @@ export function PinUnlock({ onUnlocked }) {
     h('p', null, 'Type the PIN of this inbox. Each new tab asks for it, and closing the tab locks it again.'),
     h('div', { className: 'pin-row' },
       pinInput({ value: pin, onChange: setPin, autoFocus: true, autoComplete: 'current-password', 'aria-label': 'PIN', disabled: !!locked }),
-      h('button', { type: 'submit', className: 'btn primary', disabled: pin.length !== 4 || !!locked || busy }, 'Unlock')),
+      h('button', { type: 'submit', className: 'btn primary', disabled: pin.length !== 4 || !!locked || busy }, busy ? 'Checking…' : 'Unlock')),
     locked && h('p', { className: 'pin-error', role: 'status' }, `Too many wrong PINs. Try again in ${wait(until - now)}.`),
     !locked && error && h('p', { className: 'pin-error', role: 'alert' }, error),
     h('p', { className: 'pin-help' }, 'Forgot it? ', LAPTOP.test(location.hostname)
@@ -71,7 +75,10 @@ export function PinForm({ set, offer, onDone, onSkip, onNever, onBusy = () => {}
     if (pin.length !== 4) return setError('A PIN is 4 digits.');
     if (pin !== again) return setError('The two PINs differ.');
     onBusy(true);
-    const r = await send('PUT', 'v1/pin', set ? { pin, current } : { pin }).catch(() => ({ status: 0, body: { error: 'The inbox did not answer.' } }));
+    const r = await pinState()
+      .then(async (s) => ({ ...(await newPinKey(pin, s.iterations)), ...(set ? { current: await pinKey(current, s.salt, s.iterations) } : {}) }))
+      .then((body) => send('PUT', 'v1/pin', body))
+      .catch(() => ({ status: 0, body: { error: 'The inbox did not answer.' } }));
     if (r.status !== 200) { onBusy(false); return setError(r.body.error || 'The inbox refused the PIN.'); }
     if (r.body.unlock) unlockToken.set(r.body.unlock);
     onDone();

@@ -2,7 +2,7 @@
 // deploys their own. MODE "hosted" serves many: each inbox is created with an
 // invite code, lives at an unguessable /i/<id>/ address, and is one Durable
 // Object that hibernates when nobody uses it.
-import { validPin } from '../core/pin.ts';
+import { PIN_ITERATIONS, pinKeyError } from '../core/pin.ts';
 import { inviteId } from '../core/telemetry.ts';
 import { InboxObject, RegistryObject } from './inbox-object.ts';
 
@@ -102,9 +102,10 @@ const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><met
 <p><label>PIN <input id="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="4 digits" size="6"></label> <label>Again <input id="pin2" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" placeholder="4 digits" size="6"></label></p>
 <p>The inbox page asks for the PIN in each new tab, so someone who gets the address or a sign-in link still cannot answer your agents' cards. Leave it empty to skip, and the page asks again when it opens. <label><input type="checkbox" id="never"> Never ask me for a PIN</label></p>
 <p>Usage counts: a hosted inbox always sends the operator of this service, once a day, how many cards were posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected, with an id made from your invite code. There is no off switch. It never sends card text, answers, agent names or addresses. To keep even these counts to yourself, run the inbox on your laptop. <a href="https://github.com/elecnix/your-attention#usage-counts">What the counts contain</a>.</p></form><p id="out"></p>
-<script>document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const v=(id)=>document.getElementById(id).value,out=document.getElementById('out');
+<script type="module">import{newPinKey}from'./pin-key.js';document.getElementById('f').onsubmit=async(e)=>{e.preventDefault();const v=(id)=>document.getElementById(id).value,out=document.getElementById('out');
 if(v('pin')!==v('pin2')){out.textContent='The two PINs differ.';return}if(v('pin')&&!/^[0-9]{4}$/.test(v('pin'))){out.textContent='A PIN is 4 digits.';return}
-const r=await fetch('new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({invite:v('code'),...(v('pin')?{pin:v('pin')}:{neverAsk:document.getElementById('never').checked})})});const d=await r.json();
+const pin=v('pin')?{pin:await newPinKey(v('pin'),${PIN_ITERATIONS})}:{neverAsk:document.getElementById('never').checked};
+const r=await fetch('new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({invite:v('code'),...pin})});const d=await r.json();
 if(d.unlock){try{sessionStorage.setItem('ya-unlock:'+new URL(d.url).pathname,d.unlock)}catch{}}if(d.login){location.href=d.login}else{out.textContent=d.error}}</script></body></html>`;
 
 export default {
@@ -124,13 +125,16 @@ export default {
     }
 
     if (url.pathname === '/') return new Response(LANDING, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    // The landing page derives the PIN's key with the module the inbox page uses, so the PIN never leaves the browser.
+    if (url.pathname === '/pin-key.js') return asset(env, req, url.pathname);
     const secret = env.INBOX_ID_SECRET;
     if (!secret) return json({ error: 'hosted mode needs the INBOX_ID_SECRET secret' }, 500);
     if (url.pathname === '/new' && req.method === 'POST') {
       if (!(await allowed(env, req, ''))) return tooMany();
       if (Number(req.headers.get('content-length') ?? 0) > 1024) return json({ error: 'body too large' }, 413);
       const { invite, pin, neverAsk } = (await req.json().catch(() => ({}))) as { invite?: string; pin?: unknown; neverAsk?: unknown };
-      if (pin !== undefined && !validPin(pin)) return json({ error: 'A PIN is 4 digits.' }, 400);
+      const pinError = pin === undefined ? undefined : pinKeyError(pin);
+      if (pinError) return json({ error: `pin: ${pinError}` }, 400);
       const code = String(invite ?? '').trim().slice(0, 200);
       const redeemed = code.length >= MIN_INVITE_LENGTH ? (await (await env.REGISTRY.get(env.REGISTRY.idFromName('invites')).fetch('https://registry/redeem', { method: 'POST', body: JSON.stringify({ code }) })).json()) as { ok: boolean } : { ok: false };
       if (!redeemed.ok) return json({ error: 'That invite code is not valid.' }, 403);

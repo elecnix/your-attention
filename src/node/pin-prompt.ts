@@ -2,6 +2,7 @@
 // inbox with no PIN, and for `your-attention pin set` and `pin reset`. The PIN is
 // typed hidden and never printed.
 import readline from 'node:readline';
+import { newPinKey } from '../core/pin.ts';
 
 export interface PinApi {
   status(): Promise<{ set: boolean; neverAsk: boolean; lockedUntil: number | null }>;
@@ -112,10 +113,12 @@ export function httpPinApi(url: string, token: string): PinApi & { raw(method: s
     if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `the inbox answered ${res.status}`);
     return res;
   };
+  const status = async () => (await (await ok(await raw('GET', '/v1/pin'))).json()) as { set: boolean; neverAsk: boolean; lockedUntil: number | null; iterations: number };
   return {
     raw,
-    async status() { return (await (await ok(await raw('GET', '/v1/pin'))).json()) as { set: boolean; neverAsk: boolean; lockedUntil: number | null }; },
-    async set(pin) { await ok(await raw('PUT', '/v1/pin', { pin })); },
+    status,
+    // The PIN stays here: the CLI derives the key with the iterations the inbox hands out, and sends the key.
+    async set(pin) { await ok(await raw('PUT', '/v1/pin', await newPinKey(pin, (await status()).iterations))); },
     async clear() { await ok(await raw('DELETE', '/v1/pin', {})); },
     async neverAsk() { await ok(await raw('PUT', '/v1/pin/never-ask', { neverAsk: true })); },
   };

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { COOKIE, createHandler } from '../../src/core/http.ts';
 import { Inbox } from '../../src/core/inbox.ts';
-import { PIN_TRIES, UNLOCK_HEADER } from '../../src/core/pin.ts';
+import { PIN_TRIES, UNLOCK_HEADER, newPinKey, pinKey } from '../../src/core/pin.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 
 async function setup() {
@@ -22,31 +22,34 @@ async function setup() {
       },
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     }));
+  // The client derives each key with the salt and iterations that GET /v1/pin hands out. The PIN never travels.
+  const key = (pin: string) => pinKey(pin, inbox.pin.status().salt ?? '', inbox.pin.status().iterations);
+  const newKey = (pin: string) => newPinKey(pin, inbox.pin.status().iterations);
   const unlock = async (pin: string, as: { token?: string; cookie?: string }) => {
-    const res = await call('POST', '/v1/unlock', { ...as, body: { pin } });
+    const res = await call('POST', '/v1/unlock', { ...as, body: { key: await key(pin) } });
     return { status: res.status, body: (await res.json()) as { unlock?: string; triesLeft?: number; lockedUntil?: number; error?: string }, headers: res.headers };
   };
-  return { inbox, call, link, local, agent, unlock };
+  return { inbox, call, link, local, agent, unlock, key, newKey };
 }
 
 describe('the PIN gate', () => {
   it('lets every owner in while the inbox has no PIN, and reports the prompt', async () => {
-    const { call, link } = await setup();
+    const { call, link, key, newKey } = await setup();
     assert.equal((await call('GET', '/v1/state', { cookie: link })).status, 200);
     const s = (await (await call('GET', '/v1/pin', { cookie: link })).json()) as Record<string, unknown>;
-    assert.deepEqual(s, { set: false, neverAsk: false, unlocked: true, lockedUntil: null, triesLeft: PIN_TRIES, exempt: false });
+    assert.deepEqual(s, { set: false, salt: null, iterations: 1000, neverAsk: false, unlocked: true, lockedUntil: null, triesLeft: PIN_TRIES, exempt: false });
   });
 
   it('stores "never ask" for the inbox', async () => {
-    const { call, link, inbox } = await setup();
+    const { call, link, inbox, key, newKey } = await setup();
     assert.equal((await call('PUT', '/v1/pin/never-ask', { cookie: link, body: { neverAsk: true } })).status, 200);
     assert.equal(inbox.pin.status().neverAsk, true);
     assert.equal((await call('PUT', '/v1/pin/never-ask', { cookie: link, body: { neverAsk: 'yes' } })).status, 400);
   });
 
   it('locks the page and link tokens once a PIN is set, and leaves the laptop file token and agents alone', async () => {
-    const { call, link, local, agent } = await setup();
-    const set = await call('PUT', '/v1/pin', { cookie: link, body: { pin: '2468' } });
+    const { call, link, local, agent, key, newKey } = await setup();
+    const set = await call('PUT', '/v1/pin', { cookie: link, body: await newKey('2468') });
     assert.equal(set.status, 200);
     const { unlock } = (await set.json()) as { unlock: string };
     assert.ok(unlock, 'the tab that set the PIN stays unlocked');
@@ -61,15 +64,15 @@ describe('the PIN gate', () => {
   });
 
   it('keeps an unlock token to the owner token that unlocked', async () => {
-    const { call, link, inbox } = await setup();
+    const { call, link, inbox, key, newKey } = await setup();
     await inbox.pin.set('2468');
     const other = (await inbox.createToken('phone', 'owner')).secret;
-    const { unlock } = (await (await call('POST', '/v1/unlock', { cookie: link, body: { pin: '2468' } })).json()) as { unlock: string };
+    const { unlock } = (await (await call('POST', '/v1/unlock', { cookie: link, body: { key: await key('2468') } })).json()) as { unlock: string };
     assert.equal((await call('GET', '/v1/state', { cookie: other, unlock })).status, 423);
   });
 
   it('counts wrong tries, then says how long to wait, and the laptop can still reset', async () => {
-    const { call, link, local, unlock, inbox } = await setup();
+    const { call, link, local, unlock, inbox, key, newKey } = await setup();
     await inbox.pin.set('2468');
     for (let i = 1; i < PIN_TRIES; i++) {
       const r = await unlock('1111', { cookie: link });
@@ -82,54 +85,62 @@ describe('the PIN gate', () => {
     assert.ok(locked.body.lockedUntil);
     assert.equal((await unlock('2468', { cookie: link })).status, 429, 'the right PIN waits too');
     // The laptop's owner-token file resets the PIN without the old one, lockout or not.
-    assert.equal((await call('PUT', '/v1/pin', { token: local, body: { pin: '1357' } })).status, 200);
+    assert.equal((await call('PUT', '/v1/pin', { token: local, body: await newKey('1357') })).status, 200);
     assert.equal((await unlock('1357', { cookie: link })).status, 200);
   });
 
   it('needs the current PIN to change or remove it from the page', async () => {
-    const { call, link, inbox } = await setup();
+    const { call, link, inbox, key, newKey } = await setup();
     await inbox.pin.set('2468');
-    const { unlock } = (await (await call('POST', '/v1/unlock', { cookie: link, body: { pin: '2468' } })).json()) as { unlock: string };
-    assert.equal((await call('PUT', '/v1/pin', { cookie: link, unlock, body: { pin: '1357' } })).status, 403);
-    assert.equal((await call('PUT', '/v1/pin', { cookie: link, unlock, body: { pin: '1357', current: '0000' } })).status, 401);
-    const changed = await call('PUT', '/v1/pin', { cookie: link, unlock, body: { pin: '1357', current: '2468' } });
+    const { unlock } = (await (await call('POST', '/v1/unlock', { cookie: link, body: { key: await key('2468') } })).json()) as { unlock: string };
+    assert.equal((await call('PUT', '/v1/pin', { cookie: link, unlock, body: await newKey('1357') })).status, 403);
+    assert.equal((await call('PUT', '/v1/pin', { cookie: link, unlock, body: { ...await newKey('1357'), current: await key('0000') } })).status, 401);
+    const changed = await call('PUT', '/v1/pin', { cookie: link, unlock, body: { ...await newKey('1357'), current: await key('2468') } });
     assert.equal(changed.status, 200);
     assert.equal((await call('GET', '/v1/state', { cookie: link, unlock })).status, 423, 'a new PIN ends every unlocked tab');
     const fresh = ((await changed.json()) as { unlock: string }).unlock;
     assert.equal((await call('GET', '/v1/state', { cookie: link, unlock: fresh })).status, 200);
     assert.equal((await call('DELETE', '/v1/pin', { cookie: link, unlock: fresh, body: {} })).status, 403);
-    assert.equal((await call('DELETE', '/v1/pin', { cookie: link, unlock: fresh, body: { current: '1357' } })).status, 200);
+    assert.equal((await call('DELETE', '/v1/pin', { cookie: link, unlock: fresh, body: { current: await key('1357') } })).status, 200);
     assert.equal(inbox.pin.isSet(), false);
     assert.equal((await call('GET', '/v1/state', { cookie: link })).status, 200);
   });
 
-  it('refuses a PIN that is not 4 digits', async () => {
-    const { call, link } = await setup();
-    assert.equal((await call('PUT', '/v1/pin', { cookie: link, body: { pin: '12345' } })).status, 400);
-    assert.equal((await call('PUT', '/v1/pin', { cookie: link, body: { pin: 1234 } })).status, 400);
+  it('takes a derived key, never a PIN, and refuses a key it cannot check', async () => {
+    const { call, link, newKey, inbox, key } = await setup();
+    assert.equal((await call('PUT', '/v1/pin', { cookie: link, body: { pin: '1234' } })).status, 400);
+    const good = await newKey('1234');
+    assert.equal((await call('PUT', '/v1/pin', { cookie: link, body: { ...good, key: good.key.toUpperCase() } })).status, 400);
+    assert.equal((await call('PUT', '/v1/pin', { cookie: link, body: { ...good, salt: '00' } })).status, 400);
+    assert.equal((await call('PUT', '/v1/pin', { cookie: link, body: { ...good, iterations: 999 } })).status, 400);
+    assert.equal(inbox.pin.isSet(), false);
+    assert.equal((await call('PUT', '/v1/pin', { cookie: link, body: good })).status, 200);
+    const unlock = await call('POST', '/v1/unlock', { cookie: link, body: { pin: '1234' } });
+    assert.equal(unlock.status, 400);
+    assert.match(((await unlock.json()) as { error: string }).error, /GET \/v1\/pin/);
   });
 
   it('ends a tab\'s unlock on lock, and every unlock of a revoked token', async () => {
-    const { call, link, local, inbox } = await setup();
+    const { call, link, local, inbox, key, newKey } = await setup();
     await inbox.pin.set('2468');
-    const one = ((await (await call('POST', '/v1/unlock', { cookie: link, body: { pin: '2468' } })).json()) as { unlock: string }).unlock;
+    const one = ((await (await call('POST', '/v1/unlock', { cookie: link, body: { key: await key('2468') } })).json()) as { unlock: string }).unlock;
     assert.equal((await call('POST', '/v1/lock', { cookie: link, unlock: one, body: {} })).status, 200);
     assert.equal((await call('GET', '/v1/state', { cookie: link, unlock: one })).status, 423);
-    const two = ((await (await call('POST', '/v1/unlock', { cookie: link, body: { pin: '2468' } })).json()) as { unlock: string }).unlock;
+    const two = ((await (await call('POST', '/v1/unlock', { cookie: link, body: { key: await key('2468') } })).json()) as { unlock: string }).unlock;
     const id = link.split('.')[0] ?? '';
     assert.equal((await call('DELETE', `/v1/tokens/${id}`, { token: local })).status, 200);
     assert.equal(await inbox.pin.verifyUnlock(two, id), undefined);
   });
 
   it('keeps agents and extensions out of the PIN routes', async () => {
-    const { call, agent } = await setup();
+    const { call, agent, key, newKey } = await setup();
     for (const [m, p] of [['GET', '/v1/pin'], ['PUT', '/v1/pin'], ['POST', '/v1/unlock'], ['PUT', '/v1/pin/never-ask']] as const) {
       assert.equal((await call(m, p, { token: agent, body: m === 'GET' ? undefined : { pin: '1234' } })).status, 403, `${m} ${p}`);
     }
   });
 
   it('serves attachments to a locked cookie, since only an unlocked page can list their ids', async () => {
-    const { call, link, agent, inbox } = await setup();
+    const { call, link, agent, inbox, key, newKey } = await setup();
     const png = 'data:image/png;base64,iVBORw0KGgo=';
     const card = (await (await call('POST', '/v1/cards', { token: agent, body: { id: 'c1', agent: 's', title: 'q', attachments: [{ src: png, name: 'a.png' }] } })).json()) as { attachments: { id: string }[] };
     await inbox.pin.set('2468');
@@ -137,9 +148,9 @@ describe('the PIN gate', () => {
   });
 
   it('never replays a PIN response from the message memory', async () => {
-    const { handle, link, inbox } = await (async () => { const s = await setup(); return { ...s, handle: createHandler(s.inbox) }; })();
+    const { handle, link, inbox, key } = await (async () => { const s = await setup(); return { ...s, handle: createHandler(s.inbox) }; })();
     await inbox.pin.set('2468');
-    const send = (pin: string) => handle(new Request('http://inbox.test/v1/unlock', { method: 'POST', headers: { authorization: `Bearer ${link}`, 'x-message-id': 'abcdefgh-1' }, body: JSON.stringify({ pin }) }));
+    const send = async (pin: string) => handle(new Request('http://inbox.test/v1/unlock', { method: 'POST', headers: { authorization: `Bearer ${link}`, 'x-message-id': 'abcdefgh-1' }, body: JSON.stringify({ key: await key(pin) }) }));
     assert.equal((await send('2468')).status, 200);
     const again = await send('0000');
     assert.equal(again.status, 401);
@@ -147,10 +158,10 @@ describe('the PIN gate', () => {
   });
 
   it('closes the page event stream when its unlock ends', async () => {
-    const { call, link, inbox } = await setup();
+    const { call, link, inbox, key, newKey } = await setup();
     await inbox.pin.set('2468');
     assert.equal((await call('GET', '/v1/events', { cookie: link })).status, 423);
-    const { unlock } = (await (await call('POST', '/v1/unlock', { cookie: link, body: { pin: '2468' } })).json()) as { unlock: string };
+    const { unlock } = (await (await call('POST', '/v1/unlock', { cookie: link, body: { key: await key('2468') } })).json()) as { unlock: string };
     const res = await call('GET', `/v1/events?unlock=${encodeURIComponent(unlock)}`, { cookie: link });
     assert.equal(res.status, 200);
     const reader = res.body!.getReader();

@@ -5,7 +5,7 @@ import { COOKIE, createHandler } from '../core/http.ts';
 import { checkMermaid } from '../adapters/mermaid.ts';
 import { bodyErrors, fallbackBody } from '../adapters/openui-body.ts';
 import { Inbox } from '../core/inbox.ts';
-import { WORKERS_PIN_ITERATIONS, validPin } from '../core/pin.ts';
+import type { PinKey } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
 import { dataPoint } from '../core/telemetry.ts';
 import type { Role } from '../core/types.ts';
@@ -89,7 +89,6 @@ export class InboxObject {
       uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES),
       storageLimitBytes: limit(env.STORAGE_LIMIT_BYTES),
       attachmentReadsPerDay: limit(env.ATTACHMENT_READS_PER_DAY),
-      pinIterations: WORKERS_PIN_ITERATIONS,
       checkDiagram: checkMermaid,
       checkBody: bodyErrors,
       fallbackBody,
@@ -147,7 +146,7 @@ export class InboxObject {
     const url = new URL(req.url);
     if (url.pathname === '/_init') {
       // The Worker calls this once per inbox. The object is never reachable from outside without the Worker.
-      const { ownerToken, usage, pin, neverAsk } = (await req.json()) as { ownerToken?: string; usage?: { invite?: string }; pin?: string; neverAsk?: boolean };
+      const { ownerToken, usage, pin, neverAsk } = (await req.json()) as { ownerToken?: string; usage?: { invite?: string }; pin?: PinKey; neverAsk?: boolean };
       // A hosted inbox learns its invite id here.
       if (usage) this.inbox.usage.update({ invite: String(usage.invite ?? '') });
       if (ownerToken) {
@@ -161,8 +160,9 @@ export class InboxObject {
       const { token, secret } = await this.inbox.createToken('owner of this hosted inbox', 'owner');
       // The landing page set the PIN as it created the inbox, and the tab it opens in starts unlocked.
       if (neverAsk === true) this.inbox.pin.setNeverAsk(true);
-      if (!validPin(pin)) return Response.json({ owner: secret });
-      await this.inbox.pin.set(pin);
+      if (pin === undefined) return Response.json({ owner: secret });
+      // The landing page derived the key, and the Worker checked its form. The object stores only its SHA-256.
+      await this.inbox.pin.setKey(pin);
       return Response.json({ owner: secret, unlock: await this.inbox.pin.issue(token.id) });
     }
     if (url.pathname === '/v1/ws' && req.headers.get('upgrade')?.toLowerCase() === 'websocket') {

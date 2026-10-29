@@ -1,14 +1,13 @@
-// The PIN that a browser tab types before it acts as the owner. The inbox keeps
-// a slow salted hash of the PIN, never the PIN, and a hash of each unlock token
-// it gives a tab. Wrong tries and their lockout live in storage, so a restart
+// The PIN that a browser tab types before it acts as the owner. The client runs
+// the slow salted hash, PBKDF2, and sends the derived key, never the PIN. The
+// inbox keeps a SHA-256 hash of that key, and a hash of each unlock token it
+// gives a tab. Wrong tries and their lockout live in storage, so a restart
 // keeps them.
 import { randomId, sha256 } from './crypto.ts';
 import type { Storage } from './storage.ts';
 
-/** About 100 ms of PBKDF2-SHA256 on a laptop. */
+/** About 100 ms of PBKDF2-SHA256 on a laptop. The client computes it on every build, with the count GET /v1/pin hands out. */
 export const PIN_ITERATIONS = 800_000;
-/** The most PBKDF2 iterations the Workers runtime computes. */
-export const WORKERS_PIN_ITERATIONS = 100_000;
 /** Wrong tries before a lockout. */
 export const PIN_TRIES = 5;
 /** The first lockout. Each one after it lasts twice as long as the one before, up to a day. */
@@ -22,13 +21,18 @@ const MAX_UNLOCKS = 32;
 /** How often a token in use writes its last use, so each request does not write to storage. */
 const TOUCH_MS = 60_000;
 
-export interface PinHash { hash: string; salt: string; iterations: number }
-interface PinRecord extends Partial<PinHash> { setAt?: number; neverAsk?: boolean }
+/** What a client sends for a new PIN: the PBKDF2-SHA256 key it derived, in hex, with the salt and iterations it used. */
+export interface PinKey { key: string; salt: string; iterations: number }
+/** `key` is the SHA-256 of the derived key. An inbox from before the client derived keeps the derived key itself in `hash`. */
+interface PinRecord { key?: string; hash?: string; salt?: string; iterations?: number; setAt?: number; neverAsk?: boolean }
 interface Tries { failures: number; lockouts: number; until: number }
 interface Unlock { key: string; hash: string; token: string; seen: number }
 
 export interface PinStatus {
   set: boolean;
+  /** What a client derives the key with: the salt of the PIN that is set, and its iterations, or the iterations for a new PIN. */
+  salt: string | null;
+  iterations: number;
   /** The person chose to never be asked to set a PIN. */
   neverAsk: boolean;
   /** Until when wrong tries locked the PIN, or null. */
@@ -41,9 +45,17 @@ export type UnlockResult = { ok: true; token: string } | { ok: false; triesLeft:
 const hex = (bytes: Uint8Array): string => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 const unhex = (s: string): Uint8Array<ArrayBuffer> => new Uint8Array((s.match(/../g) ?? []).map((b) => parseInt(b, 16)));
 
-async function derive(pin: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<Uint8Array> {
+/** The key a client sends for a PIN: PBKDF2-SHA256 over the PIN, 32 bytes in hex. web/pin-key.js computes the same on the page. */
+export async function pinKey(pin: string, salt: string, iterations: number): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
-  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256));
+  return hex(new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: unhex(salt), iterations }, key, 256)));
+}
+
+/** A new PIN's key, with a fresh random 16-byte salt. */
+export async function newPinKey(pin: string, iterations = PIN_ITERATIONS): Promise<PinKey> {
+  if (!validPin(pin)) throw new RangeError('a PIN is 4 digits');
+  const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+  return { key: await pinKey(pin, salt, iterations), salt, iterations };
 }
 
 /** Two strings of the same length compared in time that does not depend on where they differ. */
@@ -55,20 +67,23 @@ function same(a: string, b: string): boolean {
 }
 
 export const validPin = (pin: unknown): pin is string => typeof pin === 'string' && /^\d{4}$/.test(pin);
+/** A derived key as a client sends it: 32 bytes in lowercase hex. */
+export const validKey = (key: unknown): key is string => typeof key === 'string' && /^[0-9a-f]{64}$/.test(key);
 
-export async function hashPin(pin: string, iterations = PIN_ITERATIONS): Promise<PinHash> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  return { hash: hex(await derive(pin, salt, iterations)), salt: hex(salt), iterations };
-}
-
-export async function verifyPin(pin: string, stored: PinHash): Promise<boolean> {
-  return same(hex(await derive(pin, unhex(stored.salt), stored.iterations)), stored.hash);
+/** Why the inbox refuses a new PIN's key, or undefined when it takes it. */
+export function pinKeyError(k: unknown, iterations = PIN_ITERATIONS): string | undefined {
+  const v = (k && typeof k === 'object' ? k : {}) as Partial<PinKey>;
+  if (!validKey(v.key)) return 'key must be the PIN derived with PBKDF2-SHA256, 32 bytes in lowercase hex';
+  if (typeof v.salt !== 'string' || !/^[0-9a-f]{32}$/.test(v.salt)) return 'salt must be 16 random bytes in lowercase hex';
+  if (v.iterations !== iterations) return `iterations must be ${iterations}, as GET /v1/pin says`;
+  return undefined;
 }
 
 export class PinLock {
   private readonly store: Storage;
   private readonly now: () => number;
-  private readonly iterations: number;
+  /** The PBKDF2 iterations a new PIN's key must use. */
+  readonly iterations: number;
   private readonly listeners = new Set<() => void>();
 
   constructor(store: Storage, now: () => number = Date.now, iterations = PIN_ITERATIONS) {
@@ -86,14 +101,19 @@ export class PinLock {
   }
 
   isSet(): boolean {
-    return !!this.record().hash;
+    const r = this.record();
+    return !!(r.key || r.hash);
   }
 
   status(): PinStatus {
     const r = this.record();
     const t = this.tries();
     const locked = t.until > this.now();
-    return { set: !!r.hash, neverAsk: r.neverAsk === true, lockedUntil: locked ? t.until : null, triesLeft: locked ? 0 : PIN_TRIES - t.failures };
+    const set = this.isSet();
+    return {
+      set, salt: set ? r.salt ?? null : null, iterations: set ? r.iterations ?? this.iterations : this.iterations,
+      neverAsk: r.neverAsk === true, lockedUntil: locked ? t.until : null, triesLeft: locked ? 0 : PIN_TRIES - t.failures,
+    };
   }
 
   /** Runs after the PIN changes or goes, once every unlock token has ended. */
@@ -102,10 +122,18 @@ export class PinLock {
     return () => this.listeners.delete(listener);
   }
 
+  /** Set a PIN typed in this process, such as at the laptop's terminal. Clients send the key to setKey instead. */
   async set(pin: string): Promise<void> {
-    if (!validPin(pin)) throw new RangeError('a PIN is 4 digits');
-    const hashed = await hashPin(pin, this.iterations);
-    this.store.put<PinRecord>('meta', 'pin', { ...this.record(), ...hashed, setAt: this.now() });
+    await this.setKey(await newPinKey(pin, this.iterations));
+  }
+
+  /** Set the PIN from the key a client derived. The inbox stores the SHA-256 of the key. */
+  async setKey(k: PinKey): Promise<void> {
+    const error = pinKeyError(k, this.iterations);
+    if (error) throw new RangeError(error);
+    const key = await sha256(k.key);
+    const { neverAsk } = this.record();
+    this.store.put<PinRecord>('meta', 'pin', { key, salt: k.salt, iterations: k.iterations, setAt: this.now(), ...(neverAsk !== undefined ? { neverAsk } : {}) });
     this.store.delete('meta', 'pin-tries');
     this.dropUnlocks();
   }
@@ -121,10 +149,10 @@ export class PinLock {
     this.store.put<PinRecord>('meta', 'pin', { ...this.record(), neverAsk });
   }
 
-  /** Check a PIN against the lockout. Each try counts before the slow hash starts, so tries sent at once all count. */
-  async check(pin: string): Promise<{ ok: true } | { ok: false; triesLeft: number } | { ok: false; lockedUntil: number }> {
+  /** Check a derived key against the lockout. Each try counts before the hash runs, so tries sent at once all count. */
+  async check(key: string): Promise<{ ok: true } | { ok: false; triesLeft: number } | { ok: false; lockedUntil: number }> {
     const r = this.record();
-    if (!r.hash || !r.salt || !r.iterations) return { ok: false, triesLeft: 0 };
+    if (!this.isSet()) return { ok: false, triesLeft: 0 };
     const now = this.now();
     const t = this.tries();
     if (t.until > now) return { ok: false, lockedUntil: t.until };
@@ -133,16 +161,18 @@ export class PinLock {
       ? { failures: 0, lockouts: t.lockouts + 1, until: now + Math.min(FIRST_LOCKOUT_MS * 2 ** t.lockouts, MAX_LOCKOUT_MS) }
       : { ...t, failures };
     this.store.put('meta', 'pin-tries', next);
-    if (validPin(pin) && (await verifyPin(pin, { hash: r.hash, salt: r.salt, iterations: r.iterations }))) {
+    // An older laptop inbox stored the derived key itself, so its hash is the SHA-256 of that.
+    const expected = r.key ?? (await sha256(r.hash ?? ''));
+    if (validKey(key) && same(await sha256(key), expected)) {
       this.store.delete('meta', 'pin-tries');
       return { ok: true };
     }
     return next.until > now ? { ok: false, lockedUntil: next.until } : { ok: false, triesLeft: PIN_TRIES - failures };
   }
 
-  /** Give a tab an unlock token for the owner token it signed in with, when the PIN is right. */
-  async unlock(pin: string, token: string): Promise<UnlockResult> {
-    const r = await this.check(pin);
+  /** Give a tab an unlock token for the owner token it signed in with, when the key is right. */
+  async unlock(key: string, token: string): Promise<UnlockResult> {
+    const r = await this.check(key);
     return r.ok ? { ok: true, token: await this.issue(token) } : r;
   }
 

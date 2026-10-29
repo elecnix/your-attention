@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { pinKey } from '../../src/core/pin.ts';
 import { ROOT, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
@@ -34,14 +35,16 @@ describe('your-attention pin', () => {
       const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
       const page = (route: string, init: RequestInit = {}) => fetch(`${info.url}${route}`, { ...init, headers: { cookie, 'x-your-attention': '1', ...init.headers } });
       assert.equal((await page('/v1/state')).status, 423);
-      for (let i = 0; i < 5; i++) await page('/v1/unlock', { method: 'POST', body: JSON.stringify({ pin: '0000' }) });
-      assert.equal((await page('/v1/unlock', { method: 'POST', body: JSON.stringify({ pin: '2468' }) })).status, 429);
+      // The page derives each key with the salt and iterations the inbox hands out, as web/pin.js does.
+      const key = async (pin: string) => { const s = (await (await page('/v1/pin')).json()) as { salt: string; iterations: number }; return pinKey(pin, s.salt, s.iterations); };
+      for (let i = 0; i < 5; i++) await page('/v1/unlock', { method: 'POST', body: JSON.stringify({ key: await key('0000') }) });
+      assert.equal((await page('/v1/unlock', { method: 'POST', body: JSON.stringify({ key: await key('2468') }) })).status, 429);
       assert.match(cli(['pin', 'status']).stdout, /locked the page until/);
 
       // A forgotten PIN, during a lockout: the owner-token file resets it.
       const reset = cli(['pin', 'reset'], '1357\n1357\n');
       assert.equal(reset.status, 0, reset.stderr);
-      const unlocked = await page('/v1/unlock', { method: 'POST', body: JSON.stringify({ pin: '1357' }) });
+      const unlocked = await page('/v1/unlock', { method: 'POST', body: JSON.stringify({ key: await key('1357') }) });
       assert.equal(unlocked.status, 200);
       const { unlock } = (await unlocked.json()) as { unlock: string };
       assert.equal((await page('/v1/state', { headers: { 'x-your-attention-unlock': unlock } })).status, 200);

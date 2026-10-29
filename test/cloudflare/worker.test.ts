@@ -9,6 +9,7 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import WebSocket from 'ws';
 import { Client } from '../../src/client.ts';
+import { newPinKey, pinKey } from '../../src/core/pin.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
@@ -196,8 +197,10 @@ describe('the hosted Cloudflare build', () => {
     const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:pin-code-0123456789ab', '3', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
     assert.equal(seed.status, 0, seed.stderr);
     assert.match(await (await fetch(`${base}/`)).text(), /Never ask me for a PIN/);
-    assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'pin-code-0123456789ab', pin: '12345' }) })).status, 400);
-    const res = await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'pin-code-0123456789ab', pin: '2468' }) });
+    // The landing page derives the key with the page's own module, so the PIN never reaches the Worker.
+    assert.match(await (await fetch(`${base}/pin-key.js`)).text(), /export async function newPinKey/);
+    assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'pin-code-0123456789ab', pin: '2468' }) })).status, 400);
+    const res = await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'pin-code-0123456789ab', pin: await newPinKey('2468') }) });
     assert.equal(res.status, 201);
     const made = (await res.json()) as { url: string; login: string; unlock: string };
     assert.ok(made.unlock, 'the tab that created the inbox opens it unlocked');
@@ -212,10 +215,12 @@ describe('the hosted Cloudflare build', () => {
     });
     assert.equal(await page(), 423, 'the page socket needs the unlock token too');
     assert.equal(await page(made.unlock), 101);
-    // The PIN hash runs in workerd, with the iteration count it allows.
-    const wrong = await fetch(`${made.url}v1/unlock`, { method: 'POST', ...as(), body: JSON.stringify({ pin: '0000' }) });
+    // The client derives the key with the salt and iterations the inbox hands out. The Durable Object hashes it once with SHA-256.
+    const params = (await (await fetch(`${made.url}v1/pin`, as())).json()) as { salt: string; iterations: number };
+    assert.equal(params.iterations, 800_000);
+    const wrong = await fetch(`${made.url}v1/unlock`, { method: 'POST', ...as(), body: JSON.stringify({ key: await pinKey('0000', params.salt, params.iterations) }) });
     assert.equal(wrong.status, 401);
-    const right = await fetch(`${made.url}v1/unlock`, { method: 'POST', ...as(), body: JSON.stringify({ pin: '2468' }) });
+    const right = await fetch(`${made.url}v1/unlock`, { method: 'POST', ...as(), body: JSON.stringify({ key: await pinKey('2468', params.salt, params.iterations) }) });
     assert.equal(right.status, 200);
     const skipped = (await (await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'pin-code-0123456789ab', neverAsk: true }) })).json()) as { url: string; login: string; unlock?: string };
     assert.equal(skipped.unlock, undefined);
