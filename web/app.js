@@ -4,11 +4,19 @@ import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf } from './components.js';
 import { after, buildQueue } from './queue.js';
+import { cardDetails } from './details.js';
 
 const { React, createRoot } = window.__OpenUI;
 
 export function App() {
   const [state, setState] = React.useState(null);
+  // GET /v1/state sends card summaries. The whole card on screen, and the one after it, come from GET /v1/cards/<id>.
+  const [, setLoaded] = React.useState(0);
+  const detailsRef = React.useRef(null);
+  // On a phone, the card that opens scrolls to the top once its whole copy draws.
+  const scrollToRef = React.useRef(null);
+  detailsRef.current ??= cardDetails((id) => fetch(`${BASE}v1/cards/${encodeURIComponent(id)}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`the inbox answered ${r.status}`)))), () => setLoaded((n) => n + 1));
+  const details = detailsRef.current;
   const [auth, setAuth] = React.useState('checking');
   const [up, setUp] = React.useState(false);
   // New page code waits until the person pauses: a reload under their typing would take the field away.
@@ -56,6 +64,7 @@ export function App() {
       }
     }
     knownRef.current = ids;
+    details.keep(ids);
     setState(s);
   }); }, [state, closing]);
   const refreshRef = React.useRef(refresh);
@@ -239,7 +248,6 @@ export function App() {
   if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
-  const answers = state.answers;
   const { byId, st, levelOf, label, waiting, pending, checking, replied, outbox, sent, tagKeys, dealt, groups, order } = buildQueue(state, groupBy);
   const visible = state.cards;
   const levels = state.levels || [];
@@ -249,7 +257,12 @@ export function App() {
   if (icon && icon.getAttribute('href') !== iconHref) icon.setAttribute('href', iconHref);
   const pinned = pending.find((c) => c.id === pinnedRef.current);
   const lastVisit = pending.find((c) => c.id === lastVisitRef.current);
-  const current = cleared ? null : byId[focus] || pinned || lastVisit || replied[0] || pending[0] || null;
+  const shown = cleared ? null : byId[focus] || pinned || lastVisit || replied[0] || pending[0] || null;
+  // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
+  details.want([shown, shown && byId[after(order, shown.id)], shown && shown.follows && byId[shown.follows]]);
+  const detail = details.get(shown);
+  // Until its first copy arrives, the card on screen is its summary, and the pane says it is loading.
+  const current = detail && detail.card ? { ...detail.card, rev: shown.rev } : shown;
   pinnedRef.current = current ? current.id : null;
   lastVisitRef.current = null;
   focusRef.current = current ? current.id : null;
@@ -259,8 +272,8 @@ export function App() {
     report({ focus: reportedFocus.current, active: true });
   }
   if (current && cardInAddress() !== current.id && !/(?:token|signin)=/.test(location.hash)) history.replaceState({ card: current.id }, '', cardAddress(current.id));
-  const seenKey = current ? `${current.id}:${current.replies.length}` : null;
-  if (current && current.replies.some((r) => !r.seenAt) && seenRef.current !== seenKey) {
+  const seenKey = current ? `${current.id}:${shown.replyAt || 0}` : null;
+  if (current && shown.unseenReplies && seenRef.current !== seenKey) {
     seenRef.current = seenKey;
     setTimeout(() => api(`${BASE}v1/cards/${current.id}/seen`, {}), 1500);
   }
@@ -271,7 +284,7 @@ export function App() {
     setCleared(false);
     setFocus(id);
     // On a phone the card sits above the queue, so the page scrolls up to the card that opened.
-    if (id && window.matchMedia('(max-width: 760px)').matches) requestAnimationFrame(() => document.querySelector('.focus-card')?.scrollIntoView({ block: 'start' }));
+    if (id && window.matchMedia('(max-width: 760px)').matches) scrollToRef.current = id;
   };
   // The card after this one, in the order the queue shows, wrapping around at the end.
   const next = (id) => after(order, id);
@@ -334,16 +347,23 @@ export function App() {
   let main;
   if (!current) {
     main = h('div', { className: 'focus-card done' }, cleared && pending.length ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.');
+  } else if (!detail || !detail.card) {
+    main = h('div', { className: 'focus-card done', 'aria-busy': 'true' }, `Loading ${current.title}…`);
   } else {
-    const a = answers[current.id];
+    const a = detail.answer;
     const s = st(current);
     const pres = presenceOf(current, state);
-    const prev = current.follows && byId[current.follows];
+    const prevDetail = current.follows ? details.get(byId[current.follows]) : undefined;
+    const prev = prevDetail && prevDetail.card;
     const after = current.followedBy && byId[current.followedBy];
     const draftKey = `draft:${current.id}:${current.version}`;
-    const backlinks = visible.filter((c) => c.id !== current.id && String(c.text || '').includes(`[[${current.id}]]`));
+    const backlinks = visible.filter((c) => c.id !== current.id && (c.links || []).includes(current.id));
     const o = current.origin || {};
-    const card = h('div', { className: 'focus-card' },
+    const card = h('div', { className: 'focus-card', ref: (el) => {
+      if (!el || scrollToRef.current !== current.id) return;
+      scrollToRef.current = null;
+      requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }));
+    } },
       h('div', { className: 'meta' },
         h('span', { className: `prio ${levelOf(current)}`, title: (levels.find((l) => l.id === levelOf(current)) || {}).definition }, label(levelOf(current))),
         current.status && h('span', { className: 'status' }, current.status),
@@ -387,10 +407,11 @@ export function App() {
         h('div', { className: 'turn' },
           h('h4', null, h('a', { onClick: () => open(prev.id) }, prev.title)),
           prev.text && h(DrawFaults.Provider, { value: drawFaultsOf(prev) }, h(LinkedText, { text: prev.text, byId, open, diagrams: prev.kind !== 'system' })),
-          h('div', { className: 'ans' }, answers[prev.id] ? describe(prev, answers[prev.id]) : 'You did not answer it.'))));
+          h('div', { className: 'ans' }, prevDetail.answer ? describe(prev, prevDetail.answer) : 'You did not answer it.'))));
     // A diagram or a body the page cannot draw goes back to the card's agent.
     main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
-      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed, onNext: skip, animate: !!closing[current.id] }, card)
+      // The summary has the closure as soon as the state does, before the whole card arrives again.
+      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, onNext: skip, animate: !!closing[current.id] }, card)
       : card);
   }
 

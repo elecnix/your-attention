@@ -2,7 +2,7 @@
 // of a Durable Object, so each inbox change runs to completion before the next
 // one starts and needs no lock.
 
-export type Collection = 'cards' | 'answers' | 'tokens' | 'pairings' | 'presence' | 'meta' | 'templates' | 'widgets' | 'messages';
+export type Collection = 'cards' | 'answers' | 'tokens' | 'pairings' | 'presence' | 'meta' | 'templates' | 'widgets' | 'messages' | 'summaries';
 
 export interface SearchHit {
   card: string;
@@ -19,6 +19,8 @@ export interface Storage {
   search(query: string, limit: number): SearchHit[];
   /** The bytes the storage keeps, for a storage that measures them. */
   bytes?(): number;
+  /** How many documents a collection has, without reading them. */
+  count?(collection: Collection): number;
   close(): void;
 }
 
@@ -48,6 +50,10 @@ export class MemoryStorage implements Storage {
 
   list<T>(c: Collection): T[] {
     return [...this.bucket(c).values()].map((v) => JSON.parse(v) as T);
+  }
+
+  count(c: Collection): number {
+    return this.bucket(c).size;
   }
 
   bytes(): number {

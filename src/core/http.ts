@@ -252,7 +252,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (me.role !== 'owner') throw new InboxError(403, 'only the owner can do this');
     };
 
-    if (method === 'GET' && a === 'state') { owner(); return json(inbox.state()); }
+    if (method === 'GET' && a === 'state') { owner(); return json(inbox.summaryState()); }
     if (method === 'POST' && a === 'archive' && !b) return json(inbox.archive(me));
     if (method === 'POST' && a === 'sign-in-codes' && !b) return json(inbox.createSignInCode(me), 201);
     if (method === 'GET' && a === 'addresses' && !b) { owner(); return json({ addresses: options.networkAddresses?.() ?? [] }); }
@@ -413,7 +413,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET' && !c) {
         const card = inbox.getCard(b);
         if (me.role !== 'owner' && card.token !== me.token) throw new InboxError(403, 'another client owns this card');
-        return json({ card: publicCard(card), state: inbox.state().states[b] });
+        return json(inbox.cardDetail(b));
       }
       if (method !== 'POST') return json({ error: 'not found' }, 404);
       const body = await readJson<Record<string, unknown>>(req);

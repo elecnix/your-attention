@@ -30,8 +30,8 @@ function fakeHerdr(pane: string, onKey: (key: string, pane: { screen: string; st
   return { herdr, state, keys };
 }
 
-const cardFor = async (pane: string): Promise<Card> => until(async () => ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.origin?.herdrPane === pane));
-const closedOutcome = async (id: string): Promise<string> => until(async () => ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === id)?.closed?.outcome);
+const cardFor = async (pane: string): Promise<Card> => until(async () => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.origin?.herdrPane === pane));
+const closedOutcome = async (id: string): Promise<string> => until(async () => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === id)?.closed?.outcome);
 
 describe('the herdr sidecar', () => {
   it('offers the dialog choices and presses the one you picked, with no Enter when the number acts alone', async () => {

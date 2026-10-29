@@ -9,6 +9,7 @@ import { DurableSqlStorage } from '../src/cloudflare/storage.ts';
 import { createHandler } from '../src/core/http.ts';
 import { Inbox, MAX_CARD_BYTES } from '../src/core/inbox.ts';
 import { newPinKey, pinKey } from '../src/core/pin.ts';
+import { MAX_SHOWN_CARDS } from '../src/core/summary.ts';
 import { MemoryBlobs } from '../src/core/storage.ts';
 import { dataPoint } from '../src/core/telemetry.ts';
 
@@ -86,10 +87,23 @@ const PATHS: Path[] = [
     for (let i = 0; h.store.bytes() < 20 * 1024 * 1024; i++) await h.inbox.postCardWithFiles({ token: 'budget', role: 'agent' }, maxCard(`s${i}`));
     return { run: () => h.call('GET', '/v1/state', h.owner) };
   } },
-  { name: 'GET /v1/state, 2,000 small cards', setup: async () => {
+  { name: `GET /v1/state, ${MAX_SHOWN_CARDS} cards, the most it shows, each with the largest summary`, setup: async () => {
     const h = await hosted();
-    for (let i = 0; i < 2000; i++) h.inbox.postCard({ token: 'budget', role: 'agent' }, { id: `m${i}`, agent: `a${i % 50}`, title: `Small card ${i}`, text: 'A short question with a little context.', options: [{ id: 'y', label: 'Yes' }, { id: 'n', label: 'No' }] });
+    const long = (n: number, i: number) => `${i} ${'w'.repeat(n)}`.slice(0, n);
+    for (let i = 0; i < MAX_SHOWN_CARDS; i++) {
+      const links = Array.from({ length: 20 }, (_, j) => `[[${long(78, i * 20 + j)}]]`).join(' ');
+      h.inbox.postCard({ token: 'budget', role: 'agent' }, {
+        id: `m${i}`, agent: `a${i % 50}`, title: long(300, i), text: `${links} ${'x'.repeat(4000)}`, status: long(200, i), from: long(80, i),
+        tags: Object.fromEntries(Array.from({ length: 10 }, (_, j) => [long(100, j), long(100, i)])), origin: { name: long(200, i), harness: 'claude-code' },
+        options: [{ id: 'y', label: 'Yes' }, { id: 'n', label: 'No' }],
+      });
+    }
     return { run: () => h.call('GET', '/v1/state', h.owner) };
+  } },
+  { name: 'GET /v1/cards/<id>, a card at the 256 KB limit', setup: async () => {
+    const h = await hosted();
+    await h.inbox.postCardWithFiles({ token: 'budget', role: 'agent' }, maxCard('big'));
+    return { run: () => h.call('GET', '/v1/cards/big', h.owner) };
   } },
   { name: 'GET /v1/telemetry', setup: async () => {
     const h = await hosted();

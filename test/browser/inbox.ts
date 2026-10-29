@@ -13,6 +13,7 @@ export interface TestInbox {
   home: string;
   /** Open the page signed in, as the owner. */
   open(page: Page): Promise<void>;
+  /** The whole cards and answers, as the inbox stores them. The page reads summaries from GET /v1/state, and each card it opens. */
   state(): Promise<{ cards: Card[]; states: Record<string, string>; answers: Record<string, { values: Record<string, unknown>; comment: string }> }>;
   /** Receive answers for one agent, into a list the test reads. */
   listen(agentId: string): { events: AgentEvent[]; stop(): void };
@@ -36,7 +37,7 @@ export async function startInbox(opts: { usage?: boolean; pinPrompt?: boolean } 
       await page.locator('.bar .pill.on').waitFor();
     },
     async state() {
-      return (await (await fetch(`${server.url}/v1/state`, { headers: { authorization: `Bearer ${server.ownerToken}` } })).json()) as Awaited<ReturnType<TestInbox['state']>>;
+      return server.inbox.state() as unknown as Awaited<ReturnType<TestInbox['state']>>;
     },
     listen(agentId) {
       const events: AgentEvent[] = [];

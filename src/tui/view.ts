@@ -1,7 +1,8 @@
 // One frame of the terminal client: the bar at the top, the card list on the left, the open card on the right, and
 // the keys at the bottom. A pane under 60 columns shows the list or the card, one at a time.
 import type { InboxState, Queue } from '../../web/queue.js';
-import type { Card } from '../core/types.ts';
+// The list and the model hold the card summaries of GET /v1/state. The card on screen is whole, in its CardView.
+import type { CardSummary as Card } from '../core/summary.ts';
 import type { CardView } from './cardview.ts';
 import { drawLines, type Hit } from './doc.ts';
 import { Grid, type Style } from './screen.ts';
@@ -182,7 +183,8 @@ export function drawFrame(m: Model): Frame {
     if (!single) for (let y = bodyTop; y < bodyTop + bodyH; y++) grid.text(lw, y, g.box.v, st.dim);
     if (showCard) {
       if (!m.current || !m.view || !m.state || !m.queue) {
-        const msg = waiting ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.';
+        // The whole card loads from GET /v1/cards/<id>, usually ahead of time.
+        const msg = m.current ? `Loading ${sanitize(m.current.title)}…` : waiting ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.';
         grid.text(cardX + 2, bodyTop + 1, cut(m, msg, cardW - 3), st.dim);
       } else {
         const doc = m.view.build(cardW - 3, m.state, m.queue);

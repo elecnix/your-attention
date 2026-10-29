@@ -39,6 +39,10 @@ export class SqliteStorage implements Storage {
     return rows.map((r) => JSON.parse(r.value) as T);
   }
 
+  count(collection: Collection): number {
+    return Number((this.db.prepare('SELECT COUNT(*) AS n FROM docs WHERE collection = ?').get(collection) as { n: number } | undefined)?.n ?? 0);
+  }
+
   index(card: string, text: string): void {
     this.db.prepare('DELETE FROM search WHERE card = ?').run(card);
     if (text) this.db.prepare('INSERT INTO search (card, text) VALUES (?, ?)').run(card, text);

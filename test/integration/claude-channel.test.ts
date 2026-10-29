@@ -44,11 +44,11 @@ describe('the Claude Code channel', () => {
     fs.writeFileSync(transcript, '{"type":"start"}\n');
     const res = await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-1', title: 'Use SQLite?', options: ['Yes', 'No'], recommendation: 'Yes: one file.' } });
     assert.match(JSON.stringify(res.content), /Posted card cc-1/);
-    const state = async () => (await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[]; states: Record<string, string> };
+    const state = async () => (await h.stored()) as { cards: Card[]; states: Record<string, string> };
     const card = (await state()).cards.find((c) => c.id === 'cc-1');
     assert.equal(card?.agent, `claude:${SESSION}`);
     assert.equal(card?.origin?.harness, 'claude-code');
-    await until(async () => ((await (await h.owner('GET', '/v1/state')).json()) as { presence: Record<string, { online: boolean }> }).presence[`claude:${SESSION}`]?.online);
+    await until(async () => ((await h.stored()) as { presence: Record<string, { online: boolean }> }).presence[`claude:${SESSION}`]?.online);
 
     await h.owner('POST', '/v1/cards/cc-1/answer', { values: { choice: 'o1' }, comment: 'agreed' });
     const note = await until(() => notes.find((n) => n.meta.card_id === 'cc-1'));
@@ -63,7 +63,7 @@ describe('the Claude Code channel', () => {
   it('closes its own card', async () => {
     await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-2', title: 'Still needed?' } });
     await mcp.callTool({ name: 'card_close', arguments: { card_id: 'cc-2', kind: 'self-answered', outcome: 'Found it in the README.' } });
-    const s = (await (await h.owner('GET', '/v1/state')).json()) as { states: Record<string, string> };
+    const s = (await h.stored()) as { states: Record<string, string> };
     assert.equal(s.states['cc-2'], 'closed');
   });
 
@@ -71,7 +71,7 @@ describe('the Claude Code channel', () => {
     const res = await mcp.callTool({ name: 'card_ask_secret', arguments: { name: 'DEMO_API_KEY', title: 'Need the demo key', text: 'To set the CI secret.' } });
     const id = /card (\S+)\./.exec(JSON.stringify(res.content))?.[1];
     assert.ok(id);
-    const card = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === id);
+    const card = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === id);
     assert.equal(card?.kind, 'secret');
     const sealed = await seal(card!.secret!.publicKey, 'demo-value-not-real');
     await h.owner('POST', `/v1/cards/${id}/answer`, { values: { sealed } });
@@ -95,7 +95,7 @@ describe('the batch of card model tools', () => {
     fs.writeFileSync(file, '# Plan\n\n- ship the bridge');
     const res = await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-files', title: 'Read the plan', text: 'Draft one', attachments: [{ path: file }] } });
     assert.match(JSON.stringify(res.content), /Posted card cc-files/);
-    const s = (await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] };
+    const s = (await h.stored()) as { cards: Card[] };
     const card = s.cards.find((c) => c.id === 'cc-files');
     assert.equal(card?.attachments?.[0]?.name, 'plan.md');
     assert.equal(card?.attachments?.[0]?.type, 'text/markdown');
@@ -107,9 +107,9 @@ describe('the batch of card model tools', () => {
     assert.match(JSON.stringify((await mcp.callTool({ name: 'card_guidance', arguments: {} })).content), /version 1/);
     assert.match(JSON.stringify((await mcp.callTool({ name: 'card_widget_save', arguments: { name: 'pr', source: 'root = Card([head])\nhead = CardHeader({{title}}, {{repo}})' } })).content), /widget pr version 1/);
     await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-widget', title: 'Merge it?', body: 'root = Card([one])\none = widget pr {"title": "Add stop", "repo": "your-attention"}' } });
-    const placed = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-widget');
+    const placed = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-widget');
     assert.match(placed?.body ?? '', /one_head = CardHeader\("Add stop", "your-attention"\)/);
-    const after = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-files');
+    const after = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-files');
     assert.equal(after?.text, 'Draft two');
     assert.equal(after?.status, 'drafting');
   });

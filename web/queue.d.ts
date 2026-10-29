@@ -1,9 +1,12 @@
-import type { Answer, Card, CardState, Presence, PriorityLevel, Settings } from '../src/core/types.ts';
+import type { CardState, Presence, PriorityLevel, Settings } from '../src/core/types.ts';
+import type { AnswerSummary, CardSummary } from '../src/core/summary.ts';
+
+type Card = CardSummary;
 
 /** GET /v1/state. */
 export interface InboxState {
   cards: Card[];
-  answers: Record<string, Answer>;
+  answers: Record<string, AnswerSummary>;
   presence: Record<string, Presence>;
   states: Record<string, CardState>;
   priorities?: Record<string, string>;
@@ -14,7 +17,7 @@ export type ShownState = CardState | 'reply';
 export const CLOSED_LABEL: Record<string, string>;
 export const STATE_LABEL: Record<string, string>;
 export function agentName(id: string, cards: Card[]): string;
-export function presenceOf(card: Card, state: InboxState): ['off' | 'busy' | 'on', string] | null;
+export function presenceOf(card: Pick<Card, 'agent' | 'deliver'>, state: InboxState): ['off' | 'busy' | 'on', string] | null;
 export interface Queue {
   byId: Record<string, Card>;
   st(c: Card): ShownState;

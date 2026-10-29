@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import WebSocket from 'ws';
+import type { CardDetail } from '../../web/details.js';
 import type { InboxState } from '../../web/queue.js';
 import { ownerPairing } from '../client.ts';
 import { pinKey } from '../core/pin.ts';
@@ -70,6 +71,18 @@ export class InboxApi {
 
   state(): Promise<InboxState> {
     return this.call<InboxState>('GET', '/v1/state');
+  }
+
+  /** The whole card, its answer and its state. GET /v1/state sends only summaries. A body the inbox sent no fallback for,
+   * as the hosted inbox never does, gets one here, and the inbox hears of its faults as from the page. */
+  async card(id: string): Promise<CardDetail> {
+    const d = await this.call<CardDetail>('GET', `/v1/cards/${encodeURIComponent(id)}`);
+    if (d.card.body === undefined || d.card.bodyFallback || d.card.kind === 'system') return d;
+    const { fallbackBody } = await import('../adapters/openui-body.ts');
+    const fallback = fallbackBody(d.card.body);
+    if (!fallback) return d;
+    if (!d.card.closed) this.post(`/v1/cards/${encodeURIComponent(id)}/draw-fault`, { version: d.card.version, body: fallback.faults }).catch(() => {});
+    return { ...d, card: { ...d.card, bodyFallback: fallback } };
   }
 
   post(route: string, body: unknown = {}): Promise<Record<string, unknown>> {

@@ -61,6 +61,10 @@ export class DurableSqlStorage implements Storage {
     return this.sql.exec('SELECT value FROM docs WHERE collection = ? ORDER BY rowid', collection).toArray().map((r) => JSON.parse(String(r['value'])) as T);
   }
 
+  count(collection: Collection): number {
+    return Number(this.sql.exec('SELECT COUNT(*) AS n FROM docs WHERE collection = ?', collection).toArray()[0]?.['n'] ?? 0);
+  }
+
   index(card: string, text: string): void {
     const indexed = (): number => Number(this.sql.exec('SELECT COALESCE(SUM(length(text)), 0) AS n FROM search WHERE card = ?', card).toArray()[0]?.['n'] ?? 0);
     const old = this.used === undefined ? 0 : indexed();

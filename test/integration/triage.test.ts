@@ -14,7 +14,7 @@ let judged = 0;
 before(async () => { h = await start(); });
 after(async () => { stop.abort(); await h.stop(); });
 
-const state = async () => (await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[]; states: Record<string, string> };
+const state = async () => (await h.stored()) as { cards: Card[]; states: Record<string, string> };
 
 describe('the triage service', () => {
   it('lets cards through while it is down, then screens them when it connects', async () => {

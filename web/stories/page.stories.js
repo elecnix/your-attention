@@ -9,6 +9,12 @@ function fakeInbox(state) {
   window.fetch = async (url, init) => {
     const path = String(url);
     if (path.endsWith('v1/state')) return Response.json(state);
+    // The state sends summaries, and the page fetches the whole card it opens. The fixtures are whole cards already.
+    const one = /v1\/cards\/([^/?]+)$/.exec(path);
+    if (one && !(init && init.method)) {
+      const c = state.cards.find((x) => x.id === decodeURIComponent(one[1]));
+      return c ? Response.json({ card: c, answer: state.answers[c.id], state: state.states[c.id], rev: c.rev }) : new Response('{}', { status: 404 });
+    }
     if (init && init.method) return Response.json({ ok: true });
     return Response.json({});
   };

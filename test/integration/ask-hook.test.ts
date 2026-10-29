@@ -20,7 +20,7 @@ const hook = (mode: string, input: Record<string, unknown>): Promise<{ status: n
   child.stdin.end(JSON.stringify(input));
 });
 const ask = (session: string, question: string) => ({ session_id: session, tool_name: 'AskUserQuestion', tool_input: { questions: [{ question, header: 'Q', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] }] } });
-const card = async (session: string, title: string) => ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.agent === `claude:${session}` && c.title === title);
+const card = async (session: string, title: string) => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.agent === `claude:${session}` && c.title === title);
 
 describe('the AskUserQuestion hooks', () => {
   it('close the card when the person cancels the dialog in the terminal', async () => {

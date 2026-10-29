@@ -5,7 +5,8 @@
 import { answerValues, cardSource, changeSteps, describe, formValues } from '../../web/answers.js';
 import { cardAge } from '../../web/age.js';
 import { CLOSED_LABEL, STATE_LABEL, agentName, presenceOf, type InboxState, type Queue } from '../../web/queue.js';
-import type { Attachment, Card } from '../core/types.ts';
+import type { CardSummary } from '../core/summary.ts';
+import type { Answer, Attachment, Card } from '../core/types.ts';
 import { BodyRenderer, FormStore, parse, type Action, type BodyContext, type Widget } from './body.ts';
 import { Doc, type Span } from './doc.ts';
 import type { KeyEvent } from './input.ts';
@@ -29,7 +30,7 @@ export interface CardViewHost {
 }
 
 /** OpenUI Lang for the cards the page draws with its own components: secret, broadcast and HTML cards. */
-export function terminalSource(c: Card, cards: Card[]): string {
+export function terminalSource(c: Card, cards: CardSummary[]): string {
   const buttons = (list: [string, string, string][]) => `b = Buttons([${list.map(([label, msg, variant]) => `Button(${J(label)}, @ToAssistant(${J(msg)}), ${J(variant)})`).join(', ')}], "row")`;
   if (c.kind === 'secret' && c.secret) {
     return [
@@ -66,7 +67,10 @@ const sizeText = (n?: number): string => (n == null ? '' : n < 1024 ? `${n} B` :
 const TEXT_FILE = /^(text\/(markdown|plain|csv)|application\/json)$/;
 
 export class CardView {
+  /** The whole card, from GET /v1/cards/<id>, with its answer and the card it follows. */
   card: Card;
+  saved: Answer | undefined;
+  earlier: { card: Card; answer?: Answer | undefined } | undefined;
   readonly host: CardViewHost;
   readonly store = new FormStore();
   readonly ui = new Map<string, unknown>();
@@ -186,9 +190,11 @@ export class CardView {
       return open;
     };
 
-    const state = q.st(card);
-    const a = s.answers[card.id];
-    const level = (s.levels ?? []).find((l) => l.id === q.levelOf(card));
+    // The queue reads the card's summary, which has its reply and answer states.
+    const sum = q.byId[card.id];
+    const state = sum ? q.st(sum) : 'open';
+    const a = this.saved;
+    const level = (s.levels ?? []).find((l) => l.id === (sum ? q.levelOf(sum) : card.priority));
     if (state === 'closed' && card.closed) {
       stopLine(['closed:next'], [
         { text: `[${CLOSED_LABEL[card.closed.kind] ?? 'Closed'}] `, style: st.warn },
@@ -199,10 +205,10 @@ export class CardView {
     }
 
     // The meta line: the level with its symbol, the agent's status, a warning state, presence, and the age at the right.
-    const meta: Span[] = [{ text: `${g.waiting} ${sanitize(level?.label ?? q.label(q.levelOf(card)))}`, style: theme.level(level?.color) }];
+    const meta: Span[] = [{ text: `${g.waiting} ${sanitize(level?.label ?? q.label(sum ? q.levelOf(sum) : card.priority))}`, style: theme.level(level?.color) }];
     if (card.status) meta.push({ text: '  ' }, { text: `[${sanitize(card.status)}]`, style: st.dim });
     if (['in-triage', 'held', 'orphaned'].includes(state)) meta.push({ text: '  ' }, { text: `Warning: ${STATE_LABEL[state]}`, style: st.warn });
-    const pres = presenceOf(card, s);
+    const pres = presenceOf(sum ?? card, s);
     if (pres) meta.push({ text: '  ' }, { text: `${pres[0] === 'on' ? g.read : pres[0] === 'busy' ? g.delivered : g.stored} ${sanitize(pres[1].split(':')[0] ?? '')}`, style: pres[0] === 'on' ? st.ok : st.dim });
     const age = cardAge(this.host.now() - card.createdAt);
     const metaW = meta.reduce((w, x) => w + textWidth(x.text), 0);
@@ -289,7 +295,7 @@ export class CardView {
         stopLine(['meta:force'], spans);
       } else doc.para(spans);
     }
-    const backlinks = s.cards.filter((c) => c.id !== card.id && String(c.text ?? '').includes(`[[${card.id}]]`));
+    const backlinks = s.cards.filter((c) => c.id !== card.id && (c.links ?? []).includes(card.id));
     if (backlinks.length) {
       doc.gap();
       const spans: Span[] = [{ text: 'Linked from ', style: st.dim }];
@@ -297,7 +303,7 @@ export class CardView {
       doc.para(spans);
       linkStops();
     }
-    const prev = card.follows ? q.byId[card.follows] : undefined;
+    const prev = card.follows ? this.earlier?.card : undefined;
     if (prev) {
       doc.gap();
       if (toggle('meta:earlier', 'The card before this one, and your answer')) {
@@ -306,7 +312,8 @@ export class CardView {
         doc.para([{ text: sanitize(prev.title), style: { ...st.link, bold: true, ...(this.focus === t ? { inverse: true } : {}) }, target: t }], { first: [{ text: '  ' }] });
         linkStops();
         if (prev.text) doc.para([{ text: sanitize(prev.text) }], { first: [{ text: '  ' }] });
-        doc.para([{ text: s.answers[prev.id] ? sanitize(describe(prev, s.answers[prev.id])) : 'You did not answer it.', style: st.ok }], { first: [{ text: '  ' }] });
+        const before = this.earlier?.answer;
+        doc.para([{ text: before ? sanitize(describe(prev, before)) : 'You did not answer it.', style: st.ok }], { first: [{ text: '  ' }] });
       }
     }
     // Keep the focus on a stop that still exists, such as after a revision dropped a field.

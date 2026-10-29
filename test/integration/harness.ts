@@ -10,6 +10,8 @@ export interface Harness {
   agentToken: string;
   /** Call the inbox as the owner, the way the page does. */
   owner(method: string, route: string, body?: unknown): Promise<Response>;
+  /** The whole cards and answers, as the inbox stores them. GET /v1/state sends summaries, which a test of a card's content can't read. */
+  stored(): Promise<ReturnType<RunningServer['inbox']['state']>>;
   stop(): Promise<void>;
 }
 
@@ -25,6 +27,7 @@ export async function start(): Promise<Harness> {
       headers: { authorization: `Bearer ${h.server.ownerToken}`, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
+    stored: async () => h.server.inbox.state(),
     async stop() {
       await h.server.close();
       fs.rmSync(home, { recursive: true, force: true });

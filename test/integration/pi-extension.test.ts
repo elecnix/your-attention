@@ -30,7 +30,7 @@ const pi = {
   sendUserMessage: (text: string, options?: { deliverAs?: string }) => { sent.push({ text, options }); },
 };
 
-const state = async () => (await (await h.owner('GET', '/v1/state')).json()) as { states: Record<string, string>; presence: Record<string, { online: boolean }> };
+const state = async () => (await h.stored()) as { states: Record<string, string>; presence: Record<string, { online: boolean }> };
 
 describe('the pi extension', () => {
   it('registers the card tools and connects on session start', async () => {
@@ -54,7 +54,7 @@ describe('the pi extension', () => {
   it('opens a sealed secret into a private file, and tells the agent only the path', async () => {
     const res = await tools.get('card_ask_secret')!.execute('call-s', { name: 'PI_KEY', title: 'Need the pi key' }, undefined, undefined, ctx);
     const id = /card (\S+)\./.exec(res.content[0]!.text)?.[1];
-    const card = ((await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[] }).cards.find((c) => c.id === id);
+    const card = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === id);
     await h.owner('POST', `/v1/cards/${id}/answer`, { values: { sealed: await seal(card!.secret!.publicKey, 'pi-value-not-real') } });
     const msg = await until(() => sent.find((m) => m.text.includes(String(id))));
     assert.doesNotMatch(msg.text, /pi-value-not-real/);

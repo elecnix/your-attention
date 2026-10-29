@@ -32,7 +32,7 @@ const client = {
   },
 };
 const toolCtx = (sessionID: string) => ({ sessionID, messageID: 'm1', agent: 'build', directory: '/repo', worktree: '/repo', abort: new AbortController().signal, metadata: () => {}, ask: async () => {} });
-const state = async () => (await (await h.owner('GET', '/v1/state')).json()) as { states: Record<string, string>; cards: { id: string; agent: string; origin?: Record<string, string> }[] };
+const state = async () => (await h.stored()) as { states: Record<string, string>; cards: { id: string; agent: string; origin?: Record<string, string> }[] };
 
 describe('the OpenCode plugin', () => {
   it('turns each card tool schema into Zod arguments, with only the required ones required', () => {

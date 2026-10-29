@@ -1,4 +1,5 @@
 // The frame: what the terminal can show, the panes at each width, the list's sections and symbols, and the click targets.
+import { summarize } from '../../src/core/summary.ts';
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
 import { buildQueue, type InboxState } from '../../web/queue.js';
@@ -13,9 +14,11 @@ const card = (id: string, extra: Partial<Card> = {}): Card => ({ id, agent: `a-$
 
 function model(width: number, height: number, caps: Caps = { color: 3, unicode: true, hyperlinks: true }): Model {
   const cards = [card('a'), card('b', { priority: 'later' }), card('c'), card('d', { replies: [{ text: 'more', at: 5, seenAt: null }] })];
+  const answer = { card: 'c', version: 1, values: {}, comment: '', delivery: 'default' as const, savedAt: 3, deliveredAt: 4, readAt: null, forcedAt: null, previous: [] };
+  // The state has the summaries, and the card on screen is whole.
   const state: InboxState = {
-    cards,
-    answers: { c: { card: 'c', version: 1, values: {}, comment: '', delivery: 'default', savedAt: 3, deliveredAt: 4, readAt: null, forcedAt: null, previous: [] } },
+    cards: cards.map((c) => summarize(c, c.id === 'c' ? answer : undefined)),
+    answers: { c: { version: 1, savedAt: 3, deliveredAt: 4, readAt: null, forcedAt: null } },
     presence: {},
     states: { a: 'open', b: 'open', c: 'delivered', d: 'open' },
     levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }, { id: 'later', label: 'Can wait', definition: '' }],
@@ -23,7 +26,7 @@ function model(width: number, height: number, caps: Caps = { color: 3, unicode: 
   const theme = makeTheme(caps);
   const queue = buildQueue(state, 'none');
   const current = queue.byId['a']!;
-  const view = new CardView(current, { theme, address: (id) => `http://x/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 10 });
+  const view = new CardView(cards[0]!, { theme, address: (id) => `http://x/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 10 });
   return { theme, width, height, state, queue, current, view, zone: 'list', listScroll: 0, cardScroll: 0, groupBy: 'none', fresh: new Set(['b']), connected: true, help: false, cleared: false, now: 10 };
 }
 
@@ -89,7 +92,7 @@ describe('the frame', () => {
   it('scrolls the list to the open card after another card opens, however far down it is', () => {
     const m = model(100, 20);
     const cards = Array.from({ length: 80 }, (_, i) => card(`k${i}`));
-    m.state = { ...m.state!, cards, states: Object.fromEntries(cards.map((c) => [c.id, 'open'])) };
+    m.state = { ...m.state!, cards: cards.map((c) => summarize(c, undefined)), states: Object.fromEntries(cards.map((c) => [c.id, 'open'])) };
     m.queue = buildQueue(m.state, 'none');
     m.current = m.queue.byId['k70']!;
     m.revealList = true;

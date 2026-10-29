@@ -10,6 +10,7 @@ import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findD
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
+import { MAX_SHOWN_CARDS, SummarizedStorage, type AnswerSummary, type CardSummary } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import type {
   AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
@@ -101,7 +102,7 @@ const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
 
 /** A card's state follows from its closure and its answer. */
-export function cardState(card: Card, answer: Answer | undefined): CardState {
+export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, answer: Pick<Answer, 'savedAt' | 'readAt' | 'deliveredAt'> | undefined): CardState {
   // An answer saved after the agent closed the card still goes to the agent.
   if (card.closed && !(answer && answer.savedAt > card.closed.at)) return 'closed';
   if (!answer && card.triage?.state === 'pending') return 'in-triage';
@@ -146,7 +147,8 @@ export class Inbox {
    * `storageLimitBytes` caps what the inbox keeps in its storage now. A full inbox takes only writes that free space.
    * `attachmentReadsPerDay` caps how many files the inbox serves in a day. */
   constructor(store: Storage, now: () => number = Date.now, blobs: BlobStore = new MemoryBlobs(), opts: InboxOptions = {}) {
-    this.store = store;
+    // Each write to a card or an answer also writes the card's summary, which GET /v1/state reads.
+    this.store = new SummarizedStorage(store);
     this.now = now;
     this.blobs = blobs;
     this.uploadLimit = opts.uploadLimitBytes;
@@ -341,6 +343,10 @@ export class Inbox {
     if (agent.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     if (title.length > 300) throw new InboxError(400, 'title must be at most 300 characters');
     if (agent === SYSTEM_AGENT && caller.token !== '') throw new InboxError(403, 'the system agent is reserved');
+    // The state shows at most MAX_SHOWN_CARDS cards, so its request fits the hosted inbox's CPU time. The inbox's own cards always go in.
+    if (caller.token !== '' && !this.store.get('cards', String(input.id ?? '')) && (this.store.count?.('summaries') ?? 0) >= MAX_SHOWN_CARDS) {
+      throw new InboxError(507, `the inbox shows ${MAX_SHOWN_CARDS} cards, the most it shows. The person must clear answered or closed cards before a new one fits`);
+    }
     const levels = this.priorities();
     const priority = input.priority ?? (levels.some((l) => l.id === 'soon') ? 'soon' : levels[0]?.id ?? 'soon');
     if (!levels.some((l) => l.id === priority)) throw new InboxError(400, `priority must be one of ${levels.map((l) => l.id).join(', ')}`);
@@ -932,7 +938,7 @@ export class Inbox {
   }
 
   /** The level a card shows: the first level whose rule matches it, or the level the agent gave. */
-  effectivePriority(card: Card, levels = this.priorities(), answer = this.store.get<Answer>('answers', card.id)): string {
+  effectivePriority(card: Card | CardSummary, levels = this.priorities(), answer: AnswerSummary | Answer | undefined = this.store.get<Answer>('answers', card.id)): string {
     const scope: Record<string, Value> = {
       kind: card.kind, agent: card.agent, priority: card.priority, status: card.status ?? null, rating: card.rating ?? null,
       tags: card.tags ?? {}, blocked: card.kind === 'blocked', answered: !!answer,
@@ -1374,6 +1380,47 @@ export class Inbox {
     }
     this.emit({ type: 'change', card: '' });
     return { removed: cards.length };
+  }
+
+  /** GET /v1/state: a summary of each card the page shows, with the states, presence and levels. It reads only the
+   * summaries, so its time grows with the cards on show, never with the size of their text or the cleared ones. */
+  summaryState(): {
+    cards: CardSummary[]; answers: Record<string, AnswerSummary>; presence: Record<string, Presence>; states: Record<string, CardState>;
+    priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance;
+  } {
+    const cards = this.store.list<CardSummary>('summaries').sort((a, b) => a.createdAt - b.createdAt);
+    const answers: Record<string, AnswerSummary> = {};
+    for (const c of cards) if (c.answer) answers[c.id] = c.answer;
+    const presence = Object.fromEntries(this.store.list<Presence>('presence').map((p) => [p.agent, p]));
+    const levels = this.priorities();
+    const states: Record<string, CardState> = {};
+    const priorities: Record<string, string> = {};
+    for (const c of cards) {
+      states[c.id] = this.shownState(c, presence[c.agent], c.answer);
+      priorities[c.id] = this.effectivePriority(c, levels, c.answer);
+    }
+    return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance() };
+  }
+
+  /** GET /v1/cards/<id>: the whole card, its answer, its state, and the rev of its summary. */
+  cardDetail(id: string): { card: Card; answer?: Answer; state: CardState; rev?: string } {
+    const card = this.getCard(id);
+    const answer = this.store.get<Answer>('answers', id);
+    // A body stored before the inbox checked bodies may not draw whole, so the client gets what it can draw.
+    const fallback = card.body !== undefined ? this.fallbackBody?.(card.body) : undefined;
+    const summary = this.store.get<CardSummary>('summaries', id);
+    return {
+      card: fallback ? { ...publicCard(card), bodyFallback: fallback } : publicCard(card),
+      ...(answer ? { answer } : {}),
+      state: this.shownState(card, this.store.get<Presence>('presence', card.agent), answer),
+      ...(summary ? { rev: summary.rev } : {}),
+    };
+  }
+
+  /** A card's state, with orphaned for an open card whose agent left long ago: another session can claim it. */
+  private shownState(c: Card | CardSummary, p: Presence | undefined, answer: Pick<Answer, 'savedAt' | 'readAt' | 'deliveredAt'> | undefined): CardState {
+    const s = cardState(c, answer);
+    return s === 'open' && c.deliver === 'stream' && p && !p.online && this.now() - p.lastSeen > ORPHAN_MS ? 'orphaned' : s;
   }
 
   state(): {

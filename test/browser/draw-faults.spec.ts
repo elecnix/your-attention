@@ -17,11 +17,12 @@ async function stored(id: string, agent: string, fields: Partial<Card>): Promise
   store.put('cards', id, { ...store.get<Card>('cards', id), ...fields });
 }
 
-/** The page sees the state the hosted inbox sends, which has no bodyFallback. */
-const asHosted = (page: Page) => page.route('**/v1/state', async (route) => {
+/** The page sees the cards the hosted inbox sends, which have no bodyFallback. */
+const asHosted = (page: Page) => page.route(/\/v1\/cards\/[^/]+$/, async (route) => {
+  if (route.request().method() !== 'GET') return route.fallback();
   const res = await route.fetch();
-  const state = (await res.json()) as { cards: Card[] };
-  await route.fulfill({ response: res, json: { ...state, cards: state.cards.map(({ bodyFallback: _, ...c }) => c) } });
+  const { card: { bodyFallback: _, ...card }, ...rest } = (await res.json()) as { card: Card };
+  await route.fulfill({ response: res, json: { ...rest, card } });
 });
 
 const returned = (events: AgentEvent[]) => events.find((e): e is Extract<AgentEvent, { type: 'returned' }> => e.type === 'returned');

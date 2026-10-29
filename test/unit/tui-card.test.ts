@@ -1,5 +1,6 @@
 // The card pane: each widget draws, Tab walks the fields in order, and the answer has the values the page sends for
 // the same card and the same clicks. The expected values come from the page's own browser tests.
+import { summarize } from '../../src/core/summary.ts';
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
 import { describe as describeAnswer } from '../../web/answers.js';
@@ -20,7 +21,7 @@ function card(c: Partial<Card> & { id: string; title: string }): Card {
 function setup(c: Card) {
   const acts: unknown[] = [];
   const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: (_v, a) => acts.push(a), fileText: () => undefined, now: () => 600_000 };
-  const s: InboxState = { cards: [c], answers: {}, presence: {}, states: { [c.id]: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }] };
+  const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence: {}, states: { [c.id]: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }] };
   const view = new CardView(c, host);
   const build = () => view.build(70, s, buildQueue(s, 'none'));
   build();

@@ -285,7 +285,8 @@ export function LinkedText({ text, byId, open, diagrams = true }) {
   const cardLink = (id, key) => {
     const target = byId[id];
     if (!target) return h('span', { key, className: 'dead-link', title: 'This card is not in the inbox' }, id);
-    const preview = [target.title, target.text].filter(Boolean).join('\n\n').slice(0, 400);
+    // The state sends the start of each card's text as its preview.
+    const preview = [target.title, target.preview ?? target.text].filter(Boolean).join('\n\n').slice(0, 400);
     return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
   };
   const diagram = diagrams ? (source, key) => h(Diagram, { key, source }) : undefined;

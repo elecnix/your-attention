@@ -3,8 +3,10 @@
 // opens, what Skip for now and Send answer do, and when a card counts as seen.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import { cardDetails } from '../../web/details.js';
 import { after, buildQueue, type InboxState, type Queue } from '../../web/queue.js';
-import type { Attachment, Card } from '../core/types.ts';
+import type { CardSummary } from '../core/summary.ts';
+import type { Attachment } from '../core/types.ts';
 import { notOwnerAdvice } from '../client.ts';
 import { ApiError, InboxApi, ownerConfig } from './api.ts';
 import { loadParser, parserReady, type Action } from './body.ts';
@@ -48,6 +50,8 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   let pinned: string | null = null;
   let known: Set<string> | null = null;
   const views = new Map<string, CardView>();
+  // GET /v1/state sends summaries. The card on screen, the one after it and the one it follows load whole, ahead of time.
+  const details = cardDetails((id) => api.card(id), () => { pick(); schedule(); });
   const scrolls = new Map<string, number>();
   const files = new Map<string, string | null>();
   let frame: Frame | null = null;
@@ -153,7 +157,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   }
 
   // ---- which card is open ----
-  const order = (): Card[] => (m.queue ? m.queue.order : []);
+  const order = (): CardSummary[] => (m.queue ? m.queue.order : []);
   const go = (id: string | null) => {
     if (m.current) scrolls.set(m.current.id, m.cardScroll);
     focus = id;
@@ -187,20 +191,27 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     if (current?.id !== m.current?.id) { m.reveal = true; m.revealList = true; if (m.zone === 'card' && !current) m.zone = 'list'; }
     m.current = current;
     if (!current) { m.view = null; reportFocus(null); return; }
-    const a = m.state.answers[current.id];
+    const nextId = after(order(), current.id);
+    details.want([current, nextId ? q.byId[nextId] : undefined, current.follows ? q.byId[current.follows] : undefined]);
+    reportFocus(current.id);
+    const detail = details.get(current);
+    if (!detail) { m.view = null; return; }
+    const a = detail.answer;
     const key = `${current.id}:${a ? a.savedAt : 0}`;
     let view = views.get(key);
     if (!view) {
-      view = new CardView(current, host);
+      view = new CardView(detail.card, host);
       views.set(key, view);
       for (const k of views.keys()) if (k.startsWith(`${current.id}:`) && k !== key) views.delete(k);
     }
-    view.card = current;
+    view.card = detail.card;
+    view.saved = a;
+    const earlier = current.follows ? details.get(q.byId[current.follows]) : undefined;
+    view.earlier = earlier ? { card: earlier.card, answer: earlier.answer } : undefined;
     m.view = view;
-    reportFocus(current.id);
     // A reply you have looked at for a moment counts as seen.
-    const sk = `${current.id}:${current.replies.length}`;
-    if (current.replies.some((r) => !r.seenAt) && seenKey !== sk) {
+    const sk = `${current.id}:${current.replyAt ?? 0}`;
+    if (current.unseenReplies && seenKey !== sk) {
       seenKey = sk;
       setTimeout(() => {
         // A glance shorter than the delay does not count, and the next visit starts the delay again.

@@ -1,5 +1,6 @@
 // The terminal client parses card bodies with the page's component list and must answer as the page does:
 // for the same picks, both send the same values.
+import { summarize } from '../../src/core/summary.ts';
 import { expect, test } from '@playwright/test';
 import { buildQueue, type InboxState } from '../../web/queue.js';
 import type { Card } from '../../src/core/types.ts';
@@ -15,7 +16,7 @@ test.afterAll(async () => { await inbox.close(); });
 /** The terminal client's answer for a card, after picking with keys: each step focuses a stop, then presses keys. */
 function terminalAnswer(card: Card, steps: [string, string[]][], typed: Record<string, string> = {}) {
   const view = new CardView(card, { theme: makeTheme({ color: 0, unicode: true, hyperlinks: false }), address: () => '', act: () => {}, fileText: () => undefined, now: () => Date.now() });
-  const s: InboxState = { cards: [card], answers: {}, presence: {}, states: { [card.id]: 'open' } };
+  const s: InboxState = { cards: [summarize(card, undefined)], answers: {}, presence: {}, states: { [card.id]: 'open' } };
   const build = () => view.build(80, s, buildQueue(s, 'none'));
   build();
   for (const [stop, keys] of steps) {

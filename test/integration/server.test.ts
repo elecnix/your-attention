@@ -12,7 +12,7 @@ let h: Harness;
 before(async () => { h = await start(); });
 after(async () => { await h.stop(); });
 
-const state = async () => (await (await h.owner('GET', '/v1/state')).json()) as { cards: Card[]; presence: Record<string, { online: boolean }>; states: Record<string, string> };
+const state = async () => (await h.stored()) as { cards: Card[]; presence: Record<string, { online: boolean }>; states: Record<string, string> };
 
 describe('the laptop server', () => {
   it('serves the page and the OpenUI bundle', async () => {
