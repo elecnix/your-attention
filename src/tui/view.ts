@@ -149,7 +149,8 @@ export function drawFrame(m: Model): Frame {
   let cardLines = 0;
 
   if (m.blank) {
-    const lines = m.blank.split('\n');
+    // The message stays inside the body rows.
+    const lines = m.blank.split('\n').slice(0, bodyH);
     lines.forEach((l, i) => grid.text(Math.max(1, Math.floor((W - textWidth(l)) / 2)), bodyTop + Math.floor(bodyH / 2) - Math.floor(lines.length / 2) + i, cut(m, l, W - 2), st.dim));
   } else {
     if (showList) {

@@ -249,6 +249,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     m.queue = buildQueue(s, m.groupBy) as Queue;
     m.blank = undefined;
     m.pin = undefined;
+    pinTyped = '';
     m.connected = true;
     m.connecting = false;
     pick();
