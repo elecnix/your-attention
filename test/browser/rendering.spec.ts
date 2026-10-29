@@ -146,7 +146,7 @@ test('a card triage sent back shows its content on request', async ({ page }) =>
     own.server.inbox.hookVerdict(ext, calls[0]!.id, 'return', 'Say what you recommend.');
     await own.open(page);
     await page.locator('.q', { hasText: 'Thoughts?' }).click();
-    await expect(page.locator('.closed-line')).toContainText('Sent back by triage');
+    await expect(page.locator('.closed-line')).toContainText('Sent back to its agent');
     await page.getByRole('button', { name: 'Show card' }).click();
     await expect(page.getByText('The body triage judged.')).toBeVisible();
   } finally {

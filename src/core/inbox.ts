@@ -6,7 +6,7 @@ import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
-import { checkDiagrams, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
+import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
@@ -42,6 +42,9 @@ export interface InboxOptions {
   checkBody?: ((body: string) => string[]) | undefined;
   /** What the page draws for a stored body it can't draw whole, or undefined for one it draws whole. */
   fallbackBody?: ((body: string) => Card['bodyFallback']) | undefined;
+  /** The posting client checks diagrams and bodies, and the inbox takes them unchecked, as on the hosted service, whose
+   * requests have too little CPU time to parse them. The page reports what it cannot draw, and the card goes back to its agent. */
+  clientChecks?: boolean;
   /** The inbox always counts usage and has no off switch, as on the hosted service. */
   usageAlwaysOn?: boolean;
 }
@@ -121,6 +124,7 @@ export class Inbox {
   private readonly checkDiagram: DiagramCheck | undefined;
   private readonly checkBody: ((body: string) => string[]) | undefined;
   private readonly fallbackBody: ((body: string) => Card['bodyFallback']) | undefined;
+  private readonly clientChecks: boolean;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
@@ -151,6 +155,7 @@ export class Inbox {
     this.checkDiagram = opts.checkDiagram;
     this.checkBody = opts.checkBody;
     this.fallbackBody = opts.fallbackBody;
+    this.clientChecks = opts.clientChecks === true;
     this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
@@ -356,8 +361,8 @@ export class Inbox {
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
     const { body, template, expanded } = this.cardBody(input);
     // The page drops what it cannot read of a body without a word, so the agent hears it here.
-    const bodyProblems = body === undefined || !this.checkBody ? [] : this.checkBody(String(body));
-    if (bodyProblems.length) throw new InboxError(400, `the page cannot draw all of this body:\n- ${bodyProblems.join('\n- ')}`);
+    const bodyProblems = body === undefined || !this.checkBody || this.clientChecks ? [] : this.checkBody(String(body));
+    if (bodyProblems.length) throw new InboxError(400, bodyProblemsMessage(bodyProblems));
     let widgets = before?.widgets;
     let responses = before?.responses;
     if (expanded) {
@@ -427,7 +432,7 @@ export class Inbox {
       replies: before?.replies ?? [],
     };
     // The inbox's own system cards quote an agent's words, such as proposed guidance, and the page shows a diagram there as its source.
-    if (kind !== 'system' || caller.token !== '') requireChecked(findDiagrams(card), checked);
+    if (!this.clientChecks && (kind !== 'system' || caller.token !== '')) requireChecked(findDiagrams(card), checked);
     // Replies and history have their own caps, so a card with many replies can still be revised.
     const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined })).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
@@ -467,8 +472,54 @@ export class Inbox {
   }
 
   /** Parse every diagram the card would show, before the card commits. An await sits here, so the commit reads everything again. */
-  private checkCard(input: NewCard): Promise<CheckedDiagrams> {
+  private async checkCard(input: NewCard): Promise<CheckedDiagrams> {
+    if (this.clientChecks) return new Map();
     return checkDiagrams(findDiagrams({ text: input.text, recommendation: input.recommendation, body: this.cardBody(input).body }), this.checkDiagram);
+  }
+
+  /** What this inbox checks itself before it takes a card. A posting client checks the rest, from GET /v1/info. */
+  checks(): { diagrams: boolean; body: boolean } {
+    return { diagrams: !this.clientChecks && !!this.checkDiagram, body: !this.clientChecks && !!this.checkBody };
+  }
+
+  /** The text, recommendation and body a post or a patch would store, after templates and widgets, without storing anything.
+   * A client that checks diagrams and bodies itself reads them here. */
+  preview(caller: Caller, req: { card?: NewCard; id?: string; edits?: { old: string; new: string }[]; field?: string }): { text?: string; recommendation?: string; body?: string } {
+    if (caller.role === 'extension') throw new InboxError(403, 'only the client that posts a card can preview it');
+    const input = req.id !== undefined ? this.patched(caller, String(req.id), req.edits ?? [], req.field).input : req.card;
+    if (!input || typeof input !== 'object') throw new InboxError(400, 'send {card} for a post, or {id, edits, field} for a patch');
+    return { text: input.text, recommendation: input.recommendation, body: this.cardBody(input).body };
+  }
+
+  /** The page could not draw a card it shows: a diagram that mermaid cannot parse, or a body the OpenUI parser reads in part.
+   * The card goes back to its agent with the errors, as a laptop inbox would have refused the post. Only the owner reports. */
+  drawFault(caller: Caller, id: string, report: { version?: unknown; renderer?: unknown; diagrams?: unknown; body?: unknown }): Card {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the page reports what it cannot draw');
+    const card = this.getCard(id);
+    if (card.kind === 'system') throw new InboxError(400, 'a system card shows its diagrams as source');
+    if (Number(report.version) !== card.version) throw new InboxError(409, `the card is at version ${card.version}, and the page drew version ${String(report.version)}`);
+    if (card.closed || this.store.get<Answer>('answers', id)) return card;
+    const renderer = String(report.renderer ?? '').replace(/[^\w.-]/g, '').slice(0, 20) || 'on the page';
+    const shown = findDiagrams(card);
+    const reported = (Array.isArray(report.diagrams) ? report.diagrams : []).slice(0, MAX_DIAGRAMS) as { source?: unknown; error?: unknown }[];
+    // The page names a diagram by its source. One the card does not show is not this card's fault.
+    const diagrams = reported.flatMap((d) => {
+      const at = shown.find((x) => x.source === d?.source);
+      return at ? [diagramMessage(at.where, renderer, String(d.error ?? 'it does not draw').slice(0, 2000), 'the page could not draw it, and the inbox sent the card back')] : [];
+    });
+    const faults = card.body === undefined || !Array.isArray(report.body) ? [] : report.body.slice(0, 20).map((f) => String(f).slice(0, 1000)).filter(Boolean);
+    const reason = [...diagrams, ...(faults.length ? [bodyProblemsMessage(faults, 'so the inbox sent the card back')] : [])].join('\n\n');
+    if (!reason) throw new InboxError(400, 'the report names no diagram this card shows, and no fault in its body');
+    return this.sendBack(card, reason, 'The inbox page');
+  }
+
+  /** Close a card as returned and tell its agent why. */
+  private sendBack(card: Card, reason: string, by: string): Card {
+    this.closeAs(card, 'returned', reason);
+    for (const [k, subs] of this.agents) {
+      if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send({ type: 'returned', id: randomId(6), card: publicCard(card), reason, by });
+    }
+    return this.getCard(card.id);
   }
 
   // ---- extensions and hooks ----
@@ -538,11 +589,7 @@ export class Inbox {
     const now = this.now();
     if (verdict === 'return') {
       this.store.put('cards', card.id, { ...card, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], at: now } });
-      this.closeAs(card, 'returned', clean || 'Triage sent the card back.');
-      for (const [k, subs] of this.agents) {
-        if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send({ type: 'returned', id: randomId(6), card: publicCard(card), reason: clean || 'Triage sent the card back.' });
-      }
-      return this.getCard(card.id);
+      return this.sendBack(card, clean || 'Triage sent the card back.', 'Triage');
     }
     const triage = verdict === 'hold'
       ? { ...card.triage, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }

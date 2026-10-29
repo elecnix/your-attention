@@ -2,6 +2,7 @@
 import { BASE, CLOSED_LABEL, Icon, J, api, h, notifyOn, store } from './env.js';
 import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
+import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, renderInline, renderMarkdown } from './markdown.js';
 import { answerValues, cardSource, changeSteps, describe, formValues, parseSource } from './answers.js';
 
@@ -25,7 +26,7 @@ function CheckWithText({ props, renderNode }) {
     // The content stays rendered while hidden, so its fields keep their values and send them with the answer.
     h('div', { ref: box, className: 'revealed', hidden: !open, onInput: preview }, renderNode(props.content)));
 }
-// Mermaid(source): a diagram, drawn with the mermaid build the inbox serves. The inbox checked the source with
+// Mermaid(source): a diagram, drawn with the mermaid build the inbox serves. A laptop inbox checked the source with
 // this version when the card was posted, so it draws. Diagrams draw one at a time, since mermaid keeps one in progress.
 export const MERMAID_VERSION = '11.17.2';
 let mermaidLoad = null;
@@ -36,7 +37,7 @@ function loadMermaid() {
     const s = document.createElement('script');
     s.src = `${BASE}vendor/mermaid.min.js?v=${MERMAID_VERSION}`;
     s.onload = () => resolve(window.mermaid);
-    s.onerror = () => { mermaidLoad = null; s.remove(); reject(new Error('the diagram renderer did not load')); };
+    s.onerror = () => { mermaidLoad = null; s.remove(); reject(Object.assign(new Error('the diagram renderer did not load'), { unloaded: true })); };
     document.head.append(s);
   });
   return mermaidLoad;
@@ -79,12 +80,46 @@ function useDark() {
   }, []);
   return dark;
 }
+
+// A page that cannot draw a diagram, or all of a body, tells the inbox, and the inbox sends the card back to its agent with
+// the errors. The hosted inbox takes both unchecked, so an agent whose client skipped the check hears of it this way.
+export const DrawFaults = React.createContext(null);
+const reporters = new Map();
+/** The reporter for one version of a card, or null for a card the inbox would not send back. */
+export function drawFaultsOf(card) {
+  if (!card || card.kind === 'system' || card.closed) return null;
+  const key = `${card.id}:${card.version}`;
+  if (!reporters.has(key)) {
+    const diagrams = new Map();
+    let body = null;
+    let timer = null;
+    // Faults that show up together go in one report, so the agent reads them in one message.
+    const flush = () => {
+      timer = null;
+      api(`${BASE}v1/cards/${encodeURIComponent(card.id)}/draw-fault`, { version: card.version, renderer: MERMAID_VERSION, diagrams: [...diagrams].map(([source, error]) => ({ source, error })), ...(body ? { body } : {}) }).catch(() => {});
+    };
+    const later = () => { timer ??= setTimeout(flush, 300); };
+    reporters.set(key, {
+      diagram(source, error) { if (!diagrams.has(source)) { diagrams.set(source, error); later(); } },
+      body(faults) { if (!body) { body = faults; later(); } },
+    });
+  }
+  return reporters.get(key);
+}
+
 export function Diagram({ source }) {
   const dark = useDark();
+  const faults = React.useContext(DrawFaults);
   const [drawn, setDrawn] = React.useState({ svg: '', failed: '' });
   React.useEffect(() => {
     let live = true;
-    drawDiagram(source).then((svg) => live && setDrawn({ svg, failed: '' }), (e) => live && setDrawn({ svg: '', failed: String(e?.message || e) }));
+    drawDiagram(source).then((svg) => live && setDrawn({ svg, failed: '' }), (e) => {
+      if (!live) return;
+      const failed = String(e?.message || e);
+      setDrawn({ svg: '', failed });
+      // A renderer that did not load says nothing about the diagram.
+      if (!e?.unloaded) faults?.diagram(source, failed);
+    });
     return () => { live = false; };
   }, [source, dark]);
   // Should drawing fail all the same, such as when the renderer does not load, the person reads the source.
@@ -103,10 +138,41 @@ const library = extendLibrary(openuiChatLibrary, {
 });
 /** The page's component list, as the inbox reads it from src/adapters/openui-library.ts. */
 export const librarySchema = () => library.toJSONSchema();
+// The same list with components that draw nothing. A hidden Renderer reads a body with it, for its parse result alone.
+let parseOnly = null;
+const parseOnlyLibrary = () => (parseOnly ??= library.extend({ components: { override: Object.values(library.components).map((c) => ({ ...c, component: () => null })) } }));
+
+/** Reads a body with the OpenUI parser, as the inbox does, and draws nothing. */
+function BodyCheck({ body, onParsed }) {
+  return h('div', { hidden: true, 'data-body-check': '' }, h(Renderer, { response: body, library: parseOnlyLibrary(), onParseResult: (p) => p && p.meta && onParsed(p) }));
+}
 
 // One rendered card. Its initial state is read once, so later renders keep what you typed.
-// A body stored before the inbox checked bodies may not draw whole. The inbox then sends what the page can draw, and `broken` is set.
-export function CardView({ draftKey, response, broken, onAction }) {
+// A body may not draw whole: one stored before the laptop inbox checked bodies, for which the inbox sends `bodyFallback`,
+// or one the hosted inbox took unchecked. For that one the page finds the faults itself, draws the same fallback, and
+// reports the faults, so the card goes back to its agent.
+export function CardView({ draftKey, card, onAction }) {
+  const faultsTo = React.useContext(DrawFaults);
+  const [own, setOwn] = React.useState(null);
+  const body = card.body;
+  const checks = !card.bodyFallback && body !== undefined;
+  const mine = checks && own && own.body === body ? own : null;
+  React.useEffect(() => { if (mine && mine.faults.length) faultsTo?.body(mine.faults); }, [mine && mine.faults]);
+  // The partial fallback draws only when it reads whole itself. Otherwise the source alone does.
+  const fallback = card.bodyFallback ? card.bodyFallback.body : mine && mine.use ? mine[mine.use] : undefined;
+  const checker = !checks ? null
+    : !mine ? h(BodyCheck, { key: 'body', body, onParsed: (p) => {
+      const faults = bodyFaults(body, p);
+      const sources = faults.length ? fallbackSources(body, p) : {};
+      setOwn({ body, faults, ...sources, use: faults.length && sources.partial === undefined ? 'whole' : null });
+    } })
+    : mine.faults.length && !mine.use
+      ? h(BodyCheck, { key: 'partial', body: mine.partial, onParsed: (p) => setOwn({ ...mine, use: bodyFaults(mine.partial, p).length ? 'whole' : 'partial' }) })
+      : null;
+  return h(React.Fragment, null, checker, h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction }));
+}
+
+function CardBody({ draftKey, response, broken, onAction }) {
   const [initialState] = React.useState(() => store.get(draftKey) || undefined);
   const actionRef = React.useRef(onAction);
   actionRef.current = onAction;

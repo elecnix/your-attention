@@ -125,7 +125,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const method = req.method;
 
     // Routes open to any client on the network.
-    if (method === 'GET' && a === 'info') return json({ name: 'your-attention', protocol: PROTOCOL_VERSION, id: inbox.id(), pair: '/v1/pair' });
+    // `checks` says what the inbox checks itself. A posting client checks the rest before it posts.
+    if (method === 'GET' && a === 'info') return json({ name: 'your-attention', protocol: PROTOCOL_VERSION, id: inbox.id(), pair: '/v1/pair', checks: inbox.checks() });
     if (method === 'POST' && a === 'pair' && !b) {
       if (inbox.storageFull()) return json({ error: 'this inbox is full' }, 507);
       const body = await readJson<{ name?: string; role?: Role }>(req, BODY_LIMIT.open);
@@ -404,6 +405,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'tokens') { owner(); return json(inbox.listTokens()); }
     if (method === 'DELETE' && a === 'tokens' && b) { owner(); inbox.revokeToken(b); return json({ ok: true }); }
 
+    if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
     if (a === 'cards') {
       if (method === 'POST' && !b) return json(withWarning(publicCard(await inbox.postCardWithFiles(me, await readJson<NewCard>(req, BODY_LIMIT.card)))), 201);
       if (method === 'GET' && !b) return json(inbox.listCards(me));
@@ -438,6 +440,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(publicCard(inbox.claim(me, b, String(body['agent'] ?? ''))));
         case 'seen':
           owner(); inbox.seen(b); return json({ ok: true });
+        case 'draw-fault':
+          return json(publicCard(inbox.drawFault(me, b, body)));
         case 'force':
           owner(); return json(inbox.force(b));
         case 'release':

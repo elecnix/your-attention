@@ -202,10 +202,18 @@ export async function checkDiagrams(found: Diagram[], check: DiagramCheck | unde
   if (found.length > MAX_DIAGRAMS) throw new InboxError(400, `a card shows at most ${MAX_DIAGRAMS} diagrams`);
   for (const d of found) if (!checked.has(d.source)) checked.set(d.source, await check(d.source));
   const bad = found.filter((d) => checked.get(d.source) !== undefined);
-  if (bad.length) {
-    throw new InboxError(400, bad.map((d) => `The Mermaid diagram in ${d.where} does not parse, so the inbox did not take the card. Mermaid ${check.version} says:\n${checked.get(d.source)}`).join('\n\n'));
-  }
+  if (bad.length) throw new InboxError(400, bad.map((d) => diagramMessage(d.where, check.version, checked.get(d.source) ?? '', 'the inbox did not take the card')).join('\n\n'));
   return checked;
+}
+
+/** What the agent reads about one diagram that does not draw: where it is, what happened to the card, and mermaid's own words. */
+export function diagramMessage(where: string, version: string, error: string, outcome: string): string {
+  return `The Mermaid diagram in ${where} does not parse, so ${outcome}. Mermaid ${version} says:\n${error}`;
+}
+
+/** What the agent reads about a body the page would draw only in part, one fault a line. */
+export function bodyProblemsMessage(problems: string[], outcome?: string): string {
+  return `the page cannot draw all of this body${outcome ? `, ${outcome}` : ''}:\n- ${problems.join('\n- ')}`;
 }
 
 /** The card commits with no await after its check, so a diagram missing from the check means the card changed meanwhile. */

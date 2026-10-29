@@ -4,6 +4,8 @@
 // 3. the inbox running on this machine, with its local agent token
 import fs from 'node:fs';
 import path from 'node:path';
+import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
+import { InboxError } from './core/inbox.ts';
 import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 
@@ -74,6 +76,8 @@ export class Client {
   private readonly seen = new Set<string>();
   /** This process, the same across reconnects, so the inbox sends a restarted agent the answers its earlier process never read. */
   readonly instance = crypto.randomUUID();
+  /** What the inbox checks itself, from GET /v1/info. An inbox from before the field checks everything. */
+  private inboxChecks: Promise<{ diagrams: boolean; body: boolean }> | undefined;
 
   constructor(config: ClientConfig) {
     this.urls = [config.url, ...(config.urls ?? [])].map((u) => u.replace(/\/$/, ''));
@@ -127,13 +131,42 @@ export class Client {
   }
 
   /** The posted card. A revision the person won't see carries `warning`. */
-  post(card: NewCard): Promise<Card & { warning?: string }> { return this.call('POST', '/v1/cards', card); }
+  async post(card: NewCard): Promise<Card & { warning?: string }> {
+    await this.checkFirst('POST /v1/cards', { card: { ...card, attachments: undefined } });
+    return this.call('POST', '/v1/cards', card);
+  }
+
+  /** An inbox that does not check diagrams or bodies itself, such as the hosted one, takes them unchecked. So the client
+   * reads what the inbox would store, after templates and widgets, and checks it as a laptop inbox would, before it sends the card.
+   * It fails with the laptop inbox's own words. */
+  private async checkFirst(route: string, req: { card?: NewCard; id?: string; edits?: { old: string; new: string }[]; field?: string | undefined }): Promise<void> {
+    this.inboxChecks ??= this.call<{ checks?: { diagrams: boolean; body: boolean } }>('GET', '/v1/info')
+      .then((i) => i.checks ?? { diagrams: true, body: true }, (e: unknown) => { this.inboxChecks = undefined; throw e; });
+    const checks = await this.inboxChecks;
+    if (checks.diagrams && checks.body) return;
+    const fields = await this.call<{ text?: string; recommendation?: string; body?: string }>('POST', '/v1/preview', req);
+    try {
+      // Mermaid loads on the first diagram, and the OpenUI parser on the first body.
+      const diagrams = findDiagrams(fields);
+      if (!checks.diagrams && diagrams.length) await checkDiagrams(diagrams, (await import('./adapters/mermaid.ts')).checkMermaid);
+      const problems = !checks.body && fields.body !== undefined ? (await import('./adapters/openui-body.ts')).bodyErrors(fields.body) : [];
+      if (problems.length) throw new InboxError(400, bodyProblemsMessage(problems));
+    } catch (e) {
+      if (e instanceof InboxError) throw new Error(`${route}: ${e.status} ${e.message}`);
+      throw e;
+    }
+  }
+
   list(): Promise<{ card: Card; state: string }[]> { return this.call('GET', '/v1/cards'); }
   get(id: string): Promise<{ card: Card; state: string }> { return this.call('GET', `/v1/cards/${encodeURIComponent(id)}`); }
   close(id: string, kind: CloseKind, outcome: string, ifUnanswered = false): Promise<Card> {
     return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/close`, { kind, outcome, ifUnanswered });
   }
-  patch(id: string, edits: { old: string; new: string }[], field?: string): Promise<Card & { warning?: string }> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/patch`, { edits, field }); }
+  async patch(id: string, edits: { old: string; new: string }[], field?: string): Promise<Card & { warning?: string }> {
+    const route = `/v1/cards/${encodeURIComponent(id)}/patch`;
+    await this.checkFirst(`POST ${route}`, { id, edits, field });
+    return this.call('POST', route, { edits, field });
+  }
   status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
   saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
@@ -252,6 +285,11 @@ export class Client {
 }
 
 /** Plain text for an answer, as an agent reads it. */
+/** What an integration tells the agent about a card that triage or the inbox page sent back. */
+export function describeReturned(ev: Extract<AgentEvent, { type: 'returned' }>): string {
+  return `${ev.by ?? 'Triage'} sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`;
+}
+
 export function describeAnswer(card: Card, answer: Answer): string {
   // A sealed secret is never written out: the integration opens it.
   if (card.kind === 'secret') return answer.comment ? `(a sealed secret)\nComment: ${answer.comment}` : '(a sealed secret)';

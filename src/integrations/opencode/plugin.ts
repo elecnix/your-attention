@@ -5,7 +5,7 @@
 // OpenCode hands plugins its own Zod, as tool.schema from @opencode-ai/plugin, and wants tool arguments in it.
 // The plugin takes that Zod as an argument, so this package needs no Zod of its own.
 import os from 'node:os';
-import { Client, describeAnswer, loadConfig } from '../../client.ts';
+import { Client, describeAnswer, describeReturned, loadConfig } from '../../client.ts';
 import type { AgentEvent, Origin } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { runTool } from '../run-tool.ts';
@@ -100,7 +100,7 @@ export function createPlugin(z: unknown) {
       followed.set(session, stop);
       void inbox.stream(agentOf(session), async (ev: AgentEvent) => {
         if (ev.type === 'guidance') { await send(session, `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`); return; }
-        if (ev.type === 'returned') { await send(session, `[your-attention] Triage sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`); return; }
+        if (ev.type === 'returned') { await send(session, `[your-attention] ${describeReturned(ev)}`); return; }
         if (ev.type !== 'answer') return;
         pending.set(ev.id, ev.card.id);
         const what = ev.card.kind === 'secret' ? await secrets.receive(ev.card, ev.answer) : `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer)}`;

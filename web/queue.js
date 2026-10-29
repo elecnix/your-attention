@@ -1,7 +1,7 @@
 // The queue: each card's state, its priority level, the sections of the list, and the order Skip for now and Send
 // answer move through. The page and the terminal client share this file, so both show the same queue.
 
-export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back by triage' };
+export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back to its agent' };
 export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed', reply: 'new reply' };
 
 const lastReply = (c) => Math.max(0, ...c.replies.map((r) => r.at));

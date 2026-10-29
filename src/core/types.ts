@@ -285,7 +285,8 @@ export type AgentEvent =
   | { type: 'hello'; agent: string; version: number; guidance: number }
   | AnswerEvent
   | { type: 'guidance'; id: string; guidance: Guidance }
-  | { type: 'returned'; id: string; card: Card; reason: string };
+  /** `by` names who sent the card back: triage, or the inbox page when it could not draw the card. */
+  | { type: 'returned'; id: string; card: Card; reason: string; by?: string };
 
 /** What pages receive. They refetch state on "change". */
 export type PageEvent =

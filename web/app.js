@@ -2,7 +2,7 @@
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
-import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, cardSource, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf } from './components.js';
 import { after, buildQueue } from './queue.js';
 
 const { React, createRoot } = window.__OpenUI;
@@ -375,7 +375,7 @@ export function App() {
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(skip) })
         : current.kind === 'secret'
         ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id) })
-        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current.bodyFallback ? { ...current, body: current.bodyFallback.body } : current), broken: !!current.bodyFallback, onAction: (ev) => onAction(current, ev) }),
+        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
         h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),
@@ -386,11 +386,12 @@ export function App() {
         h('summary', null, 'The card before this one, and your answer'),
         h('div', { className: 'turn' },
           h('h4', null, h('a', { onClick: () => open(prev.id) }, prev.title)),
-          prev.text && h(LinkedText, { text: prev.text, byId, open, diagrams: prev.kind !== 'system' }),
+          prev.text && h(DrawFaults.Provider, { value: drawFaultsOf(prev) }, h(LinkedText, { text: prev.text, byId, open, diagrams: prev.kind !== 'system' })),
           h('div', { className: 'ans' }, answers[prev.id] ? describe(prev, answers[prev.id]) : 'You did not answer it.'))));
-    main = s === 'closed'
+    // A diagram or a body the page cannot draw goes back to the card's agent.
+    main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
       ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed, onNext: skip, animate: !!closing[current.id] }, card)
-      : card;
+      : card);
   }
 
   return h(React.Fragment, null,

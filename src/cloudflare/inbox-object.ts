@@ -2,8 +2,6 @@
 // at a time, and it hibernates when idle: agent sockets stay open, and the
 // object rebuilds each connection from the socket's attachment when it wakes.
 import { COOKIE, createHandler } from '../core/http.ts';
-import { checkMermaid } from '../adapters/mermaid.ts';
-import { bodyErrors, fallbackBody } from '../adapters/openui-body.ts';
 import { Inbox } from '../core/inbox.ts';
 import type { PinKey } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
@@ -89,9 +87,9 @@ export class InboxObject {
       uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES),
       storageLimitBytes: limit(env.STORAGE_LIMIT_BYTES),
       attachmentReadsPerDay: limit(env.ATTACHMENT_READS_PER_DAY),
-      checkDiagram: checkMermaid,
-      checkBody: bodyErrors,
-      fallbackBody,
+      // A request gets 10 ms of CPU time on the Workers Free plan, too little to parse a large body or a diagram.
+      // So the posting client checks them, and the page reports what it cannot draw. See SPEC.md, "Checks on the client".
+      clientChecks: true,
       // The hosted service always counts usage. A single-inbox deployment sends nothing.
       usageAlwaysOn: env.MODE === 'hosted',
     });

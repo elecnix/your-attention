@@ -1,4 +1,4 @@
-import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, SecretForm, cardSource } from '../components.js';
+import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, SecretForm } from '../components.js';
 import { h } from '../env.js';
 import { PNG, card, dataUrl, mount } from './render.js';
 import { expandWidgets } from '../../src/core/widgets.ts';
@@ -6,7 +6,7 @@ import PULL_REQUEST from '../../examples/widgets/pull-request.openui?raw';
 
 export default { title: 'Cards' };
 
-const view = (c) => h(CardView, { draftKey: `story:${c.id}`, response: cardSource(c), onAction: () => {} });
+const view = (c) => h(CardView, { draftKey: `story:${c.id}`, card: c, onAction: () => {} });
 
 export const Choice = { render: () => mount(view(card({ options: [{ id: 'o1', label: 'SQLite', description: 'One file, FTS5 search' }, { id: 'o2', label: 'Postgres', description: 'A server to run' }] }))) };
 

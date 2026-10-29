@@ -10,7 +10,7 @@ import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { Client, describeAnswer, loadConfig } from '../../client.ts';
+import { Client, describeAnswer, describeReturned, loadConfig } from '../../client.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { claudeSessionName } from './session-name.ts';
@@ -122,7 +122,7 @@ void inbox.stream(agent, async (ev) => {
     return;
   }
   if (ev.type === 'returned') {
-    await mcp.notification({ method: 'notifications/claude/channel', params: { content: `Triage sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`, meta: { card_id: ev.card.id } } });
+    await mcp.notification({ method: 'notifications/claude/channel', params: { content: describeReturned(ev), meta: { card_id: ev.card.id } } });
     return;
   }
   if (ev.type !== 'answer') return;
