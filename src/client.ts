@@ -145,7 +145,12 @@ export class Client {
         else if (transport === 'sse' || (transport === 'auto' && noSocket.has(url))) await this.overSse(url, agent, deliver, signal);
         else {
           const opened = await this.overSocket(url, agent, deliver, signal);
-          if (!opened && transport === 'auto') { noSocket.add(url); continue; }
+          // A socket that never opened on a link that answers means the link cannot carry one. A link that does not answer is down: retry it.
+          if (!opened && transport === 'auto') {
+            if (!(await this.answers(url))) throw new Error('the link is down');
+            noSocket.add(url);
+            continue;
+          }
         }
       } catch {
         if (signal.aborted) return;
@@ -153,6 +158,10 @@ export class Client {
       }
       if (!signal.aborted) await new Promise((r) => setTimeout(r, 1000));
     }
+  }
+
+  private async answers(url: string): Promise<boolean> {
+    try { return (await fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(5000) })).ok; } catch { return false; }
   }
 
   private async overSse(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
@@ -199,7 +208,18 @@ export class Client {
         try { ev = JSON.parse(String(m.data)) as { type?: string } | null; } catch { return ws.close(); }
         if (ev && typeof ev === 'object' && ev.type !== 'pong' && ev.type !== 'error') deliver(ev as AgentEvent).catch(() => ws.close());
       });
-      ws.addEventListener('close', () => { if (beat !== undefined) clearInterval(beat); signal.removeEventListener('abort', stop); resolve(opened); });
+      let ended = false;
+      const done = (): void => {
+        if (ended) return;
+        ended = true;
+        if (beat !== undefined) clearInterval(beat);
+        signal.removeEventListener('abort', stop);
+        ws.close();
+        resolve(opened);
+      };
+      ws.addEventListener('close', done);
+      // A socket that fails to connect fires error and may never fire close.
+      ws.addEventListener('error', done);
     });
   }
 

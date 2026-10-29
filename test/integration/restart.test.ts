@@ -1,8 +1,12 @@
 // A session that restarts gets the answers its earlier process received but never read.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
+import { serve } from '../../src/node/server.ts';
 import { start, until, type Harness } from './harness.ts';
 
 let h: Harness;
@@ -35,4 +39,36 @@ describe('an agent that restarts', () => {
       second.stop.abort();
     });
   }
+});
+
+describe('an agent whose inbox restarts', () => {
+  it('comes back online over its WebSocket once the inbox is up again', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'your-attention-'));
+    const opts = { host: '127.0.0.1', home, mdns: false, watch: false, log: () => {} };
+    let server = await serve({ ...opts, port: 0 });
+    const port = server.port;
+    const online = async () => ((await (await fetch(`${server.url}/v1/state`, { headers: { authorization: `Bearer ${server.ownerToken}` } })).json()) as { presence: Record<string, { online: boolean }> }).presence['comeback']?.online || undefined;
+    // Count the sockets that open, to tell a WebSocket reconnect from a fallback to server-sent events.
+    let opened = 0;
+    const Native = globalThis.WebSocket;
+    globalThis.WebSocket = class extends Native {
+      constructor(...a: ConstructorParameters<typeof Native>) { super(...a); this.addEventListener('open', () => { opened++; }); }
+    };
+    const stop = new AbortController();
+    try {
+      void new Client({ url: server.url, token: fs.readFileSync(path.join(home, 'agent-token'), 'utf8').trim() }).stream('comeback', () => {}, stop.signal);
+      await until(online);
+      await server.close();
+      // Long enough for the client to try the link while nothing listens on it.
+      await new Promise((r) => setTimeout(r, 1500));
+      server = await serve({ ...opts, port });
+      await until(online, 8000);
+      assert.equal(opened, 2);
+    } finally {
+      stop.abort();
+      globalThis.WebSocket = Native;
+      await server.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
