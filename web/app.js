@@ -2,7 +2,8 @@
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
-import { Attachments, BroadcastForm, agentName, CardAge, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, cardSource, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, cardSource, describe, formValues, presenceOf } from './components.js';
+import { after, buildQueue } from './queue.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -234,31 +235,13 @@ export function App() {
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
   const answers = state.answers;
-  const byId = Object.fromEntries(state.cards.map((c) => [c.id, c]));
-  const lastReply = (c) => Math.max(0, ...c.replies.map((r) => r.at));
-  // A reply newer than your answer brings the card back to your queue.
-  const st = (c) => {
-    const s = state.states[c.id];
-    if (c.replies.some((r) => !r.seenAt) && (!answers[c.id] || lastReply(c) > answers[c.id].savedAt)) return 'reply';
-    return s;
-  };
+  const { byId, st, levelOf, label, waiting, pending, checking, replied, outbox, sent, tagKeys, dealt, groups, order } = buildQueue(state, groupBy);
   const visible = state.cards;
   const levels = state.levels || [];
-  const levelOf = (c) => (state.priorities || {})[c.id] || c.priority;
-  const rank = (c) => { const i = levels.findIndex((l) => l.id === levelOf(c)); return i < 0 ? levels.length : i; };
-  const label = (id) => (levels.find((l) => l.id === id) || {}).label || id;
-  const waiting = (s) => ['open', 'reply', 'orphaned', 'held'].includes(s);
-  const pending = visible.filter((c) => waiting(st(c)))
-    .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
-  const checking = visible.filter((c) => st(c) === 'in-triage');
   // The tab icon gets a red dot while a card waits for you.
   const icon = document.querySelector('link[rel="icon"]');
   const iconHref = pending.length ? 'favicon-waiting.svg' : 'favicon.svg';
   if (icon && icon.getAttribute('href') !== iconHref) icon.setAttribute('href', iconHref);
-  const replied = pending.filter((c) => st(c) === 'reply').sort((a, b) => lastReply(b) - lastReply(a));
-  const sentAt = (c) => (c.closed ? c.closed.at : answers[c.id] ? answers[c.id].savedAt : 0);
-  const outbox = visible.filter((c) => ['answered', 'delivered'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
-  const sent = visible.filter((c) => ['read', 'closed'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
   const pinned = pending.find((c) => c.id === pinnedRef.current);
   const lastVisit = pending.find((c) => c.id === lastVisitRef.current);
   const current = cleared ? null : byId[focus] || pinned || lastVisit || replied[0] || pending[0] || null;
@@ -286,16 +269,12 @@ export function App() {
     if (id && window.matchMedia('(max-width: 760px)').matches) requestAnimationFrame(() => document.querySelector('.focus-card')?.scrollIntoView({ block: 'start' }));
   };
   // The card after this one, in the order the queue shows, wrapping around at the end.
-  const after = (id) => {
-    const i = order.findIndex((c) => c.id === id);
-    const rest = i < 0 ? order : [...order.slice(i + 1), ...order.slice(0, i)];
-    return (rest[0] || {}).id || null;
-  };
+  const next = (id) => after(order, id);
   // Skip opens the next card.
-  const next = () => { pinnedRef.current = null; go(after(current && current.id)); };
+  const skip = () => { pinnedRef.current = null; go(next(current && current.id)); };
   // An answer shows its receipt for a moment, then opens the card after the answered one, so a card you skipped stays skipped.
   const answered = (id) => {
-    const then = after(id);
+    const then = next(id);
     setTimeout(() => {
       if (focusRef.current !== id) return;
       pinnedRef.current = null;
@@ -305,7 +284,7 @@ export function App() {
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
 
   async function onAction(c, ev) {
-    if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return next();
+    if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return skip();
     if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
     const { values: picked, comment } = formValues(ev.formState);
     const values = answerValues(c, picked);
@@ -332,14 +311,6 @@ export function App() {
     // The cards you sent are done with: they read dimmer than the ones that wait for you.
     items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty));
 
-  // No grouping by default. The choices follow the properties the cards carry.
-  const tagKeys = [...new Set(visible.flatMap((c) => Object.keys(c.tags || {})))].sort();
-  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? agentName(c.agent, visible) : groupBy.startsWith('tag:') ? String((c.tags || {})[groupBy.slice(4)] || '').trim() || `No ${groupBy.slice(4)}` : 'Waiting for you');
-  const rest = pending.filter((c) => st(c) !== 'reply');
-  // The cards the inbox clears: answered or closed, with no agent reply you have not seen. Search still finds them.
-  const dealt = visible.filter((c) => ['closed', 'answered', 'delivered', 'read'].includes(st(c)));
-  const groups = groupBy === 'none' ? [['Waiting for you', rest]] : [...rest.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];
-  const order = [...replied, ...groups.flatMap(([, items]) => items)];
   const queue = h('nav', { className: 'queue' },
     h('label', { className: 'group-by' }, 'Group by ',
       h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); store.set('groupBy', e.target.value); } },
@@ -394,11 +365,11 @@ export function App() {
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
       current.broadcast && !current.closed
-        ? h(BroadcastForm, { card: current, cards: state.cards, onDone: next })
+        ? h(BroadcastForm, { card: current, cards: state.cards, onDone: skip })
         : current.html !== undefined
-        ? h(HtmlCard, { key: current.id, card: current, onSkip: next, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
+        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(skip) })
         : current.kind === 'secret'
-        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: next, onSent: () => answered(current.id) })
+        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id) })
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current.bodyFallback ? { ...current, body: current.bodyFallback.body } : current), broken: !!current.bodyFallback, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
@@ -413,7 +384,7 @@ export function App() {
           prev.text && h(LinkedText, { text: prev.text, byId, open, diagrams: prev.kind !== 'system' }),
           h('div', { className: 'ans' }, answers[prev.id] ? describe(prev, answers[prev.id]) : 'You did not answer it.'))));
     main = s === 'closed'
-      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed, onNext: next, animate: !!closing[current.id] }, card)
+      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed, onNext: skip, animate: !!closing[current.id] }, card)
       : card;
   }
 

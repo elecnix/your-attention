@@ -3,8 +3,7 @@ const { React } = window.__OpenUI;
 export const h = React.createElement;
 // The page may sit under a path, such as /i/<inbox id>/ on the hosted service, so every address is relative to it.
 export const BASE = location.pathname.replace(/[^/]*$/, '');
-export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back by triage' };
-export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed', reply: 'new reply' };
+export { CLOSED_LABEL, STATE_LABEL } from './queue.js';
 export const J = JSON.stringify;
 
 // This tab's unlock token, from POST /v1/unlock. It lives in session storage, so closing the tab locks the inbox again.

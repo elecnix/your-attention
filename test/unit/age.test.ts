@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-// @ts-expect-error The page's helpers are plain JavaScript.
 import { cardAge } from '../../web/age.js';
 
 const MIN = 60_000;

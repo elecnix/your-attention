@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-// @ts-expect-error The page's renderer is plain JavaScript.
 import { renderMarkdown } from '../../web/markdown.js';
 
 type Node = { type: string; children: unknown[] };
