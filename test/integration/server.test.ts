@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
@@ -20,6 +21,17 @@ describe('the laptop server', () => {
     const bundle = await fetch(`${h.server.url}/vendor/openui-bundle.min.js`);
     assert.equal(bundle.status, 200);
     assert.equal((await fetch(`${h.server.url}/../package.json`)).status, 404);
+  });
+
+  it('keeps serving after a client drops its connection in the middle of a request body', async () => {
+    const { port } = new URL(h.server.url);
+    const socket = net.connect(Number(port), '127.0.0.1');
+    await new Promise((resolve) => socket.once('connect', resolve));
+    socket.write('POST /v1/cards HTTP/1.1\r\nhost: 127.0.0.1\r\ncontent-type: application/json\r\ncontent-length: 1000\r\n\r\n{"title":');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    socket.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal((await fetch(`${h.server.url}/`)).status, 200);
   });
 
   it('keeps its token files private to the user', () => {

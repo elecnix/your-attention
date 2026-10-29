@@ -108,7 +108,15 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   };
   const handle = createHandler(inbox, { openOrigin: (card) => focusHerdrPane(card), focusSession: (href) => focusSessionLink(href), networkAddresses });
 
-  const server = http.createServer(async (req, res) => {
+  // One failed request must never stop the inbox: a client that drops its connection mid-body makes the read reject.
+  const server = http.createServer((req, res) => {
+    respond(req, res).catch(() => {
+      if (res.headersSent || req.destroyed) return void res.destroy();
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'the inbox could not handle that request' }));
+    });
+  });
+  async function respond(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const pathname = (req.url ?? '/').split('?')[0] ?? '/';
     if (req.method === 'GET' && !pathname.startsWith('/v1/') && serveStatic(pathname, res)) return;
     // `your-attention stop` asks here. Only the owner may stop the inbox, and only on this build.
@@ -145,7 +153,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       // The client went away.
     }
     res.end();
-  });
+  }
 
   // Agents may also connect over a WebSocket at /v1/ws?agent=<id>.
   const wss = new WebSocketServer({ noServer: true });
