@@ -9,6 +9,7 @@ import { Client, describeAnswer, loadConfig } from './client.ts';
 import type { Option, Priority } from './core/types.ts';
 import { homeDir, writePrivate } from './node/home.ts';
 import { serve } from './node/server.ts';
+import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, queryUsage, summarize } from './node/telemetry.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
@@ -19,7 +20,8 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   open [--link]                                       open the inbox page signed in, or print a one-time sign-in link
   clear                                               clear the cards you answered or that closed; search still finds them
   reset --yes                                         remove every card, answer and file; tokens and templates stay
-  login-url                                           print the page address with its sign-in token
+  login-url                                           print a sign-in link that works once, like open --link
+  pin status|set|reset|clear                          read, set, reset or remove the PIN that each browser tab types
   discover [--seconds 3]                              list inboxes on the LAN
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
@@ -85,6 +87,28 @@ function describeTelemetry(t: TelemetryStatus): string {
   return `Usage counts are on. One report a day goes to ${t.destination}.\nInstall id: ${t.installId}\n\n${NOTICE}`;
 }
 
+/** A one-time link that signs a browser in, so the owner token stays out of the address bar and the browser history. */
+async function signInLink(): Promise<string> {
+  const { url, owner } = localServer();
+  const res = await fetch(`${url}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json', 'x-your-attention': '1' }, body: '{}' }).catch(() => undefined);
+  if (!res) fail('No inbox runs on this machine. Start one with `your-attention start`.');
+  const { code, error } = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
+  if (!res.ok || !code) fail(`Could not make a sign-in code: ${error ?? res.status}`);
+  return `${url}/#signin=${encodeURIComponent(code)}`;
+}
+
+/** The inbox the PIN commands change: the one this machine runs, or else the one this machine paired with as owner. */
+function pinTarget(): { url: string; token: string } {
+  try {
+    const { url } = JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string };
+    return { url, token: fs.readFileSync(path.join(homeDir(), 'owner-token'), 'utf8').trim() };
+  } catch {
+    const paired = loadConfig();
+    if (!paired) fail('No inbox runs on this machine. Start one with `your-attention serve`, or pair as owner with `your-attention pair <url> --role owner`.');
+    return paired;
+  }
+}
+
 function localServer(): { url: string; owner: string } {
   try {
     const { url } = JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string };
@@ -102,6 +126,13 @@ switch (command) {
     const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop(), terminal: process.stderr.isTTY === true });
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
+    // In a terminal, the inbox asks for a PIN until it has one or the person says never. A service has no terminal and never waits here.
+    if (process.stdin.isTTY && process.stderr.isTTY) {
+      const pin = server.inbox.pin;
+      const t = terminal();
+      await offerPin(t, { status: async () => pin.status(), set: (p) => pin.set(p), clear: async () => pin.clear(), neverAsk: async () => pin.setNeverAsk(true) });
+      t.close();
+    }
     break;
   }
   case 'start': {
@@ -124,6 +155,11 @@ switch (command) {
         if (process.stdout.isTTY) {
           const t = await telemetry();
           if (t.notice) { console.log(`\n${describeTelemetry(t)}`); await telemetry({ notified: true }); }
+        }
+        if (process.stdin.isTTY && process.stdout.isTTY) {
+          const t = terminal(process.stdin, process.stdout);
+          await offerPin(t, httpPinApi(info.url, localServer().owner));
+          t.close();
         }
         break;
       }
@@ -163,9 +199,36 @@ switch (command) {
     console.log(`Stopped the inbox on ${url}.`);
     break;
   }
-  case 'login-url': {
-    const { url, owner } = localServer();
-    console.log(`${url}/#token=${owner}`);
+  case 'login-url':
+    console.log(await signInLink());
+    break;
+  case 'pin': {
+    const [sub = 'status'] = rest;
+    const { url, token } = pinTarget();
+    const api = httpPinApi(url, token);
+    const s = await api.status().catch((e: Error) => fail(`Could not read the PIN of the inbox on ${url}: ${e.message}`));
+    const t = terminal(process.stdin, process.stdout);
+    try {
+      if (sub === 'status') {
+        console.log(s.set ? 'This inbox has a PIN. Each new browser tab types it before it opens the inbox.' : s.neverAsk ? 'This inbox has no PIN, and it does not ask for one. Set one with: your-attention pin set' : 'This inbox has no PIN. Set one with: your-attention pin set');
+        if (s.lockedUntil) console.log(`Wrong PINs locked the page until ${new Date(s.lockedUntil).toLocaleTimeString()}. \`your-attention pin reset\` lifts it.`);
+      } else if (sub === 'set' || sub === 'reset') {
+        if (sub === 'set' && s.set) fail('This inbox has a PIN. Replace it with `your-attention pin reset`, which needs no current PIN.');
+        const pin = await choosePin(t);
+        if (!pin && sub === 'set') fail('No PIN set.');
+        if (pin) await api.set(pin); else await api.clear();
+        console.log(pin ? `PIN ${sub === 'set' ? 'set' : 'reset'}. Every open tab types it again.` : 'The PIN is gone, and so is the lockout. The page asks for a new PIN when it opens.');
+      } else if (sub === 'clear') {
+        await api.clear();
+        console.log('The PIN is gone. The inbox page opens without one.');
+      } else {
+        fail('Usage: your-attention pin status|set|reset|clear');
+      }
+    } catch (e) {
+      fail(`The inbox refused: ${(e as Error).message}`);
+    } finally {
+      t.close();
+    }
     break;
   }
   case 'clear':
@@ -181,13 +244,7 @@ switch (command) {
   }
   case 'open': {
     const { values } = parseArgs({ args: rest, options: { link: { type: 'boolean', default: false } } });
-    const { url, owner } = localServer();
-    // A one-time code signs the browser in, so the owner token stays out of the address bar and the browser history.
-    const res = await fetch(`${url}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json', 'x-your-attention': '1' }, body: '{}' }).catch(() => undefined);
-    if (!res) fail('No inbox runs on this machine. Start one with `your-attention start`.');
-    const { code, error } = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
-    if (!res.ok || !code) fail(`Could not make a sign-in code: ${error ?? res.status}`);
-    const link = `${url}/#signin=${encodeURIComponent(code)}`;
+    const link = await signInLink();
     if (values.link) {
       console.log(`Open this link in the browser to sign in. It works once, within 5 minutes:\n${link}`);
       break;

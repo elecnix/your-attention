@@ -66,9 +66,14 @@ async function localToken(inbox: Inbox, home: string, role: 'owner' | 'agent' | 
   const file = path.join(home, `${role}-token`);
   if (fs.existsSync(file)) {
     const secret = fs.readFileSync(file, 'utf8').trim();
-    if (await inbox.authenticate(secret)) return secret;
+    const token = await inbox.authenticate(secret);
+    if (token) {
+      // Only this user reads the file, and file access on this machine is full control already, so the CLI needs no PIN.
+      if (role === 'owner') inbox.exemptFromPin(token.id);
+      return secret;
+    }
   }
-  const { secret } = await inbox.createToken(`${role === 'owner' ? 'page' : role === 'agent' ? 'local agents' : 'local extensions'} on ${os.hostname()}`, role);
+  const { secret } = await inbox.createToken(`${role === 'owner' ? 'page' : role === 'agent' ? 'local agents' : 'local extensions'} on ${os.hostname()}`, role, { pinExempt: role === 'owner' });
   writePrivate(file, secret);
   return secret;
 }
@@ -180,9 +185,12 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       try { decoded = secret ? decodeURIComponent(secret) : undefined; } catch { decoded = undefined; }
       const t = await inbox.authenticate(decoded);
       if (t?.role !== 'owner') { socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return; }
+      // A browser cannot set headers on a WebSocket, so the page sends its unlock token in the address.
+      const gate = await inbox.pinGate(t, !auth?.startsWith('Bearer '), u.searchParams.get('unlock'));
+      if (gate.locked) { socket.end('HTTP/1.1 423 Locked\r\n\r\n'); return; }
       const viewer = u.searchParams.get('viewer') ?? undefined;
       wss.handleUpgrade(req, socket, head, (ws) => {
-        const conn = pageSocket(inbox, { send: (text) => ws.send(text), close: (c, r) => ws.close(c, r) }, viewer && /^[\w-]{4,64}$/.test(viewer) ? viewer : undefined);
+        const conn = pageSocket(inbox, { send: (text) => ws.send(text), close: (c, r) => ws.close(c, r) }, viewer && /^[\w-]{4,64}$/.test(viewer) ? viewer : undefined, gate.gated ? { unlock: gate.unlock } : undefined);
         ws.on('message', (d) => conn.message(String(d)));
         ws.on('close', () => conn.close());
       });

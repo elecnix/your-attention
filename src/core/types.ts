@@ -232,6 +232,8 @@ export interface Token {
   name: string;
   role: Role;
   createdAt: number;
+  /** An owner token kept on a machine, such as the laptop's owner-token file or a paired client, which acts without the PIN. A token that can travel as a link or a cookie never has it. */
+  pinExempt?: boolean;
 }
 
 export interface Pairing {

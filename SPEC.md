@@ -48,7 +48,7 @@ A hook call without a verdict by its deadline follows the policy: `fail-open` pa
 
 ## Person presence
 
-Each page opens a WebSocket at `/v1/ws?page=1&viewer=<page id>`, signed in with its cookie, and falls back to `GET /v1/events?viewer=<page id>` when the socket never opens. The page socket sends the same events as the stream. The page sends `{"type":"ping"}` every 2 seconds and gets `{"type":"pong"}`. Each page reports `POST /v1/person/<page id> {visible, active, focus}`. The inbox combines the pages into `{pages, visible, activeAt, focus}` at `GET /v1/person`, for the owner and extensions. With two people on one inbox, each page counts.
+Each page opens a WebSocket at `/v1/ws?page=1&viewer=<page id>&unlock=<unlock token>`, signed in with its cookie, and falls back to `GET /v1/events?viewer=<page id>` when the socket never opens. The page socket sends the same events as the stream. The page sends `{"type":"ping"}` every 2 seconds and gets `{"type":"pong"}`. Each page reports `POST /v1/person/<page id> {visible, active, focus}`. The inbox combines the pages into `{pages, visible, activeAt, focus}` at `GET /v1/person`, for the owner and extensions. With two people on one inbox, each page counts.
 
 ## Clients and tokens
 
@@ -70,6 +70,29 @@ On a laptop, the server writes `owner-token` and `agent-token` to its home direc
 4. The client polls `GET /v1/pair/<id>`. It gets `{status:"approved", token}` once, then `{status:"approved"}` after that.
 
 At most 5 requests can wait at a time, and a request that waits 10 minutes expires as denied.
+
+## The PIN
+
+Whoever holds the inbox address or a sign-in link could answer as the person, and each answer goes straight into an agent's session. With a PIN of 4 digits set, that credential opens nothing until the browser tab types the PIN.
+
+The inbox refuses a request with 423 `{error, locked: true}` when the request signs in with the cookie, or with an owner token that someone can copy as a link, and doesn't send a live unlock token. Such owner tokens come from sign-in codes, from `POST /new` on the hosted service, and from the single-mode `OWNER_TOKEN`. A locked caller may call the PIN routes below. It may also read `GET /v1/attachments/<id>`, since an image tag can't send a header and the attachment ids show up in `/v1/state` alone. Owner tokens with `pinExempt` skip the PIN as bearer tokens. The laptop's `owner-token` file has it, and so does each token paired with `role: owner`, which the person approved on the page. Agent and extension tokens never need the PIN.
+
+| Route | Who | Does |
+| -- | -- | -- |
+| `GET /v1/pin` | owner | `{set, neverAsk, unlocked, lockedUntil, triesLeft, exempt}` |
+| `POST /v1/unlock {pin}` | owner | `{unlock, idleMs}`, or 401 `{triesLeft}`, or 429 `{lockedUntil}` with `retry-after` |
+| `PUT /v1/pin {pin, current}` | owner | Sets the PIN. A gated caller sends `current` when a PIN exists, and gets a fresh `unlock`. |
+| `DELETE /v1/pin {current}` | owner | Removes the PIN, with the same rule for `current`. |
+| `PUT /v1/pin/never-ask {neverAsk}` | owner | Stores whether the page and the CLI offer to set a PIN. |
+| `POST /v1/lock` | owner | Ends the unlock token in the request's header. |
+
+The page sends its unlock token in the `x-your-attention-unlock` header. The page socket and the event stream can't send headers, so they put it in `unlock=`. The page keeps the token in `sessionStorage` under `ya-unlock:<page path>`, never in `localStorage` or a cookie, so closing the tab ends it. Each unlock token belongs to the owner token that unlocked, and the inbox stores its SHA-256 hash in `meta`. The inbox ends a token after 12 hours without a request, at `POST /v1/lock`, when someone revokes its owner token, and when the PIN changes or goes. Then the inbox closes each page socket and event stream that opened with it, with code 4423 on a socket. The message memory never keeps a PIN route's response.
+
+The inbox keeps the PIN in `meta` under `pin` as PBKDF2-SHA256 with a random 16-byte salt, in the form `{hash, salt, iterations, setAt, neverAsk}`. A laptop runs 800,000 iterations, about 100 ms. The Cloudflare build runs 100,000, the most the Workers runtime computes. The comparison takes the same time wherever the bytes differ. The inbox never logs or returns a PIN.
+
+Each wrong PIN counts in `meta` under `pin-tries` before the hash runs, so tries sent at once all count. The fifth wrong try starts a lockout of 1 minute. Each later lockout lasts twice as long as the one before, up to 24 hours, and even the right PIN waits it out. The right PIN, a new PIN, and removing the PIN reset the count, and a restart keeps it. With an exempt token, `your-attention pin reset` sets or removes a forgotten PIN without `current`, during a lockout too.
+
+The page offers to set a PIN each time it opens, as long as the inbox has none and `neverAsk` is false. It shows **Skip** and **Never ask again**. In a terminal, `serve` and `start` ask the same, with the PIN typed hidden and twice. A run without a terminal never asks. `your-attention pin status|set|reset|clear` reads and changes the PIN with the `owner-token` file, or with the token of a machine paired as owner. `set` refuses to replace a PIN, and `reset` replaces it without the old one.
 
 ## Cards
 
@@ -325,8 +348,8 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 
 With `MODE` set to `single`, the Worker serves one inbox, whose owner token is the `OWNER_TOKEN` secret. With `MODE` set to `hosted`, it serves many:
 
-- `POST /new {invite}` takes one use of an invite code and returns the address of a new inbox and its owner sign-in link. KV keeps `invite:<code>` with the number of uses the operator allows, and a registry Durable Object counts the uses taken, one request at a time.
-- Each inbox is at `/i/<id>/`. The person bookmarks the address and keeps it private.
+- `POST /new {invite, pin?, neverAsk?}` takes one use of an invite code and returns the address of a new inbox and its owner sign-in link. With a `pin`, the inbox starts with that PIN, and the answer adds `unlock`, which the landing page puts in the tab's `sessionStorage` before it opens the inbox. KV keeps `invite:<code>` with the number of uses the operator allows, and a registry Durable Object counts the uses taken, one request at a time.
+- Each inbox is at `/i/<id>/`. The person bookmarks the address and keeps it private. The address signs a browser in, and the PIN, when there is one, unlocks each tab.
 - The operator manages invites with `wrangler kv key put invite:<code> <uses> --binding INVITES --remote`. Codes need 20 characters or more, such as the 128 random bits of `openssl rand -hex 16`, and the Worker refuses a shorter one before any lookup.
 - An address is 20 random hex digits and 12 hex digits of an HMAC over them, keyed by the `INBOX_ID_SECRET` secret. The Worker checks the HMAC, so a guessed address costs no KV read and reaches no Durable Object. Changing the secret makes every address invalid.
 - Each inbox's sign-in cookie has the path `/i/<id>/`, so signing in to one inbox leaves another one's cookie alone.

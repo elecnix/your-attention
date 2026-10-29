@@ -3,6 +3,7 @@
 // object rebuilds each connection from the socket's attachment when it wakes.
 import { COOKIE, createHandler } from '../core/http.ts';
 import { Inbox } from '../core/inbox.ts';
+import { WORKERS_PIN_ITERATIONS, validPin } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
 import { dataPoint } from '../core/telemetry.ts';
 import type { Role } from '../core/types.ts';
@@ -14,6 +15,9 @@ interface SocketAttachment {
   /** Set for the inbox page's socket, which carries page events. */
   page?: boolean;
   viewer?: string | undefined;
+  /** A page that needs the PIN, and the id of the unlock token it opened with. */
+  gated?: boolean;
+  unlock?: string | undefined;
   agent: string;
   /** The agent process, the same across its reconnects. */
   instance?: string | undefined;
@@ -83,6 +87,7 @@ export class InboxObject {
       uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES),
       storageLimitBytes: limit(env.STORAGE_LIMIT_BYTES),
       attachmentReadsPerDay: limit(env.ATTACHMENT_READS_PER_DAY),
+      pinIterations: WORKERS_PIN_ITERATIONS,
     });
     // Open requests keep the object awake and billed, so events go over hibernating WebSockets only.
     this.handle = createHandler(this.inbox, { heartbeatMs: 2000, streams: false, telemetry: { source: 'hosted', destination: 'the operator of this hosted service', blocked: () => this.usageBlocked() } });
@@ -94,7 +99,7 @@ export class InboxObject {
   private attach(ws: WebSocket): Conn {
     const a = ws.deserializeAttachment() as SocketAttachment;
     if (a.page) {
-      const conn = pageSocket(this.inbox, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, a.viewer);
+      const conn = pageSocket(this.inbox, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, a.viewer, a.gated ? { unlock: a.unlock } : undefined);
       this.sockets.set(ws, conn);
       return conn;
     }
@@ -135,7 +140,7 @@ export class InboxObject {
     const url = new URL(req.url);
     if (url.pathname === '/_init') {
       // The Worker calls this once per inbox. The object is never reachable from outside without the Worker.
-      const { ownerToken, usage } = (await req.json()) as { ownerToken?: string; usage?: { enabled?: boolean; invite?: string } };
+      const { ownerToken, usage, pin, neverAsk } = (await req.json()) as { ownerToken?: string; usage?: { enabled?: boolean; invite?: string }; pin?: string; neverAsk?: boolean };
       // A hosted inbox learns its invite id here. The landing page told the person about usage counts when it sends `enabled`.
       if (usage) this.inbox.usage.update({ invite: String(usage.invite ?? ''), ...(typeof usage.enabled === 'boolean' ? { enabled: usage.enabled, notified: true } : {}) });
       if (ownerToken) {
@@ -146,8 +151,12 @@ export class InboxObject {
         }
         return Response.json({ ok: true });
       }
-      const { secret } = await this.inbox.createToken('owner of this hosted inbox', 'owner');
-      return Response.json({ owner: secret });
+      const { token, secret } = await this.inbox.createToken('owner of this hosted inbox', 'owner');
+      // The landing page set the PIN as it created the inbox, and the tab it opens in starts unlocked.
+      if (neverAsk === true) this.inbox.pin.setNeverAsk(true);
+      if (!validPin(pin)) return Response.json({ owner: secret });
+      await this.inbox.pin.set(pin);
+      return Response.json({ owner: secret, unlock: await this.inbox.pin.issue(token.id) });
     }
     if (url.pathname === '/v1/ws' && req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
       if (this.ctx.getWebSockets().length >= MAX_SOCKETS) return new Response('too many open sockets', { status: 503 });
@@ -157,11 +166,14 @@ export class InboxObject {
         const secret = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : cookieValue(req.headers.get('cookie'), COOKIE);
         const token = await this.inbox.authenticate(secret);
         if (token?.role !== 'owner') return new Response('the page needs the owner token', { status: 401 });
+        // A browser cannot set headers on a WebSocket, so the page sends its unlock token in the address.
+        const gate = await this.inbox.pinGate(token, !auth?.startsWith('Bearer '), url.searchParams.get('unlock'));
+        if (gate.locked) return new Response('this inbox is locked: type its PIN to open it', { status: 423 });
         const pair = new WebSocketPair();
         const server = pair[1];
         this.ctx.acceptWebSocket(server);
         const viewer = url.searchParams.get('viewer') ?? undefined;
-        server.serializeAttachment({ page: true, viewer: viewer && /^[\w-]{4,64}$/.test(viewer) ? viewer : undefined, agent: '', token: token.id, role: token.role, connectedAt: Date.now() } satisfies SocketAttachment);
+        server.serializeAttachment({ page: true, viewer: viewer && /^[\w-]{4,64}$/.test(viewer) ? viewer : undefined, gated: gate.gated, unlock: gate.unlock, agent: '', token: token.id, role: token.role, connectedAt: Date.now() } satisfies SocketAttachment);
         this.attach(server);
         await this.schedule();
         return new Response(null, { status: 101, webSocket: pair[0] });

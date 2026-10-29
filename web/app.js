@@ -1,6 +1,7 @@
 // The built-in front-end. It is one client of the protocol among others:
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
-import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time } from './env.js';
+import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
+import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { Attachments, BroadcastForm, agentName, CardAge, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
@@ -26,9 +27,17 @@ export function App() {
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
   const [telemetry, changeTelemetry] = useTelemetry(auth === 'ok');
+  // The PIN state, read once the page is signed in. `pinForm` is the form on screen: the offer to set one, or a change.
+  const [pin, setPin] = React.useState(null);
+  const [pinForm, setPinForm] = React.useState(null);
+  // While the page sets a PIN, the inbox closes the page socket, and the page must not show the lock screen meanwhile.
+  const settingPinRef = React.useRef(false);
+  const connRef = React.useRef(null);
 
-  const refresh = React.useCallback(() => fetch(BASE + 'v1/state').then((r) => {
+  const refresh = React.useCallback(() => { const sent = unlockToken.get(); return fetch(BASE + 'v1/state').then((r) => {
     if (r.status === 401) { setAuth('needed'); return null; }
+    // A refusal for an unlock token this tab has since replaced is stale.
+    if (r.status === 423) { if (!settingPinRef.current && unlockToken.get() === sent) setAuth('locked'); return null; }
     return r.json();
   }).then((s) => {
     if (!s) return;
@@ -44,7 +53,7 @@ export function App() {
     }
     knownRef.current = ids;
     setState(s);
-  }), [state, closing]);
+  }); }, [state, closing]);
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
 
@@ -143,7 +152,7 @@ export function App() {
     };
     // The server-sent event stream, for an inbox that serves no page socket.
     const overStream = () => {
-      es = new EventSource(`${BASE}v1/events?viewer=${encodeURIComponent(VIEWER)}`);
+      es = new EventSource(withUnlock(`${BASE}v1/events?viewer=${encodeURIComponent(VIEWER)}`));
       es.onopen = () => refreshRef.current();
       // A stream that fails may mean a revoked token: the state request tells.
       es.onerror = () => refreshRef.current();
@@ -152,7 +161,7 @@ export function App() {
     // A WebSocket lets a cloud inbox sleep between events: its pings get their answer without waking it.
     const overSocket = () => {
       let opened = false;
-      ws = new WebSocket(new URL(`${BASE}v1/ws?page=1&viewer=${encodeURIComponent(VIEWER)}`, location.href).href.replace(/^http/, 'ws'));
+      ws = new WebSocket(new URL(withUnlock(`${BASE}v1/ws?page=1&viewer=${encodeURIComponent(VIEWER)}`), location.href).href.replace(/^http/, 'ws'));
       ws.onopen = () => {
         opened = true;
         refreshRef.current();
@@ -174,11 +183,25 @@ export function App() {
       refreshRef.current();
       overSocket();
     });
+    connRef.current = { connect, stop };
     connect();
     window.addEventListener('hashchange', connect);
     const watchdog = setInterval(() => { if (Date.now() - last > 5000) setUp(false); }, 1000);
     return () => { closed = true; stop(); clearInterval(watchdog); window.removeEventListener('hashchange', connect); };
   }, []);
+
+  // A locked tab stops its connections until the PIN unlocks it. A signed-in tab reads the PIN state once, and offers to set one.
+  React.useEffect(() => {
+    if (auth === 'locked' && connRef.current) connRef.current.stop();
+    if (auth !== 'ok' || pin) return;
+    fetch(`${BASE}v1/pin`).then((r) => (r.ok ? r.json() : null)).then((s) => {
+      if (!s) return;
+      setPin(s);
+      if (!s.set && !s.neverAsk) setPinForm('offer');
+    }, () => {});
+  }, [auth]);
+  const reloadPin = () => fetch(`${BASE}v1/pin`).then((r) => (r.ok ? r.json() : null)).then((s) => s && setPin(s), () => {});
+  const unlocked = () => { setAuth('checking'); setPin(null); if (connRef.current) connRef.current.connect(); };
 
   React.useEffect(() => {
     if (!state) return;
@@ -203,6 +226,7 @@ export function App() {
       h('p', null, 'This inbox runs in the cloud. To sign in this browser, open the sign-in link you got when you created the inbox.'),
       phone);
   }
+  if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
   const answers = state.answers;
@@ -324,7 +348,8 @@ export function App() {
     group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length })),
     dealt.length > 0 && h('button', { className: 'btn clear-dealt', onClick: () => api(`${BASE}v1/archive`, {}) },
       `Clear ${dealt.length} answered or closed card${dealt.length === 1 ? '' : 's'}`),
-    h(UsageToggle, { telemetry, onChange: changeTelemetry }));
+    h(UsageToggle, { telemetry, onChange: changeTelemetry }),
+    h(PinControls, { pin, onEdit: () => setPinForm('change'), onLock: () => lockTab().then(() => setAuth('locked')) }));
 
   let main;
   if (!current) {
@@ -397,6 +422,15 @@ export function App() {
       h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: 'Your Attention on GitHub' },
         h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'currentColor' }, h('path', { d: OCTOCAT }))))),
     h(UsageNotice, { telemetry, onChange: changeTelemetry }),
+    pinForm && h(PinForm, {
+      set: !!(pin && pin.set),
+      offer: pinForm === 'offer',
+      onDone: () => { settingPinRef.current = false; setPinForm(null); reloadPin(); if (connRef.current) connRef.current.connect(); },
+      onBusy: (busy) => { settingPinRef.current = busy; },
+      // Skip asks again the next time the page opens. Never ask again is stored in the inbox.
+      onSkip: () => setPinForm(null),
+      onNever: () => neverAsk().then(() => { setPinForm(null); reloadPin(); }),
+    }),
     h('div', { className: 'layout', style: { '--queue-w': `${queueWidth}px` } },
       queue, h(QueueResizer, { width: queueWidth, onResize: setQueueWidth }), h('main', null,
         // On a phone the queue sits below the card, so a button above the card says how many wait and jumps there.

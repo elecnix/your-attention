@@ -66,6 +66,8 @@ your-attention open --link      # prints a one-time sign-in link, for a private 
 
 The inbox keeps its files in `~/.your-attention`. Set `YOUR_ATTENTION_HOME` to move them.
 
+In a terminal, `start` and `serve` offer to set a [PIN](#protect-the-inbox-with-a-pin) while the inbox has none. Type `y` and the PIN twice, `s` to skip until the next start, or `n` to stop asking. A service started at login has no terminal, so it never asks.
+
 To start the inbox when you log in (optional), write a launchd or systemd unit. Without `--write`, the command only prints the unit.
 
 ```sh
@@ -74,8 +76,8 @@ your-attention service serve --write
 
 **On a hosted inbox:**
 
-1. Open the address you got with your invite code. Enter the code, then select **Create my inbox**.
-2. The page opens your inbox, signed in. Bookmark that address, and keep it private.
+1. Open the address you got with your invite code. Enter the code and a 4-digit [PIN](#protect-the-inbox-with-a-pin), then select **Create my inbox**. Leave the PIN empty to skip it for now, or tick **Never ask me for a PIN**.
+2. The page opens your inbox, signed in. Bookmark that address, and keep it private. You type the PIN in each new tab.
 3. Pair each machine that runs agents, as [step 5](#pair-a-machine-with-a-cloud-inbox-or-another-computer) shows.
 
 **On your own Cloudflare inbox:** deploy it first, as [Run your own cloud inbox](#run-your-own-cloud-inbox-optional) shows. Then pair each machine, as step 5 shows.
@@ -163,7 +165,7 @@ your-attention discover
 your-attention pair http://<host>:4815
 ```
 
-To pair a front-end that answers cards instead of an agent, add `--role owner`.
+To pair a front-end that answers cards instead of an agent, add `--role owner`. A machine paired as owner runs the `pin` commands against a hosted inbox, such as `your-attention pin reset` for a forgotten PIN. Its token works without the PIN, so pair a machine as owner only while you sit at it.
 
 #### Check your cards before you see them (optional)
 
@@ -200,11 +202,31 @@ Answer cards on the inbox page. Each answer reaches its agent within a second, o
 ```sh
 your-attention clear            # clears the cards you answered or that closed; search still finds them
 your-attention reset --yes      # removes every card, answer and file; tokens and templates stay
-your-attention login-url        # prints the page address with its sign-in token
+your-attention login-url        # prints a sign-in link that works once, within 5 minutes
 your-attention stop             # stops the inbox, or its launchd or systemd service
 ```
 
 `clear`, `reset`, `login-url` and `stop` act on the inbox this machine runs.
+
+## Protect the inbox with a PIN
+
+An answer on a card goes straight into a coding agent's session. Someone who gets the inbox address or a sign-in link, from a bookmark, the browser history or a pasted message, could open the page and answer as you. A 4-digit PIN stops that: the address or link signs a browser in, and each new tab must also type the PIN before it shows a card or takes an answer.
+
+```sh
+your-attention pin status       # whether the inbox has a PIN, and any lockout
+your-attention pin set          # sets a PIN, typed twice and hidden
+your-attention pin reset        # replaces a forgotten PIN without the old one, and lifts a lockout
+your-attention pin clear        # removes the PIN
+```
+
+The PIN commands act on the inbox this machine runs, with its `owner-token` file, or on the inbox this machine paired with as owner. On the page, the buttons below the card list change the PIN, which needs the current one, and lock the tab.
+
+- Closing the tab locks the inbox again. A tab also locks after 12 hours without a request, and every tab locks when the PIN changes.
+- After 5 wrong PINs, the page waits 1 minute before the next try. Each later lockout doubles the wait, up to a day. `your-attention pin reset` lifts the lockout from the computer that runs the inbox.
+- The inbox stores a slow salted hash of the PIN. Nobody can read the PIN back, including you.
+- Without a PIN, the page offers to set one each time it opens. **Skip** asks again next time, and **Never ask again** stops the offer for that inbox.
+
+The PIN guards the page and every sign-in link. Agents and their tokens, and the `owner-token` file on the laptop, work without it. A PIN does not protect the inbox from someone who can read files on the laptop, or from a person who watches you type it. A 4-digit PIN has 10,000 values, so the wait after wrong tries is what stops a guesser. After about 60 tries in the first day and a half, a guesser gets 5 tries a day.
 
 ## Usage counts
 

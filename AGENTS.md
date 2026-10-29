@@ -21,7 +21,7 @@ src/node/          the Node HTTP server and the home directory
 src/integrations/  Claude Code (MCP channel, AskUserQuestion hooks), pi, herdr
 src/client.ts      the client every integration uses
 src/cli.ts         the your-attention command
-web/               the built-in page: env.js, components.js and app.js, plain JavaScript modules on the OpenUI browser bundle
+web/               the built-in page: env.js, components.js, pin.js and app.js, plain JavaScript modules on the OpenUI browser bundle
 web/stories/       Storybook stories for each component and for the whole page on a stand-in inbox
 src/cloudflare/    the Worker and the Durable Object, with their storage adapters, and the usage collector
 src/extensions/    the triage service

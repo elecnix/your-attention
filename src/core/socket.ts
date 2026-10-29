@@ -70,10 +70,11 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
   };
 }
 
-/** The inbox page over a WebSocket, for the owner: the same events as GET /v1/events. The page sends {type: "ping"} and gets {type: "pong"}. */
-export function pageSocket(inbox: Inbox, ws: SocketLike, viewer?: string): { message(text: string): void; close(): void } {
+/** The inbox page over a WebSocket, for the owner: the same events as GET /v1/events. The page sends {type: "ping"} and gets {type: "pong"}.
+ * A page that signed in with a cookie or a link token passes `guard`, with the unlock token it opened with, so the socket closes when the PIN changes. */
+export function pageSocket(inbox: Inbox, ws: SocketLike, viewer?: string, guard?: { unlock: string | undefined }): { message(text: string): void; close(): void } {
   const allow = frameBudget();
-  const stop = inbox.subscribePage((ev) => ws.send(JSON.stringify(ev)), viewer);
+  const stop = inbox.subscribePage((ev) => ws.send(JSON.stringify(ev)), viewer, guard ? { unlock: guard.unlock, close: () => ws.close(4423, 'the PIN changed: unlock again') } : undefined);
   return {
     message(text) {
       if (!allow()) return ws.close(4429, `more than ${FRAMES_PER_MINUTE} frames a minute`);

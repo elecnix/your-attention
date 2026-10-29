@@ -7,6 +7,7 @@ import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
 import { distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
+import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { Usage } from './telemetry.ts';
 import type {
@@ -32,6 +33,8 @@ export interface InboxOptions {
   uploadLimitBytes?: number | undefined;
   storageLimitBytes?: number | undefined;
   attachmentReadsPerDay?: number | undefined;
+  /** PBKDF2 iterations for a new PIN hash. The Workers runtime computes at most 100,000. */
+  pinIterations?: number | undefined;
 }
 
 export const SYSTEM_AGENT = 'system';
@@ -110,6 +113,8 @@ export class Inbox {
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
   private readonly pages = new Set<PageSend>();
+  /** The pages that need an unlock token, with the one they opened with and how to close them. */
+  private readonly guarded = new Map<PageSend, { unlock: string | undefined; close: () => void }>();
   /** What each open page reports about the person, by page id. */
   private readonly viewers = new Map<string, { visible: boolean; activeAt: number | null; focus: string | null }>();
   private readonly extensions = new Map<string, { reg: ExtensionRegistration; token: string; send: (ev: HookEvent) => void }>();
@@ -117,6 +122,8 @@ export class Inbox {
   readonly deliveries = new Set<Promise<boolean>>();
   /** The usage counts the platform sends once a day, when the person left them on. */
   readonly usage: Usage;
+  /** The PIN a browser tab types before it acts as the owner. */
+  readonly pin: PinLock;
 
   /** `keepPresence` is for a platform whose sockets outlive the object, such as a Durable Object that wakes from hibernation.
    * `uploadLimitBytes` caps the bytes of every file this inbox ever stores. Deleting a file gives none back.
@@ -130,6 +137,9 @@ export class Inbox {
     this.storageLimit = opts.storageLimitBytes;
     this.readsPerDay = opts.attachmentReadsPerDay;
     this.usage = new Usage(store, now);
+    this.pin = new PinLock(store, now, opts.pinIterations);
+    // A page that opened before the PIN changed must unlock again.
+    this.pin.onChange(() => this.closeLockedPages());
     // On a laptop, connections do not survive a restart, so nobody is online at start.
     if (!opts.keepPresence) {
       for (const p of store.list<Presence>('presence')) {
@@ -164,10 +174,10 @@ export class Inbox {
   // ---- tokens and pairing ----
 
   /** Create a token and return its secret. The secret is shown once. */
-  async createToken(name: string, role: Role): Promise<{ token: Token; secret: string }> {
+  async createToken(name: string, role: Role, opts: { pinExempt?: boolean } = {}): Promise<{ token: Token; secret: string }> {
     const id = randomId(6);
     const secret = newSecret(id);
-    const token: Token = { id, hash: await sha256(secret), name, role, createdAt: this.now() };
+    const token: Token = { id, hash: await sha256(secret), name, role, createdAt: this.now(), ...(opts.pinExempt && role === 'owner' ? { pinExempt: true } : {}) };
     this.store.put('tokens', id, token);
     return { token, secret };
   }
@@ -187,6 +197,31 @@ export class Inbox {
   revokeToken(id: string): void {
     if (!this.store.get('tokens', id)) throw new InboxError(404, 'unknown token');
     this.store.delete('tokens', id);
+    this.pin.dropUnlocks(id);
+  }
+
+  /** Let an owner token act without the PIN, such as the laptop's owner-token file, which only this machine's user reads. */
+  exemptFromPin(id: string): void {
+    const t = this.store.get<Token>('tokens', id);
+    if (t && t.role === 'owner' && !t.pinExempt) this.store.put<Token>('tokens', id, { ...t, pinExempt: true });
+  }
+
+  /** Whether a caller must unlock with the PIN, and whether it has. Every cookie, and every owner token that can
+   * travel as a link, needs the PIN once the inbox has one. `unlock` is the id of the unlock token the caller sent. */
+  async pinGate(token: Token, viaCookie: boolean, secret: string | null | undefined): Promise<{ gated: boolean; locked: boolean; unlock?: string }> {
+    const gated = token.role === 'owner' && (viaCookie || !token.pinExempt);
+    if (!gated) return { gated, locked: false };
+    const unlock = await this.pin.verifyUnlock(secret, token.id);
+    return { gated, locked: !unlock && this.pin.isSet(), unlock };
+  }
+
+  private closeLockedPages(): void {
+    if (!this.pin.isSet()) return;
+    for (const [send, g] of this.guarded) {
+      if (this.pin.live(g.unlock)) continue;
+      this.guarded.delete(send);
+      g.close();
+    }
   }
 
   /** The owner's page asks for a code that signs one more device in, such as a phone that scans it. */
@@ -264,7 +299,8 @@ export class Inbox {
     if (choice === 'approve') {
       // Mark the request first, so a second answer during the await mints nothing.
       this.store.put<Pairing>('pairings', id, { ...p, status: 'approved' });
-      const { secret } = await this.createToken(p.name, p.role);
+      // The person approved this client on an unlocked page, and its token stays on that machine.
+      const { secret } = await this.createToken(p.name, p.role, { pinExempt: p.role === 'owner' });
       this.store.put<Pairing>('pairings', id, { ...p, status: 'approved', secret });
       this.closeAs(card, 'resolved', `Paired ${p.name}.`);
     } else {
@@ -1085,12 +1121,16 @@ export class Inbox {
   }
 
   /** A page opens its event stream. `viewer` is the page's own id, for its presence reports. */
-  subscribePage(send: PageSend, viewer?: string): () => void {
+  subscribePage(send: PageSend, viewer?: string, guard?: { unlock: string | undefined; close: () => void }): () => void {
     this.pages.add(send);
+    if (guard) this.guarded.set(send, guard);
     if (viewer) this.usage.saw('pages', viewer);
     if (viewer) { this.viewers.set(viewer, this.viewers.get(viewer) ?? { visible: true, activeAt: this.now(), focus: null }); this.personChanged(); }
+    // A socket that wakes after the PIN changed closes at once.
+    if (guard && this.pin.isSet() && !this.pin.live(guard.unlock)) queueMicrotask(() => this.closeLockedPages());
     return () => {
       this.pages.delete(send);
+      this.guarded.delete(send);
       if (viewer && this.viewers.delete(viewer)) this.personChanged();
     };
   }
@@ -1156,6 +1196,7 @@ export class Inbox {
       const expiresAt = (m as { expiresAt?: unknown })?.expiresAt;
       if (typeof key === 'string' && key.startsWith('signin:') && typeof expiresAt === 'number' && expiresAt <= now) this.store.delete('meta', key);
     }
+    this.pin.sweep();
     for (const m of this.store.list<{ key: string; at: number }>('messages')) {
       if (now - m.at > MESSAGE_MEMORY_MS) this.store.delete('messages', m.key);
     }

@@ -7,6 +7,30 @@ export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 
 export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed', reply: 'new reply' };
 export const J = JSON.stringify;
 
+// This tab's unlock token, from POST /v1/unlock. It lives in session storage, so closing the tab locks the inbox again.
+// The hosted service serves every inbox on one origin, so the key carries the inbox's own address.
+const UNLOCK_KEY = `ya-unlock:${BASE}`;
+export const unlockToken = {
+  get() { try { return sessionStorage.getItem(UNLOCK_KEY); } catch { return null; } },
+  set(v) { try { sessionStorage.setItem(UNLOCK_KEY, v); } catch {} },
+  del() { try { sessionStorage.removeItem(UNLOCK_KEY); } catch {} },
+};
+// Every call this page makes to its inbox carries the unlock token in a header.
+const plainFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  const token = unlockToken.get();
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
+  if (!token || url.origin !== location.origin || !url.pathname.startsWith(`${BASE}v1/`)) return plainFetch(input, init);
+  const headers = new Headers((init && init.headers) || (input instanceof Request ? input.headers : undefined));
+  headers.set('x-your-attention-unlock', token);
+  return plainFetch(input, { ...init, headers });
+};
+/** The address of the page socket or event stream, which carry the unlock token in the address: they cannot send headers. */
+export const withUnlock = (address) => {
+  const token = unlockToken.get();
+  return token ? `${address}&unlock=${encodeURIComponent(token)}` : address;
+};
+
 export const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },

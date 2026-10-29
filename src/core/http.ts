@@ -4,6 +4,7 @@ import { randomId } from './crypto.ts';
 import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
 import { Inbox, InboxError, publicCard, type Caller } from './inbox.ts';
+import { UNLOCK_HEADER, UNLOCK_IDLE_MS, validPin } from './pin.ts';
 import type { Source } from './telemetry.ts';
 import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
 import { PROTOCOL_VERSION } from './types.ts';
@@ -72,8 +73,8 @@ function cookie(req: Request, name: string): string | undefined {
   return undefined;
 }
 
-/** A server-sent event stream that calls `stop` when the client goes away. */
-function eventStream(start: (send: (event: string, data: unknown) => void) => () => void, heartbeatMs: number): Response {
+/** A server-sent event stream that calls `stop` when the client goes away. `end` closes it from the inbox side. */
+function eventStream(start: (send: (event: string, data: unknown) => void, end: () => void) => () => void, heartbeatMs: number): Response {
   let stop = (): void => {};
   let beat: ReturnType<typeof setInterval> | undefined;
   const enc = new TextEncoder();
@@ -86,7 +87,12 @@ function eventStream(start: (send: (event: string, data: unknown) => void) => ()
           stop();
         }
       };
-      stop = start(send);
+      const end = (): void => {
+        if (beat !== undefined) clearInterval(beat);
+        stop();
+        try { controller.close(); } catch {}
+      };
+      stop = start(send, end);
       beat = setInterval(() => send('beat', { type: 'beat', at: Date.now() }), heartbeatMs);
     },
     cancel() {
@@ -139,13 +145,20 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const who = await caller(req);
     if (!who) return json({ error: 'pair first: POST /v1/pair' }, 401);
     if (who.viaCookie && method !== 'GET' && req.headers.get(CSRF_HEADER) !== '1') return json({ error: `missing ${CSRF_HEADER} header` }, 403);
+    // An EventSource cannot send headers, so the page's event stream carries its unlock token in the address.
+    const unlockSecret = req.headers.get(UNLOCK_HEADER) ?? (method === 'GET' && a === 'events' ? url.searchParams.get('unlock') : null);
+    const gate = await inbox.pinGate(who.token, who.viaCookie, unlockSecret);
+    // A locked caller may read the PIN state, unlock, and fetch a file by its id, which only an unlocked page can list.
+    const pinRoute = a === 'pin' || a === 'unlock' || a === 'lock';
+    if (gate.locked && !pinRoute && !(method === 'GET' && a === 'attachments')) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
     const me: Caller = { token: who.token.id, role: who.token.role };
     // A full inbox takes the writes that free space or answer cards, and refuses the rest.
-    const frees = method === 'DELETE' || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'answer'));
+    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'answer'));
     if (method !== 'GET' && !frees && inbox.storageFull()) return json({ error: 'this inbox is full: remove cards, templates or widgets to make room' }, 507);
     // A message that arrives over two links, or again after a retry, is applied once: the inbox
     // keeps the first result for each x-message-id, per client.
-    const messageId = method === 'GET' ? null : req.headers.get(MESSAGE_HEADER);
+    // A PIN response carries an unlock token, so the inbox never keeps it to replay.
+    const messageId = method === 'GET' || pinRoute ? null : req.headers.get(MESSAGE_HEADER);
     if (messageId !== null) {
       if (!/^[\w-]{8,64}$/.test(messageId)) return json({ error: `${MESSAGE_HEADER} must be 8 to 64 letters, digits, dashes or underscores` }, 400);
       const key = `${me.token}:${messageId}`;
@@ -156,7 +169,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       inbox.rememberMessage(key, 0, '');
       let res: Response;
       try {
-        res = await routeAuthed(req, url, me);
+        res = await routeAuthed(req, url, me, gate);
       } catch (e) {
         inbox.forgetMessage(key);
         throw e;
@@ -165,10 +178,64 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       else inbox.forgetMessage(key);
       return res;
     }
-    return routeAuthed(req, url, me);
+    if (pinRoute) {
+      if (me.role !== 'owner') return json({ error: 'only the owner can do this' }, 403);
+      return pinRoutes(req, url, me, gate, unlockSecret);
+    }
+    return routeAuthed(req, url, me, gate);
   }
 
-  async function routeAuthed(req: Request, url: URL, me: Caller): Promise<Response> {
+  /** A wrong PIN, or a lockout and how long it lasts. */
+  function refused(r: { triesLeft: number } | { lockedUntil: number }): Response {
+    if ('triesLeft' in r) return json({ error: `wrong PIN: ${r.triesLeft} ${r.triesLeft === 1 ? 'try' : 'tries'} left`, triesLeft: r.triesLeft }, 401);
+    const seconds = Math.max(1, Math.ceil((r.lockedUntil - Date.now()) / 1000));
+    const wait = seconds < 90 ? `${seconds} seconds` : seconds < 5400 ? `${Math.ceil(seconds / 60)} minutes` : `${Math.ceil(seconds / 3600)} hours`;
+    return json({ error: `too many wrong PINs: try again in ${wait}`, lockedUntil: r.lockedUntil }, 429, { 'retry-after': String(seconds) });
+  }
+
+  async function pinRoutes(req: Request, url: URL, me: Caller, gate: { gated: boolean; locked: boolean }, unlockSecret: string | null): Promise<Response> {
+    const [, a, b] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    const method = req.method;
+    const pin = inbox.pin;
+    const status = () => ({ ...pin.status(), unlocked: !gate.locked, exempt: !gate.gated });
+    if (a === 'pin' && !b && method === 'GET') return json(status());
+    if (a === 'unlock' && !b && method === 'POST') {
+      if (!pin.isSet()) return json({ error: 'this inbox has no PIN' }, 409);
+      const body = (await readJson<{ pin?: unknown } | null>(req, BODY_LIMIT.open)) ?? {};
+      if (!validPin(body.pin)) return json({ error: 'a PIN is 4 digits' }, 400);
+      const r = await pin.unlock(body.pin, me.token);
+      return r.ok ? json({ unlock: r.token, idleMs: UNLOCK_IDLE_MS }) : refused(r);
+    }
+    if (a === 'lock' && !b && method === 'POST') {
+      if (unlockSecret) await pin.lock(unlockSecret);
+      return json({ ok: true });
+    }
+    if (a === 'pin' && b === 'never-ask' && method === 'PUT') {
+      if (gate.locked) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
+      const body = (await readJson<{ neverAsk?: unknown } | null>(req, BODY_LIMIT.open)) ?? {};
+      if (typeof body.neverAsk !== 'boolean') return json({ error: 'neverAsk must be true or false' }, 400);
+      pin.setNeverAsk(body.neverAsk);
+      return json(status());
+    }
+    if (a === 'pin' && !b && (method === 'PUT' || method === 'DELETE')) {
+      const body = (await readJson<{ pin?: unknown; current?: unknown } | null>(req, BODY_LIMIT.open)) ?? {};
+      if (method === 'PUT' && !validPin(body.pin)) return json({ error: 'a PIN is 4 digits' }, 400);
+      // The page proves it knows the PIN it changes. A token kept on this machine, such as the owner-token file, resets a forgotten one.
+      if (pin.isSet() && gate.gated) {
+        if (typeof body.current !== 'string') return json({ error: 'type the current PIN to change it, or reset it on the computer that runs the inbox: your-attention pin reset' }, 403);
+        const r = await pin.check(body.current);
+        if (!r.ok) return refused(r);
+      }
+      if (method === 'PUT') await pin.set(body.pin as string);
+      else pin.clear();
+      // The tab that changed the PIN stays unlocked. Every other tab types the new one.
+      const unlock = method === 'PUT' && gate.gated ? await pin.issue(me.token) : undefined;
+      return json({ ...status(), unlocked: true, ...(unlock ? { unlock } : {}) });
+    }
+    return json({ error: 'not found' }, 404);
+  }
+
+  async function routeAuthed(req: Request, url: URL, me: Caller, gate: { gated: boolean; locked: boolean; unlock?: string }): Promise<Response> {
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     const [, a, b, c] = parts;
     const method = req.method;
@@ -198,9 +265,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     }
     if (method === 'GET' && a === 'events') {
       owner();
-      return eventStream((send) => {
+      return eventStream((send, end) => {
         send('beat', { type: 'beat', at: Date.now() });
-        return inbox.subscribePage((ev) => send(ev.type, ev), url.searchParams.get('viewer') ?? undefined);
+        return inbox.subscribePage((ev) => send(ev.type, ev), url.searchParams.get('viewer') ?? undefined, gate.gated ? { unlock: gate.unlock, close: end } : undefined);
       }, heartbeatMs);
     }
     if (method === 'GET' && a === 'poll') {

@@ -182,6 +182,38 @@ describe('the hosted Cloudflare build', () => {
   });
 
   // Last, because they use up the minute's requests.
+  it('sets the PIN as it creates an inbox, and the link alone no longer opens it', async () => {
+    const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:pin-code-0123456789ab', '3', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
+    assert.equal(seed.status, 0, seed.stderr);
+    assert.match(await (await fetch(`${base}/`)).text(), /Never ask me for a PIN/);
+    assert.equal((await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'pin-code-0123456789ab', pin: '12345' }) })).status, 400);
+    const res = await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'pin-code-0123456789ab', pin: '2468' }) });
+    assert.equal(res.status, 201);
+    const made = (await res.json()) as { url: string; login: string; unlock: string };
+    assert.ok(made.unlock, 'the tab that created the inbox opens it unlocked');
+    const token = decodeURIComponent(made.login.split('#token=')[1] ?? '');
+    const as = (extra: Record<string, string> = {}) => ({ headers: { authorization: `Bearer ${token}`, ...extra } });
+    assert.equal((await fetch(`${made.url}v1/state`, as())).status, 423, 'the login link alone opens nothing');
+    assert.equal((await fetch(`${made.url}v1/state`, as({ 'x-your-attention-unlock': made.unlock }))).status, 200);
+    const page = (unlock?: string) => new Promise<number>((resolve) => {
+      const ws = new WebSocket(`${made.url.replace(/^http/, 'ws')}v1/ws?page=1&viewer=pin-page${unlock ? `&unlock=${encodeURIComponent(unlock)}` : ''}`, as());
+      ws.once('open', () => { ws.close(); resolve(101); });
+      ws.once('unexpected-response', (_req, r) => resolve(r.statusCode ?? 0));
+    });
+    assert.equal(await page(), 423, 'the page socket needs the unlock token too');
+    assert.equal(await page(made.unlock), 101);
+    // The PIN hash runs in workerd, with the iteration count it allows.
+    const wrong = await fetch(`${made.url}v1/unlock`, { method: 'POST', ...as(), body: JSON.stringify({ pin: '0000' }) });
+    assert.equal(wrong.status, 401);
+    const right = await fetch(`${made.url}v1/unlock`, { method: 'POST', ...as(), body: JSON.stringify({ pin: '2468' }) });
+    assert.equal(right.status, 200);
+    const skipped = (await (await fetch(`${base}/new`, { method: 'POST', body: JSON.stringify({ invite: 'pin-code-0123456789ab', neverAsk: true }) })).json()) as { url: string; login: string; unlock?: string };
+    assert.equal(skipped.unlock, undefined);
+    const skippedToken = decodeURIComponent(skipped.login.split('#token=')[1] ?? '');
+    const pin = (await (await fetch(`${skipped.url}v1/pin`, { headers: { authorization: `Bearer ${skippedToken}` } })).json()) as { set: boolean; neverAsk: boolean };
+    assert.deepEqual([pin.set, pin.neverAsk], [false, true], '"never ask" is stored in the inbox');
+  });
+
   it('limits signed-in calls per inbox, and strangers cannot use up the owner\'s budget', async () => {
     const seed = spawnSync(WRANGLER, ['kv', 'key', 'put', 'invite:second-code-0123456789', '1', '--binding', 'INVITES', '--local', '--persist-to', persist], { cwd: ROOT, env, encoding: 'utf8', shell: process.platform === 'win32' });
     assert.equal(seed.status, 0, seed.stderr);
