@@ -25,8 +25,10 @@ describe('your-attention open on a paired machine', () => {
     owner = fs.readFileSync(path.join(inboxEnv.YOUR_ATTENTION_HOME, 'owner-token'), 'utf8').trim();
     agent = fs.readFileSync(path.join(inboxEnv.YOUR_ATTENTION_HOME, 'agent-token'), 'utf8').trim();
   });
-  after(() => {
+  after(async () => {
     serve.kill();
+    // The inbox must let go of its files before the folder goes, or Windows refuses to delete them.
+    await until(async () => (await fetch(`${url}/v1/info`).then(() => false, () => true)) || undefined);
     fs.rmSync(inboxHome, { recursive: true, force: true });
   });
 
