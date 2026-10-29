@@ -391,6 +391,25 @@ test('skip for now walks down the queue in its order, and wraps around at the en
   }
 });
 
+test('an answer opens the card after the one you answered, not the card you skipped', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    for (const n of ['One', 'Two', 'Three']) await own.agent.post({ id: `ans-${n}`, agent: `s-ans-${n}`, title: `Card ${n}`, priority: 'now', options: [{ id: 'y', label: 'Yes' }] });
+    await own.open(page);
+    const queue = await page.locator('nav.queue button.q .t').allTextContents();
+    const titles = queue.map((t) => /Card \w+/.exec(t)?.[0]).filter((t): t is string => !!t);
+    expect(titles).toHaveLength(3);
+    const focused = () => page.locator('nav.queue button.q.focus .t');
+    await page.locator('nav.queue button.q', { hasText: titles[0] }).click();
+    await page.getByRole('button', { name: 'Skip for now' }).click();
+    await expect(focused()).toContainText(titles[1]!);
+    await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+    await expect(focused()).toContainText(titles[2]!);
+  } finally {
+    await own.close();
+  }
+});
+
 test('the queue headers use the text color, and the cards you sent are dimmer than the ones that wait', async ({ page }) => {
   await inbox.agent.post({ id: 'waits-dim', agent: 's-dim', title: 'Still waits', priority: 'now' });
   await inbox.agent.post({ id: 'sent-dim', agent: 's-dim', title: 'Already sent', priority: 'now' });

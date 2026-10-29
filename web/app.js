@@ -256,12 +256,22 @@ export function App() {
     // On a phone the card sits above the queue, so the page scrolls up to the card that opened.
     if (id && window.matchMedia('(max-width: 760px)').matches) requestAnimationFrame(() => document.querySelector('.focus-card')?.scrollIntoView({ block: 'start' }));
   };
-  // Skip opens the card after this one, in the order the queue shows, and wraps around at the end.
-  const next = () => {
-    pinnedRef.current = null;
-    const i = order.findIndex((c) => c.id === (current && current.id));
-    const after = i < 0 ? order : [...order.slice(i + 1), ...order.slice(0, i)];
-    go((after[0] || {}).id || null);
+  // The card after this one, in the order the queue shows, wrapping around at the end.
+  const after = (id) => {
+    const i = order.findIndex((c) => c.id === id);
+    const rest = i < 0 ? order : [...order.slice(i + 1), ...order.slice(0, i)];
+    return (rest[0] || {}).id || null;
+  };
+  // Skip opens the next card.
+  const next = () => { pinnedRef.current = null; go(after(current && current.id)); };
+  // An answer shows its receipt for a moment, then opens the card after the answered one, so a card you skipped stays skipped.
+  const answered = (id) => {
+    const then = after(id);
+    setTimeout(() => {
+      if (focusRef.current !== id) return;
+      pinnedRef.current = null;
+      if (then && then !== id) go(then); else setFocus(null);
+    }, 700);
   };
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
 
@@ -272,7 +282,7 @@ export function App() {
     const values = answerValues(c, picked);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version });
     store.del(`draft:${c.id}:${c.version}`);
-    setTimeout(() => { if (pinnedRef.current === c.id) pinnedRef.current = null; setFocus((f) => (f === c.id || f === null ? null : f)); }, 700);
+    answered(c.id);
   }
 
   const item = (c, dim) => {
@@ -353,7 +363,7 @@ export function App() {
         : current.html !== undefined
         ? h(HtmlCard, { key: current.id, card: current, onSkip: next, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
         : current.kind === 'secret'
-        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: next, onSent: () => setTimeout(() => { pinnedRef.current = null; setFocus(null); }, 700) })
+        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: next, onSent: () => answered(current.id) })
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current), onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
