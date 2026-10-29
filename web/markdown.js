@@ -61,6 +61,8 @@ export function renderMarkdown(h, src, opts = {}) {
   const blocks = [];
   let i = 0;
   const key = () => `b${blocks.length}`;
+  // A table starts with a row of cells and a row of dashes. It can follow a line of text with no blank line between.
+  const tableAt = (n) => /^\|.*\|\s*$/.test(lines[n] || '') && /^\|[\s:|-]+\|\s*$/.test(lines[n + 1] || '');
   while (i < lines.length) {
     const line = lines[i];
     if (/^```/.test(line)) {
@@ -81,7 +83,7 @@ export function renderMarkdown(h, src, opts = {}) {
       const quote = [];
       for (; i < lines.length && /^>\s?/.test(lines[i]); i++) quote.push(lines[i].replace(/^>\s?/, ''));
       blocks.push(h('blockquote', { key: key() }, ins(quote.join(' '), key())));
-    } else if (/^\|.*\|\s*$/.test(line) && /^\|[\s:|-]+\|\s*$/.test(lines[i + 1] || '')) {
+    } else if (tableAt(i)) {
       const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
       const head = cells(line);
       const rows = [];
@@ -93,7 +95,7 @@ export function renderMarkdown(h, src, opts = {}) {
       i++;
     } else {
       const para = [];
-      for (; i < lines.length && lines[i].trim() && !/^(```|#{1,6}\s|>|\s*([-*+]|\d+\.)\s)/.test(lines[i]); i++) para.push(lines[i]);
+      for (; i < lines.length && lines[i].trim() && !/^(```|#{1,6}\s|>|\s*([-*+]|\d+\.)\s)/.test(lines[i]) && !tableAt(i); i++) para.push(lines[i]);
       blocks.push(h('p', { key: key() }, ins(para.join(opts.breaks ? '\n' : ' '), key())));
     }
   }

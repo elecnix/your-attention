@@ -20,6 +20,13 @@ const texts = (src: string, type: string): string[] => {
 };
 
 describe('emphasis with underscores, as CommonMark reads it', () => {
+  it('starts a table right after a line of text, with no blank line between them', () => {
+    const src = '**What it does today**\n| Step | Tool |\n|---|---|\n| Find | lexicon |';
+    assert.deepEqual(texts(src, 'p'), ['What it does today']);
+    assert.deepEqual(texts(src, 'th'), ['Step', 'Tool']);
+    assert.deepEqual(texts(src, 'td'), ['Find', 'lexicon']);
+  });
+
   it('leaves underscores inside a word alone', () => {
     assert.deepEqual(texts('The switch key in the MY_SERVICE_API_KEY environment variable', 'em'), []);
     assert.deepEqual(texts('snake_case and foo_bar_baz', 'em'), []);
