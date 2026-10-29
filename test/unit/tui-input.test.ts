@@ -49,4 +49,9 @@ describe('input decoding', () => {
     const ev = all('é👍');
     assert.deepEqual(ev.map((e) => e.type === 'key' && e.text), ['é', '👍']);
   });
+
+  it('drops a key release and a code point past Unicode, instead of reading them as presses or throwing', () => {
+    assert.deepEqual(keys('\x1b[1;1:3A', '\x1b[3;1:3~', '\x1b[97;1:3u', 'x'), ['x']);
+    assert.deepEqual(keys('\x1b[1114112u', '\x1b[27;5;1114112~'), ['unknown', 'C-unknown']);
+  });
 });

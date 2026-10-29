@@ -26,7 +26,11 @@ export function ownerConfig(env: NodeJS.ProcessEnv = process.env, home = homeDir
   }
   const server = read('server.json');
   const owner = read('owner-token');
-  if (server && owner) return { url: (JSON.parse(server) as { url: string }).url.replace(/\/$/, ''), token: owner, source: path.join(home, 'owner-token') };
+  if (server && owner) {
+    try {
+      return { url: (JSON.parse(server) as { url: string }).url.replace(/\/$/, ''), token: owner, source: path.join(home, 'owner-token') };
+    } catch { /* a server.json cut short: the inbox is not running */ }
+  }
   return 'No inbox found. Start one with `your-attention start`, pair this machine as the owner with `your-attention pair <url> --role owner`, or set YOUR_ATTENTION_URL and YOUR_ATTENTION_TOKEN.';
 }
 
@@ -108,7 +112,7 @@ export class InboxApi {
     const overStream = async () => {
       sse = new AbortController();
       try {
-        const res = await fetch(`${this.url}/v1/events?viewer=${this.viewer}${this.unlock ? `&unlock=${encodeURIComponent(this.unlock)}` : ''}`, { headers: this.headers(false), signal: sse.signal });
+        const res = await fetch(`${this.url}/v1/events?viewer=${this.viewer}`, { headers: this.headers(false), signal: sse.signal });
         if (!res.ok || !res.body) throw new Error(String(res.status));
         onEvent('change');
         const reader = res.body.getReader();
@@ -132,6 +136,7 @@ export class InboxApi {
     };
     const overSocket = () => {
       let opened = false;
+      // The inbox reads a socket's unlock token from its address only, as for the page.
       const u = `${this.url.replace(/^http/, 'ws')}/v1/ws?page=1&viewer=${this.viewer}${this.unlock ? `&unlock=${encodeURIComponent(this.unlock)}` : ''}`;
       ws = new WebSocket(u, { headers: this.headers(false) });
       ws.on('open', () => {

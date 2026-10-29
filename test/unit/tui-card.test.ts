@@ -2,7 +2,9 @@
 // the same card and the same clicks. The expected values come from the page's own browser tests.
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
+import { describe as describeAnswer } from '../../web/answers.js';
 import { buildQueue, type InboxState } from '../../web/queue.js';
+import { editKey } from '../../src/tui/edit.ts';
 import type { Card } from '../../src/core/types.ts';
 import { loadParser } from '../../src/tui/body.ts';
 import { CardView, type CardViewHost } from '../../src/tui/cardview.ts';
@@ -159,5 +161,19 @@ describe('Markdown in the card pane', () => {
     assert.match(text, /A │ B\n─+┼─+\n1 │ 2/);
     assert.match(text, /Open ❯ the session or `code`\./);
     assert.ok(t.view.stops().includes('session:https://herdr.invalid/v1/tab/w1:t2'));
+  });
+
+  it('keeps a leading blank line on Ctrl+U and Home at the start of a field, and word jumps stop between graphemes', () => {
+    const k = (name: string, mods: Partial<KeyEvent> = {}): KeyEvent => ({ type: 'key', name, ctrl: false, alt: false, shift: false, ...mods });
+    assert.deepEqual(editKey({ value: '\nabc', cursor: 0 }, k('u', { ctrl: true }), { multiline: true, width: 20 }), { value: '\nabc', cursor: 0 });
+    assert.deepEqual(editKey({ value: '\nabc', cursor: 0 }, k('home'), { multiline: true, width: 20 }), { value: '\nabc', cursor: 0 });
+    const v = 'a \u0301b';
+    const left = editKey({ value: v, cursor: v.length }, k('left', { ctrl: true }), { multiline: false, width: 20 })!;
+    assert.equal(left.cursor, 1);
+  });
+
+  it('describes an OptionCards answer with the labels of the picks, as the page summary shows them', () => {
+    const c = card({ id: 'q', title: 'Q', questions: [{ question: 'Runner?', options: [{ label: 'node:test' }] }], body: 'root = Card([f])\nf = Form("f", b, [fc])\nb = Buttons([])\nfc = FormControl("Pick", OptionCards("pick", "single", [OptionCard("a", "Alpha")]))' });
+    assert.equal(describeAnswer(c, { card: 'q', version: 1, values: { pick: 'a' }, comment: '', delivery: 'default', savedAt: 1, deliveredAt: null, readAt: null, forcedAt: null, previous: [] }), 'Pick: Alpha');
   });
 });

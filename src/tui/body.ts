@@ -156,7 +156,7 @@ export class BodyRenderer {
   }
 
   private get width(): number {
-    return this.doc.width - this.indent;
+    return Math.max(4, this.doc.width - this.indent);
   }
 
   private pad(): Span[] {
@@ -223,7 +223,7 @@ export class BodyRenderer {
         codeBlock(doc, str(p['codeString']), this.pad(), this.ctx.theme);
         return;
       case 'Separator':
-        doc.push({ spans: [...this.pad(), { text: g.rule.repeat(this.width), style: s.dim }] });
+        doc.push({ spans: [...this.pad(), { text: g.rule.repeat(Math.max(1, this.width)), style: s.dim }] });
         return;
       case 'Table': {
         const cols = els(p['columns']);
@@ -235,10 +235,10 @@ export class BodyRenderer {
         return;
       }
       case 'TagBlock':
-        doc.para(els(p['tags']).flatMap((t, i) => [...(i ? [{ text: ' ' }] : []), { text: `[${str(t.props['text'])}]`, style: s.dim }]), { first: this.pad() });
+        doc.para(els(p['tags']).flatMap((t, i) => [...(i ? [{ text: ' ' }] : []), { text: `[${sanitize(str(t.props['text']))}]`, style: s.dim }]), { first: this.pad() });
         return;
       case 'Tag':
-        doc.para([{ text: `[${str(p['text'])}]`, style: s.dim }], { first: this.pad() });
+        doc.para([{ text: `[${sanitize(str(p['text']))}]`, style: s.dim }], { first: this.pad() });
         return;
       case 'Image':
       case 'ImageBlock':
@@ -551,7 +551,7 @@ export class BodyRenderer {
         if (ev.name === 'escape' && open) { this.ctx.ui.set(openKey, false); return true; }
         if (open && (ev.name === 'up' || ev.name === 'k')) { this.ctx.ui.set(hiKey, Math.max(0, hi() - 1)); return true; }
         if (open && (ev.name === 'down' || ev.name === 'j')) { this.ctx.ui.set(hiKey, Math.min(items.length - 1, hi() + 1)); return true; }
-        if (ev.name === 'left' || ev.name === 'right') {
+        if ((ev.name === 'left' || ev.name === 'right') && items.length) {
           const at = items.findIndex((it) => it.value === current());
           const next = at < 0 ? 0 : (at + (ev.name === 'left' ? -1 : 1) + items.length) % items.length;
           store.set(form, name, items[next]!.value);

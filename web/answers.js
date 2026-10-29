@@ -138,7 +138,8 @@ function fieldLabels(source) {
   const field = (s, label) => {
     if (!s || typeof s.args[0] !== 'string') return;
     const choices = {};
-    for (const it of Array.isArray(s.args[1]) ? s.args[1] : []) {
+    // The items are the list argument: second for most fields, third for OptionCards.
+    for (const it of s.args.find(Array.isArray) ?? []) {
       const item = get(it);
       if (!item) continue;
       const [a0, , a2] = item.args;

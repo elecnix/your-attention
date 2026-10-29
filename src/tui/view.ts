@@ -245,7 +245,7 @@ const HELP: [string, string][] = [
 
 function drawHelp(grid: Grid, m: Model): void {
   const { s: st, g } = m.theme;
-  const w = Math.min(m.width - 4, 64);
+  const w = Math.max(8, Math.min(m.width - 4, 64));
   const h = Math.min(m.height - 2, HELP.length + 4);
   const x0 = Math.floor((m.width - w) / 2);
   const y0 = Math.max(1, Math.floor((m.height - h) / 2));
@@ -263,7 +263,7 @@ function drawHelp(grid: Grid, m: Model): void {
 
 function drawPin(grid: Grid, m: Model): void {
   const { s: st, g } = m.theme;
-  const w = Math.min(m.width - 4, 46);
+  const w = Math.max(8, Math.min(m.width - 4, 46));
   const x0 = Math.floor((m.width - w) / 2);
   const y0 = Math.max(1, Math.floor(m.height / 2) - 3);
   box(grid, x0, y0, w, 6, g.focusBox, st.focus);

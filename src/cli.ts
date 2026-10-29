@@ -256,7 +256,7 @@ switch (command) {
   }
   case 'tui': {
     const { values } = parseArgs({ args: rest, options: { mono: { type: 'boolean', default: false }, ascii: { type: 'boolean', default: false } } });
-    if (!process.stdin.isTTY && !process.env['YOUR_ATTENTION_TUI_SIZE']) fail('your-attention tui needs a terminal.');
+    if ((!process.stdin.isTTY || !process.stdout.isTTY) && !process.env['YOUR_ATTENTION_TUI_SIZE']) fail('your-attention tui needs a terminal for its input and its output.');
     const { runTui } = await import('./tui/app.ts');
     process.exit(await runTui({ env: process.env, io: { input: process.stdin, output: process.stdout }, mono: values.mono, ascii: values.ascii }));
   }

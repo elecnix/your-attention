@@ -70,9 +70,11 @@ const prevBoundary = (v: string, i: number): number => {
   return 0;
 };
 const nextBoundary = (v: string, i: number): number => i + (graphemes(v.slice(i))[0]?.length ?? 0);
-const wordLeft = (v: string, i: number): number => { let j = i; while (j > 0 && /\s/.test(v[j - 1]!)) j--; while (j > 0 && !/\s/.test(v[j - 1]!)) j--; return j; };
-const wordRight = (v: string, i: number): number => { let j = i; while (j < v.length && /\s/.test(v[j]!)) j++; while (j < v.length && !/\s/.test(v[j]!)) j++; return j; };
-const lineStart = (v: string, i: number): number => v.lastIndexOf('\n', i - 1) + 1;
+/** The start of the grapheme that holds index i, so a word jump never stops inside one. */
+const snap = (v: string, i: number): number => { let at = 0; for (const g of graphemes(v)) { if (at + g.length > i) return at; at += g.length; } return v.length; };
+const wordLeft = (v: string, i: number): number => { let j = i; while (j > 0 && /\s/.test(v[j - 1]!)) j--; while (j > 0 && !/\s/.test(v[j - 1]!)) j--; return snap(v, j); };
+const wordRight = (v: string, i: number): number => { let j = i; while (j < v.length && /\s/.test(v[j]!)) j++; while (j < v.length && !/\s/.test(v[j]!)) j++; return j < v.length ? snap(v, j) : j; };
+const lineStart = (v: string, i: number): number => (i <= 0 ? 0 : v.lastIndexOf('\n', i - 1) + 1);
 const lineEnd = (v: string, i: number): number => { const e = v.indexOf('\n', i); return e < 0 ? v.length : e; };
 
 /**

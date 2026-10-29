@@ -134,6 +134,7 @@ export class Vt {
       let col = 0;
       let len = 0;
       for (; col < chars.length && len < at; col++) len += chars[col]!.length;
+      while (col < chars.length && chars[col] === '') col++;
       return { x: col, y };
     }
     return undefined;

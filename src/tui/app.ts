@@ -74,8 +74,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   const open = (url: string) => {
     if (remote) { status(`Open this address: ${url}`, 'info', 10_000); return; }
     const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
-    execFile(opener, [url], () => {});
-    status(`Opened ${url}`);
+    execFile(opener, [url], (err) => status(err ? `Could not open ${url}: ${err.message}` : `Opened ${url}`, err ? 'warn' : 'info'));
   };
 
   const host: CardViewHost = {
@@ -124,8 +123,14 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       else {
         const value = String(view.store.get('secret', 'value') ?? '');
         if (!value) { view.notice = { text: 'Type the value first, or press Decline.', style: 'warn' }; schedule(); return; }
-        const { seal } = await import('../../web/sealed.js');
-        body = { values: { sealed: await seal(c.secret.publicKey, value) }, comment, version: c.version };
+        try {
+          const { seal } = await import('../../web/sealed.js');
+          body = { values: { sealed: await seal(c.secret.publicKey, value) }, comment, version: c.version };
+        } catch (e) {
+          view.notice = { text: `The value could not be sealed: ${(e as Error).message}`, style: 'warn' };
+          schedule();
+          return;
+        }
       }
     } else if (c.broadcast && !c.closed) {
       const picked = (view.store.get('broadcast', 'agents') ?? {}) as Record<string, boolean>;
@@ -196,7 +201,11 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const sk = `${current.id}:${current.replies.length}`;
     if (current.replies.some((r) => !r.seenAt) && seenKey !== sk) {
       seenKey = sk;
-      setTimeout(() => { if (m.current?.id === current.id) api.post(`/v1/cards/${encodeURIComponent(current.id)}/seen`).catch(() => {}); }, 1500);
+      setTimeout(() => {
+        // A glance shorter than the delay does not count, and the next visit starts the delay again.
+        if (m.current?.id !== current.id) { if (seenKey === sk) seenKey = null; return; }
+        api.post(`/v1/cards/${encodeURIComponent(current.id)}/seen`).catch(() => {});
+      }, 1500);
     }
   }
 
@@ -455,7 +464,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   term.start();
   mark('start', { pid: process.pid });
   schedule();
-  void loadParser().then(() => { mark('parser-ready'); schedule(); });
+  void loadParser().then(() => { mark('parser-ready'); schedule(); }, (e: Error) => status(`The card forms did not load: ${e.message}`, 'warn', 60_000));
   await refresh();
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   stopLive = api.live((type) => {

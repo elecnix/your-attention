@@ -50,6 +50,7 @@ function codeKey(code: number, m: { ctrl: boolean; alt: boolean; shift: boolean 
   if (code === 27) return key('escape', m);
   if (code === 127 || code === 8) return key('backspace', m);
   if (code === 32) return key('space', m, ' ');
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) return key('unknown', m);
   let ch = String.fromCodePoint(code);
   if (m.shift && /^[a-z]$/.test(ch)) ch = ch.toUpperCase();
   return key(ch, m, ch);
@@ -170,6 +171,8 @@ export class Decoder {
     if (prefix === '?' && final === 'u') return { type: 'reply', kind: 'kitty', value: params };
     if (prefix === '?' && final === 'c') return { type: 'reply', kind: 'attributes', value: params };
     if (prefix) return undefined;
+    // Kitty reports a key's release as event type 3, after a colon in the modifiers. The client reads presses only.
+    if (/;\d+:3(;|$)/.test(params)) return undefined;
     if (final === 'I' && !params) return { type: 'focus', on: true };
     if (final === 'O' && !params) return { type: 'focus', on: false };
     if (final === 'Z') return key('tab', { shift: true });
@@ -181,8 +184,6 @@ export class Decoder {
       return name ? key(name, mods(n[1])) : undefined;
     }
     if (final === 'u') {
-      // Kitty reports a key's release as event type 3, after a colon. The client only reads presses.
-      if (/^\d+(:\d+)*;\d+:3/.test(params)) return undefined;
       return codeKey(n[0] ?? 0, mods(n[1]));
     }
     const name = LETTER[final];

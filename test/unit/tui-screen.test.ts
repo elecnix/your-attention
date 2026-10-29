@@ -71,4 +71,10 @@ describe('the cell grid', () => {
     assert.equal(vt.cell(5, 0)?.link, null);
     assert.doesNotMatch(encodeFrame(null, g, { ...caps(3), hyperlinks: false }), /\x1b\]8/);
   });
+
+  it('finds text after a wide character at its own column, in the test emulator', () => {
+    const vt = new Vt(10, 1);
+    vt.write('日b');
+    assert.deepEqual(vt.find('b'), { x: 2, y: 0 });
+  });
 });
