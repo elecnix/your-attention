@@ -218,7 +218,7 @@ your-attention tui --mono       # no colors
 your-attention tui --ascii      # ASCII symbols and borders, for a terminal without Unicode
 ```
 
-Like the other commands, the client reads `YOUR_ATTENTION_URL` and `YOUR_ATTENTION_TOKEN` first. Without them, it uses a pairing made with `your-attention pair <url> --role owner`, then the inbox this machine runs, with its `owner-token` file.
+Like the other commands, the client reads `YOUR_ATTENTION_URL` and `YOUR_ATTENTION_TOKEN` first. Without them, it uses a pairing made with `your-attention pair <url> --role owner`, then the inbox this machine runs, with its `owner-token` file. For an inbox with a PIN, the client prompts for the PIN when the token needs it, as a sign-in link's token does. The `owner-token` file and an owner pairing open the inbox without it.
 
 | Key | In the list | In the card |
 | -- | -- | -- |
