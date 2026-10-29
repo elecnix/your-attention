@@ -332,12 +332,10 @@ export function CardView({ draftKey, response, fallback, onAction }) {
     onStateUpdate: (s) => { stateRef.current = s; store.set(draftKey, s); },
     onAction: (ev) => actionRef.current({ ...ev, formState: stateRef.current || ev.formState }),
   }), [draftKey]);
-  if (broken) {
-    return h(React.Fragment, null,
-      h('div', { className: 'note warn' }, 'Part of this card did not draw, because its body has an error. Here is the source the agent sent.'),
-      h('div', { className: 'body-source' }, h(Renderer, { response: fallback, library, initialState, ...handlers })));
-  }
-  return h(Renderer, { response, library, initialState, onParseResult, ...handlers });
+  // One Renderer in one place draws both, so a swap keeps what the person typed, as a revision does.
+  return h(React.Fragment, null,
+    broken && h('div', { className: 'note warn' }, 'Part of this card did not draw, because its body has an error. Here is the source the agent sent.'),
+    h('div', { className: broken ? 'body-source' : 'card-body' }, h(Renderer, { response: broken ? fallback : response, library, initialState, onParseResult, ...handlers })));
 }
 
 // A card the agent closed while you looked at it: it collapses to its outcome, and opens again on demand.

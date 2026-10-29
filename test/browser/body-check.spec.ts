@@ -48,9 +48,12 @@ test('a stored broken body that the agent fixes draws as a card again', async ({
   await page.locator('.q', { hasText: 'Fixed later' }).click();
   const card = page.locator('.focus-card');
   await expect(card.locator('.note.warn')).toContainText('did not draw');
+  await card.getByPlaceholder('Anything to add?').fill('Typed before the fix.');
   await inbox.agent.post({ id: 'fixed-later', agent: 's-fixed', title: 'Fixed later', priority: 'now', body: 'root = Card([a, b])\na = TextContent("x")\nb = TextContent("The fixed body.")' });
   await expect(card).toContainText('The fixed body.');
   await expect(card.locator('.note.warn')).toHaveCount(0);
+  // What the person typed stays in the comment box when the card draws again.
+  await expect(card.getByPlaceholder('Anything to add?')).toHaveValue('Typed before the fix.');
 });
 
 test('the card a card follows shows its text as Markdown, with its table and code', async ({ page }) => {
