@@ -155,7 +155,7 @@ the page cannot draw all of this body:
 - `f2` is used but never defined.
 ```
 
-`scripts/openui-library.ts` writes the component list from the page itself, and a browser test fails when the two differ. A card stored before the check, whose body the page can't draw whole, shows a warning, the body's source with its lines wrapped, and the comment box with **Send answer**.
+`scripts/openui-library.ts` writes the component list from the page itself, and a browser test fails when the two differ. Some cards stored before the check have a body the page can't draw whole. For such a card, `GET /v1/state` adds `bodyFallback: {body, faults}`, which the inbox computes and never stores. Its `body` starts with the statements before the first broken one, unchanged. A code block of the source from the broken statement on comes last. The page draws it below a warning, with the source lines wrapped and the comment box with **Send answer** below. A revision with a body that draws whole drops `bodyFallback`.
 
 The fold under a card that follows another one shows the earlier card's text as Markdown, as the card itself does.
 

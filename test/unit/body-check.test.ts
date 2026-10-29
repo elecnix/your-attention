@@ -1,7 +1,7 @@
 // The inbox reads a card body with the page's own parser and component list, and refuses a body the page would draw only in part.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { bodyErrors } from '../../src/adapters/openui-body.ts';
+import { bodyErrors, fallbackBody } from '../../src/adapters/openui-body.ts';
 import { Inbox, InboxError, type Caller } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 
@@ -51,5 +51,48 @@ describe('card body check', () => {
     inbox.postCard(agent, { id: 'c2', agent: 's1', title: 'Fine?', body: GOOD });
     assert.throws(() => inbox.patchCard(agent, 'c2', [{ old: 'Form("f1", none, [TextContent("', new: 'Form(\\"f1\\", none, [TextContent(\\"' }]), (e: unknown) => e instanceof InboxError && e.status === 400);
     assert.equal(inbox.getCard('c2').body, GOOD);
+  });
+});
+
+describe('fallback for a stored broken body', () => {
+  // As an agent wrote it: the quotes escaped from the fourth statement on.
+  const broken = [
+    'root = Card([sum, tl, f1, h2])',
+    'none = Buttons([])',
+    'sum = TextContent("**Summary.** Staging is green again.")',
+    'tl = TextContent("| Time | What |\\n|---|---|\\n| 14:41 | merged |")',
+    'f1 = Form(\\"a1\\", none, [FormControl(\\"Fix 1\\", Input(\\"c1\\", \\"Optional\\"))])',
+    'h2 = TextContent(\\"**2. The IAM check.**\\")',
+  ].join('\n');
+
+  it('draws every statement before the broken one, and shows the source from it on', () => {
+    const f = fallbackBody(broken);
+    assert.ok(f);
+    assert.deepEqual(bodyErrors(f.body), []);
+    assert.match(f.body, /^sum = TextContent\("\*\*Summary/m);
+    assert.match(f.body, /^tl = /m);
+    assert.match(f.body, /yaSource = CodeBlock\("text", "f1 = Form/);
+    assert.doesNotMatch(f.body, /yaSource = CodeBlock\("text", "root/);
+    assert.match(f.faults.join('\n'), /`f1` \(line 5\)/);
+  });
+
+  it('shows the whole source when the root statement itself is broken, and nothing for a body that draws whole', () => {
+    const f = fallbackBody('root = Card([a])\na = TextContent(\\"x\\")'.replace('root = Card([a])', 'root = Card([a, \\"b])'));
+    assert.ok(f);
+    assert.deepEqual(bodyErrors(f.body), []);
+    assert.match(f.body, /yaSource = CodeBlock\("text", "root = Card/);
+    assert.equal(fallbackBody('root = Card([a])\na = TextContent("x")'), undefined);
+  });
+
+  it('hands the page the fallback with each stored card whose body does not draw whole', () => {
+    const inbox = new Inbox(new MemoryStorage(), () => 1000, undefined, { checkBody: bodyErrors, fallbackBody });
+    inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Old?', body: GOOD });
+    inbox['store'].put('cards', 'old', { ...inbox.getCard('old'), body: broken });
+    inbox.postCard(agent, { id: 'fine', agent: 's1', title: 'Fine?', body: GOOD });
+    const cards = inbox.state().cards;
+    assert.match(cards.find((c) => c.id === 'old')?.bodyFallback?.body ?? '', /yaSource/);
+    assert.equal(cards.find((c) => c.id === 'fine')?.bodyFallback, undefined);
+    // The stored card keeps the body the agent sent.
+    assert.equal(inbox.getCard('old').body, broken);
   });
 });

@@ -3,7 +3,7 @@
 // object rebuilds each connection from the socket's attachment when it wakes.
 import { COOKIE, createHandler } from '../core/http.ts';
 import { checkMermaid } from '../adapters/mermaid.ts';
-import { bodyErrors } from '../adapters/openui-body.ts';
+import { bodyErrors, fallbackBody } from '../adapters/openui-body.ts';
 import { Inbox } from '../core/inbox.ts';
 import { WORKERS_PIN_ITERATIONS, validPin } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
@@ -92,6 +92,7 @@ export class InboxObject {
       pinIterations: WORKERS_PIN_ITERATIONS,
       checkDiagram: checkMermaid,
       checkBody: bodyErrors,
+      fallbackBody,
       // The hosted service always counts usage. A single-inbox deployment sends nothing.
       usageAlwaysOn: env.MODE === 'hosted',
     });

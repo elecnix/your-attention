@@ -178,6 +178,9 @@ export interface Card {
   widgets?: { name: string; version: number }[];
   /** The responses of the widgets the body placed, with the values each was placed with. */
   responses?: { widget: string; version: number; template: string; values: Record<string, unknown> }[];
+  /** Set by the inbox in the page's state, never stored: what the page draws for a body stored before the inbox checked
+   * bodies, when the page can't draw it whole. `body` draws the statements that parse, then the source from the broken one on. */
+  bodyFallback?: { body: string; faults: string[] };
   priority: Priority;
   /** A state label the agent sets, such as "waiting on CI". */
   status?: string;

@@ -31,7 +31,10 @@ test('a stored body the page cannot draw whole shows its source, and the card st
   await page.locator('.q', { hasText: 'Stored broken body' }).click();
   const card = page.locator('.focus-card');
   await expect(card.locator('.note.warn')).toContainText('did not draw');
-  await expect(card).toContainText('The second fix.');
+  // What parses draws as the card, and the source starts at the broken statement.
+  await expect(card.locator('.openui-card').first()).toContainText('Two fixes.');
+  await expect(card.locator('.body-source .openui-code-block-syntax-highlighter')).toContainText('The second fix.');
+  await expect(card.locator('.body-source .openui-code-block-syntax-highlighter')).not.toContainText('Two fixes.');
   // The source wraps, so the person reads every line without scrolling sideways.
   const pre = card.locator('.body-source .openui-code-block-syntax-highlighter');
   expect(await pre.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);

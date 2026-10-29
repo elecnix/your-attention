@@ -309,20 +309,9 @@ export function describe(card, a) {
   return [...picks, a.comment].filter(Boolean).join('\n') || 'Empty answer';
 }
 
-/** The card with its body shown as source, for a body the page cannot draw whole. */
-export function sourceCard(c) {
-  return cardSource({ ...c, body: ['root = Card([yaSource])', `yaSource = CodeBlock("text", ${J(c.body)})`].join('\n') });
-}
-
 // One rendered card. Its initial state is read once, so later renders keep what you typed.
-// The inbox refuses a body the page cannot draw whole, but one it stored before it checked bodies still shows, as `fallback`.
-export function CardView({ draftKey, response, fallback, onAction }) {
-  // The source the parser found broken. A revision brings new source, which draws as a card again.
-  const [brokenSource, setBrokenSource] = React.useState(null);
-  const broken = brokenSource === response;
-  const onParseResult = React.useCallback((r) => {
-    if (fallback && r && (r.meta.incomplete || r.meta.unresolved.length)) setBrokenSource(response);
-  }, [fallback, response]);
+// A body stored before the inbox checked bodies may not draw whole. The inbox then sends what the page can draw, and `broken` is set.
+export function CardView({ draftKey, response, broken, onAction }) {
   const [initialState] = React.useState(() => store.get(draftKey) || undefined);
   const actionRef = React.useRef(onAction);
   actionRef.current = onAction;
@@ -334,8 +323,8 @@ export function CardView({ draftKey, response, fallback, onAction }) {
   }), [draftKey]);
   // One Renderer in one place draws both, so a swap keeps what the person typed, as a revision does.
   return h(React.Fragment, null,
-    broken && h('div', { className: 'note warn' }, 'Part of this card did not draw, because its body has an error. Here is the source the agent sent.'),
-    h('div', { className: broken ? 'body-source' : 'card-body' }, h(Renderer, { response: broken ? fallback : response, library, initialState, onParseResult, ...handlers })));
+    broken && h('div', { className: 'note warn' }, 'Part of this card did not draw, because its body has an error. The source from that error on is at the end of the card.'),
+    h('div', { className: broken ? 'body-source' : 'card-body' }, h(Renderer, { response, library, initialState, ...handlers })));
 }
 
 // A card the agent closed while you looked at it: it collapses to its outcome, and opens again on demand.

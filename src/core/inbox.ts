@@ -40,6 +40,8 @@ export interface InboxOptions {
   checkDiagram?: DiagramCheck | undefined;
   /** Lists what keeps the page from drawing all of a card body. The inbox refuses a body with any. */
   checkBody?: ((body: string) => string[]) | undefined;
+  /** What the page draws for a stored body it can't draw whole, or undefined for one it draws whole. */
+  fallbackBody?: ((body: string) => Card['bodyFallback']) | undefined;
   /** The inbox always counts usage and has no off switch, as on the hosted service. */
   usageAlwaysOn?: boolean;
 }
@@ -118,6 +120,7 @@ export class Inbox {
   private readonly readsPerDay: number | undefined;
   private readonly checkDiagram: DiagramCheck | undefined;
   private readonly checkBody: ((body: string) => string[]) | undefined;
+  private readonly fallbackBody: ((body: string) => Card['bodyFallback']) | undefined;
   private readonly now: () => number;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
@@ -147,6 +150,7 @@ export class Inbox {
     this.readsPerDay = opts.attachmentReadsPerDay;
     this.checkDiagram = opts.checkDiagram;
     this.checkBody = opts.checkBody;
+    this.fallbackBody = opts.fallbackBody;
     this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
@@ -1319,7 +1323,9 @@ export class Inbox {
     cards: Card[]; answers: Record<string, Answer>; presence: Record<string, Presence>; states: Record<string, CardState>;
     priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance;
   } {
-    const cards = this.store.list<Card>('cards').filter((c) => !c.archivedAt).map(publicCard).sort((a, b) => a.createdAt - b.createdAt);
+    const cards = this.store.list<Card>('cards').filter((c) => !c.archivedAt).map(publicCard).sort((a, b) => a.createdAt - b.createdAt)
+      // A body stored before the inbox checked bodies may not draw whole, so the page gets what it can draw.
+      .map((c) => { const f = c.body !== undefined ? this.fallbackBody?.(c.body) : undefined; return f ? { ...c, bodyFallback: f } : c; });
     const shown = new Set(cards.map((c) => c.id));
     const answers = Object.fromEntries(this.store.list<Answer>('answers').filter((a) => shown.has(a.card)).map((a) => [a.card, a]));
     const presence = Object.fromEntries(this.store.list<Presence>('presence').map((p) => [p.agent, p]));

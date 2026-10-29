@@ -2,7 +2,7 @@
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
-import { Attachments, BroadcastForm, agentName, CardAge, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, cardSource, sourceCard, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, agentName, CardAge, CardView, Changes, ClosedCard, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, cardSource, describe, formValues, presenceOf } from './components.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -399,7 +399,7 @@ export function App() {
         ? h(HtmlCard, { key: current.id, card: current, onSkip: next, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(next) })
         : current.kind === 'secret'
         ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: next, onSent: () => answered(current.id) })
-        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current), fallback: current.body ? sourceCard(current) : undefined, onAction: (ev) => onAction(current, ev) }),
+        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, response: cardSource(current.bodyFallback ? { ...current, body: current.bodyFallback.body } : current), broken: !!current.bodyFallback, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
         h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),

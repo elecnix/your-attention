@@ -5,11 +5,11 @@ import { createParser, type Parser } from '@openuidev/lang-core';
 import { LIBRARY } from './openui-library.ts';
 
 let parser: Parser | undefined;
+const read = (body: string) => (parser ??= createParser(LIBRARY as Parameters<typeof createParser>[0], 'root')).parse(body);
 
 /** What keeps the page from drawing all of a body, one sentence each. Empty when the page draws it whole. */
 export function bodyErrors(body: string): string[] {
-  parser ??= createParser(LIBRARY as Parameters<typeof createParser>[0], 'root');
-  const { root, meta } = parser.parse(body);
+  const { root, meta } = read(body);
   const starts = statementStarts(body);
   // Any line that reads as a root statement counts, even one an unclosed string hides, so that error names the string.
   if (!/^[ \t]*root[ \t]*=/m.test(body)) return ['the body has no `root = ...` statement. Put Markdown in text, and OpenUI Lang in body.'];
@@ -25,9 +25,42 @@ export function bodyErrors(body: string): string[] {
   return errors;
 }
 
+/** What the page draws for a body it can't draw whole, which an inbox stored before it checked bodies. */
+export interface BodyFallback {
+  /** OpenUI Lang: the statements before the first broken one as the agent wrote them, then the source from it on. */
+  body: string;
+  /** What keeps the page from drawing the agent's body whole, as bodyErrors lists it. */
+  faults: string[];
+}
+
+const fallbacks = new Map<string, BodyFallback | undefined>();
+
+/** The fallback for a body the page can't draw whole, or undefined for one it draws whole. */
+export function fallbackBody(body: string): BodyFallback | undefined {
+  if (fallbacks.has(body)) return fallbacks.get(body);
+  const faults = bodyErrors(body);
+  let out: BodyFallback | undefined;
+  if (faults.length) {
+    const { meta } = read(body);
+    // An unclosed string hides every statement from its own on, so the page draws the ones before it.
+    const cut = meta.incomplete ? (statementStarts(body)[meta.statementCount - 1]?.at ?? 0) : body.length;
+    const kept = body.slice(0, cut).replace(/\n+$/, '');
+    const source = (rest: string) => `yaSource = CodeBlock("text", ${JSON.stringify(rest)})`;
+    // The root keeps the children the kept statements define, then the source, after what did draw.
+    const defined = new Set(statementStarts(kept).map((st) => st.name));
+    const children = (kids: string) => [...kids.split(',').map((k) => k.trim()).filter((k) => defined.has(k)), 'yaSource'].join(', ');
+    const partial = cut < body.length && `${kept.replace(/^([ \t]*root[ \t]*=[ \t]*Card\(\[)([^\]\n]*)\]/m, (_, open: string, kids: string) => `${open}${children(kids)}]`)}\n${source(body.slice(cut))}`;
+    const whole = `root = Card([yaSource])\n${source(body)}`;
+    out = { body: partial && /yaSource\]/.test(partial) && !bodyErrors(partial).length ? partial : whole, faults };
+  }
+  if (fallbacks.size > 500) fallbacks.clear();
+  fallbacks.set(body, out);
+  return out;
+}
+
 /** Each line that starts a statement, in order, as the parser counts them. A line inside a string belongs to the statement before it. */
-function statementStarts(body: string): { name: string; line: number }[] {
-  const starts: { name: string; line: number }[] = [];
+function statementStarts(body: string): { name: string; line: number; at: number }[] {
+  const starts: { name: string; line: number; at: number }[] = [];
   let quote = '';
   let line = 1;
   for (let i = 0; i < body.length; i++) {
@@ -40,7 +73,7 @@ function statementStarts(body: string): { name: string; line: number }[] {
     if (c === '"' || c === "'") { quote = c; continue; }
     if (i === 0 || body[i - 1] === '\n') {
       const m = /^[ \t]*([A-Za-z_]\w*)[ \t]*=/.exec(body.slice(i, i + 200));
-      if (m) starts.push({ name: m[1]!, line });
+      if (m) starts.push({ name: m[1]!, line, at: i });
     }
   }
   return starts;
