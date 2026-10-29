@@ -212,3 +212,23 @@ export function describe(card, a) {
   return [...picks, a.comment].filter(Boolean).join('\n') || 'Empty answer';
 }
 
+// What changed since the version before, line by line.
+const FIELDS = [['title', 'Title'], ['text', 'Text'], ['recommendation', 'Recommendation'], ['body', 'Body'], ['html', 'HTML']];
+function diff(before, after) {
+  const b = String(before ?? '').split('\n');
+  const a = String(after ?? '').split('\n');
+  return { removed: b.filter((l) => l && !a.includes(l)), added: a.filter((l) => l && !b.includes(l)) };
+}
+
+/** Every revision, newest first: for each one, the lines it removed and added in each field. */
+export function changeSteps(card) {
+  const versions = [...(card.history || []), card];
+  const steps = [];
+  for (let i = versions.length - 1; i > 0; i--) {
+    const before = versions[i - 1];
+    const after = versions[i];
+    const fields = FIELDS.map(([k, label]) => ({ label, ...diff(before[k], after[k]) })).filter((f) => f.removed.length || f.added.length);
+    if (fields.length) steps.push({ version: after.version, fields });
+  }
+  return steps;
+}

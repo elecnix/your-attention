@@ -9,3 +9,5 @@ export function answerValues(card: Card, values: Record<string, unknown>): Recor
 export function formValues(formState: unknown): { values: Record<string, unknown>; comment: string };
 /** An answer as a person reads it. */
 export function describe(card: Card, answer: Answer | undefined): string;
+/** Every revision, newest first: for each one, the lines it removed and added in each field. */
+export function changeSteps(card: Card): { version: number; fields: { label: string; removed: string[]; added: string[] }[] }[];

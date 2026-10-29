@@ -4,11 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { discover } from './adapters/mdns.ts';
 import { Client, describeAnswer, loadConfig } from './client.ts';
 import type { Option, Priority } from './core/types.ts';
 import { homeDir, writePrivate } from './node/home.ts';
-import { serve } from './node/server.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
 
@@ -18,6 +16,7 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   start [options for serve]                           run the inbox in the background
   stop                                                stop the inbox, or its service when one is installed
   open [--link]                                       open the inbox page signed in, or print a one-time sign-in link
+  tui [--mono] [--ascii]                              answer cards full screen in this terminal, with the keyboard and mouse
   clear                                               clear the cards you answered or that closed; search still finds them
   reset --yes                                         remove every card, answer and file; tokens and templates stay
   login-url                                           print a sign-in link that works once, like open --link
@@ -124,6 +123,7 @@ switch (command) {
     const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '::' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
     const relayKey = values.relay ? process.env[String(values['relay-key-env'])] ?? fail(`--relay needs the relay key in $${values['relay-key-env']}`) : '';
     const stop = async (): Promise<void> => { await server.close(); process.exit(0); };
+    const { serve } = await import('./node/server.ts');
     const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop(), ...(process.stdin.isTTY && process.stderr.isTTY ? { ask: askYesNo } : {}) });
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
@@ -254,8 +254,15 @@ switch (command) {
     execFile(opener, [link]);
     break;
   }
+  case 'tui': {
+    const { values } = parseArgs({ args: rest, options: { mono: { type: 'boolean', default: false }, ascii: { type: 'boolean', default: false } } });
+    if (!process.stdin.isTTY && !process.env['YOUR_ATTENTION_TUI_SIZE']) fail('your-attention tui needs a terminal.');
+    const { runTui } = await import('./tui/app.ts');
+    process.exit(await runTui({ env: process.env, io: { input: process.stdin, output: process.stdout }, mono: values.mono, ascii: values.ascii }));
+  }
   case 'discover': {
     const { values } = parseArgs({ args: rest, options: { seconds: { type: 'string', default: '3' } } });
+    const { discover } = await import('./adapters/mdns.ts');
     const found = await discover(Number(values.seconds) * 1000);
     if (!found.length) console.log('No inbox found on this network.');
     for (const f of found) console.log(`${f.name}\thttp://${f.addresses.find((a) => !a.includes(':')) ?? f.host}:${f.port}\tid=${f.txt['id'] ?? '?'}`);
