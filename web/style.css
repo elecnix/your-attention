@@ -235,7 +235,7 @@
   .phone { display: inline-flex; color: var(--muted); background: none; border: 0; padding: 0; cursor: pointer; }
   .phone:hover, .phone:focus-visible { color: var(--ink); }
   .muted { color: var(--muted); }
-  .qr-dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); padding: 20px; width: min(380px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
+  .qr-dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); padding: 20px; width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
   .qr-dialog::backdrop { background: rgb(0 0 0 / .45); }
   .qr-dialog h2 { font-size: calc(18px * var(--text-scale)); margin: 0 0 4px; }
   .qr-dialog p { margin: 0 0 8px; }
@@ -244,7 +244,7 @@
   .qr-address { font-family: var(--font-code); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
   .qr-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 12px; }
   .to-queue { display: none; }
-  .qr-dialog code { font-size: .85em; }
+  .qr-dialog code { font-size: .85em; overflow-wrap: anywhere; }
   .qr-dialog .note, .qr-dialog .muted { font-size: calc(13px * var(--text-scale)); }
   /* A phone: the bar scrolls away, the title, the status and the links share the first row, and every control is big enough for a thumb. */
   @media (max-width: 760px) {

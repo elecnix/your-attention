@@ -184,3 +184,20 @@ test('the sign-in page of a laptop inbox says to run your-attention open on that
   await expect(steps).toContainText('phone button');
   await context.close();
 });
+
+test('the dialog fits a full IPv6 address on one line, and never scrolls sideways', async ({ page }) => {
+  const v6 = 'http://[2607:fa49:d342:a100:1c3e:5d2f:9b4a:7e11]:4815';
+  await page.route('**/v1/addresses', (route) => route.fulfill({ json: { addresses: ['http://example-mac.local:4815', v6, 'http://192.168.1.20:4815'] } }));
+  await inbox.open(page);
+  await page.getByRole('button', { name: 'Open this inbox on your phone' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Open this inbox on your phone' });
+  const code = dialog.locator('code', { hasText: '2607:fa49' });
+  await expect(code).toBeVisible();
+  const box = (await code.boundingBox())!;
+  const line = await code.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.6);
+  expect(box.height).toBeLessThan(line * 1.5);
+  const scrolls = () => dialog.evaluate((el) => el.scrollWidth > el.clientWidth || [...el.querySelectorAll('*')].some((c) => c.scrollWidth > c.clientWidth + 1));
+  expect(await scrolls()).toBe(false);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await scrolls()).toBe(false);
+});
