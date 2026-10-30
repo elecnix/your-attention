@@ -72,11 +72,12 @@ export const DEFAULT_PRIORITIES: PriorityLevel[] = [
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
 export const DEFAULT_GUIDANCE = [
+  'On a card, "you" is the person who reads it. Write about yourself in the third person, as "this agent" or the name in `from`, never "I" or "we", so the person always knows who acts.',
   'Write each card so the person can answer it without opening the session.',
   'State the goal, the options you weighed, the evidence, and your recommendation.',
   'Shape the answer options to the question. The person may leave any field empty.',
   'Put each question next to the field that answers it. One question uses options. Several questions use forms in the body, each beside the text or table it is about.',
-  'Explain each option inside it, in its description: what you will do if the person picks it. Never list the options with their explanations in the text.',
+  'Explain each option inside it, in its description: what this agent does if the person picks it, such as "This agent reruns the deploy." Never list the options with their explanations in the text.',
   'Never list questions in the text with the answers at the bottom. Write what you will check yourself as statements, not questions.',
   'The page adds a comment box, Send answer and Skip at the bottom of every card. Add no general comment box or send button of your own.',
   'When a card asks several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
