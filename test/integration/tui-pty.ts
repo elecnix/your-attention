@@ -51,7 +51,11 @@ export function startTui(opts: { url: string; token: string; cols?: number; rows
   child.stdout!.setEncoding('utf8');
   child.stdout!.on('data', (d: string) => vt.write(d));
   child.stderr!.on('data', (d) => { stderr += String(d); });
+  // A write to a client that already quit fails later, as an error on its input. On Windows the client reads that pipe
+  // itself, so the Ctrl+C that stop() sends after a quit would throw from outside the test.
+  child.stdin!.on('error', () => {});
   const exited = new Promise<number | null>((r) => child.once('exit', (code) => r(code)));
+  let stopped: Promise<void> | undefined;
   const t: Tui = {
     vt,
     child,
@@ -61,20 +65,22 @@ export function startTui(opts: { url: string; token: string; cols?: number; rows
     waitFor: (text, ms = 8000) => until(() => vt.find(text), ms).catch(() => { throw new Error(`the screen never showed "${text}":\n${vt.text()}\n${stderr}`); }),
     events: () => (fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { event: string; ms: number }) : []),
     exited,
-    async stop() {
-      const start = t.events().find((e) => e.event === 'start') as { pid?: number } | undefined;
-      if (child.exitCode === null) {
-        child.stdin!.write('\x03');
-        await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
-      }
-      if (start?.pid) { try { process.kill(start.pid, 'SIGTERM'); } catch { /* already gone */ } }
-      child.stdin!.end();
-      child.stdout!.destroy();
-      child.stderr!.destroy();
-      if (child.exitCode === null) child.kill();
-      await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
-      fs.rmSync(path.dirname(trace), { recursive: true, force: true });
-    },
+    // A test stops its own client, and afterEach stops it again in case the test failed first.
+    stop: () => (stopped ??= stop()),
   };
+  async function stop(): Promise<void> {
+    const start = t.events().find((e) => e.event === 'start') as { pid?: number } | undefined;
+    if (child.exitCode === null) {
+      child.stdin!.write('\x03');
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
+    }
+    if (start?.pid) { try { process.kill(start.pid, 'SIGTERM'); } catch { /* already gone */ } }
+    child.stdin!.end();
+    child.stdout!.destroy();
+    child.stderr!.destroy();
+    if (child.exitCode === null) child.kill();
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
+    fs.rmSync(path.dirname(trace), { recursive: true, force: true });
+  }
   return t;
 }
