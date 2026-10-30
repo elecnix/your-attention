@@ -53,7 +53,7 @@ flowchart TB
     ET["extension-token: extension"]
   end
   subgraph INBOX["inbox: laptop server, or hosted Durable Object at /i/inbox-id/"]
-    DB[("SHA-256 of each token, PIN hash, sign-in codes, pairings")]
+    DB[("SHA-256 of each token, SHA-256 of the PIN key, PIN salt, sign-in codes, pairings")]
   end
   subgraph WORKER["hosted Worker"]
     KV[("invite codes, uses left")]
@@ -80,7 +80,9 @@ flowchart TB
   PC -- "system card shows the code" --> PERSON
   PERSON -- "approves on a signed-in page" --> INBOX
   INBOX -- "GET /v1/pair/id: token, once" --> CLIENT
-  BROWSER -- "PIN: POST /v1/unlock" --> INBOX
+  BROWSER -- "PIN key, derived in the tab: POST /v1/unlock" --> INBOX
+  CLIENT -- "PIN key, derived by the CLI or tui: PUT /v1/pin, POST /v1/unlock" --> INBOX
+  INBOX -- "GET /v1/pin: salt, iterations" --> BROWSER
   INBOX -- "unlock token" --> UT
   AT -- "bearer" --> INBOX
   CJ -- "bearer" --> INBOX
@@ -90,6 +92,7 @@ flowchart TB
 - The inbox stores a hash of each token, never the token. Only the machine or tab named in its box holds the secret.
 - An owner token is the only key that signs in a new browser. A browser gets one from a sign-in code, or once from `POST /new`. The page removes `#token=` and `#signin=` from the address bar, so a bookmarked address signs nobody in.
 - An agent token can't make a sign-in code, approve a pairing or read the state. On a machine paired only as an agent, the owner commands, `open`, `tui` and `pin`, say to pair as owner. That pairing goes in `owner.json` and leaves `client.json` to the agents.
+- The PIN never leaves the device that types it. The tab, the CLI and the terminal client derive a key from it with PBKDF2, using the salt from `GET /v1/pin`, and send the key. The inbox stores a SHA-256 hash of that key.
 - A token minted at `serve` or by pairing as owner skips the PIN. When the inbox has a PIN, a browser's owner token needs an unlock token as well, which the tab sends as `x-your-attention-unlock`. An unlock token ends after 12 hours without use.
 - An invite code is the operator's secret. The hosted inbox keeps only its invite id, the first 16 hex digits of the code's SHA-256, for usage counts.
 
