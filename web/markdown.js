@@ -6,6 +6,7 @@
 // finds the same addresses, since the inbox serves a file only when its card names it.
 // A herdr link, https://herdr.invalid/v1/..., is a session link: the page opens it in herdr.
 // With a diagram option, a ```mermaid block becomes what it returns. src/core/diagrams.ts finds the same blocks to check them.
+// A fenced block gets a Copy button, which web/copy.js handles.
 export const MERMAID_FENCE = /^```\s*mermaid(\s|$)/i;
 export const SESSION_LINK = /^https:\/\/herdr\.invalid\/v1\//;
 const URL_TAIL = /[.,;:!?'"*_]+$/;
@@ -30,6 +31,18 @@ function underscoreEmphasis(text, at, match) {
   const before = text[at - 1] || '';
   const after = text[at + match.length] || '';
   return !WORD_CHAR.test(before) && !WORD_CHAR.test(after) && !/^\s|\s$/.test(match.slice(1, -1));
+}
+
+// Lucide's copy and check icons. The stylesheet shows the check while the button says Copied.
+const COPY_ICON = ['M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z', 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'];
+const CHECK_ICON = ['M20 6 9 17l-5-5'];
+const icon = (h, cls, paths) => h('svg', { className: cls, viewBox: '0 0 24 24', 'aria-hidden': 'true' }, paths.map((d) => h('path', { key: d, d })));
+
+/** A block of code with a Copy button at its top right. `preProps` go on the pre, such as a class. */
+export function codeBlock(h, text, key, preProps = null) {
+  return h('div', { key, className: 'code-block' },
+    h('button', { type: 'button', className: 'copy-button', 'aria-label': 'Copy', title: 'Copy' }, icon(h, 'copy-icon', COPY_ICON), icon(h, 'check-icon', CHECK_ICON)),
+    h('pre', preProps, h('code', null, text)));
 }
 
 function inline(h, text, key, opts = {}) {
@@ -93,7 +106,7 @@ export function renderMarkdown(h, src, opts = {}) {
       for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
       i++;
       if (opts.diagram && MERMAID_FENCE.test(line)) blocks.push(opts.diagram(code.join('\n'), key()));
-      else blocks.push(h('pre', { key: key() }, h('code', null, code.join('\n'))));
+      else blocks.push(codeBlock(h, code.join('\n'), key()));
     } else if (/^#{1,6}\s/.test(line)) {
       const level = /^#+/.exec(line)[0].length;
       blocks.push(h(`h${Math.min(level + 2, 6)}`, { key: key() }, ins(line.replace(/^#+\s*/, ''), key())));

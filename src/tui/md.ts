@@ -107,6 +107,12 @@ function block(doc: Doc, b: MdNode, ctx: MdContext, pad: Span[], width: number, 
     return;
   }
   if (b.type === 'diagram') { diagram(doc, String(b.props['source'] ?? ''), pad, ctx.theme); return; }
+  // A fenced block comes with the page's Copy button around it. The terminal draws only its code.
+  if (b.type === 'div' && b.props['className'] === 'code-block') {
+    const pre = b.children.find((c): c is MdNode => typeof c !== 'string' && c.type === 'pre');
+    if (pre) block(doc, pre, ctx, pad, width, base, s, g);
+    return;
+  }
   if (b.type === 'pre') {
     const code = b.children.map((c) => (typeof c === 'string' ? c : c.children.join(''))).join('');
     codeBlock(doc, code, pad, ctx.theme);

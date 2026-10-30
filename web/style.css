@@ -309,3 +309,27 @@
     .qr { margin: 8px 0; }
     .qr svg { width: min(220px, 60vw); }
   }
+
+  /* Code copies with a click: a block through its Copy button at its top right, inline code by a click on it. web/copy.js
+     The button stays dim until the pointer is over the block or the button has focus. OpenUI's own button looks the same. */
+  .code-block { position: relative; }
+  .copy-button, .openui-code-block-wrapper > .openui-code-block-copy-button {
+    position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 4px;
+    min-width: 0; height: auto; padding: 4px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel); color: var(--muted); cursor: pointer; opacity: .45; transition: opacity .15s ease;
+  }
+  .code-block:hover > .copy-button, .copy-button:focus, .copy-button[data-copied],
+  .openui-code-block-wrapper:hover > .openui-code-block-copy-button, .openui-code-block-wrapper > .openui-code-block-copy-button:focus,
+  .openui-code-block-wrapper > .openui-code-block-copy-button[data-copied] { opacity: 1; }
+  .copy-button:focus-visible, .openui-code-block-copy-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .copy-button svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .copy-button .check-icon, .copy-button[data-copied="Copied"] .copy-icon { display: none; }
+  .copy-button[data-copied="Copied"] .check-icon { display: block; }
+  .copy-button[data-copied]::before, .openui-code-block-copy-button[data-copied]::before { content: attr(data-copied); font-size: calc(12px * var(--text-scale)); line-height: 1; padding: 0 2px; }
+  .copy-button[data-copied="Copied"], .openui-code-block-copy-button[data-copied="Copied"] { color: var(--ok); }
+  .copy-button[data-copied="Copy failed"], .openui-code-block-copy-button[data-copied="Copy failed"] { color: var(--bad); }
+  @media (prefers-reduced-motion: reduce) { .copy-button, .openui-code-block-copy-button { transition: none; } }
+  code:not(pre code, a code, .openui-code-block-wrapper code) { cursor: pointer; }
+  .copy-toast { position: fixed; z-index: 30; transform: translate(-50%, calc(-100% - 6px)); padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--panel); font-size: calc(12px * var(--text-scale)); line-height: 1.4; white-space: nowrap; pointer-events: none; }
+  .copy-toast[data-tone="bad"] { background: var(--bad); }
+  .copy-toast[hidden] { display: none; }

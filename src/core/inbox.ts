@@ -83,6 +83,7 @@ export const DEFAULT_GUIDANCE = [
   'The page adds a comment box, Send answer and Skip at the bottom of every card. Add no general comment box or send button of your own.',
   'When a card asks several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
   'When a card is about another agent, link its session so the person can go there in one click: [label](https://herdr.invalid/v1/pane/<pane id>), from `herdr agent list`. Link another card with [[card-id]].',
+  'Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;

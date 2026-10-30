@@ -94,3 +94,24 @@ describe('file links', () => {
     assert.deepEqual(codes('`file:///tmp/a`'), ['file:///tmp/a']);
   });
 });
+
+describe('fenced code', () => {
+  type El = { type: string; props: Record<string, unknown>; children: unknown[] };
+  const el = (type: string, props: Record<string, unknown> | null, ...children: unknown[]): El => ({ type, props: props ?? {}, children: children.flat() });
+
+  it('puts a Copy button beside the block, and keeps the text exactly as written', () => {
+    const block = (renderMarkdown(el, '```sh\nnpm test\n  --watch\n```') as El[])[0]!;
+    assert.equal(block.props['className'], 'code-block');
+    const [button, pre] = block.children as [El, El];
+    assert.equal(button.type, 'button');
+    assert.equal(button.props['type'], 'button');
+    assert.equal(button.props['aria-label'], 'Copy');
+    assert.equal(pre.type, 'pre');
+    assert.deepEqual((pre.children[0] as El).children, ['npm test\n  --watch']);
+  });
+
+  it('draws a Mermaid block with the diagram option, with no Copy button', () => {
+    const blocks = renderMarkdown(el, '```mermaid\nflowchart TD\n  A --> B\n```', { diagram: (source: string) => el('figure', null, source) }) as El[];
+    assert.deepEqual(blocks.map((b) => b.type), ['figure']);
+  });
+});

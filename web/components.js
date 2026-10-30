@@ -3,7 +3,8 @@ import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, notifyOn, store } from './e
 import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
-import { SESSION_LINK, renderInline, renderMarkdown } from './markdown.js';
+import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
+import { installCopy } from './copy.js';
 import { answerValues, cardSource, changeSteps, describe, formValues, optionValue, parseSource, recommendedOptions } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
@@ -11,6 +12,8 @@ import { agentName, presenceOf } from './queue.js';
 export { agentName, answerValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions };
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
+// Code on every card copies with a click, on the page and in each story.
+installCopy();
 
 // CheckWithText(label, check, [content]): a check box, and a label that shows the content when clicked, such as text the
 // person can edit before the agent uses it. Hovering the label previews the text. The label never ticks the box.
@@ -130,7 +133,7 @@ export function Diagram({ source }) {
     return () => { live = false; };
   }, [source, dark]);
   // Should drawing fail all the same, such as when the renderer does not load, the person reads the source.
-  if (drawn.failed) return h('pre', { className: 'diagram-source', title: `The diagram did not draw: ${drawn.failed}` }, h('code', null, source));
+  if (drawn.failed) return codeBlock(h, source, undefined, { className: 'diagram-source', title: `The diagram did not draw: ${drawn.failed}` });
   // mermaid's strict security level sanitizes the SVG it returns.
   return h('figure', { className: 'diagram', role: 'img', 'aria-label': `Diagram: ${source.split('\n')[0]}`, dangerouslySetInnerHTML: { __html: drawn.svg } });
 }

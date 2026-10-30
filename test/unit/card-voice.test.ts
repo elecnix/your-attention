@@ -37,3 +37,10 @@ describe('who speaks on a card', () => {
     assert.match(describeOf('card_ask_secret', ['properties', 'text']), /"you" is the person/);
   });
 });
+
+describe('text the person copies', () => {
+  it('asks the agent, in the guidance and in card_post, to put it in code, which the page copies with a click', () => {
+    assert.match(DEFAULT_GUIDANCE, /inline code or a fenced block.*copy it with a click/);
+    assert.match(describeOf('card_post', ['properties', 'text']), /inline code or a fenced block.*copy it with a click/);
+  });
+});
