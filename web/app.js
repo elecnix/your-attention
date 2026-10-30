@@ -384,9 +384,9 @@ export function App() {
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { text: r.text, byId, open, diagrams: false }))),
       a && s !== 'reply' && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
       h('h2', { className: 'card-title' }, current.title),
-      !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open, diagrams: current.kind !== 'system' }),
+      !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined }),
       // The agent's recommendation, drawn by the page on every kind of card, so it reads as the conclusion and never gets lost.
-      current.recommendation && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), h(LinkedText, { text: current.recommendation, byId, open, diagrams: current.kind !== 'system' })),
+      current.recommendation && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), h(LinkedText, { text: current.recommendation, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined })),
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
       current.broadcast && !current.closed

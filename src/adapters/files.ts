@@ -34,3 +34,24 @@ export class FileBlobs implements BlobStore {
     await Promise.all([fs.rm(this.file(key), { force: true }), fs.rm(`${this.file(key)}.type`, { force: true })]);
   }
 }
+
+/** A file on this machine, by the decoded path of its file: address, for the laptop inbox's file links. A directory, a
+ * missing file or anything else that is not a regular file is undefined. The caller reads the bytes after it checks the size. */
+export async function localFile(name: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> } | undefined> {
+  // A file: address on Windows has a path like /C:/Users/me, with a slash before the drive.
+  const file = process.platform === 'win32' ? path.normalize(name.replace(/^\/(?=[A-Za-z]:)/, '')) : name;
+  if (!path.isAbsolute(file)) return undefined;
+  try {
+    const stat = await fs.stat(file);
+    if (!stat.isFile()) return undefined;
+    return {
+      size: stat.size,
+      async read() {
+        const buf = await fs.readFile(file);
+        return new Uint8Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) as Uint8Array<ArrayBuffer>;
+      },
+    };
+  } catch {
+    return undefined;
+  }
+}

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { COOKIE, createHandler } from '../../src/core/http.ts';
+import { COOKIE, createHandler, type HandlerOptions } from '../../src/core/http.ts';
 import { Inbox } from '../../src/core/inbox.ts';
 import { PIN_TRIES, UNLOCK_HEADER, newPinKey, pinKey } from '../../src/core/pin.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 
-async function setup() {
+async function setup(options: HandlerOptions = {}) {
   const inbox = new Inbox(new MemoryStorage(), Date.now, undefined, { pinIterations: 1000 });
-  const handle = createHandler(inbox, { heartbeatMs: 50 });
+  const handle = createHandler(inbox, { heartbeatMs: 50, ...options });
   // A token that can travel as a link or a cookie, such as a sign-in code's, and the laptop's own file token.
   const link = (await inbox.createToken('device', 'owner')).secret;
   const local = (await inbox.createToken('page', 'owner', { pinExempt: true })).secret;
@@ -145,6 +145,17 @@ describe('the PIN gate', () => {
     const card = (await (await call('POST', '/v1/cards', { token: agent, body: { id: 'c1', agent: 's', title: 'q', attachments: [{ src: png, name: 'a.png' }] } })).json()) as { attachments: { id: string }[] };
     await inbox.pin.set('2468');
     assert.equal((await call('GET', `/v1/attachments/${card.attachments[0]?.id}`, { cookie: link })).status, 200);
+  });
+
+  it('serves a card\'s file link to a locked cookie, since a new tab sends no unlock header', async () => {
+    const localFiles = { host: 'laptop', file: async () => ({ size: 2, read: async () => new TextEncoder().encode('hi') as Uint8Array<ArrayBuffer> }) };
+    const { call, link, agent, inbox } = await setup({ localFiles });
+    await call('POST', '/v1/cards', { token: agent, body: { id: 'c1', agent: 's', title: 'q', origin: { host: 'laptop' }, text: 'See file:///tmp/a.txt' } });
+    await inbox.pin.set('2468');
+    assert.equal((await call('GET', '/v1/state', { cookie: link })).status, 423);
+    const res = await call('GET', `/v1/cards/c1/file?path=${encodeURIComponent('/tmp/a.txt')}`, { cookie: link });
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), 'hi');
   });
 
   it('never replays a PIN response from the message memory', async () => {

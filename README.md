@@ -206,6 +206,8 @@ your-attention login-url        # prints a sign-in link that works once, within 
 your-attention stop             # stops the inbox, or its launchd or systemd service
 ```
 
+A card can link a file on the agent's computer with a `file:` address, such as `file:///Users/me/report.html`. On the laptop inbox, a click opens the file in a new tab, when the card came from the same computer. The inbox serves only files that the card's text or recommendation contains, to the owner only, and a served HTML file can't run scripts. A cloud inbox, and a card from another computer, show the path as code.
+
 `clear`, `reset` and `stop` act on the inbox this machine runs. `login-url` and `open` sign in to that inbox, or, on a machine that runs none, to the inbox it paired with as owner, such as a cloud inbox: `your-attention pair <url> --role owner`.
 
 ### Answer in a terminal

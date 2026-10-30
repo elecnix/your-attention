@@ -281,7 +281,9 @@ export async function openSessionLink(href, el) {
 // Card text with [[card-id]] links. A link shows the linked card title, and its text on hover.
 // Card text is Markdown, and [[card-id]] links to another card by its title.
 // A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
-export function LinkedText({ text, byId, open, diagrams = true }) {
+// With a card id in `files`, a file: link opens the file in a new tab, which the laptop inbox serves for that card only.
+// Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
+export function LinkedText({ text, byId, open, diagrams = true, files }) {
   const cardLink = (id, key) => {
     const target = byId[id];
     if (!target) return h('span', { key, className: 'dead-link', title: 'This card is not in the inbox' }, id);
@@ -290,7 +292,9 @@ export function LinkedText({ text, byId, open, diagrams = true }) {
     return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
   };
   const diagram = diagrams ? (source, key) => h(Diagram, { key, source }) : undefined;
-  return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram }));
+  const fileLink = files ? (path, label, key) => h('a', { key, className: 'file-link', title: path, target: '_blank', rel: 'noopener noreferrer',
+    href: `${BASE}v1/cards/${encodeURIComponent(files)}/file?path=${encodeURIComponent(path)}` }, label) : undefined;
+  return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram, fileLink }));
 }
 
 export const isImage = (t) => /^image\/(png|jpeg|gif|webp)$/.test(t);

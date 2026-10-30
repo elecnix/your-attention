@@ -1,9 +1,10 @@
 // The HTTP protocol, with fetch Request and Response only, so the same handler
 // runs on Node, Bun, Deno and Workers. SPEC.md lists each route.
 import { randomId } from './crypto.ts';
+import { fileLinkPaths } from './file-links.ts';
 import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
-import { Inbox, InboxError, publicCard, type Caller } from './inbox.ts';
+import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, publicCard, type Caller } from './inbox.ts';
 import { UNLOCK_HEADER, UNLOCK_IDLE_MS, pinKeyError, validKey, type PinKey } from './pin.ts';
 import type { Source } from './telemetry.ts';
 import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
@@ -16,6 +17,24 @@ export const CSRF_HEADER = 'x-your-attention';
 export const MESSAGE_HEADER = 'x-message-id';
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json']);
+/** The type of a local file, by its extension. Text that a browser would download, such as Markdown and CSV, shows as plain text. */
+const LOCAL_TYPES: Record<string, string> = {
+  html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', txt: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
+  md: 'text/plain; charset=utf-8', markdown: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8', json: 'application/json; charset=utf-8',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+};
+
+/** The headers of a served file, shown in place or downloaded. Nothing served this way runs scripts. */
+function fileHeaders(type: string, inline: boolean, name: string, cache: string): Record<string, string> {
+  return {
+    'content-type': type,
+    'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
+    // Browsers refuse to show a PDF in a sandboxed document, so a PDF gets the other limits without sandbox.
+    'content-security-policy': `${type === 'application/pdf' ? '' : 'sandbox; '}default-src 'none'; img-src 'self'; style-src 'unsafe-inline'`,
+    'x-content-type-options': 'nosniff',
+    'cache-control': cache,
+  };
+}
 
 export interface HandlerOptions {
   /** Opens the session a card came from, such as a herdr pane. */
@@ -30,6 +49,9 @@ export interface HandlerOptions {
   networkAddresses?: () => string[];
   /** Where this build sends usage counts, and why it sends none, such as DO_NOT_TRACK. Without it, GET /v1/telemetry answers 404. */
   telemetry?: { source: Source; destination: string; blocked?: () => string | undefined };
+  /** The files of this machine, which the laptop inbox serves for a card's file: links. `host` is this machine's name, as
+   * a client puts it in a card's origin. A build with no file system has none, and GET /v1/cards/<id>/file answers 404. */
+  localFiles?: { host: string; file(path: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> } | undefined> };
 }
 
 /** The largest body each kind of route reads. A card post carries its files as data: URLs. */
@@ -106,6 +128,8 @@ function eventStream(start: (send: (event: string, data: unknown) => void, end: 
 
 export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req: Request) => Promise<Response> {
   const heartbeatMs = options.heartbeatMs ?? 2000;
+  /** Whether this inbox serves the files a card names: it has a file system, and the card came from this machine. */
+  const servesFiles = (card: Card): boolean => !!options.localFiles && card.origin?.host === options.localFiles.host;
 
   async function caller(req: Request): Promise<{ token: Token; viaCookie: boolean } | undefined> {
     const auth = req.headers.get('authorization');
@@ -151,8 +175,10 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const unlockSecret = req.headers.get(UNLOCK_HEADER) ?? (method === 'GET' && a === 'events' ? url.searchParams.get('unlock') : null);
     const gate = await inbox.pinGate(who.token, who.viaCookie, unlockSecret);
     // A locked caller may read the PIN state, unlock, and fetch a file by its id, which only an unlocked page can list.
+    // A new tab sends no unlock header, so a card's file link opens on the same terms.
     const pinRoute = a === 'pin' || a === 'unlock' || a === 'lock';
-    if (gate.locked && !pinRoute && !(method === 'GET' && a === 'attachments')) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
+    const fileRoute = method === 'GET' && (a === 'attachments' || (a === 'cards' && c === 'file'));
+    if (gate.locked && !pinRoute && !fileRoute) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
     const me: Caller = { token: who.token.id, role: who.token.role };
     // A full inbox takes the writes that free space or answer cards, and refuses the rest.
     const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'answer'));
@@ -388,19 +414,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     }
     if (method === 'GET' && a === 'attachments' && b) {
       const { file, bytes } = await inbox.attachment(me, b);
-      // Only types the page renders go inline. Everything else downloads, and nothing served here runs scripts.
+      // Only types the page renders go inline. Everything else downloads.
       const inline = INLINE_TYPES.has(file.type) && url.searchParams.get('download') !== '1';
-      const name = encodeURIComponent(file.name);
-      return new Response(bytes, {
-        headers: {
-          'content-type': INLINE_TYPES.has(file.type) ? file.type : 'application/octet-stream',
-          'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${name}`,
-          // Browsers refuse to show a PDF in a sandboxed document, so a PDF gets the other limits without sandbox.
-          'content-security-policy': `${file.type === 'application/pdf' ? '' : 'sandbox; '}default-src 'none'; img-src 'self'; style-src 'unsafe-inline'`,
-          'x-content-type-options': 'nosniff',
-          'cache-control': 'private, max-age=86400',
-        },
-      });
+      return new Response(bytes, { headers: fileHeaders(INLINE_TYPES.has(file.type) ? file.type : 'application/octet-stream', inline, file.name, 'private, max-age=86400') });
     }
     if (method === 'GET' && a === 'tokens') { owner(); return json(inbox.listTokens()); }
     if (method === 'DELETE' && a === 'tokens' && b) { owner(); inbox.revokeToken(b); return json({ ok: true }); }
@@ -413,7 +429,27 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET' && !c) {
         const card = inbox.getCard(b);
         if (me.role !== 'owner' && card.token !== me.token) throw new InboxError(403, 'another client owns this card');
-        return json(inbox.cardDetail(b));
+        const detail = inbox.cardDetail(b);
+        return json(me.role === 'owner' && servesFiles(card) ? { ...detail, card: { ...detail.card, localFiles: true } } : detail);
+      }
+      if (method === 'GET' && c === 'file') {
+        owner();
+        const card = inbox.getCard(b);
+        const local = options.localFiles;
+        if (!local) return json({ error: 'this inbox serves no local files' }, 404);
+        if (!servesFiles(card)) throw new InboxError(403, 'this card came from another machine');
+        // The agent that posted the card chose what it exposes: a file is served only when the card names its exact path.
+        const name = url.searchParams.get('path') ?? '';
+        if (![card.text, card.recommendation].some((t) => fileLinkPaths(t ?? '').includes(name))) throw new InboxError(403, 'the card does not name this file');
+        const file = await local.file(name);
+        if (!file) return json({ error: 'no such file' }, 404);
+        if (file.size > MAX_ATTACHMENT_BYTES) throw new InboxError(413, `the file is ${file.size} bytes, over the limit of ${MAX_ATTACHMENT_BYTES}`);
+        const base = name.split('/').pop() ?? '';
+        const type = LOCAL_TYPES[/\.([^.]+)$/.exec(base)?.[1]?.toLowerCase() ?? ''];
+        // A file can grow between the size check and the read.
+        const bytes = await file.read();
+        if (bytes.byteLength > MAX_ATTACHMENT_BYTES) throw new InboxError(413, `the file is over the limit of ${MAX_ATTACHMENT_BYTES} bytes`);
+        return new Response(bytes, { headers: fileHeaders(type ?? 'application/octet-stream', !!type, base, 'no-store') });
       }
       if (method !== 'POST') return json({ error: 'not found' }, 404);
       const body = await readJson<Record<string, unknown>>(req);

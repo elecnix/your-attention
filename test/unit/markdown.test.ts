@@ -52,3 +52,45 @@ describe('the scan after an underscore that is not emphasis', () => {
     assert.equal(/\(\?<[=!]/.test(fs.readFileSync(new URL('../../web/markdown.js', import.meta.url), 'utf8')), false);
   });
 });
+
+describe('file links', () => {
+  type El = { type: string; props: Record<string, unknown>; children: unknown[] };
+  const el = (type: string, props: Record<string, unknown> | null, ...children: unknown[]): El => ({ type, props: props ?? {}, children: children.flat() });
+  const walk = (n: unknown, found: El[] = []): El[] => {
+    if (Array.isArray(n)) n.forEach((c) => walk(c, found));
+    else if (n && typeof n === 'object') { found.push(n as El); (n as El).children.forEach((c) => walk(c, found)); }
+    return found;
+  };
+  const codes = (src: string): string[] => walk(renderMarkdown(el, src)).filter((n) => n.type === 'code').map((n) => n.children.join(''));
+  const linked = (src: string): [string, string][] => {
+    const calls: [string, string][] = [];
+    renderMarkdown(el, src, { fileLink: (path: string, label: string, key: string) => { calls.push([path, label]); return el('a', { key, href: path }, label); } });
+    return calls;
+  };
+
+  it('shows a bare file address as code with its path, and leaves the closing period of a sentence out', () => {
+    assert.deepEqual(codes('Read file:///tmp/report.html.'), ['/tmp/report.html']);
+    assert.deepEqual(texts('Read file:///tmp/report.html.', 'p'), ['Read /tmp/report.html.']);
+  });
+
+  it('decodes the path, so the code shows the name a person reads', () => {
+    assert.deepEqual(codes('file:///tmp/My%20Report.html'), ['/tmp/My Report.html']);
+  });
+
+  it('shows a Markdown link to a file address as code with its path', () => {
+    assert.deepEqual(codes('See [the report](file:///tmp/r.html) now.'), ['/tmp/r.html']);
+  });
+
+  it('hands each file link to the fileLink option, with its path and its label', () => {
+    assert.deepEqual(linked('See [the report](file:///tmp/r.html) and file:///tmp/My%20Notes.md.'), [['/tmp/r.html', 'the report'], ['/tmp/My Notes.md', '/tmp/My Notes.md']]);
+  });
+
+  it('leaves an address that names another host, or is not a file path, as text', () => {
+    assert.deepEqual(codes('file://server/share/x and [y](file:relative)'), []);
+    assert.deepEqual(linked('file://server/share/x and [y](file:relative)'), []);
+  });
+
+  it('keeps a file address inside a code span as written', () => {
+    assert.deepEqual(codes('`file:///tmp/a`'), ['file:///tmp/a']);
+  });
+});

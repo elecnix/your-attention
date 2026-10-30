@@ -5,7 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FileBlobs } from '../adapters/files.ts';
+import { FileBlobs, localFile } from '../adapters/files.ts';
 import { advertise, type Advertisement } from '../adapters/mdns.ts';
 import { checkMermaid } from '../adapters/mermaid.ts';
 import { bodyErrors, fallbackBody } from '../adapters/openui-body.ts';
@@ -130,6 +130,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
     focusSession: (href) => focusSessionLink(href),
     networkAddresses,
     telemetry: { source: 'laptop', destination: usage.url, blocked: () => usage.blocked },
+    localFiles: { host: os.hostname(), file: localFile },
   });
 
   // One failed request must never stop the inbox: a client that drops its connection mid-body makes the read reject.

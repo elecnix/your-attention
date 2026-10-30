@@ -19,6 +19,13 @@ async function setup() {
 }
 
 describe('http', () => {
+  it('serves no file links on a build without local files, such as the hosted inbox', async () => {
+    const { call, owner, agent } = await setup();
+    await call('POST', '/v1/cards', { token: agent, body: { id: 'f1', agent: 's1', title: 'q', origin: { host: 'laptop' }, text: 'See file:///tmp/a.txt' } });
+    assert.equal((await call('GET', `/v1/cards/f1/file?path=${encodeURIComponent('/tmp/a.txt')}`, { token: owner })).status, 404);
+    assert.equal(((await (await call('GET', '/v1/cards/f1', { token: owner })).json()) as { card: { localFiles?: boolean } }).card.localFiles, undefined);
+  });
+
   it('answers info without a token', async () => {
     const { call } = await setup();
     const res = await call('GET', '/v1/info');

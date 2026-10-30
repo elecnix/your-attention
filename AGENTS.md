@@ -68,6 +68,7 @@ flowchart TB
     OJ["owner.json: owner token, PIN-exempt"]
   end
   PERSON(("person"))
+  LF[("inbox machine's files, each one a card from this machine contains as a file: address")]
 
   HOME -. "written by serve" .- INBOX
   OT -- "POST /v1/sign-in-codes" --> SC["sign-in code: once, 5 min"]
@@ -87,6 +88,7 @@ flowchart TB
   AT -- "bearer" --> INBOX
   CJ -- "bearer" --> INBOX
   ET -- "bearer" --> INBOX
+  LF -- "GET /v1/cards/id/file: owner, sandboxed" --> BROWSER
 ```
 
 - The inbox stores a hash of each token, never the token. Only the machine or tab named in its box holds the secret.
@@ -94,6 +96,7 @@ flowchart TB
 - An agent token can't make a sign-in code, approve a pairing or read the state. On a machine paired only as an agent, the owner commands, `open`, `tui` and `pin`, say to pair as owner. That pairing goes in `owner.json` and leaves `client.json` to the agents.
 - The PIN never leaves the device that types it. The tab, the CLI and the terminal client derive a key from it with PBKDF2, using the salt from `GET /v1/pin`, and send the key. The inbox stores a SHA-256 hash of that key.
 - A token minted at `serve` or by pairing as owner skips the PIN. When the inbox has a PIN, a browser's owner token needs an unlock token as well, which the tab sends as `x-your-attention-unlock`. An unlock token ends after 12 hours without use.
+- The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
 - An invite code is the operator's secret. The hosted inbox keeps only its invite id, the first 16 hex digits of the code's SHA-256, for usage counts.
 
 ## Commands

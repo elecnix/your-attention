@@ -181,6 +181,9 @@ export interface Card {
   /** Set by the inbox in the page's state, never stored: what the page draws for a body stored before the inbox checked
    * bodies, when the page can't draw it whole. `body` draws the statements that parse, then the source from the broken one on. */
   bodyFallback?: { body: string; faults: string[] };
+  /** Set by the laptop inbox in GET /v1/cards/<id> for the owner, never stored: the card came from this machine, and the
+   * inbox serves the files its text and recommendation name with file: addresses. */
+  localFiles?: boolean;
   priority: Priority;
   /** A state label the agent sets, such as "waiting on CI". */
   status?: string;

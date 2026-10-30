@@ -2,12 +2,25 @@
 // It covers headings, paragraphs, lists, block quotes, fenced code, tables,
 // inline code, bold, italic, links to http, https and mailto addresses, and bare
 // http and https addresses. With a cardLink option, [[card-id]] becomes what it returns.
+// A file: address on this machine becomes what the fileLink option returns, or code with its path. src/core/file-links.ts
+// finds the same addresses, since the inbox serves a file only when its card names it.
 // A herdr link, https://herdr.invalid/v1/..., is a session link: the page opens it in herdr.
 // With a diagram option, a ```mermaid block becomes what it returns. src/core/diagrams.ts finds the same blocks to check them.
 export const MERMAID_FENCE = /^```\s*mermaid(\s|$)/i;
 export const SESSION_LINK = /^https:\/\/herdr\.invalid\/v1\//;
 const URL_TAIL = /[.,;:!?'"*_]+$/;
 const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/** The decoded path of a file: address on this machine, or undefined for another host or an address that is not one. */
+function filePath(url) {
+  if (!/^file:\/\//.test(url)) return undefined;
+  try {
+    const u = new URL(url);
+    return u.host ? undefined : decodeURIComponent(u.pathname);
+  } catch {
+    return undefined;
+  }
+}
 /**
  * As in CommonMark, an underscore next to a letter or digit on its outer side never opens or closes emphasis,
  * so MY_SERVICE_API_KEY stays one word, and the text inside must not start or end with a space. Stars have no
@@ -21,7 +34,7 @@ function underscoreEmphasis(text, at, match) {
 
 function inline(h, text, key, opts = {}) {
   const out = [];
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*|_[^_]+_)|\[\[([\w.:-]+)\]\]|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()[\]]+)/g;
+  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*|_[^_]+_)|\[\[([\w.:-]+)\]\]|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()[\]]+)|(file:\/\/[^\s<>()[\]`]+)/g;
   let last = 0;
   let m;
   let n = 0;
@@ -34,12 +47,20 @@ function inline(h, text, key, opts = {}) {
     const a = (href, label) => (SESSION_LINK.test(href)
       ? h('a', { key: k, href, className: 'session-link', title: 'Open this session in herdr' }, label)
       : h('a', { key: k, href, target: '_blank', rel: 'noopener noreferrer' }, label));
+    const file = (path, label) => (opts.fileLink ? opts.fileLink(path, label, k) : h('code', { key: k }, path));
     if (m[1]) out.push(h('code', { key: k }, m[1].slice(1, -1)));
     else if (m[2]) out.push(h('strong', { key: k }, inline(h, m[2].slice(2, -2), k, opts)));
     else if (m[3]) out.push(h('em', { key: k }, inline(h, m[3].slice(1, -1), k, opts)));
     else if (m[4]) out.push(opts.cardLink ? opts.cardLink(m[4], k) : m[0]);
-    else if (m[5]) out.push(/^(https?:|mailto:)/i.test(m[6]) ? a(m[6], m[5]) : m[5]);
-    else {
+    else if (m[5]) {
+      const path = filePath(m[6]);
+      out.push(path !== undefined ? file(path, m[5]) : /^(https?:|mailto:)/i.test(m[6]) ? a(m[6], m[5]) : m[5]);
+    } else if (m[8]) {
+      const url = m[8].replace(URL_TAIL, '');
+      const path = filePath(url);
+      out.push(path !== undefined ? file(path, path) : url);
+      re.lastIndex = m.index + url.length;
+    } else {
       // A sentence's closing period is not part of the address before it.
       const url = m[7].replace(URL_TAIL, '');
       out.push(a(url, url));

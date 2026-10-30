@@ -172,6 +172,12 @@ describe('Markdown in the card pane', () => {
     assert.ok(t.view.stops().includes('session:https://herdr.invalid/v1/tab/w1:t2'));
   });
 
+  it('shows a file link as its path, which the terminal can open itself, with no Tab stop', () => {
+    const t = setup(card({ id: 'fl', title: 'Files', origin: { host: 'laptop' }, localFiles: true, text: 'Read [the report](file:///tmp/My%20Report.html) and file:///tmp/notes.txt.' }));
+    assert.match(t.text(), /Read `\/tmp\/My Report\.html` and `\/tmp\/notes\.txt`\./);
+    assert.deepEqual(t.view.stops().filter((x) => x.startsWith('url:')), []);
+  });
+
   it('keeps a leading blank line on Ctrl+U and Home at the start of a field, and word jumps stop between graphemes', () => {
     const k = (name: string, mods: Partial<KeyEvent> = {}): KeyEvent => ({ type: 'key', name, ctrl: false, alt: false, shift: false, ...mods });
     assert.deepEqual(editKey({ value: '\nabc', cursor: 0 }, k('u', { ctrl: true }), { multiline: true, width: 20 }), { value: '\nabc', cursor: 0 });
