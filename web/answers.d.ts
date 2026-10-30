@@ -16,4 +16,6 @@ export function optionValue(option: { id: string; label: string }): string;
 /** Whether a recommendation starts with this label, then a sentence end, a comma, a colon or the end of the text. */
 export function recommendationNames(recommendation: string | undefined, label: string): boolean;
 /** The ids of the options a card recommends, and whether its recommendation goes inside the one it recommends. */
-export function recommendedOptions(card: Pick<Card, 'options'> & Partial<Card>): { ids: string[]; inside: boolean };
+export function recommendedOptions(card: Pick<Card, 'options'> & Partial<Card>): { ids: string[]; inside: boolean; text: string };
+/** The recommendation without the label it starts with, capitalized, or as it is when it does not start with the label. */
+export function recommendationRest(recommendation: string | undefined, label: string): string;

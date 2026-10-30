@@ -276,7 +276,7 @@ export class CardView {
       theme, md, store: this.store, ui: this.ui, errors: this.errors, focused: this.focus, widgets: this.widgets,
       address: this.host.address(card.id),
       onAction: (action) => this.host.act(this, action),
-      recommended: { values: (card.options ?? []).filter((o) => recommends.ids.includes(o.id)).map(optionValue), text: recommends.inside ? card.recommendation : undefined },
+      recommended: { values: (card.options ?? []).filter((o) => recommends.ids.includes(o.id)).map(optionValue), text: recommends.text },
     };
     // A body stored before the inbox checked bodies may not draw whole: the inbox sends what the page draws in its place.
     if (card.bodyFallback) doc.para([{ text: 'Warning: part of this card did not draw, because its body has an error. The source from that error on is at the end of the card.', style: st.warn }]);

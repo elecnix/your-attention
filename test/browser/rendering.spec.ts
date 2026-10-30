@@ -451,7 +451,8 @@ test('an option the recommendation starts with is the recommended one, and the e
   const go = page.locator('.focus-card .openui-option-card', { hasText: 'Go ahead' }).first();
   await expect(page.locator('.focus-card .recommendation')).toHaveCount(0);
   await expect(go.locator('.rec-tag')).toHaveText('Recommended');
-  await expect(go.locator('.rec-in-option')).toContainText('A read-only key exposes nothing.');
+  // The box says the pick once: the recommendation drops the label it starts with.
+  await expect(go.locator('.rec-in-option .card-text')).toHaveText('A read-only key exposes nothing.');
   await expect(page.locator('.focus-card .rec-tag')).toHaveCount(1);
   await go.click();
   await page.getByRole('button', { name: 'Send answer' }).click();

@@ -245,6 +245,9 @@ describe('the recommended option in the card pane', () => {
     assert.ok(at(/Recommended/) < at(/key exposes nothing/), t);
     assert.ok(at(/key exposes nothing/) < at(/No Datadog key in PR CI/), t);
     assert.equal(lines.filter((l) => /Recommended/.test(l)).length, 1);
+    // The option says "Go ahead" once: the recommendation inside it drops the label and starts with a capital.
+    assert.equal(lines.filter((l) => /Go ahead/.test(l)).length, 1, t);
+    assert.match(t, /A read-only key exposes nothing/);
   });
 
   it('tags a marked option, and keeps a recommendation that names no option in its own block', () => {

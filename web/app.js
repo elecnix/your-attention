@@ -359,7 +359,7 @@ export function App() {
     const draftKey = `draft:${current.id}:${current.version}`;
     const backlinks = visible.filter((c) => c.id !== current.id && (c.links || []).includes(current.id));
     const o = current.origin || {};
-    const recommendation = current.recommendation && h(LinkedText, { text: current.recommendation, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined });
+    const recommendationText = (text) => h(LinkedText, { text, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined });
     const card = h('div', { className: 'focus-card', ref: (el) => {
       if (!el || scrollToRef.current !== current.id) return;
       scrollToRef.current = null;
@@ -388,7 +388,7 @@ export function App() {
       !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined }),
       // The agent's recommendation, drawn by the page on every kind of card, so it reads as the conclusion and never gets lost.
       // When it names one of the options, it sits inside that option instead, so the card says it once.
-      current.recommendation && !recommendedOptions(current).inside && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), recommendation),
+      current.recommendation && !recommendedOptions(current).inside && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), recommendationText(current.recommendation)),
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
       current.broadcast && !current.closed
@@ -397,7 +397,7 @@ export function App() {
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(skip) })
         : current.kind === 'secret'
         ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id) })
-        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendation, onAction: (ev) => onAction(current, ev) }),
+        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
         h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),

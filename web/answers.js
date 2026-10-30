@@ -175,18 +175,41 @@ export function recommendationNames(recommendation, label) {
 }
 
 /**
+ * The recommendation without the label it starts with, as the option that shows that label draws it: the label, the
+ * emphasis around it, and the punctuation and spaces after it go, and what remains starts with a capital. A recommendation
+ * that does not start with the label stays as it is.
+ */
+export function recommendationRest(recommendation, label) {
+  const rec = String(recommendation ?? '');
+  if (!recommendationNames(rec, label)) return rec;
+  const open = /^\s*([*_]*)/.exec(rec)[1];
+  const name = plain(label);
+  let at = /^\s*[*_]*/.exec(rec)[0].length;
+  // The label as the recommendation spells it, so emphasis inside it counts as part of it.
+  for (let seen = 0; seen < name.length && at < rec.length; at++) if (!/[*_]/.test(rec[at]) || rec[at] === name[seen]) seen++;
+  let rest = rec.slice(at).replace(/^[.!?,:]+/, '');
+  const close = [...open].reverse().join('');
+  if (close && rest.startsWith(close)) rest = rest.slice(close.length);
+  rest = rest.replace(/^[.!?,:]+/, '').trimStart();
+  return rest.replace(/^([*_]*)(\p{Ll})/u, (_, marks, c) => marks + c.toUpperCase()).trimEnd();
+}
+
+/**
  * The options a card recommends: the ones it marks, else the one its recommendation starts with, the longest label first.
- * `inside` says the recommendation goes inside that option, when there is one such option. The page and the terminal
+ * `inside` says the recommendation goes inside that option, when there is one such option, and `text` is what it shows there. The page and the terminal
  * client draw both from this, and leave the recommendation in its own box otherwise.
  */
 export function recommendedOptions(c) {
-  if (!drawsOptions(c)) return { ids: [], inside: false };
+  if (!drawsOptions(c)) return { ids: [], inside: false, text: '' };
   let ids = c.options.filter((o) => o.recommended === true).map((o) => o.id);
   if (!ids.length && c.recommendation) {
     const best = c.options.filter((o) => recommendationNames(c.recommendation, o.label)).sort((a, b) => plain(b.label).length - plain(a.label).length)[0];
     if (best) ids = [best.id];
   }
-  return { ids, inside: ids.length === 1 && !!c.recommendation };
+  const inside = ids.length === 1 && !!c.recommendation;
+  // Inside the option, the recommendation drops the option's label, so the box says the pick once.
+  const text = inside ? recommendationRest(c.recommendation, c.options.find((o) => o.id === ids[0]).label) : '';
+  return { ids, inside, text };
 }
 
 /** The picks the card still offers, by option id. A revision that dropped or relabeled an option drops its pick. */

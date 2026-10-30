@@ -177,7 +177,7 @@ function BodyCheck({ body, onParsed }) {
 // A body may not draw whole: one stored before the laptop inbox checked bodies, for which the inbox sends `bodyFallback`,
 // or one the hosted inbox took unchecked. For that one the page finds the faults itself, draws the same fallback, and
 // reports the faults, so the card goes back to its agent.
-export function CardView({ draftKey, card, onAction, recommendation }) {
+export function CardView({ draftKey, card, onAction, recommendationText }) {
   const faultsTo = React.useContext(DrawFaults);
   const [own, setOwn] = React.useState(null);
   const body = card.body;
@@ -195,10 +195,10 @@ export function CardView({ draftKey, card, onAction, recommendation }) {
     : mine.faults.length && !mine.use
       ? h(BodyCheck, { key: 'partial', body: mine.partial, onParsed: (p) => setOwn({ ...mine, use: bodyFaults(mine.partial, p).length ? 'whole' : 'partial' }) })
       : null;
-  // `recommendation` is the recommendation as the page draws it, for the option it recommends.
-  const { ids, inside } = recommendedOptions(card);
+  // `recommendationText` draws a recommendation as the page does, for the option it recommends.
+  const { ids, text } = recommendedOptions(card);
   const values = (card.options || []).filter((o) => ids.includes(o.id)).map(optionValue);
-  const rec = React.useMemo(() => (values.length ? { values, note: inside ? recommendation : null } : null), [values.join('\n'), inside, recommendation]);
+  const rec = values.length ? { values, note: text && recommendationText ? recommendationText(text) : null } : null;
   return h(React.Fragment, null, checker, h(Recommended.Provider, { value: rec },
     h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction })));
 }
