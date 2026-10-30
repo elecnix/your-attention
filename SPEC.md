@@ -130,13 +130,19 @@ Only the token that posted a card can change it or acknowledge its answer. The i
 
 ## Answers
 
-An owner client sends the answer with `POST /v1/cards/<id>/answer {values, comment, delivery, version}`. Every field is optional, so an empty answer is valid. `delivery` is one of:
+An owner client sends the answer with `POST /v1/cards/<id>/answer {values, comment, delivery, version, images}`. Every field is optional, so an empty answer is valid. `delivery` is one of:
 
 - `default`: steer the current turn, or start a new turn when the agent is idle.
 - `steer` or `followUp`: the matching delivery in the harness.
 - `force`: set by `POST /v1/cards/<id>/force` for an answer the model has not read.
 
 A new answer replaces the old one and keeps it in `previous`.
+
+`images` is a list of up to 10 pasted images, each `{src, name, field}`. `src` is a base64 `data:` URL of a PNG, JPEG, GIF or WebP image of at most 8 MB, and `field` says where the person pasted it, such as `comment` or `q0`. The inbox answers 400 for any other type or an https URL, 413 for an image over the limit, and 400 for an image on a secret card. It stores the bytes in the blob store before it saves the answer. They count against `uploadLimitBytes` like a card's files. The answer's `images` keeps a reference `{id, name, type, size, field}` for each one. The answer route takes a body of up to 16 MB, as the card post does. A card's agent token reads each image at `GET /v1/attachments/<id>`, and no other agent token does. Replacing an answer keeps the earlier images in `previous`, and `reset` deletes them.
+
+In the page, Command+V on an image in the general comment box, in a question's comment field or in any text field of the card on screen adds a thumbnail under that field. A × button removes it before the person sends. Text on the clipboard still pastes as text. A pasted file that isn't one of the four image types, or is over 8 MB, shows a message under the field, and the page doesn't add it. **Send answer** sends the images with the answer and clears them. A secret card's fields don't take images.
+
+An integration saves each image of an answer into `~/.your-attention/images/<agent>/<card>/`, readable by this user only (mode 0600 in a 0700 folder), and the event gives the file's path: `Image pasted in comment: <path>`, or `Image: <path>` when the image has no field. Claude Code, pi and OpenCode all do so before they tell the model.
 
 ## Secret cards
 

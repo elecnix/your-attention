@@ -9,6 +9,7 @@ import { Client, describeAnswer, describeReturned, loadConfig } from '../../clie
 import type { AgentEvent, Origin } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { runTool } from '../run-tool.ts';
+import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { cardTools } from '../tools.ts';
 
@@ -103,7 +104,7 @@ export function createPlugin(z: unknown) {
         if (ev.type === 'returned') { await send(session, `[your-attention] ${describeReturned(ev)}`); return; }
         if (ev.type !== 'answer') return;
         pending.set(ev.id, ev.card.id);
-        const what = ev.card.kind === 'secret' ? await secrets.receive(ev.card, ev.answer) : `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer)}`;
+        const what = ev.card.kind === 'secret' ? await secrets.receive(ev.card, ev.answer) : `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(inbox, agentOf(session), ev.answer))}`;
         await send(session, `[your-attention answer ${ev.id}] ${what}`);
       }, stop.signal).catch(() => {});
     };
