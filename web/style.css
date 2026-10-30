@@ -163,6 +163,12 @@
   .check-with-text .revealed { margin-top: 8px; }
   .recommendation .label { display: block; color: var(--accent); margin-bottom: 4px; }
   .recommendation .card-text, .recommendation .card-text > :last-child { margin-bottom: 0; }
+  /* The recommended option: a tag and the recommendation below its description, with the callout's accent line and no fill, so it never reads as a pick. */
+  .openui-option-card__top:has(> .rec-in-option) { order: 1; align-self: stretch; width: auto; height: auto; border-radius: 0; background: none; color: inherit; display: block; }
+  .rec-in-option { border-left: 3px solid var(--accent); padding: 0 0 0 10px; }
+  .rec-tag { display: block; color: var(--accent); font-weight: 600; font-size: calc(13px * var(--text-scale)); margin-bottom: 2px; }
+  .rec-in-option .card-text { font: var(--openui-text-body-sm); color: var(--body-text); }
+  .rec-in-option .card-text, .rec-in-option .card-text > :last-child { margin-bottom: 0; }
   .card-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
   /* A link to another agent's session, in a card's text, body or file. A click opens it in herdr. */
   a[href^="https://herdr.invalid/v1/"] { color: var(--accent); cursor: pointer; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 0 .35em; white-space: nowrap; display: inline-flex; align-items: center; gap: .3em; vertical-align: bottom; }

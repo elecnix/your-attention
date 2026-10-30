@@ -199,6 +199,8 @@ If the phone cannot open the inbox, check for a VPN on the laptop. A VPN that se
 
 Answer cards on the inbox page. Each answer reaches its agent within a second, or when its session resumes.
 
+An agent's recommendation shows inside the option it recommends, under a **Recommended** tag, so you read the pick once. The agent marks that option with `recommended: true`, or starts its recommendation with the option's label, as in "Go ahead. The key is read-only." A recommendation that matches no option keeps its own box above the options.
+
 ```sh
 your-attention clear            # clears the cards you answered or that closed; search still finds them
 your-attention reset --yes      # removes every card, answer and file; tokens and templates stay
@@ -212,7 +214,7 @@ A card can link a file on the agent's computer with a `file:` address, such as `
 
 ### Answer in a terminal
 
-`your-attention tui` shows the inbox full screen in a terminal, beside your agents in herdr, tmux or any terminal tab. The card list is on the left, in the page's sections and order. The open card is on the right, with its text, the recommendation, its files and its form. Your answer goes to the agent with the same values the page would send.
+`your-attention tui` shows the inbox full screen in a terminal, beside your agents in herdr, tmux or any terminal tab. The card list is on the left, in the page's sections and order. The open card is on the right, with its text, the recommendation, its files and its form. The recommended option shows the same tag and recommendation as on the page. Your answer goes to the agent with the same values the page would send.
 
 ```sh
 your-attention tui              # the inbox on this machine, as its owner

@@ -1,8 +1,9 @@
 // The card on screen, drawn as the page draws it: its meta line, where it comes from, the agent's replies, your
 // answer, the title, the text as Markdown, the recommendation, the files, what changed, the form, and the receipt.
+// A recommendation that names an option shows inside that option instead.
 // Each interactive part is a Tab stop. Secret, broadcast and HTML cards get forms in OpenUI Lang too, so one
 // renderer draws every card.
-import { answerValues, cardSource, changeSteps, describe, formValues } from '../../web/answers.js';
+import { answerValues, cardSource, changeSteps, describe, formValues, optionValue, recommendedOptions } from '../../web/answers.js';
 import { cardAge } from '../../web/age.js';
 import { CLOSED_LABEL, STATE_LABEL, agentName, presenceOf, type InboxState, type Queue } from '../../web/queue.js';
 import type { CardSummary } from '../core/summary.ts';
@@ -245,7 +246,9 @@ export class CardView {
     doc.gap();
     doc.para([{ text: sanitize(card.title), style: { ...st.title, ...(theme.caps.color ? {} : { underline: true }) } }]);
     if (!card.broadcast && card.text) { doc.gap(); markdown(doc, card.text, md); linkStops(); }
-    if (card.recommendation) {
+    // A recommendation that names one of the options shows inside that option, as on the page.
+    const recommends = recommendedOptions(card);
+    if (card.recommendation && !recommends.inside) {
       doc.gap();
       const bar: Span[] = [{ text: `${g.quote} `, style: st.accent }];
       doc.para([{ text: 'Recommendation', style: { ...st.accent, bold: true } }], { first: bar, rest: bar });
@@ -273,6 +276,7 @@ export class CardView {
       theme, md, store: this.store, ui: this.ui, errors: this.errors, focused: this.focus, widgets: this.widgets,
       address: this.host.address(card.id),
       onAction: (action) => this.host.act(this, action),
+      recommended: { values: (card.options ?? []).filter((o) => recommends.ids.includes(o.id)).map(optionValue), text: recommends.inside ? card.recommendation : undefined },
     };
     // A body stored before the inbox checked bodies may not draw whole: the inbox sends what the page draws in its place.
     if (card.bodyFallback) doc.para([{ text: 'Warning: part of this card did not draw, because its body has an error. The source from that error on is at the end of the card.', style: st.warn }]);

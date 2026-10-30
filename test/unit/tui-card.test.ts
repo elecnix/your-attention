@@ -232,3 +232,26 @@ describe('an agent reply in the terminal client', () => {
     assert.match(t, /• one|- one/);
   });
 });
+
+describe('the recommended option in the card pane', () => {
+  it('tags the option the recommendation names and shows the recommendation inside it, not above the options', () => {
+    const t = setup(card({ id: 'ri', title: 'Give PR CI a Datadog key?', recommendation: 'Go ahead. A **read-only** key exposes nothing.',
+      options: [{ id: 'g', label: 'Go ahead', description: 'This agent adds the key.' }, { id: 'n', label: 'No Datadog key in PR CI' }] })).text();
+    assert.doesNotMatch(t, /^.*Recommendation$/m);
+    const lines = t.split('\n');
+    const at = (re: RegExp) => lines.findIndex((l) => re.test(l));
+    assert.ok(at(/Go ahead$/) < at(/This agent adds the key/), t);
+    assert.ok(at(/This agent adds the key/) < at(/Recommended/), t);
+    assert.ok(at(/Recommended/) < at(/key exposes nothing/), t);
+    assert.ok(at(/key exposes nothing/) < at(/No Datadog key in PR CI/), t);
+    assert.equal(lines.filter((l) => /Recommended/.test(l)).length, 1);
+  });
+
+  it('tags a marked option, and keeps a recommendation that names no option in its own block', () => {
+    const marked = setup(card({ id: 'rm', title: 'Merge?', options: [{ id: 'm', label: 'Merge', recommended: true }, { id: 'w', label: 'Wait' }] })).text();
+    assert.ok(marked.split('\n').findIndex((l) => /Recommended/.test(l)) > marked.split('\n').findIndex((l) => /Merge$/.test(l)), marked);
+    const none = setup(card({ id: 'rn', title: 'Store?', recommendation: 'SQLite, one file.', options: [{ id: 's', label: 'Use SQLite' }, { id: 'p', label: 'Use Postgres' }] })).text();
+    assert.match(none, /Recommendation/);
+    assert.doesNotMatch(none, /Recommended/);
+  });
+});

@@ -80,6 +80,8 @@ export interface BodyContext {
   onAction(action: Action, form: string | undefined): void;
   /** The address of this card on the page, for what the terminal cannot draw. */
   address: string;
+  /** The values of the options the card recommends in its `choice` field, and the recommendation to show inside the one it recommends. */
+  recommended?: { values: string[]; text?: string | undefined };
 }
 
 /** A field with rules registers here, so a primary button can check its form before it sends. */
@@ -536,6 +538,17 @@ export class BodyRenderer {
       const hang: Span[] = [...this.pad(), { text: ' '.repeat(2 + textWidth(mark) + 1), target }];
       doc.para(label, { first: lead, rest: hang });
       if (it.description) doc.para(inlineSpans(it.description, this.ctx.md, s.dim).map((sp) => ({ ...sp, target: sp.target ?? target })), { first: hang, rest: hang });
+      const rec = this.ctx.recommended;
+      if (kind === 'OptionCards' && name === 'choice' && rec?.values.includes(it.value)) {
+        // As on the page: a tag and the recommendation below the description, behind the callout's accent line.
+        const bar: Span[] = [...hang, { text: `${g.quote} `, style: s.accent, target }];
+        doc.para([{ text: 'Recommended', style: { ...s.accent, bold: true }, target }], { first: bar, rest: bar });
+        if (rec.text) {
+          const note = new Doc(doc.width - bar.reduce((w, x) => w + textWidth(x.text), 0));
+          markdown(note, rec.text, this.ctx.md);
+          for (const l of note.lines) doc.push({ spans: [...bar, ...l.spans] });
+        }
+      }
     });
     doc.end(id);
     this.register(form, name, lit(p['rules']));

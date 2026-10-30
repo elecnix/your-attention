@@ -14,6 +14,8 @@ export interface Option {
   id: string;
   label: string;
   description?: string;
+  /** The option the agent recommends. The page tags it and shows the card's recommendation inside it. One at most, unless the card takes `multiple`. */
+  recommended?: boolean;
 }
 
 /** The shape of one question in Claude Code's AskUserQuestion tool. */

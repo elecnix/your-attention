@@ -2,7 +2,7 @@
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
-import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf } from './components.js';
+import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue } from './queue.js';
 import { cardDetails } from './details.js';
 
@@ -359,6 +359,7 @@ export function App() {
     const draftKey = `draft:${current.id}:${current.version}`;
     const backlinks = visible.filter((c) => c.id !== current.id && (c.links || []).includes(current.id));
     const o = current.origin || {};
+    const recommendation = current.recommendation && h(LinkedText, { text: current.recommendation, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined });
     const card = h('div', { className: 'focus-card', ref: (el) => {
       if (!el || scrollToRef.current !== current.id) return;
       scrollToRef.current = null;
@@ -386,7 +387,8 @@ export function App() {
       h('h2', { className: 'card-title' }, current.title),
       !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined }),
       // The agent's recommendation, drawn by the page on every kind of card, so it reads as the conclusion and never gets lost.
-      current.recommendation && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), h(LinkedText, { text: current.recommendation, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined })),
+      // When it names one of the options, it sits inside that option instead, so the card says it once.
+      current.recommendation && !recommendedOptions(current).inside && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), recommendation),
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
       current.broadcast && !current.closed
@@ -395,7 +397,7 @@ export function App() {
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(skip) })
         : current.kind === 'secret'
         ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id) })
-        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, onAction: (ev) => onAction(current, ev) }),
+        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendation, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
         h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),

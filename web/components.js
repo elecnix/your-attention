@@ -4,11 +4,11 @@ import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, renderInline, renderMarkdown } from './markdown.js';
-import { answerValues, cardSource, changeSteps, describe, formValues, parseSource } from './answers.js';
+import { answerValues, cardSource, changeSteps, describe, formValues, optionValue, parseSource, recommendedOptions } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
-export { agentName, answerValues, cardSource, describe, formValues, parseSource, presenceOf };
+export { agentName, answerValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions };
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 
@@ -138,10 +138,29 @@ export function Diagram({ source }) {
 // A field label reads Markdown, as card text does, so a label can link to the pull request it asks about.
 const PlainFormControl = openuiChatLibrary.components.FormControl.component;
 const MarkdownFormControl = (args) => PlainFormControl({ ...args, props: { ...args.props, label: h(React.Fragment, null, renderInline(h, args.props.label)) } });
+// The option a card recommends shows a Recommended tag, and the card's recommendation, below its description.
+// CardView gives the recommended option values and the recommendation to the `choice` field the page builds from the options.
+const Recommended = React.createContext(null);
+const RECOMMENDED = { type: 'recommended-option' };
+function RecommendedNote({ note }) {
+  // A link in the recommendation opens without picking the option around it.
+  return h('div', { className: 'rec-in-option', onClick: (e) => { if (e.target.closest('a')) e.stopPropagation(); } },
+    h('span', { className: 'rec-tag' }, 'Recommended'), note);
+}
+const PlainOptionCards = openuiChatLibrary.components.OptionCards.component;
+function RecommendingOptionCards(args) {
+  const rec = React.useContext(Recommended);
+  if (!rec || args.props.name !== 'choice') return PlainOptionCards(args);
+  // OpenUI draws an option's top content through renderNode, so the note goes there and the stylesheet moves it below the text.
+  const items = (args.props.items || []).map((it) => (rec.values.includes(it?.props?.value) ? { ...it, props: { ...it.props, topContent: RECOMMENDED } } : it));
+  const renderNode = (n) => (n === RECOMMENDED ? h(RecommendedNote, { note: rec.note }) : args.renderNode(n));
+  return PlainOptionCards({ ...args, props: { ...args.props, items }, renderNode });
+}
 const library = extendLibrary(openuiChatLibrary, {
   CheckWithText,
   Mermaid: ({ props }) => h(Diagram, { source: String(props.source ?? '') }),
   FormControl: MarkdownFormControl,
+  OptionCards: RecommendingOptionCards,
 });
 /** The page's component list, as the inbox reads it from src/adapters/openui-library.ts. */
 export const librarySchema = () => library.toJSONSchema();
@@ -158,7 +177,7 @@ function BodyCheck({ body, onParsed }) {
 // A body may not draw whole: one stored before the laptop inbox checked bodies, for which the inbox sends `bodyFallback`,
 // or one the hosted inbox took unchecked. For that one the page finds the faults itself, draws the same fallback, and
 // reports the faults, so the card goes back to its agent.
-export function CardView({ draftKey, card, onAction }) {
+export function CardView({ draftKey, card, onAction, recommendation }) {
   const faultsTo = React.useContext(DrawFaults);
   const [own, setOwn] = React.useState(null);
   const body = card.body;
@@ -176,7 +195,12 @@ export function CardView({ draftKey, card, onAction }) {
     : mine.faults.length && !mine.use
       ? h(BodyCheck, { key: 'partial', body: mine.partial, onParsed: (p) => setOwn({ ...mine, use: bodyFaults(mine.partial, p).length ? 'whole' : 'partial' }) })
       : null;
-  return h(React.Fragment, null, checker, h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction }));
+  // `recommendation` is the recommendation as the page draws it, for the option it recommends.
+  const { ids, inside } = recommendedOptions(card);
+  const values = (card.options || []).filter((o) => ids.includes(o.id)).map(optionValue);
+  const rec = React.useMemo(() => (values.length ? { values, note: inside ? recommendation : null } : null), [values.join('\n'), inside, recommendation]);
+  return h(React.Fragment, null, checker, h(Recommended.Provider, { value: rec },
+    h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction })));
 }
 
 function CardBody({ draftKey, response, broken, onAction }) {

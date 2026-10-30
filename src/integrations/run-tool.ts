@@ -49,11 +49,11 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         text: str(args['text']),
         recommendation: str(args['recommendation']),
         // An option is an object with its explanation, or a plain label.
-        options: (args['options'] as (string | null | { label?: unknown; description?: unknown })[] | undefined)?.map((o, i): Option => {
+        options: (args['options'] as (string | null | { label?: unknown; description?: unknown; recommended?: unknown })[] | undefined)?.map((o, i): Option => {
           const obj = o && typeof o === 'object' ? o : undefined;
           const label = obj ? String(obj.label ?? '') : String(o ?? '');
           const description = obj ? str(obj.description) : undefined;
-          return { id: `o${i + 1}`, label, ...(description ? { description } : {}) };
+          return { id: `o${i + 1}`, label, ...(description ? { description } : {}), ...(obj?.recommended === true ? { recommended: true } : {}) };
         }),
         multiple: args['multiple'] as boolean | undefined,
         body: str(args['body']),

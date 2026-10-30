@@ -78,6 +78,7 @@ export const DEFAULT_GUIDANCE = [
   'Shape the answer options to the question. The person may leave any field empty.',
   'Put each question next to the field that answers it. One question uses options. Several questions use forms in the body, each beside the text or table it is about.',
   'Explain each option inside it, in its description: what this agent does if the person picks it, such as "This agent reruns the deploy." Never list the options with their explanations in the text.',
+  'Mark the option this agent recommends with recommended: true, and put only the reasons in the recommendation. The page shows them inside that option, so the person reads the pick once.',
   'Never list questions in the text with the answers at the bottom. Write what you will check yourself as statements, not questions.',
   'The page adds a comment box, Send answer and Skip at the bottom of every card. Add no general comment box or send button of your own.',
   'When a card asks several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
@@ -356,6 +357,7 @@ export class Inbox {
     const priority = input.priority ?? (levels.some((l) => l.id === 'soon') ? 'soon' : levels[0]?.id ?? 'soon');
     if (!levels.some((l) => l.id === priority)) throw new InboxError(400, `priority must be one of ${levels.map((l) => l.id).join(', ')}`);
     if (input.rating !== undefined && !(Number.isInteger(input.rating) && input.rating >= 1 && input.rating <= 5)) throw new InboxError(400, 'rating must be 1 to 5');
+    if (!input.multiple && Array.isArray(input.options) && input.options.filter((o) => o?.recommended === true).length > 1) throw new InboxError(400, 'a card without multiple takes at most one recommended option');
     const id = input.id ? String(input.id) : randomId(8);
     if (!/^[\w.:-]{1,80}$/.test(id)) throw new InboxError(400, 'id must be 1 to 80 letters, digits, dots, colons, dashes or underscores');
 

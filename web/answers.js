@@ -6,7 +6,7 @@ const J = JSON.stringify;
 export function cardSource(c) {
   // A body with forms of its own keeps them where the agent placed them, and gets the comment and buttons below.
   // So does a body with no form and no options or questions, so the card stays answerable.
-  if (c.body && (/\bForm\(/.test(c.body) || (!c.options?.length && !c.questions?.length))) return withAnswerFooter(c.body);
+  if (keepsOwnForm(c)) return withAnswerFooter(c.body);
   if (c.kind === 'blocked' && c.options && c.options.length) {
     // The sidecar read these choices from the agent's dialog, and presses the one you pick in that pane.
     return [
@@ -156,7 +156,38 @@ function fieldLabels(source) {
 }
 
 // A pick names the option's id and its label, so a pick stays only while the revised card still offers that option.
-const optionValue = (o) => `${o.id}:${o.label}`;
+export const optionValue = (o) => `${o.id}:${o.label}`;
+
+const keepsOwnForm = (c) => !!c.body && (/\bForm\(/.test(c.body) || (!c.options?.length && !c.questions?.length));
+// The page draws a card's options as boxes unless the card brings its own HTML, form or kind of form.
+const drawsOptions = (c) => !!c.options?.length && c.html === undefined && c.kind !== 'secret' && !c.broadcast && !keepsOwnForm(c);
+// Markdown emphasis out, so "**Go ahead.**" reads as "Go ahead.". An underscore inside a word, as in MY_KEY, stays.
+const plain = (s) => String(s ?? '').replace(/\*+/g, '').replace(/(^|[^\p{L}\p{N}])_+|_+(?=[^\p{L}\p{N}]|$)/gu, '$1').trim();
+const ENDS_CLAUSE = /^[.!?,:]/;
+
+/** Whether a recommendation starts with this label, then a sentence end, a comma, a colon or the end of the text. Case and emphasis do not count. */
+export function recommendationNames(recommendation, label) {
+  const rec = plain(recommendation).toLowerCase();
+  const name = plain(label).toLowerCase();
+  if (!name || !rec.startsWith(name)) return false;
+  const rest = rec.slice(name.length);
+  return rest.trim() === '' || ENDS_CLAUSE.test(rest) || ENDS_CLAUSE.test(name.slice(-1));
+}
+
+/**
+ * The options a card recommends: the ones it marks, else the one its recommendation starts with, the longest label first.
+ * `inside` says the recommendation goes inside that option, when there is one such option. The page and the terminal
+ * client draw both from this, and leave the recommendation in its own box otherwise.
+ */
+export function recommendedOptions(c) {
+  if (!drawsOptions(c)) return { ids: [], inside: false };
+  let ids = c.options.filter((o) => o.recommended === true).map((o) => o.id);
+  if (!ids.length && c.recommendation) {
+    const best = c.options.filter((o) => recommendationNames(c.recommendation, o.label)).sort((a, b) => plain(b.label).length - plain(a.label).length)[0];
+    if (best) ids = [best.id];
+  }
+  return { ids, inside: ids.length === 1 && !!c.recommendation };
+}
 
 /** The picks the card still offers, by option id. A revision that dropped or relabeled an option drops its pick. */
 export function answerValues(card, values) {

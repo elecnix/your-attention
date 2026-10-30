@@ -416,6 +416,58 @@ test('the recommendation stands out: a labeled callout at the card text size, ab
   await expect(page.locator('.focus-card .recommendation')).toHaveText(/Read it first\./);
 });
 
+test('a recommended option carries a Recommended tag and the recommendation inside its box, below its description', async ({ page }) => {
+  await inbox.agent.post({ id: 'rec-flag', agent: 's-rec-opt', title: 'Merge the retry fix?', priority: 'now', text: 'CI is green.',
+    recommendation: 'Tests pass, and the change is **small**.', options: [{ id: 'm', label: 'Merge', description: 'This agent merges the pull request.', recommended: true }, { id: 'w', label: 'Wait', description: 'This agent waits a day.' }] });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Merge the retry fix?' }).click();
+  const merge = page.locator('.focus-card .openui-option-card', { hasText: 'Merge' }).first();
+  const wait = page.locator('.focus-card .openui-option-card', { hasText: 'Wait' }).first();
+  // The recommendation moves inside the option it recommends, so the card says it once.
+  await expect(page.locator('.focus-card .recommendation')).toHaveCount(0);
+  await expect(merge.locator('.rec-tag')).toHaveText('Recommended');
+  await expect(merge.locator('.rec-in-option strong')).toHaveText('small');
+  await expect(wait.locator('.rec-tag')).toHaveCount(0);
+  const below = (await merge.locator('.rec-in-option').boundingBox())!.y;
+  expect(below).toBeGreaterThan((await merge.locator('.openui-option-card__subtitle').boundingBox())!.y);
+  // The tag never looks like a pick: the box is not checked, and its fill and border match the other option's.
+  await expect(merge).toHaveAttribute('aria-checked', 'false');
+  const look = (l: import('@playwright/test').Locator) => l.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).borderTopColor]);
+  expect(await look(merge)).toEqual(await look(wait));
+  expect(await merge.locator('.rec-tag').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+  // Picking it still works and looks as before.
+  await merge.click();
+  await expect(merge).toHaveAttribute('aria-checked', 'true');
+});
+
+test('an option the recommendation starts with is the recommended one, and the earlier-card fold still reads', async ({ page }) => {
+  await inbox.agent.post({ id: 'rec-infer', agent: 's-rec-infer', title: 'Give PR CI a Datadog key?', priority: 'now',
+    recommendation: 'Go ahead. A read-only key exposes nothing.', options: [{ id: 'g', label: 'Go ahead' }, { id: 'n', label: 'No Datadog key in PR CI' }] });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Give PR CI a Datadog key?' }).click();
+  const go = page.locator('.focus-card .openui-option-card', { hasText: 'Go ahead' }).first();
+  await expect(page.locator('.focus-card .recommendation')).toHaveCount(0);
+  await expect(go.locator('.rec-tag')).toHaveText('Recommended');
+  await expect(go.locator('.rec-in-option')).toContainText('A read-only key exposes nothing.');
+  await expect(page.locator('.focus-card .rec-tag')).toHaveCount(1);
+  await go.click();
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await inbox.agent.post({ id: 'rec-infer-2', agent: 's-rec-infer', title: 'Which Datadog site?', priority: 'now', follows: 'rec-infer', text: 'The key is ready.' });
+  await page.locator('.q', { hasText: 'Which Datadog site?' }).click();
+  const earlier = page.locator('.focus-card details.earlier');
+  await earlier.locator('summary').click();
+  await expect(earlier.locator('.ans')).toContainText('Go ahead');
+});
+
+test('a recommendation that names no option keeps its own box, and no option gets the tag', async ({ page }) => {
+  await inbox.agent.post({ id: 'rec-none', agent: 's-rec-none', title: 'Store sessions where?', priority: 'now',
+    recommendation: 'SQLite, since the laptop build needs one file.', options: [{ id: 's', label: 'Use SQLite' }, { id: 'p', label: 'Use Postgres' }] });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Store sessions where?' }).click();
+  await expect(page.locator('.focus-card .recommendation')).toHaveText(/Recommendation\s*SQLite, since/);
+  await expect(page.locator('.focus-card .rec-tag')).toHaveCount(0);
+});
+
 test('an answer opens the card after the one you answered, not the card you skipped', async ({ page }) => {
   const own = await startInbox();
   try {

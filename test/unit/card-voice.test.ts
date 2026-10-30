@@ -26,6 +26,12 @@ describe('who speaks on a card', () => {
     assert.match(option, /This agent/);
   });
 
+  it('asks the agent to mark the option it recommends, and to put only the reasons in recommendation', () => {
+    assert.match(describeOf('card_post', ['properties', 'options', 'items', 'properties', 'recommended']), /recommend/);
+    assert.match(describeOf('card_post', ['properties', 'recommendation']), /recommended: true/);
+    assert.match(DEFAULT_GUIDANCE, /recommended: true/);
+  });
+
   it('tells the agent in card_post and card_ask_secret that "you" on the card is the person', () => {
     assert.match(describeOf('card_post', ['properties', 'text']), /"you" is the person/);
     assert.match(describeOf('card_ask_secret', ['properties', 'text']), /"you" is the person/);
