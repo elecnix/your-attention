@@ -76,10 +76,11 @@ let installed = false;
 export function installCopy() {
   if (installed) return;
   installed = true;
-  // A status region on the page from the start, empty and clear until a copy, so a screen reader reads each word put in it.
+  // A live region on the page from the start, empty and clear until a copy, so a screen reader reads each word put in it.
+  // It has no status role, which the page gives only to the message it shows, such as the PIN check.
   toast = document.createElement('div');
   toast.className = 'copy-toast';
-  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
   document.body.append(toast);
   // OpenUI's own button copies only on a secure page and says "Copy code". The capture phase takes its click first.
   document.addEventListener('click', (e) => {

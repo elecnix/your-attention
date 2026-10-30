@@ -95,7 +95,7 @@ test('inline code copies on a click in the text, the recommendation, a reply, Te
     await expect(code).toHaveCSS('cursor', 'pointer');
     await code.click();
     await expect(code).toHaveAttribute('data-copied', 'Copied');
-    await expect(page.getByRole('status')).toHaveText('Copied');
+    await expect(page.locator('.copy-toast[aria-live="polite"]')).toHaveText('Copied');
     expect(await clipboard(context)).toBe(text);
   }
 });
