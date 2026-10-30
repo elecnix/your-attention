@@ -8,10 +8,12 @@ on:
 permissions:
   contents: read
 
+# Each job has timeout-minutes: 15. A passing job takes 2 minutes at most, so a hung one fails at 15 instead of at GitHub's 6-hour limit.
 jobs:
   typecheck:
     name: typecheck (${{ matrix.checker }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +32,7 @@ jobs:
   cloudflare:
     # The Worker as it would deploy: a dry-run bundle, then the hosted build on workerd with local Durable Objects, R2 and KV.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       WRANGLER_SEND_METRICS: 'false'
     steps:
@@ -49,6 +52,7 @@ jobs:
   browser:
     # Playwright on the page, with two people in two browser contexts, and every Storybook story.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
@@ -67,6 +71,7 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
