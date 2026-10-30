@@ -34,18 +34,12 @@ const timers = new WeakMap();
 let toast = null;
 /** The word over inline code, at the code. It floats on the page, since the code may clip what overflows it. */
 function showToast(el, word) {
-  if (!toast) {
-    toast = document.createElement('div');
-    toast.className = 'copy-toast';
-    toast.setAttribute('role', 'status');
-    document.body.append(toast);
-  }
   const r = el.getBoundingClientRect();
   toast.textContent = word;
   toast.dataset.tone = word === 'Copied' ? 'ok' : 'bad';
   toast.style.left = `${r.left + r.width / 2}px`;
   toast.style.top = `${r.top}px`;
-  toast.hidden = false;
+  toast.dataset.show = '';
   toast.owner = el;
 }
 
@@ -60,7 +54,7 @@ function feedback(el, ok) {
   timers.set(el, setTimeout(() => {
     delete el.dataset.copied;
     if (button) el.setAttribute('aria-label', 'Copy');
-    else if (toast && toast.owner === el) toast.hidden = true;
+    else if (toast && toast.owner === el) { delete toast.dataset.show; toast.textContent = ''; }
   }, FEEDBACK_MS));
 }
 
@@ -82,6 +76,11 @@ let installed = false;
 export function installCopy() {
   if (installed) return;
   installed = true;
+  // A status region on the page from the start, empty and clear until a copy, so a screen reader reads each word put in it.
+  toast = document.createElement('div');
+  toast.className = 'copy-toast';
+  toast.setAttribute('role', 'status');
+  document.body.append(toast);
   // OpenUI's own button copies only on a secure page and says "Copy code". The capture phase takes its click first.
   document.addEventListener('click', (e) => {
     const button = e.target instanceof Element ? e.target.closest(BUTTON) : null;

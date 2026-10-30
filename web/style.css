@@ -332,4 +332,4 @@
   code:not(pre code, a code, .openui-code-block-wrapper code) { cursor: pointer; }
   .copy-toast { position: fixed; z-index: 30; transform: translate(-50%, calc(-100% - 6px)); padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--panel); font-size: calc(12px * var(--text-scale)); line-height: 1.4; white-space: nowrap; pointer-events: none; }
   .copy-toast[data-tone="bad"] { background: var(--bad); }
-  .copy-toast[hidden] { display: none; }
+  .copy-toast:not([data-show]) { opacity: 0; }
