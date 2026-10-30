@@ -29,8 +29,9 @@ describe('file links in a card', () => {
   });
 
   it('finds every path the page links, in every text', () => {
+    const linked = [['/tmp/report.html'], ['/tmp/r.html', '/tmp/My Notes.md', '/tmp/in-parens.txt'], ['/tmp/local.txt'], ['/tmp/b.txt'], [], []];
+    TEXTS.forEach((t, i) => assert.deepEqual(pagePaths(t), linked[i], t));
     for (const t of TEXTS) for (const p of pagePaths(t)) assert.ok(fileLinkPaths(t).includes(p), `${p} in ${t}`);
-    assert.deepEqual(pagePaths(TEXTS[1]!), ['/tmp/r.html', '/tmp/My Notes.md', '/tmp/in-parens.txt']);
   });
 
   it('also finds an address inside code, which the agent named all the same', () => {
