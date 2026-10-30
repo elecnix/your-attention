@@ -148,7 +148,8 @@ describe('the PIN gate', () => {
   });
 
   describe('file links with a PIN', () => {
-    const localFiles = { host: 'laptop', file: async () => ({ size: 2, read: async () => new TextEncoder().encode('hi') as Uint8Array<ArrayBuffer> }) };
+    // Each stand-in file holds its own path, so a test sees which file the inbox served.
+    const localFiles = { host: 'laptop', file: async (p: string) => ({ size: p.length, read: async () => new TextEncoder().encode(p) as Uint8Array<ArrayBuffer> }) };
     const PATH = '/tmp/a.txt';
     async function locked() {
       const t = await setup({ localFiles });
@@ -176,7 +177,7 @@ describe('the PIN gate', () => {
       const t = await ticketOf(res);
       const served = await open('c1', `ticket=${t}`);
       assert.equal(served.status, 200);
-      assert.equal(await served.text(), 'hi');
+      assert.equal(await served.text(), PATH);
       assert.equal((await open('c1', `ticket=${t}`)).status, 403);
     });
 
@@ -202,7 +203,7 @@ describe('the PIN gate', () => {
     it('serves the path the ticket is for, whatever path the address carries', async () => {
       const { ticket, open } = await locked();
       const t = await ticketOf(await ticket('c1', PATH));
-      assert.equal((await open('c1', `ticket=${t}&path=${encodeURIComponent('/tmp/b.txt')}`)).status, 200);
+      assert.equal(await (await open('c1', `ticket=${t}&path=${encodeURIComponent('/tmp/b.txt')}`)).text(), PATH);
     });
   });
 
