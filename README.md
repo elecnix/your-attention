@@ -239,6 +239,8 @@ Like the other commands, the client reads `YOUR_ATTENTION_URL` and `YOUR_ATTENTI
 | `o` | open the card in the browser | |
 | `?`, `q`, Ctrl+C | help, quit, quit | Ctrl+C quits |
 
+On a card that is still loading, Enter waits and shows "Loading the card…". The client moves into the card once it loads, unless you pick another card first.
+
 Ctrl+Enter needs a terminal that reports it, such as iTerm2, Ghostty, cmux, kitty or WezTerm, and tmux with `extended-keys` on. Ctrl+S works in every terminal. In a text field, letters type text, and the Ctrl keys still work.
 
 A click opens a card or presses a button. In a form, a click picks a choice, ticks a box or puts the cursor in a text field. The wheel scrolls the pane under the pointer. A click on a herdr session link opens that session in herdr, as on the page. A click on any other link opens it in the browser.

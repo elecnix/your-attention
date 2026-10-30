@@ -160,6 +160,21 @@ describe('the card pane', () => {
   });
 });
 
+describe('focus on a card that has not drawn yet', () => {
+  it('puts the focus on the first field, or the last stop, at the first draw', () => {
+    const c = card({ id: 'fresh', title: 'Fresh', options: [{ id: 'y', label: 'Yes' }] });
+    const first = new CardView(c, { theme, address: () => '', act: () => {}, fileText: () => undefined, now: () => 0 });
+    first.focusFirstField();
+    const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence: {}, states: { fresh: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }] };
+    first.build(70, s, buildQueue(s, 'none'));
+    assert.equal(first.focus, first.stops().find((x) => x.startsWith('field:')));
+    const last = new CardView(c, { theme, address: () => '', act: () => {}, fileText: () => undefined, now: () => 0 });
+    last.focusLastStop();
+    last.build(70, s, buildQueue(s, 'none'));
+    assert.equal(last.focus, last.stops().at(-1));
+  });
+});
+
 describe('Markdown in the card pane', () => {
   it('keeps the spaces of code, draws lists, quotes and tables, and links a session link', () => {
     const t = setup(card({ id: 'md', title: 'Markdown', text: '# Plan\n\n```\n  indented\n```\n\n- one\n- two **bold**\n\n> quoted\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nOpen [the session](https://herdr.invalid/v1/tab/w1:t2) or `code`.' }));

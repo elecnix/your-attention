@@ -37,6 +37,17 @@ export interface Model {
   reveal?: boolean;
   /** Scroll the list so the open card shows, after another card opened. */
   revealList?: boolean;
+  /** Enter pressed on a card whose fields have not loaded. The card is entered once they arrive, at its first field, or at
+   * its last for Shift+Tab. */
+  entering?: EnterRequest;
+}
+
+export interface EnterRequest { card: string; last: boolean }
+
+/** What a waiting Enter does now: wait while its card loads, enter it once it has, or drop when another card or none is open. */
+export function settleEnter(req: EnterRequest, current: string | null, loaded: boolean): 'wait' | 'enter' | 'drop' {
+  if (req.card !== current) return 'drop';
+  return loaded ? 'enter' : 'wait';
 }
 
 export interface Frame {
@@ -184,7 +195,7 @@ export function drawFrame(m: Model): Frame {
     if (showCard) {
       if (!m.current || !m.view || !m.state || !m.queue) {
         // The whole card loads from GET /v1/cards/<id>, usually ahead of time.
-        const msg = m.current ? `Loading ${sanitize(m.current.title)}…` : waiting ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.';
+        const msg = m.current && m.entering?.card === m.current.id ? 'Loading the card…' : m.current ? `Loading ${sanitize(m.current.title)}…` : waiting ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.';
         grid.text(cardX + 2, bodyTop + 1, cut(m, msg, cardW - 3), st.dim);
       } else {
         const doc = m.view.build(cardW - 3, m.state, m.queue);

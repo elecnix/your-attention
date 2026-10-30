@@ -2,6 +2,8 @@
 // and the agent receives the answer the page would send.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
@@ -31,6 +33,49 @@ const listen = (id: string) => {
   return { answer: () => until(() => events.find((e) => e.type === 'answer'), 8000), stop };
 };
 const post = (c: NewCard) => agent.post(c);
+
+/** A proxy in front of the inbox that holds GET /v1/cards/<id> for the cards in `held` until `release`, so a test can act
+ * on a card whose fields have not loaded. Everything else, the page socket too, goes through as it came. */
+async function slowCards(target: string, held: string[]) {
+  const waiting: (() => void)[] = [];
+  // A socket that upgraded leaves the server's connections, so close() ends each one itself.
+  const upgraded = new Set<net.Socket>();
+  let released = false;
+  const server = http.createServer((req, res) => {
+    const forward = () => {
+      const up = http.request(`${target}${req.url}`, { method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode ?? 502, r.headers); r.pipe(res); });
+      up.on('error', () => res.destroy());
+      req.pipe(up);
+    };
+    const id = /^\/v1\/cards\/([^/?]+)$/.exec(req.url ?? '')?.[1];
+    if (req.method === 'GET' && id && held.includes(decodeURIComponent(id)) && !released) waiting.push(forward);
+    else forward();
+  });
+  server.on('upgrade', (req, socket, head) => {
+    const u = new URL(target);
+    const up = net.connect(Number(u.port), u.hostname, () => {
+      const lines = [`${req.method} ${req.url} HTTP/1.1`];
+      for (let i = 0; i < req.rawHeaders.length; i += 2) lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+      up.write(`${lines.join('\r\n')}\r\n\r\n`);
+      up.write(head);
+      socket.pipe(up).pipe(socket);
+    });
+    upgraded.add(socket as net.Socket).add(up);
+    up.on('error', () => socket.destroy());
+    socket.on('error', () => up.destroy());
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+  return {
+    url: `http://127.0.0.1:${port}`,
+    release: () => { released = true; for (const f of waiting.splice(0)) f(); },
+    close: () => new Promise<void>((r) => {
+      for (const sock of upgraded) sock.destroy();
+      server.closeAllConnections();
+      server.close(() => r());
+    }),
+  };
+}
 
 before(async () => {
   h = await start();
@@ -164,6 +209,47 @@ describe('your-attention tui', () => {
       await t.stop();
     } finally {
       await own.stop();
+    }
+  });
+
+  it('enters a card once its fields load, after Enter while it loaded', async () => {
+    await post({ id: 'late', agent: 's-late', title: 'Late fields', priority: 'now', options: [{ id: 'y', label: 'Yes' }] });
+    const proxy = await slowCards(h.server.url, ['late']);
+    try {
+      const t = tui({ url: proxy.url });
+      await t.waitFor('Loading Late fields…');
+      t.send('\r');
+      await t.waitFor('Loading the card…');
+      proxy.release();
+      await t.waitFor('( ) Yes');
+      // In the list, Space enters the card. Only a field that has focus picks.
+      t.send(' ');
+      await t.waitFor('(•) Yes');
+    } finally {
+      await proxy.close();
+      await agent.close('late', 'retracted', 'test over');
+    }
+  });
+
+  it('drops a waiting Enter when the person moves to another card first', async () => {
+    await post({ id: 'wait1', agent: 's-wait', title: 'Wait first', priority: 'now', options: [{ id: 'y', label: 'Yes' }] });
+    await post({ id: 'wait2', agent: 's-wait2', title: 'Wait second', priority: 'now', options: [{ id: 'y', label: 'Yes' }] });
+    const proxy = await slowCards(h.server.url, ['wait1', 'wait2']);
+    try {
+      const t = tui({ url: proxy.url });
+      const row = await t.waitFor('Wait first');
+      t.click(row.x, row.y);
+      await t.waitFor('Loading Wait first…');
+      t.send('\r');
+      await t.waitFor('Loading the card…');
+      t.send('j');
+      await t.waitFor('Loading Wait second…');
+      proxy.release();
+      await t.waitFor('( ) Yes');
+      await t.waitFor('↑↓ cards');
+    } finally {
+      await proxy.close();
+      for (const id of ['wait1', 'wait2']) await agent.close(id, 'retracted', 'test over');
     }
   });
 

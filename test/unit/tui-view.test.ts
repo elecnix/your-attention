@@ -8,7 +8,7 @@ import { loadParser } from '../../src/tui/body.ts';
 import { CardView } from '../../src/tui/cardview.ts';
 import type { Caps } from '../../src/tui/screen.ts';
 import { detectCaps, makeTheme } from '../../src/tui/theme.ts';
-import { drawFrame, listWidth, type Model } from '../../src/tui/view.ts';
+import { drawFrame, listWidth, settleEnter, type Model } from '../../src/tui/view.ts';
 
 const card = (id: string, extra: Partial<Card> = {}): Card => ({ id, agent: `a-${id}`, kind: 'ask', title: `Card ${id}`, priority: 'now', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, replies: [], ...extra });
 
@@ -99,5 +99,26 @@ describe('the frame', () => {
     const f = drawFrame(m);
     assert.ok(Array.from({ length: 20 }, (_, y) => f.grid.row(y)).some((r) => r.startsWith('▶ ◉ now   Card k70')));
     assert.ok(m.listScroll > 0);
+  });
+});
+
+describe('Enter on a card whose fields have not loaded', () => {
+  it('waits for the fields, then enters the card, at its first field or its last with Shift+Tab', () => {
+    assert.equal(settleEnter({ card: 'a', last: false }, 'a', false), 'wait');
+    assert.equal(settleEnter({ card: 'a', last: false }, 'a', true), 'enter');
+  });
+
+  it('drops the request once the person moves to another card, or none is open', () => {
+    assert.equal(settleEnter({ card: 'a', last: false }, 'b', false), 'drop');
+    assert.equal(settleEnter({ card: 'a', last: false }, 'b', true), 'drop');
+    assert.equal(settleEnter({ card: 'a', last: false }, null, false), 'drop');
+  });
+
+  it('says the card is loading while Enter waits for it', () => {
+    const m = model(100, 30);
+    m.view = null;
+    m.entering = { card: 'a', last: false };
+    const rows = Array.from({ length: 30 }, (_, y) => drawFrame(m).grid.row(y));
+    assert.ok(rows.some((r) => r.includes('Loading the card…')), rows.join('\n'));
   });
 });

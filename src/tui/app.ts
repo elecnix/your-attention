@@ -16,7 +16,7 @@ import type { InputEvent, KeyEvent, MouseEvent } from './input.ts';
 import { encodeFrame, type Grid } from './screen.ts';
 import { Terminal, type TerminalIo } from './terminal.ts';
 import { detectCaps, makeTheme } from './theme.ts';
-import { drawFrame, type Frame, type Model } from './view.ts';
+import { drawFrame, settleEnter, type Frame, type Model } from './view.ts';
 
 export interface TuiOptions {
   env: NodeJS.ProcessEnv;
@@ -190,6 +190,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     pinned = current ? current.id : null;
     if (current?.id !== m.current?.id) { m.reveal = true; m.revealList = true; if (m.zone === 'card' && !current) m.zone = 'list'; }
     m.current = current;
+    if (m.entering) settle();
     if (!current) { m.view = null; reportFocus(null); return; }
     const nextId = after(order(), current.id);
     details.want([current, nextId ? q.byId[nextId] : undefined, current.follows ? q.byId[current.follows] : undefined]);
@@ -209,6 +210,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const earlier = current.follows ? details.get(q.byId[current.follows]) : undefined;
     view.earlier = earlier ? { card: earlier.card, answer: earlier.answer } : undefined;
     m.view = view;
+    if (m.entering) settle();
     // A reply you have looked at for a moment counts as seen.
     const sk = `${current.id}:${current.replyAt ?? 0}`;
     if (current.unseenReplies && seenKey !== sk) {
@@ -219,6 +221,13 @@ export async function runTui(opts: TuiOptions): Promise<number> {
         api.post(`/v1/cards/${encodeURIComponent(current.id)}/seen`).catch(() => {});
       }, 1500);
     }
+  }
+
+  /** Act on a waiting Enter, once the card on screen has changed or loaded. */
+  function settle(): void {
+    const outcome = settleEnter(m.entering!, m.current?.id ?? null, !!m.view && m.view.card.id === m.current?.id);
+    if (outcome === 'drop') m.entering = undefined;
+    else if (outcome === 'enter') enterCard(m.entering!.last);
   }
 
   function reportFocus(id: string | null): void {
@@ -320,9 +329,11 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     
   };
   const enterCard = (last = false) => {
-    if (!m.view) return;
+    // A card whose fields have not loaded is entered once they arrive, unless the person moves to another card first.
+    if (!m.view) { if (m.current) m.entering = { card: m.current.id, last }; return; }
+    m.entering = undefined;
     m.zone = 'card';
-    if (last) { m.view.focus = undefined; m.view.move(-1); } else if (!m.view.focus) m.view.focusFirstField();
+    if (last) m.view.focusLastStop(); else if (!m.view.focus) m.view.focusFirstField();
     m.reveal = true;
   };
   const pressSend = () => {

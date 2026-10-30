@@ -77,6 +77,8 @@ export class CardView {
   readonly ui = new Map<string, unknown>();
   readonly errors = new Map<string, string>();
   focus: string | undefined;
+  /** Where the focus goes at the first draw, when the card was entered before it had stops. */
+  private pendingFocus: 'first' | 'last' | undefined;
   widgets = new Map<string, Widget>();
   doc: Doc = new Doc(40);
   /** A line the view shows above the form after an action, such as an error from the inbox. */
@@ -117,7 +119,16 @@ export class CardView {
   /** The first field of the card's form, where the person starts to answer. */
   focusFirstField(): void {
     const ids = this.stops();
+    // A card that has not drawn has no stops yet, so its first draw places the focus.
+    if (!ids.length) { this.pendingFocus = 'first'; return; }
     this.focus = ids.find((id) => id.startsWith('field:')) ?? ids.find((id) => id.startsWith('button:')) ?? ids[0];
+  }
+
+  /** Focus the last stop, as Shift+Tab from the list does. */
+  focusLastStop(): void {
+    const ids = this.stops();
+    if (!ids.length) { this.pendingFocus = 'last'; return; }
+    this.focus = ids.at(-1);
   }
 
   focused(): Widget | undefined {
@@ -324,6 +335,10 @@ export class CardView {
     // Keep the focus on a stop that still exists, such as after a revision dropped a field.
     if (this.focus && !this.widgets.has(this.focus)) this.focus = undefined;
     this.doc = doc;
+    const pending = this.pendingFocus;
+    this.pendingFocus = undefined;
+    if (pending === 'first') this.focusFirstField();
+    else if (pending === 'last') this.focusLastStop();
     return doc;
   }
 
