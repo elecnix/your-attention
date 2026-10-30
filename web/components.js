@@ -145,7 +145,7 @@ const RECOMMENDED = { type: 'recommended-option' };
 function RecommendedNote({ note }) {
   // A link in the recommendation opens without picking the option around it.
   return h('div', { className: 'rec-in-option', onClick: (e) => { if (e.target.closest('a')) e.stopPropagation(); } },
-    h('span', { className: 'rec-tag' }, 'Recommended'), note);
+    h('strong', { className: 'rec-tag' }, 'Recommended'), note);
 }
 const PlainOptionCards = openuiChatLibrary.components.OptionCards.component;
 function RecommendingOptionCards(args) {

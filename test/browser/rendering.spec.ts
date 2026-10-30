@@ -426,7 +426,7 @@ test('a recommended option carries a Recommended tag and the recommendation insi
   // The recommendation moves inside the option it recommends, so the card says it once.
   await expect(page.locator('.focus-card .recommendation')).toHaveCount(0);
   await expect(merge.locator('.rec-tag')).toHaveText('Recommended');
-  await expect(merge.locator('.rec-in-option strong')).toHaveText('small');
+  await expect(merge.locator('.rec-in-option .card-text strong')).toHaveText('small');
   await expect(wait.locator('.rec-tag')).toHaveCount(0);
   const below = (await merge.locator('.rec-in-option').boundingBox())!.y;
   expect(below).toBeGreaterThan((await merge.locator('.openui-option-card__subtitle').boundingBox())!.y);
@@ -435,6 +435,9 @@ test('a recommended option carries a Recommended tag and the recommendation insi
   const look = (l: import('@playwright/test').Locator) => l.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).borderTopColor]);
   expect(await look(merge)).toEqual(await look(wait));
   expect(await merge.locator('.rec-tag').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+  // The tag is heavier than the recommendation under it, as the Recommendation label is.
+  const weight = (l: import('@playwright/test').Locator) => l.evaluate((el) => Number(getComputedStyle(el).fontWeight));
+  expect(await weight(merge.locator('.rec-tag'))).toBeGreaterThan(await weight(merge.locator('.rec-in-option .card-text p').first()));
   // Picking it still works and looks as before.
   await merge.click();
   await expect(merge).toHaveAttribute('aria-checked', 'true');
