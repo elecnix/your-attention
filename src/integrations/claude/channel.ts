@@ -11,6 +11,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Client, describeAnswer, describeReturned, loadConfig } from '../../client.ts';
+import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { claudeSessionName } from './session-name.ts';
@@ -134,7 +135,7 @@ void inbox.stream(agent, async (ev) => {
     ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
     : `The person answered card "${card.title}":`;
   const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
-  const body = card.kind === 'secret' ? await secrets.receive(card, answer) : `${head}${urgency}\n${describeAnswer(card, answer)}`;
+  const body = card.kind === 'secret' ? await secrets.receive(card, answer) : `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(inbox, agent, answer))}`;
   await mcp.notification({
     method: 'notifications/claude/channel',
     params: { content: body, meta: { card_id: card.id, receipt } },

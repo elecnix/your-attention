@@ -1,5 +1,6 @@
 import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, SecretForm } from '../components.js';
 import { h } from '../env.js';
+import { installPaste } from '../paste-images.js';
 import { PNG, card, dataUrl, mount } from './render.js';
 import { expandWidgets } from '../../src/core/widgets.ts';
 import PULL_REQUEST from '../../examples/widgets/pull-request.openui?raw';
@@ -65,5 +66,25 @@ export const PullRequestWidgets = {
       'second = widget pull-request {"title": "Name agents by session", "subtitle": "elecnix/your-attention · #13", "state": "CI green · review requested", "url": "https://github.com/elecnix/your-attention"}',
     ].join('\n'), () => ({ name: 'pull-request', version: 1, source: PULL_REQUEST })).body;
     return mount(view(card({ title: 'Merge these two?', body, options: [{ id: 'yes', label: 'Merge both' }, { id: 'first', label: 'Only the first' }] })));
+  },
+};
+
+// The comment box after the person pastes two images into it: a thumbnail for each, with a control to remove it.
+let pasteInstalled = false;
+export const WithPastedImages = {
+  render: () => {
+    if (!pasteInstalled) { pasteInstalled = true; installPaste(() => 'c1'); }
+    const root = mount(view(card({ title: 'Which layout do you prefer?' })));
+    const bytes = Uint8Array.from(atob(PNG.split(',')[1]), (c) => c.charCodeAt(0));
+    const paste = (name) => {
+      const box = root.querySelector('textarea');
+      if (!box) return setTimeout(() => paste(name), 50);
+      const data = new DataTransfer();
+      data.items.add(new File([bytes], name, { type: 'image/png' }));
+      box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    };
+    paste('layout-a.png');
+    setTimeout(() => paste('layout-b.png'), 100);
+    return root;
   },
 };

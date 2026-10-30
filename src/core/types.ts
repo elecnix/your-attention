@@ -142,6 +142,8 @@ export interface Attachment {
   size?: number;
   /** A text description, for images. */
   alt?: string;
+  /** On a pasted answer image, the field it was pasted into, such as `comment` or `q0`. */
+  field?: string;
 }
 
 /** A file as an agent sends it: a data: URL with base64 bytes, or an https URL. */
@@ -223,6 +225,8 @@ export interface Answer {
   /** Form values by field name. Every field is optional. */
   values: Record<string, unknown>;
   comment: string;
+  /** Images the person pasted into the answer. The bytes are at GET /v1/attachments/<id>. */
+  images?: Attachment[];
   /** The card's widget responses, filled from this answer. */
   responses?: string[];
   delivery: Delivery;

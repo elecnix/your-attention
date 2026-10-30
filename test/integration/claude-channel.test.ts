@@ -83,6 +83,17 @@ describe('the Claude Code channel', () => {
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   });
 
+  it('saves a pasted image to a private file and names its path in the event', async () => {
+    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-img', title: 'Which layout?' } });
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await h.owner('POST', '/v1/cards/cc-img/answer', { values: {}, comment: 'like this', images: [{ src: png, name: 'mock.png', field: 'comment' }] });
+    const note = await until(() => notes.find((n) => n.meta.card_id === 'cc-img'));
+    const file = /Image pasted in comment: (\S+)/.exec(note.content)?.[1];
+    assert.ok(file, note.content);
+    assert.equal(fs.readFileSync(file).length, 70);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  });
+
   it('searches earlier answers', async () => {
     const res = await mcp.callTool({ name: 'card_search', arguments: { query: 'agreed' } });
     assert.match(JSON.stringify(res.content), /cc-1/);
