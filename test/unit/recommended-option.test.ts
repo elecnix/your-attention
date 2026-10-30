@@ -94,6 +94,9 @@ describe('recommendationRest', () => {
     assert.equal(recommendationRest('*Go ahead*: read-only.', 'Go ahead'), 'Read-only.');
     assert.equal(recommendationRest('Go ahead. **read-only** keys are safe.', 'Go ahead'), '**Read-only** keys are safe.');
     assert.equal(recommendationRest('Merge it. Tests pass.', '**Merge it**'), 'Tests pass.');
+    assert.equal(recommendationRest('Go *ahead*, since the key is read-only', 'Go ahead'), 'Since the key is read-only');
+    assert.equal(recommendationRest('**Go** ahead. Read-only.', 'Go ahead'), 'Read-only.');
+    assert.equal(recommendationRest('Set MY_KEY. It is read-only.', 'Set MY_KEY'), 'It is read-only.');
   });
 
   it('leaves nothing for a recommendation that is only the label', () => {

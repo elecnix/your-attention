@@ -182,16 +182,20 @@ export function recommendationNames(recommendation, label) {
 export function recommendationRest(recommendation, label) {
   const rec = String(recommendation ?? '');
   if (!recommendationNames(rec, label)) return rec;
-  const open = /^\s*([*_]*)/.exec(rec)[1];
   const name = plain(label);
-  let at = /^\s*[*_]*/.exec(rec)[0].length;
-  // The label as the recommendation spells it, so emphasis inside it counts as part of it.
-  for (let seen = 0; seen < name.length && at < rec.length; at++) if (!/[*_]/.test(rec[at]) || rec[at] === name[seen]) seen++;
-  let rest = rec.slice(at).replace(/^[.!?,:]+/, '');
-  const close = [...open].reverse().join('');
-  if (close && rest.startsWith(close)) rest = rest.slice(close.length);
-  rest = rest.replace(/^[.!?,:]+/, '').trimStart();
-  return rest.replace(/^([*_]*)(\p{Ll})/u, (_, marks, c) => marks + c.toUpperCase()).trimEnd();
+  let at = /^\s*/.exec(rec)[0].length;
+  // The label as the recommendation spells it. Each emphasis mark it opens, before or inside the label, closes after it.
+  let open = 0;
+  for (let seen = 0; seen < name.length && at < rec.length; at++) {
+    if (/[*_]/.test(rec[at]) && rec[at] !== name[seen]) open++;
+    else seen++;
+  }
+  let rest = rec.slice(at);
+  while (rest && (/^[.!?,:]/.test(rest) || (open > 0 && /^[*_]/.test(rest)))) {
+    if (/^[*_]/.test(rest)) open--;
+    rest = rest.slice(1);
+  }
+  return rest.trim().replace(/^([*_]*)(\p{Ll})/u, (_, marks, c) => marks + c.toUpperCase());
 }
 
 /**
