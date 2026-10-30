@@ -575,3 +575,15 @@ test('the card shows its rough age at the top right, and the age moves on with t
   const [right, meta] = await Promise.all([age.evaluate((el) => el.getBoundingClientRect().right), page.locator('.focus-card .meta').evaluate((el) => el.getBoundingClientRect().right)]);
   expect(meta - right).toBeLessThan(2);
 });
+
+test('an agent reply draws its Markdown: bold, links and lists', async ({ page }) => {
+  await inbox.agent.post({ id: 'reply-md', agent: 's-reply-md', title: 'Reply with Markdown', priority: 'now' });
+  await inbox.agent.reply('reply-md', '**Deployed.** See [the run](https://example.com/run).\n\n- one\n- two');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Reply with Markdown' }).click();
+  const reply = page.locator('.focus-card .reply-msg');
+  await expect(reply.locator('strong', { hasText: 'Deployed.' })).toBeVisible();
+  await expect(reply.locator('a[href="https://example.com/run"]')).toHaveText('the run');
+  await expect(reply.locator('li')).toHaveCount(2);
+  await expect(reply).not.toContainText('**');
+});

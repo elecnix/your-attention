@@ -216,3 +216,13 @@ describe('Markdown in the card pane', () => {
     assert.match(text, /│ b = Nope\(/);
   });
 });
+
+describe('an agent reply in the terminal client', () => {
+  it('draws its Markdown, as the card text does', () => {
+    const t = setup(card({ id: 'rmd', title: 'Replied', replies: [{ at: 1, seenAt: null, text: '**Deployed.** See [the run](https://example.com/run).\n\n- one\n- two' }] })).text();
+    assert.match(t, /Deployed\. See the run/);
+    assert.doesNotMatch(t, /\*\*Deployed/);
+    assert.doesNotMatch(t, /\]\(https/);
+    assert.match(t, /• one|- one/);
+  });
+});

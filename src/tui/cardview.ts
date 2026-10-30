@@ -236,7 +236,8 @@ export class CardView {
     for (const r of card.replies.slice().reverse()) {
       doc.gap();
       doc.para([{ text: `${g.reply} Agent reply · ${time(r.at)}`, style: st.bold }]);
-      doc.para([{ text: sanitize(r.text) }], { first: [{ text: '  ' }] });
+      markdown(doc, r.text, md);
+      linkStops();
     }
     if (a && state !== 'reply') { doc.gap(); doc.para([{ text: 'Your answer: ', style: { ...st.ok, bold: true } }, { text: sanitize(describe(card, a)), style: st.ok }]); }
     if (this.notice) { doc.gap(); doc.para([{ text: sanitize(this.notice.text), style: this.notice.style === 'warn' ? st.error : st.ok }]); }

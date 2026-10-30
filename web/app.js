@@ -381,7 +381,7 @@ export function App() {
           `herdr: ${[o.herdrWorkspace && `workspace ${o.herdrWorkspace}`, o.herdrTab && `tab ${o.herdrTab}`].filter(Boolean).join(' › ')}`),
         o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/open`, {}) }, 'Open session')),
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
-      current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), r.text)),
+      current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { text: r.text, byId, open, diagrams: false }))),
       a && s !== 'reply' && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
       h('h2', { className: 'card-title' }, current.title),
       !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open, diagrams: current.kind !== 'system' }),
