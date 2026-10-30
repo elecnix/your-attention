@@ -64,6 +64,8 @@ export function notify(title, body) {
 }
 
 export const ICONS = {
+  // Lucide's key: a secret field shows it at its left.
+  key: ['m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4', 'm21 2-9.6 9.6', 'M13 15.5a5.5 5.5 0 1 1-11 0a5.5 5.5 0 1 1 11 0'],
   // Lucide's brush-cleaning.
   broom: ['m16 22-1-4', 'M19 13.99a1 1 0 0 0 1-1V12a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v.99a1 1 0 0 0 1 1', 'M5 14h14l1.973 6.767A1 1 0 0 1 20 22H4a1 1 0 0 1-.973-1.233z', 'm8 22 1-4'],
   // Lucide's hand: a card that waits for you raises its hand.

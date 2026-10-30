@@ -1,5 +1,5 @@
 // The parts of the page, each one renderable alone, as the stories do.
-import { BASE, CLOSED_LABEL, Icon, J, api, h, notifyOn, store } from './env.js';
+import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, notifyOn, store } from './env.js';
 import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
@@ -266,7 +266,9 @@ export function SecretForm({ card, onSent, onSkip }) {
   }
   return h('form', { className: 'secret', onSubmit: (e) => { e.preventDefault(); send(true); } },
     h('label', null, card.secret.name,
-      h('input', { type: 'password', autoComplete: 'off', spellCheck: false, value, onChange: (e) => setValue(e.target.value) })),
+      h('span', { className: 'secret-field' },
+        h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
+        h('input', { type: 'password', autoComplete: 'off', spellCheck: false, value, onChange: (e) => setValue(e.target.value) }))),
     h('label', null, 'Comment', h('textarea', { rows: 2, value: comment, onChange: (e) => setComment(e.target.value), placeholder: 'Anything to add?' })),
     error && h('div', { className: 'note warn' }, error),
     h('div', { className: 'nav' },

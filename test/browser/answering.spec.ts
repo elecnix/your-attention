@@ -231,3 +231,26 @@ test('a secret request reads its text as Markdown, as every other card does', as
   await expect(card.locator('code', { hasText: 'KEY_ARN' })).toBeVisible();
   await expect(card.locator('h2', { hasText: 'Paste the key' })).toHaveCount(1);
 });
+
+test('a secret field shows a key icon at its left, before the typed value', async ({ page }) => {
+  const secrets = new SecretRequests();
+  await secrets.ask(inbox.agent, { agent: 's-key-icon', name: 'KEY_ICON_TOKEN', title: 'Key icon secret', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Key icon secret' }).click();
+  const icon = page.locator('.secret .secret-field svg.key-icon');
+  await expect(icon).toBeVisible();
+  const input = page.locator('.secret .secret-field input[type=password]');
+  const [i, f, pad] = await Promise.all([
+    icon.evaluate((el) => el.getBoundingClientRect().toJSON()),
+    input.evaluate((el) => el.getBoundingClientRect().toJSON()),
+    input.evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft)),
+  ]);
+  // The icon sits inside the field's left edge, and the typed value starts after it.
+  expect(i.left).toBeGreaterThanOrEqual(f.left);
+  expect(i.right).toBeLessThanOrEqual(f.left + pad);
+  expect(i.top).toBeGreaterThanOrEqual(f.top);
+  expect(i.bottom).toBeLessThanOrEqual(f.bottom);
+  // A click on the icon lands on the field under it.
+  await page.mouse.click((i.left + i.right) / 2, (i.top + i.bottom) / 2);
+  await expect(input).toBeFocused();
+});
