@@ -88,6 +88,8 @@ export const DEFAULT_GUIDANCE = [
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+export const MAX_ANSWER_IMAGES = 10;
+const ANSWER_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 /** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
 export const MIN_FILE_CHARGE = 64 * 1024;
 /** The largest card, as stored, without its files. */
@@ -745,7 +747,9 @@ export class Inbox {
     // A key is <card id>.<index>.<random>, and a card id may contain dots.
     const card = this.getCard(id.split('.').slice(0, -2).join('.') || id);
     if (caller.role === 'agent' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
-    const file = card.attachments?.find((f) => f.id === id);
+    const answer = this.store.get<Answer>('answers', card.id);
+    const file = card.attachments?.find((f) => f.id === id)
+      ?? [answer, ...(answer?.previous ?? [])].flatMap((a) => a?.images ?? []).find((f) => f.id === id);
     if (!file) throw new InboxError(404, 'unknown attachment');
     // Each client has its own daily budget, so an agent's downloads never use up the owner's. A refused download reads no blob.
     if (this.readsPerDay !== undefined) {
@@ -1073,7 +1077,7 @@ export class Inbox {
 
   // ---- answers ----
 
-  async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number }): Promise<Answer> {
+  async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number; images?: (NewAttachment & { field?: string })[] }): Promise<Answer> {
     const card = this.getCard(id);
     const delivery = input.delivery ?? 'default';
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
@@ -1082,12 +1086,15 @@ export class Inbox {
     if (card.kind === 'secret' && (Object.keys(values).some((k) => k !== 'sealed') || ('sealed' in values && !isSealed(values['sealed'])))) {
       throw new InboxError(400, 'a secret card takes only a sealed value: seal it with the card\'s public key');
     }
+    if (card.kind === 'secret' && input.images?.length) throw new InboxError(400, 'a secret card takes no images');
+    const images = await this.storeAnswerImages(card, input.images);
     const before = this.store.get<Answer>('answers', id);
     const answer: Answer = {
       card: id,
       version: Number(input.version ?? card.version),
       values,
       comment: String(input.comment ?? '').trim(),
+      ...(images.length ? { images } : {}),
       delivery,
       savedAt: this.now(),
       deliveredAt: null,
@@ -1108,6 +1115,39 @@ export class Inbox {
     else this.flush(card.agent);
     if (card.kind !== 'system' && card.kind !== 'secret') this.observeAnswer(card, this.store.get<Answer>('answers', id) ?? answer);
     return this.store.get<Answer>('answers', id) ?? answer;
+  }
+
+  /** Store the images pasted into an answer, and return their references. Each must be a base64 image of a type the page
+   * shows, within the attachment limit. The files count against the upload limit like a card's files. */
+  private async storeAnswerImages(card: Card, input: (NewAttachment & { field?: string })[] | undefined): Promise<Attachment[]> {
+    if (input === undefined) return [];
+    if (!Array.isArray(input)) throw new InboxError(400, 'images must be a list');
+    if (input.length > MAX_ANSWER_IMAGES) throw new InboxError(400, `an answer takes at most ${MAX_ANSWER_IMAGES} images`);
+    const decoded = input.map((f, i) => {
+      if (!f || typeof f !== 'object' || !/^data:/.test(String(f.src ?? ''))) throw new InboxError(400, `image ${i + 1}: src must be a base64 data: URL`);
+      const d = decodeDataUrl(i, f);
+      if (!ANSWER_IMAGE_TYPES.has(d.type)) throw new InboxError(400, `image ${i + 1}${f.name ? ` (${cleanName(f.name)})` : ''} is ${d.type}: an answer takes only PNG, JPEG, GIF or WebP images`);
+      return d;
+    });
+    const bytes = decoded.reduce((n, d) => n + Math.max(d.bytes.length, MIN_FILE_CHARGE), 0);
+    const { used, limit } = this.uploads();
+    if (limit !== undefined && used + bytes > limit) throw new InboxError(413, `these images are ${bytes} bytes, and this inbox has stored ${used} of its lifetime limit of ${limit} bytes`);
+    if (bytes) this.store.put('meta', 'uploaded-bytes', used + bytes);
+    const stored: Attachment[] = [];
+    const settled = await Promise.allSettled(input.map(async (f, i): Promise<void> => {
+      const d = decoded[i]!;
+      const key = `${card.id}.a${i}.${randomId(6)}`;
+      const ref: Attachment = { id: key, name: cleanName(f.name) || `pasted-${i + 1}.${d.type.slice(6).replace('jpeg', 'jpg')}`, type: d.type, size: d.bytes.length, ...(f.field ? { field: String(f.field).slice(0, 80) } : {}) };
+      stored.push(ref);
+      await this.blobs.put(key, d.bytes, d.type);
+    }));
+    const failed = settled.find((r) => r.status === 'rejected');
+    if (failed) {
+      await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
+      this.store.put('meta', 'uploaded-bytes', Math.max(0, this.uploads().used - bytes));
+      throw (failed as PromiseRejectedResult).reason;
+    }
+    return stored;
   }
 
   /** The model has the answer in its context. */
@@ -1391,7 +1431,9 @@ export class Inbox {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner resets the inbox');
     const cards = this.store.list<Card>('cards');
     for (const card of cards) {
-      await Promise.all((card.attachments ?? []).filter((f) => f.id).map((f) => this.blobs.delete(f.id ?? '')));
+      const answer = this.store.get<Answer>('answers', card.id);
+      const images = [answer, ...(answer?.previous ?? [])].flatMap((a) => a?.images ?? []);
+      await Promise.all([...(card.attachments ?? []), ...images].filter((f) => f.id).map((f) => this.blobs.delete(f.id ?? '')));
       this.store.delete('answers', card.id);
       this.store.delete('cards', card.id);
       this.store.index(card.id, '');

@@ -472,7 +472,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         return new Response(bytes, { headers: fileHeaders(type ?? 'application/octet-stream', !!type, base, 'no-store') });
       }
       if (method !== 'POST') return json({ error: 'not found' }, 404);
-      const body = await readJson<Record<string, unknown>>(req);
+      const body = await readJson<Record<string, unknown>>(req, c === 'answer' ? BODY_LIMIT.card : BODY_LIMIT.other);
       switch (c) {
         case 'file-ticket': {
           owner();
@@ -487,6 +487,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         case 'answer':
           owner();
           return json(await inbox.answer(b, {
+            images: body['images'] as Parameters<Inbox['answer']>[1]['images'],
             values: body['values'] as Record<string, unknown> | undefined,
             comment: body['comment'] as string | undefined,
             delivery: body['delivery'] as Delivery | undefined,

@@ -2,6 +2,7 @@
 // it reads GET /v1/state, listens on the page WebSocket or GET /v1/events, and posts answers.
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
+import { clearPasted, installPaste, pastedImages } from './paste-images.js';
 import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue } from './queue.js';
 import { cardDetails } from './details.js';
@@ -28,6 +29,7 @@ export function App() {
   const [fresh, setFresh] = React.useState({});
   const pinnedRef = React.useRef(null);
   const focusRef = React.useRef(null);
+  React.useEffect(() => installPaste(() => focusRef.current), []);
   const knownRef = React.useRef(null);
   const seenRef = React.useRef(null);
   const reportedFocus = React.useRef(undefined);
@@ -306,7 +308,9 @@ export function App() {
     if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
     const { values: picked, comment } = formValues(ev.formState);
     const values = answerValues(c, picked);
-    await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version });
+    const images = pastedImages.payload(c.id);
+    await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
+    clearPasted(c.id);
     store.del(`draft:${c.id}:${c.version}`);
     answered(c.id);
   }
@@ -394,7 +398,7 @@ export function App() {
       current.broadcast && !current.closed
         ? h(BroadcastForm, { card: current, cards: state.cards, onDone: skip })
         : current.html !== undefined
-        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version }).then(skip) })
+        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); } })
         : current.kind === 'secret'
         ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id) })
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
