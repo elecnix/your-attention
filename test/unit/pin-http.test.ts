@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import { COOKIE, createHandler, type HandlerOptions } from '../../src/core/http.ts';
 import { Inbox } from '../../src/core/inbox.ts';
 import { PIN_TRIES, UNLOCK_HEADER, newPinKey, pinKey } from '../../src/core/pin.ts';
@@ -147,15 +147,63 @@ describe('the PIN gate', () => {
     assert.equal((await call('GET', `/v1/attachments/${card.attachments[0]?.id}`, { cookie: link })).status, 200);
   });
 
-  it('serves a card\'s file link to a locked cookie, since a new tab sends no unlock header', async () => {
+  describe('file links with a PIN', () => {
     const localFiles = { host: 'laptop', file: async () => ({ size: 2, read: async () => new TextEncoder().encode('hi') as Uint8Array<ArrayBuffer> }) };
-    const { call, link, agent, inbox } = await setup({ localFiles });
-    await call('POST', '/v1/cards', { token: agent, body: { id: 'c1', agent: 's', title: 'q', origin: { host: 'laptop' }, text: 'See file:///tmp/a.txt' } });
-    await inbox.pin.set('2468');
-    assert.equal((await call('GET', '/v1/state', { cookie: link })).status, 423);
-    const res = await call('GET', `/v1/cards/c1/file?path=${encodeURIComponent('/tmp/a.txt')}`, { cookie: link });
-    assert.equal(res.status, 200);
-    assert.equal(await res.text(), 'hi');
+    const PATH = '/tmp/a.txt';
+    async function locked() {
+      const t = await setup({ localFiles });
+      await t.call('POST', '/v1/cards', { token: t.agent, body: { id: 'c1', agent: 's', title: 'q', origin: { host: 'laptop' }, text: `See file://${PATH} and file:///tmp/b.txt` } });
+      await t.call('POST', '/v1/cards', { token: t.agent, body: { id: 'c2', agent: 's', title: 'q', origin: { host: 'laptop' }, text: `See file://${PATH}` } });
+      await t.inbox.pin.set('2468');
+      const { body } = await t.unlock('2468', { cookie: t.link });
+      const ticket = async (card: string, path: string, unlock = body.unlock) => t.call('POST', `/v1/cards/${card}/file-ticket`, { cookie: t.link, unlock, body: { path } });
+      const open = (card: string, query: string) => t.call('GET', `/v1/cards/${card}/file?${query}`, { cookie: t.link });
+      return { ...t, ticket, open };
+    }
+    const ticketOf = async (res: Response) => ((await res.json()) as { ticket: string }).ticket;
+
+    it('refuses a file to a cookie without a ticket, locked or not', async () => {
+      const { open, call, link, unlock } = await locked();
+      assert.equal((await open('c1', `path=${encodeURIComponent(PATH)}`)).status, 423);
+      const { body } = await unlock('2468', { cookie: link });
+      assert.equal((await call('GET', `/v1/cards/c1/file?path=${encodeURIComponent(PATH)}`, { cookie: link, unlock: body.unlock })).status, 403);
+    });
+
+    it('serves a file once to the tab that opens a ticket, which an unlocked page asked for', async () => {
+      const { ticket, open } = await locked();
+      const res = await ticket('c1', PATH);
+      assert.equal(res.status, 201);
+      const t = await ticketOf(res);
+      const served = await open('c1', `ticket=${t}`);
+      assert.equal(served.status, 200);
+      assert.equal(await served.text(), 'hi');
+      assert.equal((await open('c1', `ticket=${t}`)).status, 403);
+    });
+
+    it('gives a ticket only to an unlocked page, and only for a path the card contains', async () => {
+      const { ticket } = await locked();
+      assert.equal((await ticket('c1', PATH, '')).status, 423);
+      assert.equal((await ticket('c1', '/tmp/c.txt')).status, 403);
+    });
+
+    it('refuses a ticket for another card, and a ticket over 60 seconds old', async () => {
+      const { ticket, open } = await locked();
+      assert.equal((await open('c2', `ticket=${await ticketOf(await ticket('c1', PATH))}`)).status, 403);
+      mock.timers.enable({ apis: ['Date'], now: Date.now() });
+      try {
+        const t = await ticketOf(await ticket('c1', PATH));
+        mock.timers.tick(60_001);
+        assert.equal((await open('c1', `ticket=${t}`)).status, 403);
+      } finally {
+        mock.timers.reset();
+      }
+    });
+
+    it('serves the path the ticket is for, whatever path the address carries', async () => {
+      const { ticket, open } = await locked();
+      const t = await ticketOf(await ticket('c1', PATH));
+      assert.equal((await open('c1', `ticket=${t}&path=${encodeURIComponent('/tmp/b.txt')}`)).status, 200);
+    });
   });
 
   it('never replays a PIN response from the message memory', async () => {

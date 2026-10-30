@@ -91,4 +91,12 @@ describe('file links on the laptop inbox', () => {
     const res = await fetch(`${h.server.url}${fileRoute('files', pathOf(url('notes.txt')))}`, { headers: { cookie } });
     assert.equal(res.status, 200);
   });
+
+  it('serves a file once for a ticket, as the page opens it', async () => {
+    const t = await h.owner('POST', '/v1/cards/files/file-ticket', { path: pathOf(url('notes.txt')) });
+    assert.equal(t.status, 201);
+    const { ticket } = (await t.json()) as { ticket: string };
+    assert.equal(await (await h.owner('GET', `/v1/cards/files/file?ticket=${ticket}`)).text(), 'plain notes');
+    assert.equal((await h.owner('GET', `/v1/cards/files/file?ticket=${ticket}`)).status, 403);
+  });
 });

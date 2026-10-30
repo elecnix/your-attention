@@ -281,6 +281,21 @@ export async function openSessionLink(href, el) {
 // Card text with [[card-id]] links. A link shows the linked card title, and its text on hover.
 // Card text is Markdown, and [[card-id]] links to another card by its title.
 // A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
+/** Open a card's file in a new tab. A new tab sends no unlock header, so it opens the file with a ticket that this page
+ * asks for, good once. The tab opens at the click, since a popup blocker stops one that opens after a fetch. */
+export function openCardFile(card, path) {
+  const tab = window.open('', '_blank');
+  if (!tab) return;
+  tab.opener = null;
+  const route = `${BASE}v1/cards/${encodeURIComponent(card)}/file`;
+  api(`${route}-ticket`, { path })
+    .then((r) => r.json().then((d) => {
+      if (!r.ok) throw new Error(d.error || `the inbox answered ${r.status}`);
+      tab.location.href = new URL(`${route}?ticket=${encodeURIComponent(d.ticket)}`, location.href).href;
+    }))
+    .catch((e) => { tab.document.title = 'File not opened'; tab.document.body.textContent = `The file did not open: ${e.message}`; });
+}
+
 // With a card id in `files`, a file: link opens the file in a new tab, which the laptop inbox serves for that card only.
 // Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
 export function LinkedText({ text, byId, open, diagrams = true, files }) {
@@ -292,8 +307,9 @@ export function LinkedText({ text, byId, open, diagrams = true, files }) {
     return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
   };
   const diagram = diagrams ? (source, key) => h(Diagram, { key, source }) : undefined;
-  const fileLink = files ? (path, label, key) => h('a', { key, className: 'file-link', title: path, target: '_blank', rel: 'noopener noreferrer',
-    href: `${BASE}v1/cards/${encodeURIComponent(files)}/file?path=${encodeURIComponent(path)}` }, label) : undefined;
+  const fileLink = files ? (path, label, key) => h('a', { key, className: 'file-link', title: path,
+    href: `${BASE}v1/cards/${encodeURIComponent(files)}/file?path=${encodeURIComponent(path)}`,
+    onClick: (e) => { e.preventDefault(); openCardFile(files, path); } }, label) : undefined;
   return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram, fileLink }));
 }
 

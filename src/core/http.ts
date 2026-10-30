@@ -17,6 +17,8 @@ export const CSRF_HEADER = 'x-your-attention';
 export const MESSAGE_HEADER = 'x-message-id';
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json']);
+/** How long a file ticket opens its file, once. */
+const FILE_TICKET_MS = 60_000;
 /** The type of a local file, by its extension. Text that a browser would download, such as Markdown and CSV, shows as plain text. */
 const LOCAL_TYPES: Record<string, string> = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', txt: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
@@ -130,6 +132,21 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
   const heartbeatMs = options.heartbeatMs ?? 2000;
   /** Whether this inbox serves the files a card names: it has a file system, and the card came from this machine. */
   const servesFiles = (card: Card): boolean => !!options.localFiles && card.origin?.host === options.localFiles.host;
+  /** The tickets the page asked for to open a file in a new tab, each good for one use, for one card and path. */
+  const tickets = new Map<string, { card: string; path: string; expiresAt: number }>();
+
+  /** The file a card names at `name`, or the refusal. The agent that posted the card chose what it exposes: the inbox
+   * serves a file only when the card came from this machine and its text or recommendation names that exact path. */
+  async function cardFile(card: Card, name: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> }> {
+    const local = options.localFiles;
+    if (!local) throw new InboxError(404, 'this inbox serves no local files');
+    if (!servesFiles(card)) throw new InboxError(403, 'this card came from another machine');
+    if (![card.text, card.recommendation].some((t) => fileLinkPaths(t ?? '').includes(name))) throw new InboxError(403, 'the card does not name this file');
+    const file = await local.file(name);
+    if (!file) throw new InboxError(404, 'no such file');
+    if (file.size > MAX_ATTACHMENT_BYTES) throw new InboxError(413, `the file is ${file.size} bytes, over the limit of ${MAX_ATTACHMENT_BYTES}`);
+    return file;
+  }
 
   async function caller(req: Request): Promise<{ token: Token; viaCookie: boolean } | undefined> {
     const auth = req.headers.get('authorization');
@@ -175,18 +192,18 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const unlockSecret = req.headers.get(UNLOCK_HEADER) ?? (method === 'GET' && a === 'events' ? url.searchParams.get('unlock') : null);
     const gate = await inbox.pinGate(who.token, who.viaCookie, unlockSecret);
     // A locked caller may read the PIN state, unlock, and fetch a file by its id, which only an unlocked page can list.
-    // A new tab sends no unlock header, so a card's file link opens on the same terms.
+    // A new tab sends no unlock header, so it opens a card's file link with a ticket that an unlocked page asked for.
     const pinRoute = a === 'pin' || a === 'unlock' || a === 'lock';
-    const fileRoute = method === 'GET' && (a === 'attachments' || (a === 'cards' && c === 'file'));
+    const fileRoute = method === 'GET' && (a === 'attachments' || (a === 'cards' && c === 'file' && url.searchParams.has('ticket')));
     if (gate.locked && !pinRoute && !fileRoute) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
     const me: Caller = { token: who.token.id, role: who.token.role };
     // A full inbox takes the writes that free space or answer cards, and refuses the rest.
-    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'answer'));
+    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'answer' || c === 'file-ticket'));
     if (method !== 'GET' && !frees && inbox.storageFull()) return json({ error: 'this inbox is full: remove cards, templates or widgets to make room' }, 507);
     // A message that arrives over two links, or again after a retry, is applied once: the inbox
     // keeps the first result for each x-message-id, per client.
-    // A PIN response carries an unlock token, so the inbox never keeps it to replay.
-    const messageId = method === 'GET' || pinRoute ? null : req.headers.get(MESSAGE_HEADER);
+    // A PIN response carries an unlock token, and a file ticket works once, so the inbox never keeps either to replay.
+    const messageId = method === 'GET' || pinRoute || c === 'file-ticket' ? null : req.headers.get(MESSAGE_HEADER);
     if (messageId !== null) {
       if (!/^[\w-]{8,64}$/.test(messageId)) return json({ error: `${MESSAGE_HEADER} must be 8 to 64 letters, digits, dashes or underscores` }, 400);
       const key = `${me.token}:${messageId}`;
@@ -435,15 +452,18 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET' && c === 'file') {
         owner();
         const card = inbox.getCard(b);
-        const local = options.localFiles;
-        if (!local) return json({ error: 'this inbox serves no local files' }, 404);
-        if (!servesFiles(card)) throw new InboxError(403, 'this card came from another machine');
-        // The agent that posted the card chose what it exposes: a file is served only when the card names its exact path.
-        const name = url.searchParams.get('path') ?? '';
-        if (![card.text, card.recommendation].some((t) => fileLinkPaths(t ?? '').includes(name))) throw new InboxError(403, 'the card does not name this file');
-        const file = await local.file(name);
-        if (!file) return json({ error: 'no such file' }, 404);
-        if (file.size > MAX_ATTACHMENT_BYTES) throw new InboxError(413, `the file is ${file.size} bytes, over the limit of ${MAX_ATTACHMENT_BYTES}`);
+        let name = url.searchParams.get('path') ?? '';
+        const id = url.searchParams.get('ticket');
+        if (id !== null) {
+          const ticket = tickets.get(id);
+          tickets.delete(id);
+          if (!ticket || ticket.card !== b || ticket.expiresAt < Date.now()) throw new InboxError(403, 'this file link has expired: open it again from the card');
+          name = ticket.path;
+        } else if (gate.gated && inbox.pin.isSet()) {
+          // With a PIN, a cookie alone never opens a file: the tab needs a ticket from an unlocked page.
+          throw new InboxError(403, 'open this file from its card');
+        }
+        const file = await cardFile(card, name);
         const base = name.split('/').pop() ?? '';
         const type = LOCAL_TYPES[/\.([^.]+)$/.exec(base)?.[1]?.toLowerCase() ?? ''];
         // A file can grow between the size check and the read.
@@ -454,6 +474,16 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method !== 'POST') return json({ error: 'not found' }, 404);
       const body = await readJson<Record<string, unknown>>(req);
       switch (c) {
+        case 'file-ticket': {
+          owner();
+          const path = String(body['path'] ?? '');
+          await cardFile(inbox.getCard(b), path);
+          const now = Date.now();
+          for (const [k, t] of tickets) if (t.expiresAt < now) tickets.delete(k);
+          const ticket = randomId(24);
+          tickets.set(ticket, { card: b, path, expiresAt: now + FILE_TICKET_MS });
+          return json({ ticket, expiresAt: now + FILE_TICKET_MS }, 201);
+        }
         case 'answer':
           owner();
           return json(await inbox.answer(b, {

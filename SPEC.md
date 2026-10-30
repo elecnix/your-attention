@@ -187,7 +187,16 @@ The route serves the owner only, and it serves a file under these rules:
 - A directory, a missing file, or anything else that isn't a regular file answers 404. A file over 8 MB, the attachment limit, answers 413.
 - The extension sets the type. HTML comes back as `text/html`, and text, Markdown, logs and CSV as `text/plain`, with JSON, images and PDF as their own types. The route serves any other extension as a download.
 - Each response has `x-content-type-options: nosniff` and the Content Security Policy of an attachment, which starts with `sandbox`. So a served HTML report runs in an opaque origin, without scripts, and can't read the inbox's cookie or its storage. A PDF goes without `sandbox`, as an attachment does, because browsers refuse to show a sandboxed PDF.
-- The link opens in a new tab, which signs in with the cookie and doesn't send an unlock header. A locked inbox serves the route as it serves attachments, since the page shows the link only once it unlocks.
+- The page opens the file with a ticket. At a click it opens a new tab, then asks `POST /v1/cards/<id>/file-ticket {path}`, which only the owner may call. The inbox checks the rules above and answers 201 `{ticket, expiresAt}`. The tab then loads `GET /v1/cards/<id>/file?ticket=<ticket>`. A ticket opens one file once, for its card and path, within 60 seconds, and a used, expired or other card's ticket answers 403. The inbox keeps tickets in memory and never replays the ticket response for an `x-message-id`.
+
+A new tab signs in with the cookie and doesn't send an unlock header, so whether the inbox has a PIN sets what opens a file:
+
+| The inbox | A request without a ticket | A request with a ticket |
+| --- | --- | --- |
+| has no PIN | serves the file to the cookie, or to an owner token | serves the file once |
+| has a PIN | answers 403 to the cookie, and 423 while the cookie is locked. A PIN-exempt owner token still opens the file | serves the file once, even to a locked cookie |
+
+`POST /v1/cards/<id>/file-ticket` follows the PIN gate as other routes do, so a locked page gets 423 and no ticket.
 
 The hosted inbox has no file system, so the route answers 404 there.
 
