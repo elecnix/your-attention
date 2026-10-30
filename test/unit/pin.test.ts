@@ -29,6 +29,14 @@ describe('PIN keys', () => {
     assert.equal(PIN_ITERATIONS, 800_000);
   });
 
+  it('the page derives the same key without Web Crypto, as on a plain-HTTP address from another machine', async () => {
+    const salt = '00112233445566778899aabbccddeeff';
+    assert.equal(page.pinKeyWithoutWebCrypto('2468', salt, 1000), await pinKey('2468', salt, 1000));
+    assert.equal(page.pinKeyWithoutWebCrypto('0000', salt, 1), await pinKey('0000', salt, 1));
+    // RFC 7914's PBKDF2-HMAC-SHA256 vector: P = "passwd", S = "salt", c = 1, first 32 bytes.
+    assert.equal(page.pinKeyWithoutWebCrypto('passwd', '73616c74', 1), '55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc');
+  });
+
   it('stores the SHA-256 of the key, so a stolen store does not unlock', async () => {
     const { pin, store, key } = setup();
     const k = await newPinKey('2468', 1000);

@@ -84,6 +84,16 @@ test('the page sends a key derived from the PIN, never the PIN', async ({ page }
   }
 });
 
+test('a page without Web Crypto, as on a plain-HTTP address from another machine, still unlocks', async ({ page }) => {
+  await inbox.server.inbox.pin.set('2468');
+  await page.addInitScript(() => { Object.defineProperty(Crypto.prototype, 'subtle', { get: () => undefined }); });
+  await signIn(page);
+  expect(await page.evaluate(() => window.isSecureContext && !crypto.subtle)).toBe(true);
+  await page.getByLabel('PIN').fill('2468');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await expect(page.locator('.bar .pill.on')).toBeVisible({ timeout: 15_000 });
+});
+
 test('wrong PINs lock the screen and say how long to wait', async ({ page }) => {
   await inbox.server.inbox.pin.set('2468');
   await signIn(page);
