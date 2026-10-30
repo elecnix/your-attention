@@ -10,7 +10,9 @@ describe('the test harness', () => {
     const agent = new Client({ url: h.server.url, token: h.agentToken });
     const { ended } = h.listen(agent, 's-left-open');
     await h.stop();
-    const outcome = await Promise.race([ended.then(() => 'ended'), new Promise((r) => setTimeout(() => r('still retrying'), 3000))]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([ended.then(() => 'ended'), new Promise((r) => { timer = setTimeout(() => r('still retrying'), 3000); })]);
+    clearTimeout(timer);
     assert.equal(outcome, 'ended');
   });
 });
