@@ -52,6 +52,14 @@ flags = SwitchGroup("flags13", [SwitchItem("Deploy after merge", "", "deploy")])
 note = Input("ticket", "Ticket")`;
 
 describe('the card pane', () => {
+  it('draws a closed card as closed while the state has no summary of it yet', () => {
+    const c = card({ id: 'gone', title: 'Closed meanwhile', closed: { kind: 'resolved', outcome: 'Fixed upstream.', at: 1 } });
+    const view = new CardView(c, { theme, address: () => '', act: () => {}, fileText: () => undefined, now: () => 600_000 });
+    const s: InboxState = { cards: [], answers: {}, presence: {}, states: {} };
+    const text = view.build(70, s, buildQueue(s, 'none')).lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+    assert.match(text, /No longer waiting\] Fixed upstream\./);
+  });
+
   it('draws a body with its text, table and fields in place, and sends what the page sends for the same picks', () => {
     const t = setup(card({ id: 'forms', title: 'Two pull requests', body: FORMS }));
     const screen = t.text();

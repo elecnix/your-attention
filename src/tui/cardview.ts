@@ -192,7 +192,7 @@ export class CardView {
 
     // The queue reads the card's summary, which has its reply and answer states.
     const sum = q.byId[card.id];
-    const state = sum ? q.st(sum) : 'open';
+    const state = sum ? q.st(sum) : card.closed ? 'closed' : 'open';
     const a = this.saved;
     const level = (s.levels ?? []).find((l) => l.id === (sum ? q.levelOf(sum) : card.priority));
     if (state === 'closed' && card.closed) {
