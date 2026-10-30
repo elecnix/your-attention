@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, describe, it } from 'node:test';
+import { after, afterEach, before, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
-import type { AgentEvent, NewCard, Sealed } from '../../src/core/types.ts';
+import type { NewCard, Sealed } from '../../src/core/types.ts';
 import { start, until, type Harness } from './harness.ts';
 import { startTui, type Tui } from './tui-pty.ts';
 
@@ -27,10 +27,8 @@ const tui = (opts: Partial<Parameters<typeof startTui>[0]> = {}): Tui => {
 };
 /** Answers for one agent, as they arrive. */
 const listen = (id: string) => {
-  const events: AgentEvent[] = [];
-  const ctl = new AbortController();
-  void agent.stream(id, (e) => { events.push(e); }, ctl.signal);
-  return { answer: () => until(() => events.find((e) => e.type === 'answer'), 8000), stop: () => ctl.abort() };
+  const { events, stop } = h.listen(agent, id);
+  return { answer: () => until(() => events.find((e) => e.type === 'answer'), 8000), stop };
 };
 const post = (c: NewCard) => agent.post(c);
 
@@ -38,8 +36,11 @@ before(async () => {
   h = await start();
   agent = new Client({ url: h.server.url, token: h.agentToken });
 });
+// A test that fails stops before its own cleanup, so each one's clients stop here, and a failure never leaves a process behind.
+afterEach(async () => {
+  for (const t of running.splice(0)) await t.stop();
+});
 after(async () => {
-  for (const t of running) await t.stop();
   await h.stop();
   fs.rmSync(herdrDir, { recursive: true, force: true });
 });
@@ -93,6 +94,8 @@ describe('your-attention tui', () => {
     const ev = listen('s-ce');
     const t = tui();
     await t.waitFor('Ctrl Enter one');
+    // The list shows a card before its fields load, and Enter on a card that has not loaded does nothing.
+    await t.waitFor('( ) Yes');
     t.send('\r ');
     await t.waitFor('(•) Yes');
     t.send('\x1b[13;5u');
@@ -102,6 +105,7 @@ describe('your-attention tui', () => {
     const ev2 = listen('s-ce2');
     // The answer opens the next card, and Enter goes to its first field.
     await t.waitFor('Ctrl Enter two new');
+    await t.waitFor('( ) Yes');
     t.send('\r ');
     await t.waitFor('(•) Yes');
     t.send('\x1b[27;5;13~');
@@ -141,9 +145,7 @@ describe('your-attention tui', () => {
       const { secret } = await own.server.inbox.createToken('tui test', 'owner');
       const ownAgent = new Client({ url: own.server.url, token: own.agentToken });
       await ownAgent.post({ id: 'locked', agent: 's-locked', title: 'Behind the PIN', priority: 'now', options: [{ id: 'y', label: 'Yes' }] });
-      const events: AgentEvent[] = [];
-      const ctl = new AbortController();
-      void ownAgent.stream('s-locked', (e) => { events.push(e); }, ctl.signal);
+      const { events, stop } = own.listen(ownAgent, 's-locked');
       const t = startTui({ url: own.server.url, token: secret });
       running.push(t);
       await t.waitFor('This inbox is locked. Type its PIN:');
@@ -151,13 +153,14 @@ describe('your-attention tui', () => {
       await t.waitFor('Wrong PIN. 4 tries left.');
       t.send('2468\r');
       await t.waitFor('Behind the PIN');
+      await t.waitFor('( ) Yes');
       t.send('\r ');
       await t.waitFor('(•) Yes');
       t.send('\x13');
       const a = await until(() => events.find((e) => e.type === 'answer'), 8000);
       assert.ok(a.type === 'answer' && a.answer.values['choice'] === 'y');
       assert.equal(t.vt.raw.includes('2468'), false, 'the PIN never reaches the screen');
-      ctl.abort();
+      stop();
       await t.stop();
     } finally {
       await own.stop();
