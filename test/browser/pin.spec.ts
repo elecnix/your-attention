@@ -89,9 +89,13 @@ test('a page without Web Crypto, as on a plain-HTTP address from another machine
   await page.addInitScript(() => { Object.defineProperty(Crypto.prototype, 'subtle', { get: () => undefined }); });
   await signIn(page);
   expect(await page.evaluate(() => window.isSecureContext && !crypto.subtle)).toBe(true);
+  // A slow phone takes seconds: with the CPU four times slower, the page says how far the check got.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
   await page.getByLabel('PIN').fill('2468');
   await page.getByRole('button', { name: 'Unlock' }).click();
-  await expect(page.locator('.bar .pill.on')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('status')).toContainText(/Checking the PIN on this device: \d+%/);
+  await expect(page.locator('.bar .pill.on')).toBeVisible({ timeout: 30_000 });
 });
 
 test('wrong PINs lock the screen and say how long to wait', async ({ page }) => {

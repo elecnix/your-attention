@@ -9,7 +9,9 @@ const send = (method, path, body) => fetch(BASE + path, { method, headers: { 'co
   .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
 // The PIN never leaves the page. It derives a key with the salt and iterations of GET /v1/pin, and sends the key.
 const pinState = () => fetch(`${BASE}v1/pin`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`the inbox answered ${r.status}`))));
-const currentKey = async (pin) => { const s = await pinState(); return pinKey(pin, s.salt, s.iterations); };
+const currentKey = async (pin, onProgress) => { const s = await pinState(); return pinKey(pin, s.salt, s.iterations, onProgress); };
+// A page without Web Crypto, such as a phone at a plain-HTTP laptop address, derives the key in seconds, and says how far it got.
+const progressText = (fraction) => (fraction === null ? null : `Checking the PIN on this device: ${Math.floor(fraction * 100)}%`);
 
 // A loopback, private network or .local address means a computer runs the inbox, and its CLI resets the PIN.
 const LAPTOP = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|\[f[cd][0-9a-f:]*\]|\[fe80:[0-9a-f:]*\]|[\w-]+\.local)$/i;
@@ -31,6 +33,7 @@ export function PinUnlock({ onUnlocked }) {
   const [until, setUntil] = React.useState(null);
   const [now, setNow] = React.useState(Date.now());
   const [busy, setBusy] = React.useState(false);
+  const [progress, setProgress] = React.useState(null);
   React.useEffect(() => {
     fetch(`${BASE}v1/pin`).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s && s.lockedUntil) setUntil(s.lockedUntil); }, () => {});
   }, []);
@@ -44,8 +47,9 @@ export function PinUnlock({ onUnlocked }) {
     e.preventDefault();
     if (pin.length !== 4 || locked || busy) return;
     setBusy(true);
-    const r = await currentKey(pin).then((key) => send('POST', 'v1/unlock', { key })).catch(() => ({ status: 0, body: { error: 'The inbox did not answer.' } }));
+    const r = await currentKey(pin, setProgress).then((key) => send('POST', 'v1/unlock', { key })).catch(() => ({ status: 0, body: { error: 'The inbox did not answer.' } }));
     setBusy(false);
+    setProgress(null);
     setPin('');
     if (r.status === 200 && r.body.unlock) { unlockToken.set(r.body.unlock); onUnlocked(); return; }
     if (r.status === 429 && r.body.lockedUntil) { setUntil(r.body.lockedUntil); setNow(Date.now()); setError(null); return; }
@@ -58,6 +62,7 @@ export function PinUnlock({ onUnlocked }) {
       pinInput({ value: pin, onChange: setPin, autoFocus: true, autoComplete: 'current-password', 'aria-label': 'PIN', disabled: !!locked }),
       h('button', { type: 'submit', className: 'btn primary', disabled: pin.length !== 4 || !!locked || busy }, busy ? 'Checking…' : 'Unlock')),
     locked && h('p', { className: 'pin-error', role: 'status' }, `Too many wrong PINs. Try again in ${wait(until - now)}.`),
+    !locked && progress !== null && h('p', { className: 'pin-help', role: 'status' }, progressText(progress)),
     !locked && error && h('p', { className: 'pin-error', role: 'alert' }, error),
     h('p', { className: 'pin-help' }, 'Forgot it? ', LAPTOP.test(location.hostname)
       ? h(React.Fragment, null, 'On the computer that runs the inbox, run ', h('code', null, 'your-attention pin reset'), '.')
@@ -70,15 +75,21 @@ export function PinForm({ set, offer, onDone, onSkip, onNever, onBusy = () => {}
   const [pin, setPin] = React.useState('');
   const [again, setAgain] = React.useState('');
   const [error, setError] = React.useState(null);
+  const [progress, setProgress] = React.useState(null);
   const submit = async (e) => {
     e.preventDefault();
     if (pin.length !== 4) return setError('A PIN is 4 digits.');
     if (pin !== again) return setError('The two PINs differ.');
     onBusy(true);
     const r = await pinState()
-      .then(async (s) => ({ ...(await newPinKey(pin, s.newIterations)), ...(set ? { current: await pinKey(current, s.salt, s.iterations) } : {}) }))
+      // Changing the PIN derives two keys, so each one reports half of the progress.
+      .then(async (s) => ({
+        ...(await newPinKey(pin, s.newIterations, (f) => setProgress(set ? f / 2 : f))),
+        ...(set ? { current: await pinKey(current, s.salt, s.iterations, (f) => setProgress(0.5 + f / 2)) } : {}),
+      }))
       .then((body) => send('PUT', 'v1/pin', body))
       .catch(() => ({ status: 0, body: { error: 'The inbox did not answer.' } }));
+    setProgress(null);
     if (r.status !== 200) { onBusy(false); return setError(r.body.error || 'The inbox refused the PIN.'); }
     if (r.body.unlock) unlockToken.set(r.body.unlock);
     onDone();
@@ -92,6 +103,7 @@ export function PinForm({ set, offer, onDone, onSkip, onNever, onBusy = () => {}
       h('label', null, 'New PIN ', pinInput({ value: pin, onChange: setPin, autoComplete: 'new-password', autoFocus: !set })),
       h('label', null, 'Again ', pinInput({ value: again, onChange: setAgain, autoComplete: 'new-password' }))),
     error && h('p', { className: 'pin-error', role: 'alert' }, error),
+    progress !== null && h('p', { role: 'status' }, progressText(progress)),
     h('div', { className: 'usage-actions' },
       h('button', { type: 'submit', className: 'btn primary' }, set ? 'Change PIN' : 'Set PIN'),
       offer && h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip'),

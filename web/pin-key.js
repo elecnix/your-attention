@@ -3,17 +3,18 @@
 const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
 const unhex = (s) => new Uint8Array((s.match(/../g) || []).map((b) => parseInt(b, 16)));
 
-export async function pinKey(pin, salt, iterations) {
+/** `onProgress(fraction)` runs while a page without Web Crypto derives the key, which takes seconds on a phone. */
+export async function pinKey(pin, salt, iterations, onProgress) {
   // A browser gives Web Crypto to secure origins only. A phone that opens a laptop inbox at http://laptop.local has none.
-  if (!globalThis.crypto || !globalThis.crypto.subtle) return pinKeyWithoutWebCrypto(pin, salt, iterations);
+  if (!globalThis.crypto || !globalThis.crypto.subtle) return pinKeyWithoutWebCrypto(pin, salt, iterations, onProgress);
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
   return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: unhex(salt), iterations }, key, 256));
 }
 
 /** A new PIN's key, with a fresh random 16-byte salt. getRandomValues works on any origin. */
-export async function newPinKey(pin, iterations) {
+export async function newPinKey(pin, iterations, onProgress) {
   const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
-  return { key: await pinKey(pin, salt, iterations), salt, iterations };
+  return { key: await pinKey(pin, salt, iterations, onProgress), salt, iterations };
 }
 
 // PBKDF2-HMAC-SHA256 for 32 bytes, in plain JavaScript, for a page without Web Crypto. The HMAC pads are hashed once,
@@ -66,8 +67,12 @@ function hash(bytes, h = INIT, done = 0) {
   return s;
 }
 
-/** PBKDF2-HMAC-SHA256 with Web Crypto's result, for 32 bytes. Exported for the tests. */
-export function pinKeyWithoutWebCrypto(pin, salt, iterations) {
+/** Iterations between two yields to the page, about 50 ms on a phone. */
+const CHUNK = 20_000;
+
+/** PBKDF2-HMAC-SHA256 with Web Crypto's result, for 32 bytes. It yields to the page between chunks, so the page can draw
+ * `onProgress(fraction)`. Exported for the tests. */
+export async function pinKeyWithoutWebCrypto(pin, salt, iterations, onProgress) {
   let key = new TextEncoder().encode(pin);
   if (key.length > 64) key = wordBytes(hash(key));
   const pad = (x) => { const p = new Uint8Array(64).fill(x); key.forEach((b, i) => { p[i] ^= b; }); return p; };
@@ -86,6 +91,10 @@ export function pinKeyWithoutWebCrypto(pin, salt, iterations) {
   msg[8] = 0x80000000;
   msg[15] = (64 + 32) * 8;
   for (let n = 1; n < iterations; n++) {
+    if (n % CHUNK === 0) {
+      if (onProgress) onProgress(n / iterations);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     const hi = Int32Array.from(inner);
     msg.set(u, 0);
     block(hi, msg);
@@ -95,6 +104,7 @@ export function pinKeyWithoutWebCrypto(pin, salt, iterations) {
     u = ho;
     for (let i = 0; i < 8; i++) out[i] ^= u[i];
   }
+  if (onProgress) onProgress(1);
   return hex(wordBytes(out));
 }
 

@@ -31,10 +31,14 @@ describe('PIN keys', () => {
 
   it('the page derives the same key without Web Crypto, as on a plain-HTTP address from another machine', async () => {
     const salt = '00112233445566778899aabbccddeeff';
-    assert.equal(page.pinKeyWithoutWebCrypto('2468', salt, 1000), await pinKey('2468', salt, 1000));
-    assert.equal(page.pinKeyWithoutWebCrypto('0000', salt, 1), await pinKey('0000', salt, 1));
+    const steps: number[] = [];
+    assert.equal(await page.pinKeyWithoutWebCrypto('2468', salt, 50_000, (done) => steps.push(done)), await pinKey('2468', salt, 50_000));
+    // A slow phone takes seconds, so the derivation yields and reports how far it got.
+    assert.ok(steps.length >= 2, `progress reported ${steps.length} times`);
+    assert.ok(steps.every((x, i) => x > 0 && x <= 1 && (i === 0 || x >= steps[i - 1]!)));
+    assert.equal(await page.pinKeyWithoutWebCrypto('0000', salt, 1), await pinKey('0000', salt, 1));
     // RFC 7914's PBKDF2-HMAC-SHA256 vector: P = "passwd", S = "salt", c = 1, first 32 bytes.
-    assert.equal(page.pinKeyWithoutWebCrypto('passwd', '73616c74', 1), '55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc');
+    assert.equal(await page.pinKeyWithoutWebCrypto('passwd', '73616c74', 1), '55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc');
   });
 
   it('stores the SHA-256 of the key, so a stolen store does not unlock', async () => {
