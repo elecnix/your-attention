@@ -26,7 +26,19 @@ test('attachments render by type: a gallery, Markdown, CSV, JSON, and a download
   await expect(page.locator('table.csv td').first()).toHaveText('bridge');
   await expect(page.locator('.file pre')).toContainText('"ok": true');
   const zip = page.locator('a.file-name', { hasText: 'logs.zip' });
-  await expect(zip).toHaveAttribute('href', /download=1/);
+  await expect(zip).toHaveAttribute('href', /\/v1\/attachments\/[^?]+$/);
+});
+
+test('an HTML attachment opens in a tab, even one an older agent posted as octet-stream', async ({ page }) => {
+  await inbox.agent.post({ id: 'report', agent: 's-report', title: 'Read the report', priority: 'now', attachments: [
+    { src: `data:application/octet-stream;base64,${b64('<h1>Friction report</h1>')}`, name: 'report.html' },
+  ] });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Read the report' }).click();
+  const link = page.locator('a.file-name', { hasText: 'report.html' });
+  await expect(link).not.toHaveAttribute('download', /.*/);
+  const [tab] = await Promise.all([page.context().waitForEvent('page'), link.click()]);
+  await expect(tab.locator('h1')).toHaveText('Friction report');
 });
 
 test('card links show the linked title, and the linked card lists its backlinks', async ({ page }) => {

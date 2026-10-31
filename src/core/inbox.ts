@@ -704,9 +704,11 @@ export class Inbox {
       const d = decoded[i];
       if (!d) return f;
       const key = `${id}.${i}.${randomId(6)}`;
-      const ref: Attachment = { id: key, name: cleanName(f.name) || `attachment-${i + 1}`, type: d.type, size: d.bytes.length, alt: f.alt ? String(f.alt).slice(0, 300) : undefined };
+      const name = cleanName(f.name) || `attachment-${i + 1}`;
+      const type = attachmentType({ name, type: d.type });
+      const ref: Attachment = { id: key, name, type, size: d.bytes.length, alt: f.alt ? String(f.alt).slice(0, 300) : undefined };
       stored.push(ref);
-      await this.blobs.put(key, d.bytes, d.type);
+      await this.blobs.put(key, d.bytes, type);
       return { src: '', ref };
     }));
     const failed = settled.find((r) => r.status === 'rejected');
@@ -1468,7 +1470,8 @@ export class Inbox {
 
 const TYPES_BY_EXTENSION: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf',
-  md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', csv: 'text/csv', json: 'application/json',
+  md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', csv: 'text/csv', json: 'application/json',
+  html: 'text/html', htm: 'text/html',
 };
 
 const index = (i: number): number => i + 1;
@@ -1507,8 +1510,14 @@ function decodeDataUrl(i: number, f: NewAttachment): { type: string; bytes: Uint
   return { type: (m[1] ?? '').toLowerCase(), bytes: Uint8Array.from(raw, (c) => c.charCodeAt(0)) };
 }
 
-function typeFromName(name: string): string {
+/** The type of a file by its extension, or application/octet-stream for an extension the inbox does not know. */
+export function typeFromName(name: string): string {
   return TYPES_BY_EXTENSION[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream';
+}
+
+/** A file's type, or the type its name gives when an agent sent it as application/octet-stream. */
+export function attachmentType(file: { name: string; type?: string }): string {
+  return !file.type || file.type === 'application/octet-stream' ? typeFromName(file.name) : file.type;
 }
 
 /** A card without the id of the token that posted it. */

@@ -94,6 +94,17 @@ describe('card tools', () => {
     await assert.rejects(runTool(ctx, 'card_guidance', { text: 'x' }), /card_guidance does not take text\. It takes propose/);
   });
 
+  it('reads an HTML file the agent attaches as text/html', async () => {
+    const { toAttachment } = await import('../../src/integrations/run-tool.ts');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-attach-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'report.html'), '<h1>r</h1>');
+      assert.match(String(toAttachment({ path: path.join(dir, 'report.html') }).src), /^data:text\/html;base64,/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('posts the card without an origin when looking it up fails', async () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     let posted: Record<string, unknown> = {};

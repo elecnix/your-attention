@@ -231,7 +231,7 @@ An inbox built with `storageLimitBytes` refuses writes with 507 while it stores 
 
 A pairing request and its card go a day after the request. An approved token that the client has not collected within 10 minutes goes from storage.
 
-`GET /v1/attachments/<id>` serves the bytes to owner and extension tokens, and to the client that posted the card. Images, PDF, Markdown, text, CSV and JSON come back inline, and every other type as a download with `content-type: application/octet-stream`. Each response has `x-content-type-options: nosniff` and a Content Security Policy that blocks scripts.
+`GET /v1/attachments/<id>` serves the bytes to owner and extension tokens, and to the client that posted the card. Images, PDF, Markdown, text, CSV, JSON and HTML come back inline, and every other type as a download with `content-type: application/octet-stream`. Each response has `x-content-type-options: nosniff` and a Content Security Policy that blocks scripts, so an HTML file shows with its styles and runs none of its scripts. The inbox takes a file's type from its data URL. When that type is `application/octet-stream`, it takes the type from the file's extension instead, both when it stores the file and when it serves one stored earlier. On the page, a file's name opens it in a new tab, and the browser shows it or saves it by the inbox's `content-disposition` header.
 
 ## Templates
 

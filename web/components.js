@@ -347,7 +347,7 @@ export const isImage = (t) => /^image\/(png|jpeg|gif|webp)$/.test(t);
 export const fileUrl = (f) => (f.id ? `${BASE}v1/attachments/${encodeURIComponent(f.id)}` : /^https:\/\//i.test(String(f.url || '')) ? f.url : 'about:blank');
 export const sizeText = (n) => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-// One attached file, rendered by its type: Markdown, CSV and JSON in place, PDF in a frame, anything else as a download.
+// One attached file, rendered by its type: Markdown, CSV and JSON in place, PDF in a frame, anything else behind its name.
 export function FileView({ file }) {
   const [text, setText] = React.useState(null);
   const textual = /^(text\/(markdown|plain|csv)|application\/json)$/.test(file.type);
@@ -355,7 +355,8 @@ export function FileView({ file }) {
     if (!textual) return;
     fetch(fileUrl(file)).then((r) => r.text()).then(setText, () => setText(''));
   }, [file.id, file.url]);
-  const download = h('a', { className: 'file-name', href: file.id ? `${fileUrl(file)}?download=1` : file.url, download: file.name, target: '_blank', rel: 'noopener' }, file.name);
+  // The name opens the file in a tab. The inbox shows a type the browser renders, sandboxed, and downloads the rest.
+  const download = h('a', { className: 'file-name', href: fileUrl(file), target: '_blank', rel: 'noopener' }, file.name);
   let body = null;
   // Only the inbox's own copy of a PDF goes in a frame: the inbox serves it as application/pdf with nosniff,
   // so the browser can only show it as a PDF. A sandboxed frame cannot run the PDF viewer. A PDF elsewhere stays a link.

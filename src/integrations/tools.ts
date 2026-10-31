@@ -33,7 +33,7 @@ export const cardTools: CardTool[] = [
         from: { type: 'string', description: 'Optional. The name you give yourself, such as "the release agent", shown on the card. The card already shows your session name and where you run.' },
         attachments: {
           type: 'array',
-          description: 'Files to show on the card: images, PDF, Markdown, text, CSV, JSON, or any file to download. At most 10, 8 MB each.',
+          description: 'Files to show on the card: images, PDF, Markdown, text, CSV, JSON, HTML, or any file to download. At most 10, 8 MB each.',
           items: { type: 'object', properties: { path: { type: 'string', description: 'A local file.' }, url: { type: 'string', description: 'An https URL.' }, name: { type: 'string' }, alt: { type: 'string', description: 'What an image shows.' } } },
         },
         html: { type: 'string', description: 'Your own HTML and scripts, shown in a sandboxed frame if the person allows it. The page sets the font, text size, weights and colors to match the inbox, so style only the layout. When you ask several questions, give each one its own comment input beside it. The page adds a comment box, Send answer and Skip below the frame, so add no general comment box or send button. Send answer takes every named input, select and textarea in the frame: a radio gives its value, check boxes give the list of checked values. A script can also answer with yourAttention.answer(values, comment), and the comment box text joins it. A herdr session link, <a href="https://herdr.invalid/v1/pane/w7:p2">, opens that session in herdr.' },

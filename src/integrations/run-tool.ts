@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
+import { typeFromName } from '../core/inbox.ts';
 import type { CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
 import { cardTools } from './tools.ts';
@@ -16,16 +17,11 @@ export interface ToolContext {
   arrival: string;
 }
 
-const TYPES: Record<string, string> = {
-  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf',
-  md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain', log: 'text/plain', csv: 'text/csv', json: 'application/json',
-};
-
 /** A file the agent names by path or URL, as the inbox takes it. */
 export function toAttachment(a: { path?: string; url?: string; name?: string; alt?: string }): NewAttachment {
   if (a.url) return { src: a.url, name: a.name, alt: a.alt };
   if (!a.path) throw new Error('each attachment needs a path or a url');
-  const type = TYPES[path.extname(a.path).slice(1).toLowerCase()] ?? 'application/octet-stream';
+  const type = typeFromName(a.path);
   return { src: `data:${type};base64,${fs.readFileSync(a.path).toString('base64')}`, name: a.name ?? path.basename(a.path), alt: a.alt };
 }
 

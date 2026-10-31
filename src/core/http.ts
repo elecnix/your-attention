@@ -4,7 +4,7 @@ import { randomId } from './crypto.ts';
 import { fileLinkPaths } from './file-links.ts';
 import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
-import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, publicCard, type Caller } from './inbox.ts';
+import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller } from './inbox.ts';
 import { UNLOCK_HEADER, UNLOCK_IDLE_MS, pinKeyError, validKey, type PinKey } from './pin.ts';
 import type { Source } from './telemetry.ts';
 import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
@@ -16,7 +16,7 @@ export const CSRF_HEADER = 'x-your-attention';
 /** A client-chosen id that makes a write idempotent across links and retries. */
 export const MESSAGE_HEADER = 'x-message-id';
 /** File types the page shows in place. Any other file is served as a download. */
-const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json']);
+const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'text/html']);
 /** How long a file ticket opens its file, once. */
 const FILE_TICKET_MS = 60_000;
 /** The type of a local file, by its extension. Text that a browser would download, such as Markdown and CSV, shows as plain text. */
@@ -431,9 +431,10 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     }
     if (method === 'GET' && a === 'attachments' && b) {
       const { file, bytes } = await inbox.attachment(me, b);
-      // Only types the page renders go inline. Everything else downloads.
-      const inline = INLINE_TYPES.has(file.type) && url.searchParams.get('download') !== '1';
-      return new Response(bytes, { headers: fileHeaders(INLINE_TYPES.has(file.type) ? file.type : 'application/octet-stream', inline, file.name, 'private, max-age=86400') });
+      // Only types a browser renders go inline, HTML in a sandbox that runs no script. Everything else downloads.
+      const type = attachmentType(file);
+      const inline = INLINE_TYPES.has(type) && url.searchParams.get('download') !== '1';
+      return new Response(bytes, { headers: fileHeaders(INLINE_TYPES.has(type) ? type : 'application/octet-stream', inline, file.name, 'private, max-age=86400') });
     }
     if (method === 'GET' && a === 'tokens') { owner(); return json(inbox.listTokens()); }
     if (method === 'DELETE' && a === 'tokens' && b) { owner(); inbox.revokeToken(b); return json({ ok: true }); }

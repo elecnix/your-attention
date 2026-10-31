@@ -128,13 +128,35 @@ describe('http routes for the card model', () => {
     assert.match(img.headers.get('content-disposition') ?? '', /^inline/);
   });
 
-  it('serves a file type the page cannot render as a download, never as HTML', async () => {
+  it('serves an HTML file in place, sandboxed so its scripts never run', async () => {
     const { call, agent } = await setup();
     const html = `data:text/html;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`;
-    const posted = (await (await call('POST', '/v1/cards', { token: agent, body: { id: 'c2', agent: 's1', title: 'q', attachments: [{ src: html, name: 'page.html' }] } })).json()) as { attachments: { id: string }[] };
+    const posted = (await (await call('POST', '/v1/cards', { token: agent, body: { id: 'c2', agent: 's1', title: 'q', attachments: [{ src: html, name: 'page.html' }] } })).json()) as { attachments: { id: string; type: string }[] };
+    assert.equal(posted.attachments[0]!.type, 'text/html');
+    const res = await call('GET', `/v1/attachments/${posted.attachments[0]!.id}`, { token: agent });
+    assert.equal(res.headers.get('content-type'), 'text/html');
+    assert.match(res.headers.get('content-disposition') ?? '', /^inline/);
+    assert.match(res.headers.get('content-security-policy') ?? '', /^sandbox; default-src 'none'/);
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  });
+
+  it('types a file posted as octet-stream by its name, and serves one already stored that way by its name', async () => {
+    const { call, agent } = await setup();
+    const html = `data:application/octet-stream;base64,${Buffer.from('<h1>report</h1>').toString('base64')}`;
+    const posted = (await (await call('POST', '/v1/cards', { token: agent, body: { id: 'c3', agent: 's1', title: 'q', attachments: [{ src: html, name: 'report.html' }] } })).json()) as { attachments: { id: string; type: string }[] };
+    assert.equal(posted.attachments[0]!.type, 'text/html');
+    const res = await call('GET', `/v1/attachments/${posted.attachments[0]!.id}`, { token: agent });
+    assert.equal(res.headers.get('content-type'), 'text/html');
+    assert.match(res.headers.get('content-disposition') ?? '', /^inline/);
+  });
+
+  it('serves a file type no browser renders as a download', async () => {
+    const { call, agent } = await setup();
+    const zip = `data:application/zip;base64,${Buffer.from('PK').toString('base64')}`;
+    const posted = (await (await call('POST', '/v1/cards', { token: agent, body: { id: 'c4', agent: 's1', title: 'q', attachments: [{ src: zip, name: 'logs.zip' }] } })).json()) as { attachments: { id: string }[] };
     const res = await call('GET', `/v1/attachments/${posted.attachments[0]!.id}`, { token: agent });
     assert.equal(res.headers.get('content-type'), 'application/octet-stream');
-    assert.match(res.headers.get('content-disposition') ?? '', /^attachment; filename\*=UTF-8''page\.html/);
+    assert.match(res.headers.get('content-disposition') ?? '', /^attachment; filename\*=UTF-8''logs\.zip/);
   });
 
   it('saves templates, changes priority levels, proposes guidance, and keeps settings for the owner', async () => {
