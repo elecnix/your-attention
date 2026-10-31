@@ -213,7 +213,7 @@ A card can link a file on the agent's computer with a `file:` address, such as `
 
 `clear`, `reset` and `stop` act on the inbox this machine runs. `login-url` and `open` sign in to that inbox, or, on a machine that runs none, to the inbox it paired with as owner, such as a cloud inbox: `your-attention pair <url> --role owner`.
 
-`your-attention status` says what runs here before you start or stop anything: whether the inbox on this machine answers, its address, pid, inbox id, PIN and usage setting, the home directory with its database, token files, service and log, the inboxes this machine paired with and whether each answers, and `YOUR_ATTENTION_URL` or `YOUR_ATTENTION_TOKEN` when they are set, since they win over the files. It prints the names of the token files, never their contents.
+`your-attention status` says what runs here before you start or stop anything: whether the inbox on this machine answers, its address, pid, inbox id, PIN and usage setting, the home directory with its database, token files, service and log, the inboxes this machine paired with and whether each answers, and `YOUR_ATTENTION_URL` or `YOUR_ATTENTION_TOKEN` when they are set, since they win over the files. It prints the names of the token files and of those two variables, never their contents, so a secret stays out of the scrollback.
 
 ### Answer in a terminal
 

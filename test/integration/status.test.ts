@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -36,6 +38,13 @@ function withHome(run: (home: string) => Promise<void>): () => Promise<void> {
   };
 }
 
+/** The report of such a home, which every case expects to exit 0. */
+async function reportFor(home: string, extra: Record<string, string> = {}): Promise<string> {
+  const r = await status(home, extra);
+  assert.equal(r.code, 0, r.err);
+  return r.out;
+}
+
 describe('your-attention status', () => {
   it('reports the running inbox, its files and its settings, and prints no token', async () => {
     const h = await start();
@@ -62,12 +71,11 @@ describe('your-attention status', () => {
   });
 
   it('says no inbox runs on a machine that has none, and which command starts one', withHome(async (home) => {
-    const r = await status(home);
-    assert.equal(r.code, 0, r.err);
-    assert.match(r.out, /state\s+none on this machine/);
-    assert.match(r.out, /start it\s+your-attention start/);
-    assert.match(r.out, /tokens\s+none yet/);
-    assert.match(r.out, /Paired inboxes\n\s+none\s+pair with/);
+    const out = await reportFor(home);
+    assert.match(out, /state\s+none on this machine/);
+    assert.match(out, /start it\s+your-attention start/);
+    assert.match(out, /tokens\s+none yet/);
+    assert.match(out, /Paired inboxes\n\s+none\s+pair with/);
   }));
 
   it('lists a pairing and whether that inbox answers', async () => {
@@ -75,11 +83,10 @@ describe('your-attention status', () => {
     try {
       await withHome(async (machine) => {
         fs.writeFileSync(path.join(machine, 'client.json'), JSON.stringify({ url: h.server.url, token: h.agentToken }));
-        const r = await status(machine);
-        assert.equal(r.code, 0, r.err);
-        assert.ok(r.out.includes(`${h.server.url} (client.json, answering)`), r.out);
+        const out = await reportFor(machine);
+        assert.ok(out.includes(`${h.server.url} (client.json, answering)`), out);
         // A machine that runs no inbox still shows where its agents send their cards.
-        assert.match(r.out, /state\s+none on this machine/);
+        assert.match(out, /state\s+none on this machine/);
       })();
     } finally {
       await h.stop();
@@ -88,23 +95,44 @@ describe('your-attention status', () => {
 
   it('says a pairing that does not answer does not answer', withHome(async (home) => {
     fs.writeFileSync(path.join(home, 'client.json'), JSON.stringify({ url: 'http://127.0.0.1:1', token: 't' }));
-    const r = await status(home);
-    assert.equal(r.code, 0, r.err);
-    assert.ok(r.out.includes('http://127.0.0.1:1 (client.json, not answering)'), r.out);
+    assert.ok((await reportFor(home)).includes('http://127.0.0.1:1 (client.json, not answering)'));
   }));
 
   it('calls an address file left by a crashed inbox what it is', withHome(async (home) => {
     fs.writeFileSync(path.join(home, 'server.json'), JSON.stringify({ url: 'http://127.0.0.1:1', port: 1, pid: 1 }));
-    const r = await status(home);
-    assert.equal(r.code, 0, r.err);
-    assert.match(r.out, /state\s+not running; \S+server\.json is left from an earlier run/);
-    assert.match(r.out, /start it\s+your-attention start/);
+    const out = await reportFor(home);
+    assert.match(out, /state\s+not running; \S+server\.json is left from an earlier run/);
+    assert.match(out, /start it\s+your-attention start/);
   }));
 
   it('says when the environment sends agents somewhere other than the files', withHome(async (home) => {
-    const r = await status(home, { YOUR_ATTENTION_URL: 'https://inbox.example' });
-    assert.equal(r.code, 0, r.err);
-    assert.match(r.out, /agents use\s+YOUR_ATTENTION_URL is set alone, so agents ignore it/);
-    assert.ok(!r.out.includes('YOUR_ATTENTION_URL, with'), r.out);
+    const out = await reportFor(home, { YOUR_ATTENTION_URL: 'https://inbox.example' });
+    assert.match(out, /agents use\s+YOUR_ATTENTION_URL is set alone, so agents ignore it/);
+    assert.ok(!out.includes('YOUR_ATTENTION_URL, with'), out);
+  }));
+
+  it('prints the names of the environment variables, and never the token', withHome(async (home) => {
+    const secret = 'ya-token-value-4c1f';
+    const out = await reportFor(home, { YOUR_ATTENTION_URL: 'https://inbox.example', YOUR_ATTENTION_TOKEN: secret });
+    assert.match(out, /agents use\s+https:\/\/inbox\.example, with YOUR_ATTENTION_TOKEN, before the files above/);
+    assert.ok(!out.includes(secret), 'the environment token leaked into the output');
+  }));
+
+  it('does not call another program on the inbox address a running inbox', withHome(async (home) => {
+    // A crashed inbox can leave its address in server.json while something else takes the port.
+    const other = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'some-other-program', id: 'not-an-inbox' }));
+    });
+    await new Promise<void>((listening) => other.listen(0, '127.0.0.1', listening));
+    try {
+      const { port } = other.address() as AddressInfo;
+      fs.writeFileSync(path.join(home, 'server.json'), JSON.stringify({ url: `http://127.0.0.1:${port}`, port, pid: 1 }));
+      const out = await reportFor(home);
+      assert.match(out, /state\s+not running/);
+      assert.match(out, /start it\s+your-attention start/);
+    } finally {
+      await new Promise<void>((closed) => other.close(() => closed()));
+    }
   }));
 });

@@ -63,18 +63,21 @@ function readServerInfo(): { url: string; pid: number } | undefined {
   try { return JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string; pid: number }; } catch { return undefined; }
 }
 
-/** What the inbox at this address says about itself, from GET /v1/info, or undefined when none answers. */
-async function infoOf(url: string): Promise<{ name?: string; id?: string; protocol?: number } | undefined> {
+/** What a your-attention inbox at this address says about itself, from GET /v1/info, or undefined when none answers there.
+ * Another program on the address could answer 200 with JSON of its own, so the name has to match. */
+async function infoOf(url: string): Promise<{ name: string; id?: string; protocol?: number } | undefined> {
   try {
     const res = await fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(2000) });
-    return res.ok ? (await res.json()) as { name?: string; id?: string; protocol?: number } : undefined;
+    if (!res.ok) return undefined;
+    const info = (await res.json()) as { name?: string; id?: string; protocol?: number };
+    return info.name === 'your-attention' ? info as { name: string; id?: string; protocol?: number } : undefined;
   } catch {
     return undefined;
   }
 }
 
 /** Whether an inbox answers at this address. */
-const answers = async (url: string): Promise<boolean> => (await infoOf(url))?.name === 'your-attention';
+const answers = async (url: string): Promise<boolean> => (await infoOf(url)) !== undefined;
 
 /** The address of the inbox this machine runs, when one answers there. */
 async function runningUrl(): Promise<string | undefined> {
