@@ -303,10 +303,11 @@ switch (command) {
     for (const [role, file] of [['agent', 'client.json'], ['owner', 'owner.json']] as const) {
       const text = readHome(file, home);
       if (!text) continue;
-      let pairing: { url?: string };
-      try { pairing = JSON.parse(text) as { url?: string }; } catch { pairings.push([role, `${file} is unreadable`]); continue; }
-      const url = pairing.url;
-      if (!url) { pairings.push([role, `${file} holds no address`]); continue; }
+      let pairing: unknown;
+      try { pairing = JSON.parse(text); } catch { pairings.push([role, `${file} is unreadable`]); continue; }
+      // The file parses to anything at all: `null` and a bare number parse without an error.
+      const url = typeof pairing === 'object' && pairing !== null ? (pairing as { url?: unknown }).url : undefined;
+      if (!url || typeof url !== 'string') { pairings.push([role, `${file} holds no address`]); continue; }
       pairings.push([role, `${url} (${file}, ${(await answers(url)) ? 'answering' : 'not answering'})`]);
     }
     if (!pairings.length) pairings.push(['none', 'pair with `your-attention pair <url>`']);

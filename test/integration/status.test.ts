@@ -98,6 +98,15 @@ describe('your-attention status', () => {
     assert.ok((await reportFor(home)).includes('http://127.0.0.1:1 (client.json, not answering)'));
   }));
 
+  it('reads a pairing file that parses to anything but an address as one without an address', withHome(async (home) => {
+    // `null` and a bare number parse without an error, so the object check is what catches them.
+    const file = path.join(home, 'client.json');
+    for (const text of ['null', '42', '{"url":42}', '{}']) {
+      fs.writeFileSync(file, text);
+      assert.ok((await reportFor(home)).includes('client.json holds no address'), `client.json holding ${text}`);
+    }
+  }));
+
   it('calls an address file that no inbox answers on not running', withHome(async (home) => {
     const file = path.join(home, 'server.json');
     fs.writeFileSync(file, JSON.stringify({ url: 'http://127.0.0.1:1', port: 1, pid: 1 }));
