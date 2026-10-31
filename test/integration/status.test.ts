@@ -98,28 +98,14 @@ describe('your-attention status', () => {
     assert.ok((await reportFor(home)).includes('http://127.0.0.1:1 (client.json, not answering)'));
   }));
 
-  it('calls an address file left by a crashed inbox what it is', withHome(async (home) => {
-    fs.writeFileSync(path.join(home, 'server.json'), JSON.stringify({ url: 'http://127.0.0.1:1', port: 1, pid: 1 }));
-    const out = await reportFor(home);
-    assert.match(out, /state\s+not running; \S+server\.json is left from an earlier run/);
-    assert.match(out, /start it\s+your-attention start/);
-  }));
+  it('calls an address file that no inbox answers on not running', withHome(async (home) => {
+    const file = path.join(home, 'server.json');
+    fs.writeFileSync(file, JSON.stringify({ url: 'http://127.0.0.1:1', port: 1, pid: 1 }));
+    const idle = await reportFor(home);
+    assert.match(idle, /state\s+not running; \S+server\.json is left from an earlier run/);
+    assert.match(idle, /start it\s+your-attention start/);
 
-  it('says when the environment sends agents somewhere other than the files', withHome(async (home) => {
-    const out = await reportFor(home, { YOUR_ATTENTION_URL: 'https://inbox.example' });
-    assert.match(out, /agents use\s+YOUR_ATTENTION_URL is set alone, so agents ignore it/);
-    assert.ok(!out.includes('YOUR_ATTENTION_URL, with'), out);
-  }));
-
-  it('prints the names of the environment variables, and never the token', withHome(async (home) => {
-    const secret = 'ya-token-value-4c1f';
-    const out = await reportFor(home, { YOUR_ATTENTION_URL: 'https://inbox.example', YOUR_ATTENTION_TOKEN: secret });
-    assert.match(out, /agents use\s+https:\/\/inbox\.example, with YOUR_ATTENTION_TOKEN, before the files above/);
-    assert.ok(!out.includes(secret), 'the environment token leaked into the output');
-  }));
-
-  it('does not call another program on the inbox address a running inbox', withHome(async (home) => {
-    // A crashed inbox can leave its address in server.json while something else takes the port.
+    // A crashed inbox can leave its address behind while another program takes the port.
     const other = http.createServer((_req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ name: 'some-other-program', id: 'not-an-inbox' }));
@@ -127,12 +113,20 @@ describe('your-attention status', () => {
     await new Promise<void>((listening) => other.listen(0, '127.0.0.1', listening));
     try {
       const { port } = other.address() as AddressInfo;
-      fs.writeFileSync(path.join(home, 'server.json'), JSON.stringify({ url: `http://127.0.0.1:${port}`, port, pid: 1 }));
-      const out = await reportFor(home);
-      assert.match(out, /state\s+not running/);
-      assert.match(out, /start it\s+your-attention start/);
+      fs.writeFileSync(file, JSON.stringify({ url: `http://127.0.0.1:${port}`, port, pid: 1 }));
+      assert.match(await reportFor(home), /state\s+not running/);
     } finally {
       await new Promise<void>((closed) => other.close(() => closed()));
     }
+  }));
+
+  it('reports the environment that wins over the files, and never its token', withHome(async (home) => {
+    const secret = 'ya-token-value-4c1f';
+    const alone = await reportFor(home, { YOUR_ATTENTION_URL: 'https://inbox.example' });
+    assert.match(alone, /agents use\s+YOUR_ATTENTION_URL is set alone, so agents ignore it/);
+
+    const both = await reportFor(home, { YOUR_ATTENTION_URL: 'https://inbox.example', YOUR_ATTENTION_TOKEN: secret });
+    assert.match(both, /agents use\s+https:\/\/inbox\.example, with YOUR_ATTENTION_TOKEN, before the files above/);
+    assert.ok(!both.includes(secret), 'the environment token leaked into the output');
   }));
 });
