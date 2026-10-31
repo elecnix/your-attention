@@ -8,9 +8,14 @@ import { ROOT, start, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 
+/** The whole lines a watcher has written. A chunk boundary can land inside a line, so the last part waits for its newline. */
+function wholeLines(out: string): string[] {
+  return out.split('\n').slice(0, -1).map((l) => l.trim()).filter(Boolean);
+}
+
 /** The first line of a card event. A watcher prints `hello` when its stream opens, and again after a reconnect. */
 async function firstCardEvent(seen: { out: string }): Promise<Record<string, unknown>> {
-  const line = await until(() => seen.out.split('\n').map((l) => l.trim()).filter(Boolean).find((l) => !l.includes('"type":"hello"')) || undefined);
+  const line = await until(() => wholeLines(seen.out).find((l) => !l.includes('"type":"hello"')));
   return JSON.parse(line) as Record<string, unknown>;
 }
 
@@ -74,6 +79,12 @@ describe('watching the inbox from the command line', () => {
       await selected.stop();
       await h.stop();
     }
+  });
+
+  it('reads only whole lines, so a chunk that splits one waits for the rest', () => {
+    assert.deepEqual(wholeLines('{"type":"hel'), [], 'a partial line is not an event yet');
+    assert.deepEqual(wholeLines('{"a":1}\n{"b":'), ['{"a":1}'], 'the whole line comes through, the fragment does not');
+    assert.deepEqual(wholeLines('{"a":1}\n'), ['{"a":1}']);
   });
 
   it('refuses --no-card with --select, and an empty --select', async () => {
