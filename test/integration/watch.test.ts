@@ -52,9 +52,10 @@ describe('watching the inbox from the command line', () => {
       await until(async () => (await h.stored()).states[posted.id] === 'read');
     } finally {
       const code = await w.stop();
+      // The inbox stops before anything is asserted: a failed assertion must not strand the server this test started.
+      await h.stop();
       // Windows has no SIGTERM to handle: a kill ends the process there, and the exit code is the killer's.
       if (process.platform !== 'win32') assert.equal(code, 0, 'a signal ends the watch cleanly');
-      await h.stop();
     }
   });
 
