@@ -56,6 +56,8 @@ describe('watching the inbox from the command line', () => {
     const whole = await watching(h.home, '--agent', 'cli:fields');
     const selected = await watching(h.home, '--agent', 'cli:select', '--select', 'id,title');
     try {
+      // Each card is answered before its watcher may have connected, on purpose: the inbox sends an agent every answer it
+      // stored and nobody received yet when that agent's stream opens, so the watcher prints it either way.
       const c = new Client({ url: h.server.url, token: h.agentToken });
       const a = await c.post({ id: 'watch-fields', agent: 'cli:fields', title: 'Ship the watcher?', text: 'It reads the agent stream.' });
       const b = await c.post({ id: 'watch-select', agent: 'cli:select', title: 'Ship the watcher?', text: 'It reads the agent stream.' });

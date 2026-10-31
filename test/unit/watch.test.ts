@@ -58,11 +58,9 @@ describe('the watcher output', () => {
 
   it('leaves the card out with --no-card, on an answer and on a returned card', () => {
     const answered = watchLine(answer, { noCard: true }, 1700);
-    assert.equal(answered.type, 'answer');
-    assert.equal('card' in answered, false);
-    assert.deepEqual(answered.type === 'answer' ? answered.answer.values : undefined, { choice: 'o2' });
     const returned = watchLine({ type: 'returned', id: 'receipt-2', card, reason: 'no recommendation' }, { noCard: true }, 1700);
-    assert.equal('card' in returned, false);
+    for (const line of [answered, returned]) assert.equal('card' in line, false);
+    assert.deepEqual(answered.type === 'answer' ? answered.answer.values : undefined, { choice: 'o2' });
     assert.equal(returned.type === 'returned' ? returned.reason : undefined, 'no recommendation');
   });
 
