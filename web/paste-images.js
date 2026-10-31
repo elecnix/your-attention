@@ -23,7 +23,7 @@ export function checkImage(file) {
   return null;
 }
 
-const drafts = new Map(); // card id -> [{key, name, field, src}]
+const drafts = new Map(); // card id -> [{key, name, field, src, url}], where url is the blob address a new tab opens
 let counter = 0;
 
 export const pastedImages = {
@@ -41,11 +41,18 @@ export const pastedImages = {
       r.readAsDataURL(file);
     });
     counter += 1;
-    drafts.set(cardId, [...have, { key: `img${counter}`, name: file.name && file.name !== 'image.png' ? file.name : `pasted-${counter}.${file.type.slice(6).replace('jpeg', 'jpg')}`, field, src }]);
+    drafts.set(cardId, [...have, { key: `img${counter}`, name: file.name && file.name !== 'image.png' ? file.name : `pasted-${counter}.${file.type.slice(6).replace('jpeg', 'jpg')}`, field, src, url: URL.createObjectURL(file) }]);
     return null;
   },
-  remove(cardId, key) { drafts.set(cardId, (drafts.get(cardId) || []).filter((i) => i.key !== key)); },
-  clear(cardId) { drafts.delete(cardId); },
+  remove(cardId, key) {
+    const have = drafts.get(cardId) || [];
+    for (const i of have) if (i.key === key) URL.revokeObjectURL(i.url);
+    drafts.set(cardId, have.filter((i) => i.key !== key));
+  },
+  clear(cardId) {
+    for (const i of drafts.get(cardId) || []) URL.revokeObjectURL(i.url);
+    drafts.delete(cardId);
+  },
   /** What the answer route takes. */
   payload: (cardId) => (drafts.get(cardId) || []).map(({ src, name, field }) => ({ src, name, field })),
 };
@@ -83,7 +90,13 @@ export function drawStrips(cardId) {
       drop.textContent = '×';
       drop.setAttribute('aria-label', `Remove ${img.name}`);
       drop.addEventListener('click', () => { pastedImages.remove(cardId, img.key); drawStrips(cardId); });
-      fig.append(pic, drop);
+      const open = document.createElement('a');
+      open.href = img.url;
+      open.target = '_blank';
+      open.rel = 'noopener';
+      open.title = `Open ${img.name} in a new tab`;
+      open.append(pic);
+      fig.append(open, drop);
       strip.append(fig);
     }
     if (note) {

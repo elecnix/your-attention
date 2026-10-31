@@ -64,6 +64,24 @@ test('a dropped file that is not an image is refused with a message', async ({ p
   await expect(page.locator('.focus-card .pasted-thumb')).toHaveCount(0);
 });
 
+test('clicking a thumbnail opens the full image in a new tab, before and after sending', async ({ page }) => {
+  await inbox.agent.post({ id: 'pi-5', agent: 's-pi-5', title: 'Open an image', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Open an image' }).click();
+  await pasteFile(page, '.focus-card textarea', 'image/png', 'big.png');
+  const draft = page.waitForEvent('popup');
+  await page.locator('.focus-card .pasted-thumb a').click();
+  const tab = await draft;
+  await expect.poll(() => tab.evaluate(() => document.images[0]?.naturalWidth ?? 0)).toBeGreaterThan(0);
+  await tab.close();
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  const sent = page.locator('.focus-card .gallery a[target=_blank]');
+  await expect(sent).toHaveCount(1);
+  const answered = page.waitForEvent('popup');
+  await sent.click();
+  expect((await answered).url()).toContain('/v1/attachments/pi-5.a0.');
+});
+
 test('a file that is not an image is refused with a message', async ({ page }) => {
   await inbox.agent.post({ id: 'pi-2', agent: 's-pi-2', title: 'Paste a PDF', priority: 'now' });
   await inbox.open(page);
