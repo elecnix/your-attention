@@ -25,7 +25,9 @@ async function watching(home: string, ...args: string[]) {
   const seen = { out: '', err: '' };
   child.stdout.on('data', (d) => { seen.out += String(d); });
   child.stderr.on('data', (d) => { seen.err += String(d); });
-  const ended = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
+  // 'close' waits for stdio to drain, so a test that reads `seen` afterwards sees everything the child wrote; 'exit' fires
+  // while a last chunk may still be on its way.
+  const ended = new Promise<number | null>((resolve) => child.on('close', () => resolve(child.exitCode)));
   return { child, seen, ended, stop: async () => { child.kill('SIGTERM'); return ended; } };
 }
 
@@ -82,9 +84,13 @@ describe('watching the inbox from the command line', () => {
   });
 
   it('reads only whole lines, so a chunk that splits one waits for the rest', () => {
-    assert.deepEqual(wholeLines('{"type":"hel'), [], 'a partial line is not an event yet');
-    assert.deepEqual(wholeLines('{"a":1}\n{"b":'), ['{"a":1}'], 'the whole line comes through, the fragment does not');
-    assert.deepEqual(wholeLines('{"a":1}\n'), ['{"a":1}']);
+    // A chunk can end inside a line, so a line counts once its newline arrives, and the fragment after it waits.
+    const cases: [string, string[]][] = [
+      ['{"type":"hel', []],
+      ['{"a":1}\n{"b":', ['{"a":1}']],
+      ['{"a":1}\n', ['{"a":1}']],
+    ];
+    for (const [out, lines] of cases) assert.deepEqual(wholeLines(out), lines, JSON.stringify(out));
   });
 
   it('refuses --no-card with --select, and an empty --select', async () => {
