@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
-import { pickCard, watchLine } from '../../src/watch.ts';
+import { pickCard, watchLine, type WatchLine } from '../../src/watch.ts';
 
 const card = {
   id: 'c1',
@@ -37,6 +37,9 @@ const answer: AgentEvent = {
   },
 };
 
+/** The card a line carries: only an answer and a returned card bring one. */
+const cardOf = (line: WatchLine): Partial<Card> | undefined => (line.type === 'answer' || line.type === 'returned' ? line.card : undefined);
+
 describe('the watcher output', () => {
   it('adds receivedAt to the event the inbox sent, and changes nothing else', () => {
     const hello = { type: 'hello', agent: 'cli:watch', version: 1, guidance: 1 } as AgentEvent;
@@ -44,16 +47,11 @@ describe('the watcher output', () => {
     assert.deepEqual(watchLine(answer, {}, 1700), { ...answer, receivedAt: 1700 });
   });
 
-  it('keeps the whole card by default, so a reader needs nothing but the line', () => {
-    const line = watchLine(answer, {}, 1700);
-    assert.equal(line.type, 'answer');
-    assert.deepEqual(line.type === 'answer' ? line.card : undefined, card);
-  });
-
-  it('keeps only the fields --select names, and leaves out a field the card does not carry', () => {
-    const line = watchLine(answer, { fields: ['id', 'title', 'notACardField'] }, 1700);
-    assert.equal(line.type, 'answer');
-    assert.deepEqual(line.type === 'answer' ? line.card : undefined, { id: 'c1', title: 'Deploy now?' });
+  it('keeps the whole card by default, and only the fields --select names', () => {
+    // The whole card, so a reader needs nothing but the line.
+    assert.deepEqual(cardOf(watchLine(answer, {}, 1700)), card);
+    // The named fields only, and a name the card does not carry is left out rather than stored as undefined.
+    assert.deepEqual(cardOf(watchLine(answer, { fields: ['id', 'title', 'notACardField'] }, 1700)), { id: 'c1', title: 'Deploy now?' });
   });
 
   it('leaves the card out with --no-card, on an answer and on a returned card', () => {

@@ -251,7 +251,7 @@ The client works in iTerm2, cmux, Apple Terminal, tmux and herdr panes, and Linu
 
 ### Watch the answers from a script
 
-`your-attention watch` keeps one agent stream open and prints each event it receives as one line of JSON, so a script reads the answers without a front-end. The fields are the ones `SPEC.md` defines for the agent stream, with `receivedAt` added: the time this process read the event. The command adds `receivedAt` and leaves the other fields as the inbox wrote them. Output is line-delimited JSON, so `jq` reads it as it arrives.
+`your-attention watch` keeps one agent stream open and prints each event it receives as one line of JSON, so a script reads the answers without a front-end. The fields are the ones `SPEC.md` defines for the agent stream, with `receivedAt` added: the time this process read the event. The command adds `receivedAt` and leaves the other fields as the inbox wrote them. Output is line-delimited JSON, so `jq` reads it as it arrives. A `beat`, the frame that shows the stream answering, never becomes a line, so a quiet inbox writes only the answers that arrive.
 
 ```sh
 your-attention watch --agent cli:deploy | jq -r 'select(.type == "answer") | .answer.values.choice'
