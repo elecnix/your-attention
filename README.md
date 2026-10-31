@@ -249,6 +249,21 @@ Color is never the only sign. Each state has a symbol of its own: `●` waits fo
 
 The client works in iTerm2, cmux, Apple Terminal, tmux and herdr panes, and Linux terminals. From 60 columns it shows the list beside the card, and below that one pane at a time. A card part that a terminal can't draw, such as a chart or an HTML card, shows a line with the card's address on the page. On a laptop, the first frame of an inbox with 200 cards appears about 130 ms after the command starts. `YOUR_ATTENTION_TUI_TRACE=<file>` writes that time and the time of each frame to the file.
 
+### Watch the answers from a script
+
+`your-attention watch` keeps one agent stream open and prints each event it receives as one line of JSON, so a script reads the answers without a front-end. The fields are the ones `SPEC.md` defines for the agent stream, with `receivedAt` added: the time this process read the event. The command adds `receivedAt` and leaves the other fields as the inbox wrote them. Output is line-delimited JSON, so `jq` reads it as it arrives.
+
+```sh
+your-attention watch --agent cli:deploy | jq -r 'select(.type == "answer") | .answer.values.choice'
+your-attention watch --no-card                    # the answer and its receipt, without the card
+your-attention watch --select id,title,status    # only these fields of the card
+your-attention watch --agent cli:deploy --ack     # marks each answer read, as the answering session does
+```
+
+A watcher receives the answers to cards that this machine's token posted as the agent it names, so it pairs with `your-attention post --agent cli:deploy`: a script that posts cards and watches them gets each answer as it arrives. Cards that other sessions post stay on the page and in `your-attention tui`. The watcher reconnects by itself with one instance id, so a restarted inbox or a dropped socket keeps every answer queued and delivers each one once, and a `hello` line marks each connection or reconnection.
+
+The inbox reports an answer as read only when something acknowledges it, so `--ack` is off by default. A watcher that acknowledged every answer would mark read what the session waiting for it has not seen.
+
 ## Protect the inbox with a PIN
 
 An answer on a card goes straight into a coding agent's session. Someone who gets the inbox address or a sign-in link, from a bookmark, the browser history or a pasted message, could open the page and answer as you. A 4-digit PIN stops that: the address or link signs a browser in, and each new tab must also type the PIN before it shows a card or takes an answer.

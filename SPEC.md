@@ -403,6 +403,8 @@ A client adds `instance=<id>` to the stream, `/v1/ws` or `/v1/poll` address, wit
 
 Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST /v1/cards/<id>/claim {agent}` hands one to a successor session.
 
+`your-attention watch` follows that stream for a script: it prints each event as one line of JSON, the inbox's own event with `receivedAt` added and nothing else changed. `--agent` names the agent, `--no-card` leaves the card out, `--select` keeps the card fields it names, and `--ack` acknowledges each answer after printing it. Without `--ack` the watcher acknowledges nothing, so it never marks read what the agent waiting for that answer has not seen.
+
 ## Pages
 
 `GET /v1/state` returns `{cards, answers, presence, states, priorities, levels, settings, guidance}`. `cards` has one summary for each card except the cleared ones, enough for the queue, the levels, presence and the answer states:

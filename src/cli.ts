@@ -9,6 +9,7 @@ import type { Option, Priority } from './core/types.ts';
 import { homeDir, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
+import { watchLine } from './watch.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
@@ -25,6 +26,8 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
                                                       post a card, and with --wait print the answer
+  watch [--agent ID] [--no-card] [--select FIELD,...] [--ack]
+                                                      print each answer for that agent as a line of JSON
   claude-channel                                      the MCP channel server for Claude Code
   claude-hook ask-pre|ask-post|ask-cancel             the AskUserQuestion hooks for Claude Code
   herdr-blocked                                       post a card for each herdr agent that is blocked
@@ -312,6 +315,36 @@ switch (command) {
       console.log(describeAnswer(ev.card, ev.answer));
       await c.ack(card.id);
       stop.abort();
+    }, stop.signal);
+    break;
+  }
+  case 'watch': {
+    const { values } = parseArgs({ args: rest, options: {
+      agent: { type: 'string', default: 'cli:watch' },
+      'no-card': { type: 'boolean', default: false },
+      select: { type: 'string' },
+      ack: { type: 'boolean', default: false },
+    } });
+    if (values['no-card'] && values.select !== undefined) fail('Choose --no-card or --select, not both: one leaves the card out, and the other picks the fields to keep.');
+    const fields = values.select?.split(',').map((f) => f.trim()).filter(Boolean);
+    if (fields?.length === 0) fail('--select takes a comma-separated list of card fields, such as --select=id,title. Without it, each line carries the whole card.');
+    const c = client();
+    const stop = new AbortController();
+    const end = (): void => {
+      stop.abort();
+      // Closing a socket waits for the far end's answer, which a quiet inbox may never send, and the watch has nothing
+      // left to write. So the signal ends the watch on its own, and a stream that returns first ends it sooner.
+      setTimeout(() => process.exit(0), 500).unref();
+    };
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, end);
+    // A reader that stops reading, as `watch | head -1` does, ends the watch: it is not an error.
+    process.stdout.on('error', (e: NodeJS.ErrnoException) => { if (e.code === 'EPIPE') process.exit(0); });
+    console.error(`Watching ${c.url} for the answers to cards posted as ${values.agent}, one line of JSON each.`);
+    await c.stream(values.agent, async (ev) => {
+      process.stdout.write(`${JSON.stringify(watchLine(ev, { noCard: values['no-card'], fields }, Date.now()))}\n`);
+      // Only when asked: a watcher that acknowledged every answer would mark read what the agent waiting for it has not seen.
+      if (!values.ack || ev.type !== 'answer') return;
+      await c.ack(ev.card.id).catch((e: Error) => console.error(`Could not mark card ${ev.card.id} read: ${e.message}`));
     }, stop.signal);
     break;
   }

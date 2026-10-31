@@ -245,7 +245,9 @@ export class Client {
     return new Promise((resolve) => {
       let opened = false;
       const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}&instance=${this.instance}`);
-      const stop = (): void => ws.close();
+      // An abort ends the stream now: a socket close waits for the far end's answer, and an idle inbox may not send
+      // one for as long as the process lives, which would leave a stopped client unable to exit.
+      const stop = (): void => { ws.close(); done(); };
       signal.addEventListener('abort', stop, { once: true });
       // The global WebSocket cannot send headers, so the token goes in the first frame.
       // The client pings every 20 seconds. A Durable Object answers without waking, and closes a socket that stops.
@@ -258,7 +260,9 @@ export class Client {
       ws.addEventListener('message', (m) => {
         let ev: { type?: string } | null;
         try { ev = JSON.parse(String(m.data)) as { type?: string } | null; } catch { return ws.close(); }
-        if (ev && typeof ev === 'object' && ev.type !== 'pong' && ev.type !== 'error') deliver(ev as AgentEvent).catch(() => ws.close());
+        // A beat only says the stream is alive, as it does over the event stream and the long-poll, so it never reaches
+        // the caller as an agent event.
+        if (ev && typeof ev === 'object' && ev.type !== 'pong' && ev.type !== 'error' && ev.type !== 'beat') deliver(ev as AgentEvent).catch(() => ws.close());
       });
       let ended = false;
       const done = (): void => {
