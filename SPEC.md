@@ -452,6 +452,8 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 
 `your-attention stop` sends `POST /v1/shutdown` with the owner token, and waits until the inbox no longer answers. Other tokens get 403. When a launchd or systemd service runs the inbox, `stop` stops the service, because the service manager restarts an inbox that exits. The Cloudflare build has no shutdown route.
 
+`your-attention status` reports the machine rather than changing it. The report starts with whether the inbox this machine runs answers, and gives its address, pid, inbox id, protocol, PIN state and usage setting. An address file left by a crashed inbox reads `not running`. Next come the home directory, its database size, the token files in it, the launchd or systemd unit, and `serve.log`. Each inbox this machine paired with follows, from `client.json` and `owner.json`, with whether that inbox answers. `YOUR_ATTENTION_URL` and `YOUR_ATTENTION_TOKEN` appear when they are set, since the client reads them before the files. The report lists the token files and doesn't print what is in them. It exits 0 whether or not an inbox runs, and says which command starts one.
+
 ## The Cloudflare build
 
 `src/cloudflare/worker.ts` runs the same core on Workers. It doesn't bundle mermaid or the OpenUI parser, since the clients check diagrams and bodies, as [Checks on the client](#checks-on-the-client) describes. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. The object hibernates when idle:

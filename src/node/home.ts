@@ -13,3 +13,8 @@ export function writePrivate(file: string, content: string): void {
   fs.writeFileSync(file, content, { mode: 0o600 });
   fs.chmodSync(file, 0o600);
 }
+
+/** A trimmed file in the home directory, or undefined when it is not there. */
+export function readHome(name: string, home = homeDir()): string | undefined {
+  try { return fs.readFileSync(path.join(home, name), 'utf8').trim(); } catch { return undefined; }
+}

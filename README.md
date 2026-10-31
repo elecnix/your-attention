@@ -202,6 +202,7 @@ Answer cards on the inbox page. Each answer reaches its agent within a second, o
 An agent's recommendation shows inside the option it recommends, under a **Recommended** tag, so you read the pick once. The agent marks that option with `recommended: true`, or starts its recommendation with the option's label, as in "Go ahead. The key is read-only." A recommendation that matches no option keeps its own box above the options.
 
 ```sh
+your-attention status           # the inbox on this machine, its files, and this machine's pairings
 your-attention clear            # clears the cards you answered or that closed; search still finds them
 your-attention reset --yes      # removes every card, answer and file; tokens and templates stay
 your-attention login-url        # prints a sign-in link that works once, within 5 minutes
@@ -211,6 +212,8 @@ your-attention stop             # stops the inbox, or its launchd or systemd ser
 A card can link a file on the agent's computer with a `file:` address, such as `file:///Users/me/report.html`. On the laptop inbox, a click opens the file in a new tab, when the card came from the same computer. The inbox serves only files that the card's text or recommendation contains, to the owner only, and a served HTML file can't run scripts. A cloud inbox, and a card from another computer, show the path as code.
 
 `clear`, `reset` and `stop` act on the inbox this machine runs. `login-url` and `open` sign in to that inbox, or, on a machine that runs none, to the inbox it paired with as owner, such as a cloud inbox: `your-attention pair <url> --role owner`.
+
+`your-attention status` says what runs here before you start or stop anything: whether the inbox on this machine answers, its address, pid, inbox id, PIN and usage setting, the home directory with its database, token files, service and log, the inboxes this machine paired with and whether each answers, and `YOUR_ATTENTION_URL` or `YOUR_ATTENTION_TOKEN` when they are set, since they win over the files. It prints the names of the token files, never their contents.
 
 ### Answer in a terminal
 
