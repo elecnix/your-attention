@@ -103,23 +103,45 @@ export function clearPasted(cardId) {
   for (const strip of document.querySelectorAll('[data-pasted-strip]')) strip.remove();
 }
 
-/** Paste an image into any text field of the card on screen. Text on the clipboard still pastes as text. */
+/** The text field of the card on screen that an event landed on, or null. */
+function fieldOf(e, currentCard) {
+  const el = e.target instanceof Element ? e.target.closest('textarea, input') : null;
+  if (!el || !currentCard() || !el.closest('.focus-card') || (el.type && !['text', 'search', 'url', 'email', 'textarea'].includes(el.type))) return null;
+  return el;
+}
+
+/** Add the files to the card's draft under the field they landed on, and show thumbnails or the refusal. */
+async function take(el, cardId, files) {
+  const field = el.getAttribute('name') || el.id || 'answer';
+  const strip = stripAfter(el, field);
+  const problems = [];
+  for (const file of files) {
+    const problem = await pastedImages.add(cardId, field, file).catch((err) => String(err.message || err));
+    if (problem) problems.push(problem);
+  }
+  strip.setAttribute('data-note', problems.join(' '));
+  drawStrips(cardId);
+}
+
+/** Paste or drop an image on any text field of the card on screen. Text on the clipboard still pastes as text. */
 export function installPaste(currentCard) {
-  document.addEventListener('paste', async (e) => {
-    const el = e.target instanceof Element ? e.target.closest('textarea, input') : null;
-    const cardId = currentCard();
-    if (!el || !cardId || !el.closest('.focus-card') || (el.type && !['text', 'search', 'url', 'email', 'textarea'].includes(el.type))) return;
-    const files = imageFiles(e.clipboardData);
+  document.addEventListener('paste', (e) => {
+    const el = fieldOf(e, currentCard);
+    const files = el ? imageFiles(e.clipboardData) : [];
     if (!files.length) return;
     if (![...e.clipboardData.items].some((i) => i.kind === 'string' && i.type === 'text/plain')) e.preventDefault();
-    const field = el.getAttribute('name') || el.id || 'answer';
-    const strip = stripAfter(el, field);
-    const problems = [];
-    for (const file of files) {
-      const problem = await pastedImages.add(cardId, field, file).catch((err) => String(err.message || err));
-      if (problem) problems.push(problem);
-    }
-    strip.setAttribute('data-note', problems.join(' '));
-    drawStrips(cardId);
+    take(el, currentCard(), files);
+  });
+  // A field only receives a drop when dragover is cancelled, and the browser would otherwise open the file.
+  const dragsFiles = (e) => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes('Files');
+  document.addEventListener('dragover', (e) => {
+    if (dragsFiles(e) && fieldOf(e, currentCard)) e.preventDefault();
+  });
+  document.addEventListener('drop', (e) => {
+    const el = dragsFiles(e) ? fieldOf(e, currentCard) : null;
+    if (!el) return;
+    e.preventDefault();
+    const files = [...e.dataTransfer.files];
+    if (files.length) take(el, currentCard(), files);
   });
 }
