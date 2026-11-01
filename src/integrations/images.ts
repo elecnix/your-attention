@@ -6,9 +6,16 @@ import type { Client } from '../client.ts';
 import type { Answer } from '../core/types.ts';
 import { homeDir } from '../node/home.ts';
 
+/** One folder name an agent or a card id can be, with nothing in it that walks up a level. */
+function folder(name: string): string {
+  const clean = name.replace(/[^\w.-]/g, '_');
+  // `.` and `..` name folders rather than files, so a card id or an agent name of `..` would climb out of the tree.
+  return clean === '' || clean === '.' || clean === '..' ? '_' : clean;
+}
+
 /** Where the images of `card` answered for `agent` are written. */
 export function imagesDir(agent: string, card: string): string {
-  return path.join(homeDir(), 'images', agent.replace(/[^\w.-]/g, '_'), card.replace(/[^\w.-]/g, '_'));
+  return path.join(homeDir(), 'images', folder(agent), folder(card));
 }
 
 /** Save the answer's images and return their paths, in order. A file that can't be fetched gets a line saying so. */
@@ -16,7 +23,13 @@ export async function saveAnswerImages(inbox: Pick<Client, 'attachment'>, agent:
   const images = answer.images ?? [];
   if (!images.length) return [];
   const dir = imagesDir(agent, answer.card);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  } catch (e) {
+    // The answer still has to reach the agent. A folder that cannot be made costs the images, not the answer, so
+    // each file becomes a line the model reads, as a failed fetch does.
+    return images.map((f) => `${f.name || 'an image'} (could not be saved: ${(e as Error).message})`);
+  }
   return Promise.all(images.map(async (f, i) => {
     const file = path.join(dir, `${answer.savedAt}-${i + 1}-${(f.name || 'image').replace(/[^\w.-]/g, '_')}`);
     try {

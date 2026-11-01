@@ -89,6 +89,9 @@ export const DEFAULT_GUIDANCE = [
 export const MAX_ATTACHMENTS = 10;
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_ANSWER_IMAGES = 10;
+// The images of one answer share a byte budget, because the route reads a body of 16 MB and base64 costs four thirds:
+// ten images of 8 MB each would make a body no route accepts.
+export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
 const ANSWER_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 /** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
 export const MIN_FILE_CHARGE = 64 * 1024;
@@ -1080,16 +1083,19 @@ export class Inbox {
   // ---- answers ----
 
   async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number; images?: (NewAttachment & { field?: string })[] }): Promise<Answer> {
-    const card = this.getCard(id);
+    const posted = this.getCard(id);
     const delivery = input.delivery ?? 'default';
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
     const values = input.values && typeof input.values === 'object' ? input.values : {};
     // The inbox accepts only a sealed value for a secret, so plain text never reaches storage.
-    if (card.kind === 'secret' && (Object.keys(values).some((k) => k !== 'sealed') || ('sealed' in values && !isSealed(values['sealed'])))) {
+    if (posted.kind === 'secret' && (Object.keys(values).some((k) => k !== 'sealed') || ('sealed' in values && !isSealed(values['sealed'])))) {
       throw new InboxError(400, 'a secret card takes only a sealed value: seal it with the card\'s public key');
     }
-    if (card.kind === 'secret' && input.images?.length) throw new InboxError(400, 'a secret card takes no images');
-    const images = await this.storeAnswerImages(card, input.images);
+    if (posted.kind === 'secret' && input.images?.length) throw new InboxError(400, 'a secret card takes no images');
+    const images = await this.storeAnswerImages(posted, input.images);
+    // Storing images awaited, so another session may have claimed the card while the files were written. Read it
+    // again, and deliver to whoever holds it now: the claim's own flush ran before this answer existed.
+    const card = this.getCard(id);
     const before = this.store.get<Answer>('answers', id);
     const answer: Answer = {
       card: id,
@@ -1133,6 +1139,7 @@ export class Inbox {
     });
     const bytes = decoded.reduce((n, d) => n + Math.max(d.bytes.length, MIN_FILE_CHARGE), 0);
     const { used, limit } = this.uploads();
+    if (bytes > MAX_ANSWER_IMAGE_BYTES) throw new InboxError(413, `these images are ${bytes} bytes, and an answer takes at most ${MAX_ANSWER_IMAGE_BYTES}`);
     if (limit !== undefined && used + bytes > limit) throw new InboxError(413, `these images are ${bytes} bytes, and this inbox has stored ${used} of its lifetime limit of ${limit} bytes`);
     if (bytes) this.store.put('meta', 'uploaded-bytes', used + bytes);
     const stored: Attachment[] = [];

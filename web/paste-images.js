@@ -2,6 +2,9 @@
 // thumbnails under a field. The state is per card, so a draft survives a re-render and a revision of the card.
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 export const IMAGE_LIMIT_BYTES = 8 * 1024 * 1024;
+// The answer route reads a body of at most 16 MB, and base64 makes an image four thirds of its size, so the images of
+// one answer share a budget well under that. Ten images of 8 MB would be a body of 107 MB, which no route accepts.
+export const IMAGE_TOTAL_BYTES = 10 * 1024 * 1024;
 export const IMAGE_COUNT_LIMIT = 10;
 
 /** The files on a clipboard, in order, so checkImage can refuse the ones that aren't images. Text is left for the field. */
@@ -23,25 +26,41 @@ export function checkImage(file) {
   return null;
 }
 
-const drafts = new Map(); // card id -> [{key, name, field, src, url}], where url is the blob address a new tab opens
+/** Megabytes, as the person reads them, for a message about a size. */
+const mb = (n) => `${Math.round(n / (1024 * 1024))} MB`;
+
+/** The problem with adding `file` to a draft that already holds `have`, or null when it fits. */
+export function draftProblem(have, file) {
+  const problem = checkImage(file);
+  if (problem) return problem;
+  if (have.length >= IMAGE_COUNT_LIMIT) return `An answer takes at most ${IMAGE_COUNT_LIMIT} images.`;
+  const total = have.reduce((n, i) => n + (i.size || 0), 0) + file.size;
+  if (total > IMAGE_TOTAL_BYTES) return `These images add up to ${mb(total)}, and an answer takes at most ${mb(IMAGE_TOTAL_BYTES)} of images.`;
+  return null;
+}
+
+const drafts = new Map(); // card id -> [{key, name, field, src, url, size}], where url is the blob address a new tab opens
 let counter = 0;
 
 export const pastedImages = {
   list: (cardId) => drafts.get(cardId) || [],
   /** Add a file to a card's draft. Returns the problem, or null. */
   async add(cardId, field, file) {
-    const problem = checkImage(file);
-    if (problem) return problem;
-    const have = drafts.get(cardId) || [];
-    if (have.length >= IMAGE_COUNT_LIMIT) return `An answer takes at most ${IMAGE_COUNT_LIMIT} images.`;
+    const early = draftProblem(drafts.get(cardId) || [], file);
+    if (early) return early;
     const src = await new Promise((resolve, reject) => {
       const r = new FileReader();
       r.onload = () => resolve(r.result);
       r.onerror = () => reject(new Error('the browser could not read the image'));
       r.readAsDataURL(file);
     });
+    // Read the draft again: a second paste or a drop can land while this one decodes, and the list read before the
+    // await would drop that image when this one is written back.
+    const have = drafts.get(cardId) || [];
+    const late = draftProblem(have, file);
+    if (late) return late;
     counter += 1;
-    drafts.set(cardId, [...have, { key: `img${counter}`, name: file.name && file.name !== 'image.png' ? file.name : `pasted-${counter}.${file.type.slice(6).replace('jpeg', 'jpg')}`, field, src, url: URL.createObjectURL(file) }]);
+    drafts.set(cardId, [...have, { key: `img${counter}`, name: file.name && file.name !== 'image.png' ? file.name : `pasted-${counter}.${file.type.slice(6).replace('jpeg', 'jpg')}`, field, src, url: URL.createObjectURL(file), size: file.size }]);
     return null;
   },
   remove(cardId, key) {

@@ -1,10 +1,12 @@
 export const IMAGE_TYPES: string[];
 export const IMAGE_LIMIT_BYTES: number;
 export const IMAGE_COUNT_LIMIT: number;
+export const IMAGE_TOTAL_BYTES: number;
 export function imageFiles(clipboard: { items?: ArrayLike<{ kind: string; type: string; getAsFile(): unknown }> } | null | undefined): { type: string; size: number; name: string }[];
 export function checkImage(file: { type: string; size: number; name?: string }): string | null;
+export function draftProblem(have: { size?: number }[], file: { type: string; size: number; name?: string }): string | null;
 export const pastedImages: {
-  list(cardId: string): { key: string; name: string; field: string; src: string }[];
+  list(cardId: string): { key: string; name: string; field: string; src: string; url: string; size: number }[];
   add(cardId: string, field: string, file: File): Promise<string | null>;
   remove(cardId: string, key: string): void;
   clear(cardId: string): void;
