@@ -116,6 +116,20 @@ vale sync && vale *.md   # prose rules, the same ones CI runs
 
 Set `YOUR_ATTENTION_SKIP_MDNS=1` to skip the mDNS test on a network that drops multicast.
 
+## Invite codes on the hosted service
+
+A hosted deployment gives each person an inbox through an invite code. `invite:<code>` in the `INVITES` KV namespace holds how many inboxes that code may still create, and codes need 20 characters or more:
+
+```sh
+npx wrangler kv key put "invite:$(openssl rand -hex 16)" 5 --namespace-id "$KV_NAMESPACE_ID" --remote
+```
+
+`KV_NAMESPACE_ID` is the repository variable that `deploy-cloudflare.yml` substitutes into `wrangler.jsonc`. Wrangler needs `CLOUDFLARE_API_TOKEN`, or a `wrangler login` session when you mint from your own machine. Mint from a machine, never from a workflow: a code printed in a run of a public repository is a code anyone can spend.
+
+A single-mode deployment has no invites. It takes `OWNER_TOKEN` instead, and that token is the way in.
+
+Keep each code you give out as `<code> <label>` in a private file, which is what `your-attention telemetry report --invites FILE` reads to report usage per invite.
+
 ## Before you open a pull request
 
 CI runs the same checks against the push, so a red run reports what the branch could have answered first. Merge `main` into the branch, then work through this list. The merge matters as much as the checks: it is where a conflict, or a name that both sides introduced, appears.
