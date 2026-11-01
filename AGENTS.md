@@ -21,13 +21,14 @@ src/node/          the Node HTTP server and the home directory
 src/integrations/  Claude Code (MCP channel, AskUserQuestion hooks), pi, herdr
 src/client.ts      the client every integration uses
 src/cli.ts         the your-attention command
+src/watch.ts       the line of JSON `your-attention watch` prints for each event of an agent stream
 src/tui/           the terminal client: `your-attention tui`, on the page's web/answers.js and web/queue.js
 web/               the built-in page: env.js, components.js, pin.js and app.js, plain JavaScript modules on the OpenUI browser bundle
 web/stories/       Storybook stories for each component and for the whole page on a stand-in inbox
 src/cloudflare/    the Worker and the Durable Object, with their storage adapters, and the usage collector
 src/extensions/    the triage service
 test/unit/         fast tests with in-memory storage
-test/integration/  a real server, the CLI, the channel over MCP stdio, the pi extension, triage, links and mDNS
+test/integration/  a real server, the CLI, the channel over MCP stdio, the pi extension, triage, links, the watcher and mDNS
 test/cloudflare/   the Durable Object with stand-ins, and the hosted build on wrangler dev
 test/browser/      Playwright on the page, two people in two browser contexts, and every story
 ```
@@ -95,6 +96,7 @@ flowchart TB
 
 - The inbox stores a hash of each token, never the token. Only the machine or tab named in its box holds the secret.
 - An owner token is the only key that signs in a new browser. A browser gets one from a sign-in code, or once from `POST /new`. The page removes `#token=` and `#signin=` from the address bar, so a bookmarked address signs nobody in.
+- Losing every owner credential closes the page. A cloud inbox's address does not sign a browser in, its sign-in link works once within five minutes, and an agent token cannot make a sign-in code, so recovery means a new inbox. The cards in the old one remain in a place nobody can open.
 - An agent token can't make a sign-in code, approve a pairing or read the state. On a machine paired only as an agent, the owner commands, `open`, `tui` and `pin`, say to pair as owner. That pairing goes in `owner.json` and leaves `client.json` to the agents.
 - The PIN never leaves the device that types it. The tab, the CLI and the terminal client derive a key from it with PBKDF2, using the salt from `GET /v1/pin`, and send the key. The inbox stores a SHA-256 hash of that key.
 - A token minted at `serve` or by pairing as owner skips the PIN. When the inbox has a PIN, a browser's owner token needs an unlock token as well, which the tab sends as `x-your-attention-unlock`. An unlock token ends after 12 hours without use.
