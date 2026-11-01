@@ -130,6 +130,23 @@ export class Client {
     return true;
   }
 
+  /** The bytes of a file on a card this client posted, such as an image the person pasted into an answer. */
+  async attachment(id: string): Promise<Uint8Array<ArrayBuffer>> {
+    let lastError: unknown;
+    for (const url of [this.url, ...this.urls.filter((u) => u !== this.url)]) {
+      try {
+        if (url !== this.url && !(await this.sameInbox(url))) continue;
+        const res = await fetch(`${url}/v1/attachments/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${this.token}` } });
+        if (!res.ok) throw new Error(`GET /v1/attachments/${id}: ${res.status}`);
+        this.url = url;
+        return new Uint8Array(await res.arrayBuffer());
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw new Error(`no link answered (${(lastError as Error)?.message ?? 'none tried'})`);
+  }
+
   /** The posted card. A revision the person won't see carries `warning`. */
   async post(card: NewCard): Promise<Card & { warning?: string }> {
     await this.checkFirst('POST /v1/cards', { card: { ...card, attachments: undefined } });
@@ -294,7 +311,7 @@ export function describeReturned(ev: Extract<AgentEvent, { type: 'returned' }>):
   return `${ev.by ?? 'Triage'} sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`;
 }
 
-export function describeAnswer(card: Card, answer: Answer): string {
+export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]): string {
   // A sealed secret is never written out: the integration opens it.
   if (card.kind === 'secret') return answer.comment ? `(a sealed secret)\nComment: ${answer.comment}` : '(a sealed secret)';
   const lines: string[] = [];
@@ -315,6 +332,10 @@ export function describeAnswer(card: Card, answer: Answer): string {
     lines.push(`${k}: ${label}`);
   }
   if (answer.comment) lines.push(`Comment: ${answer.comment}`);
+  // Pasted images are files: name each path, or say how many came when the integration has not saved them.
+  const images = answer.images ?? [];
+  if (imagePaths?.length) images.forEach((f, i) => lines.push(`Image${f.field ? ` pasted in ${f.field}` : ''}: ${imagePaths[i] ?? f.name}`));
+  else if (images.length) lines.push(`${images.length} pasted image${images.length === 1 ? '' : 's'}`);
   // Each widget on the card can add text for the agent, filled from this answer, such as what to do next.
   for (const r of answer.responses ?? []) lines.push('', r);
   return lines.join('\n') || 'An empty answer: the person sent nothing more.';
