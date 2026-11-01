@@ -651,7 +651,7 @@ export function PhoneLink() {
   const copy = () => navigator.clipboard?.writeText(address).then(() => setCopied(true), () => {});
   return h(React.Fragment, null,
     h(BarIconButton, { className: 'phone', label: 'Open this inbox on your phone', onClick: () => setOpen(true) },
-      h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 },
+      h(BarIcon, null,
         h('rect', { x: 4, y: 1, width: 8, height: 14, rx: 1.75 }),
         h('path', { d: 'M7 12.5h2', strokeLinecap: 'round' }))),
     open && h('dialog', { ref, className: 'qr-dialog', onClose: close, onClick: (e) => { if (e.target === ref.current) close(); }, 'aria-labelledby': 'qr-title' },
@@ -684,6 +684,11 @@ function BarIconButton({ className, label, onClick, children }) {
   return h('button', { type: 'button', className, onClick, 'aria-label': label, title: label }, children);
 }
 
+/** The 22-pixel icon of a top-bar button, drawn with the stroke every one of them shares. */
+function BarIcon({ children }) {
+  return h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, children);
+}
+
 /** A browser, phone or paired machine that holds a key to this inbox, and a way to sign one out. */
 export function DevicesLink() {
   const [open, setOpen] = React.useState(false);
@@ -713,7 +718,7 @@ export function DevicesLink() {
   const role = (t) => (t.role === 'owner' ? 'signs in' : t.role === 'agent' ? 'posts cards' : 'checks cards');
   return h(React.Fragment, null,
     h(BarIconButton, { className: 'devices-open', label: 'Devices signed in to this inbox', onClick: () => setOpen(true) },
-      h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 },
+      h(BarIcon, null,
         h('circle', { cx: 5.5, cy: 8, r: 2.75 }),
         h('path', { d: 'M8.25 8H14 M12 8v2.5 M10 8v2', strokeLinecap: 'round' }))),
     open && h('dialog', { ref, className: 'qr-dialog devices-dialog', onClose: close, onClick: (e) => { if (e.target === ref.current) close(); }, 'aria-labelledby': 'devices-title' },
