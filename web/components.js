@@ -650,12 +650,11 @@ export function PhoneLink() {
   const close = () => { ref.current?.close(); setOpen(false); setCopied(false); setQr(null); };
   const copy = () => navigator.clipboard?.writeText(address).then(() => setCopied(true), () => {});
   return h(React.Fragment, null,
-    h('button', { type: 'button', className: 'phone', onClick: () => setOpen(true), 'aria-label': 'Open this inbox on your phone', title: 'Open this inbox on your phone' },
-      h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 },
+    h(BarIconButton, { className: 'phone', label: 'Open this inbox on your phone', onClick: () => setOpen(true) },
+      h(BarIcon, null,
         h('rect', { x: 4, y: 1, width: 8, height: 14, rx: 1.75 }),
         h('path', { d: 'M7 12.5h2', strokeLinecap: 'round' }))),
-    open && h('dialog', { ref, className: 'qr-dialog', onClose: close, onClick: (e) => { if (e.target === ref.current) close(); }, 'aria-labelledby': 'qr-title' },
-      h('h2', { id: 'qr-title' }, 'Open this inbox on your phone'),
+    open && h(BarDialog, { dialogRef: ref, className: 'qr-dialog', titleId: 'qr-title', title: 'Open this inbox on your phone', onClose: close },
       h('p', null, 'Scan the code with the phone camera. The phone opens the inbox signed in.'),
       h('div', { className: 'qr' }, qr && qr.failed
         ? h('p', { className: 'qr-failed' }, 'The QR code did not load. Copy the address below instead.')
@@ -672,4 +671,75 @@ export function PhoneLink() {
       h('div', { className: 'qr-actions' },
         h('button', { type: 'button', className: 'btn', onClick: copy }, copied ? 'Copied' : 'Copy the address'),
         h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: true }, 'Close'))));
+}
+
+/** The inbox's own words for a failed request, so a dialog says why it did not happen. */
+const bodyError = (r) => r.json().then(
+  (d) => Promise.reject(new Error(d.error || `The inbox answered ${r.status}.`)),
+  () => Promise.reject(new Error(`The inbox answered ${r.status}.`)));
+
+/** The frame both top-bar dialogs share: the backdrop click, the escape key and the heading. */
+function BarDialog({ dialogRef, className, titleId, title, onClose, children }) {
+  return h('dialog', { ref: dialogRef, className, onClose, onClick: (e) => { if (e.target === dialogRef.current) onClose(); }, 'aria-labelledby': titleId },
+    h('h2', { id: titleId }, title), children);
+}
+
+/** A top-bar button that shows an icon, named for a screen reader and on hover. */
+function BarIconButton({ className, label, onClick, children }) {
+  return h('button', { type: 'button', className, onClick, 'aria-label': label, title: label }, children);
+}
+
+/** The 22-pixel icon of a top-bar button, drawn with the stroke every one of them shares. */
+function BarIcon({ children }) {
+  return h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, children);
+}
+
+/** A browser, phone or paired machine that holds a key to this inbox, and a way to sign one out. */
+export function DevicesLink() {
+  const [open, setOpen] = React.useState(false);
+  const [tokens, setTokens] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [confirming, setConfirming] = React.useState(null);
+  const [busy, setBusy] = React.useState(null);
+  const ref = React.useRef(null);
+  const load = () => api(`${BASE}v1/tokens`)
+    .then((r) => (r.ok ? r.json() : bodyError(r)))
+    .then((list) => { setTokens(list); setError(null); }, (e) => setError(e.message || 'The list did not load.'));
+  React.useEffect(() => {
+    if (!open) return;
+    if (ref.current && !ref.current.open) ref.current.showModal();
+    load();
+  }, [open]);
+  const close = () => { ref.current?.close(); setOpen(false); setTokens(null); setError(null); setConfirming(null); };
+  // A write that uses the cookie carries the header a cross-site form cannot set, as every page write does.
+  const revoke = (id) => {
+    setBusy(id);
+    fetch(`${BASE}v1/tokens/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'x-your-attention': '1' } })
+      .then((r) => (r.ok ? null : bodyError(r)))
+      .then(() => { setConfirming(null); return load(); }, (e) => setError(e.message || 'That device did not sign out.'))
+      .finally(() => setBusy(null));
+  };
+  const day = (t) => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  const role = (t) => (t.role === 'owner' ? 'signs in' : t.role === 'agent' ? 'posts cards' : 'checks cards');
+  return h(React.Fragment, null,
+    h(BarIconButton, { className: 'devices-open', label: 'Devices signed in to this inbox', onClick: () => setOpen(true) },
+      h(BarIcon, null,
+        h('circle', { cx: 5.5, cy: 8, r: 2.75 }),
+        h('path', { d: 'M8.25 8H14 M12 8v2.5 M10 8v2', strokeLinecap: 'round' }))),
+    open && h(BarDialog, { dialogRef: ref, className: 'qr-dialog devices-dialog', titleId: 'devices-title', title: 'Devices signed in to this inbox', onClose: close },
+      h('p', null, 'Each browser, phone and machine holds its own key. Signing a device out ends that key, and the others keep working.'),
+      error && h('p', { className: 'note warn', role: 'alert' }, error),
+      !tokens && !error && h('p', { className: 'muted' }, 'Reading the list…'),
+      tokens && !tokens.length && h('p', { className: 'muted' }, 'This inbox lists no device.'),
+      tokens && tokens.length > 0 && h('ul', { className: 'devices' }, tokens.map((t) => h('li', { key: t.id, className: 'device' },
+        h('div', { className: 'device-what' },
+          h('span', { className: 'device-name' }, t.name),
+          h('span', { className: 'device-facts' }, `${role(t)} · since ${day(t.createdAt)}${t.pinExempt ? ' · skips the PIN' : ''}`)),
+        confirming === t.id
+          ? h('div', { className: 'device-actions' },
+            h('span', { className: 'note warn' }, 'It loses its key and signs in again with a link.'),
+            h('button', { type: 'button', className: 'btn', onClick: () => setConfirming(null) }, 'Keep it'),
+            h('button', { type: 'button', className: 'btn danger', onClick: () => revoke(t.id), disabled: busy === t.id, autoFocus: true }, busy === t.id ? 'Signing out…' : 'Sign it out'))
+          : h('button', { type: 'button', className: 'btn', onClick: () => setConfirming(t.id) }, 'Sign out')))),
+      h('div', { className: 'qr-actions' }, h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: confirming === null }, 'Close'))));
 }

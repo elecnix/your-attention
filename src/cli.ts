@@ -6,15 +6,17 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerPairing } from './client.ts';
 import type { Option, Priority } from './core/types.ts';
-import { homeDir, writePrivate } from './node/home.ts';
+import { homeDir, readHome, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
+import { watchLine } from './watch.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
   serve [--port 4815] [--host ::] [--no-mdns]        run the inbox
   start [options for serve]                           run the inbox in the background
   stop                                                stop the inbox, or its service when one is installed
+  status                                              show the inbox, its files, and this machine's pairings
   open [--link]                                       open the inbox page signed in, or print a one-time sign-in link
   tui [--mono] [--ascii]                              answer cards full screen in this terminal, with the keyboard and mouse
   clear                                               clear the cards you answered or that closed; search still finds them
@@ -25,6 +27,8 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
                                                       post a card, and with --wait print the answer
+  watch [--agent ID] [--no-card] [--select FIELD,...] [--ack]
+                                                      print each answer for that agent as a line of JSON
   claude-channel                                      the MCP channel server for Claude Code
   claude-hook ask-pre|ask-post|ask-cancel             the AskUserQuestion hooks for Claude Code
   herdr-blocked                                       post a card for each herdr agent that is blocked
@@ -55,14 +59,39 @@ function client(): Client {
   return new Client(config);
 }
 
-function readServerInfo(): { url: string; pid: number } | undefined {
-  try { return JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string; pid: number }; } catch { return undefined; }
+/** The address this machine's inbox wrote, when server.json holds one. Another program, or a file written halfway,
+ * can leave anything there, and every row of the report is a string. */
+function readServerInfo(): { url: string; pid?: number } | undefined {
+  try {
+    const info = JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url?: unknown; pid?: unknown } | null;
+    if (typeof info?.url !== 'string' || !info.url) return undefined;
+    return { url: info.url, ...(typeof info.pid === 'number' ? { pid: info.pid } : {}) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** What a your-attention inbox at this address says about itself, from GET /v1/info, or undefined when none answers there.
+ * Another program on the address could answer 200 with JSON of its own, so the name has to match and each field has to hold
+ * what the report can print. */
+async function infoOf(url: string): Promise<{ name: string; id?: string; protocol?: number } | undefined> {
+  try {
+    const res = await fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return undefined;
+    const info = (await res.json()) as { name?: unknown; id?: unknown; protocol?: unknown } | null;
+    if (info?.name !== 'your-attention') return undefined;
+    return {
+      name: 'your-attention',
+      ...(typeof info.id === 'string' ? { id: info.id } : {}),
+      ...(typeof info.protocol === 'number' ? { protocol: info.protocol } : {}),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether an inbox answers at this address. */
-const answers = (url: string): Promise<boolean> => fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(2000) })
-  .then(async (r) => r.ok && ((await r.json()) as { name?: string } | null)?.name === 'your-attention')
-  .catch(() => false);
+const answers = async (url: string): Promise<boolean> => (await infoOf(url)) !== undefined;
 
 /** The address of the inbox this machine runs, when one answers there. */
 async function runningUrl(): Promise<string | undefined> {
@@ -85,6 +114,33 @@ function describeTelemetry(t: TelemetryStatus): string {
   if (t.blocked) return `This machine sends no usage counts: ${t.blocked}.`;
   if (!t.enabled) return `Usage counts are off.\n\n${NOTICE}`;
   return `Usage counts are on. One anonymous report a day goes to ${t.destination}.\nInstall id: ${t.installId}\n\n${NOTICE}`;
+}
+
+/** The same setting as one line, for `status`. */
+function telemetryLine(t: TelemetryStatus): string {
+  if (t.blocked) return `off: this machine sends none (${t.blocked})`;
+  if (!t.enabled) return 'off; turn them on with `your-attention telemetry on`';
+  return `on: one anonymous report a day goes to ${t.destination}`;
+}
+
+/** The rows of `status`, in two indented columns under a title. */
+function section(title: string, rows: [string, string][]): string {
+  const width = Math.max(...rows.map(([label]) => label.length));
+  const indent = ' '.repeat(width + 4);
+  return [title, ...rows.map(([label, value]) => `  ${label.padEnd(width)}  ${value.split('\n').join(`\n${indent}`)}`)].join('\n');
+}
+
+/** A file size in a short unit, for `status`. */
+function bytes(n: number): string {
+  if (n < 1024) return `${n} bytes`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Whether a PIN protects the inbox, and any lockout that wrong PINs started. */
+function describePin(pin: { set: boolean; neverAsk: boolean; lockedUntil: number | null }): string {
+  const how = pin.set ? 'set: each new browser tab types it' : pin.neverAsk ? 'none, and the page never asks for one' : 'none; set one with `your-attention pin set`';
+  return pin.lockedUntil && pin.lockedUntil > Date.now() ? `${how}\nwrong PINs lock the page until ${new Date(pin.lockedUntil).toLocaleTimeString()}` : how;
 }
 
 /** A one-time link that signs a browser in, so the owner token stays out of the address bar and the browser history.
@@ -208,6 +264,86 @@ switch (command) {
     console.log(`Stopped the inbox on ${url}.`);
     break;
   }
+  case 'status': {
+    const home = homeDir();
+    const serverFile = path.join(home, 'server.json');
+    const here = readServerInfo();
+    const info = here ? await infoOf(here.url) : undefined;
+    const ownerToken = readHome('owner-token', home);
+
+    // The inbox this machine runs, and what it says about itself.
+    const inbox: [string, string][] = [];
+    if (info && here) {
+      inbox.push(['state', 'running']);
+      inbox.push(['address', here.url]);
+      if (here.pid !== undefined) inbox.push(['pid', String(here.pid)]);
+      if (info.id) inbox.push(['inbox id', info.id]);
+      if (info.protocol !== undefined) inbox.push(['protocol', String(info.protocol)]);
+      if (ownerToken) {
+        const pin = await httpPinApi(here.url, ownerToken).status().catch(() => undefined);
+        if (pin) inbox.push(['PIN', describePin(pin)]);
+        // The usage setting lives in the inbox, and only its owner may read it.
+        const usage = await fetch(`${here.url}/v1/telemetry`, { headers: { authorization: `Bearer ${ownerToken}` }, signal: AbortSignal.timeout(2000) })
+          .then(async (r) => (r.ok ? (await r.json()) as TelemetryStatus : undefined))
+          .catch(() => undefined);
+        if (usage) inbox.push(['usage counts', telemetryLine(usage)]);
+      }
+    } else if (here) {
+      inbox.push(['state', `not running; ${serverFile} is left from an earlier run`]);
+      inbox.push(['address', here.url]);
+      inbox.push(['start it', 'your-attention start']);
+    } else if (fs.existsSync(serverFile)) {
+      inbox.push(['state', `not running; ${serverFile} holds no address`]);
+      inbox.push(['start it', 'your-attention start']);
+    } else {
+      inbox.push(['state', 'none on this machine']);
+      inbox.push(['start it', 'your-attention start, or pair with an inbox: your-attention pair <url>']);
+    }
+    // A service starts the inbox at login, and `stop` stops the service itself.
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      const { serviceFile } = await import('./node/service.ts');
+      const unit = serviceFile('serve', []);
+      const installed = fs.existsSync(unit.path);
+      const running = installed && spawnSync('sh', ['-c', unit.running], { stdio: 'ignore' }).status === 0;
+      inbox.push(['service', running ? `running (${unit.path})` : installed ? `installed, not running (${unit.path})` : 'not installed']);
+    }
+    if (fs.existsSync(path.join(home, 'serve.log'))) inbox.push(['log', path.join(home, 'serve.log')]);
+
+    // The files this machine keeps, and the secrets they hold.
+    const tokens = ['owner-token', 'agent-token', 'extension-token'].filter((f) => fs.existsSync(path.join(home, f)));
+    const db = path.join(home, 'inbox.sqlite');
+    const files: [string, string][] = [['home', home]];
+    if (fs.existsSync(db)) files.push(['database', `${db}, ${bytes(fs.statSync(db).size)}`]);
+    files.push(['tokens', tokens.length ? tokens.join(', ') : 'none yet']);
+
+    // The inboxes this machine paired with, and whether each one answers.
+    const pairings: [string, string][] = [];
+    for (const [role, file] of [['agent', 'client.json'], ['owner', 'owner.json']] as const) {
+      const text = readHome(file, home);
+      // No such file means no such pairing. An empty file is there, and the person should see that it is.
+      if (text === undefined) continue;
+      if (!text) { pairings.push([role, `${file} is empty`]); continue; }
+      let pairing: unknown;
+      try { pairing = JSON.parse(text); } catch { pairings.push([role, `${file} is unreadable`]); continue; }
+      // The file parses to anything at all: `null` and a bare number parse without an error.
+      const url = typeof pairing === 'object' && pairing !== null ? (pairing as { url?: unknown }).url : undefined;
+      if (!url || typeof url !== 'string') { pairings.push([role, `${file} holds no address`]); continue; }
+      pairings.push([role, `${url} (${file}, ${(await answers(url)) ? 'answering' : 'not answering'})`]);
+    }
+    if (!pairings.length) pairings.push(['none', 'pair with `your-attention pair <url>`']);
+
+    console.log(section('Inbox on this machine', inbox));
+    console.log(`\n${section('Files on this machine', files)}`);
+    console.log(`\n${section('Paired inboxes', pairings)}`);
+    // Environment variables win over the files, so an agent uses them before its pairing.
+    const url = process.env['YOUR_ATTENTION_URL'];
+    const token = process.env['YOUR_ATTENTION_TOKEN'];
+    if (url || token) {
+      const line = url && token ? `${url}, with YOUR_ATTENTION_TOKEN, before the files above` : `${url ? 'YOUR_ATTENTION_URL' : 'YOUR_ATTENTION_TOKEN'} is set alone, so agents ignore it`;
+      console.log(`\n${section('Environment', [['agents use', line]])}`);
+    }
+    break;
+  }
   case 'login-url':
     console.log(await signInLink());
     break;
@@ -312,6 +448,36 @@ switch (command) {
       console.log(describeAnswer(ev.card, ev.answer));
       await c.ack(card.id);
       stop.abort();
+    }, stop.signal);
+    break;
+  }
+  case 'watch': {
+    const { values } = parseArgs({ args: rest, options: {
+      agent: { type: 'string', default: 'cli:watch' },
+      'no-card': { type: 'boolean', default: false },
+      select: { type: 'string' },
+      ack: { type: 'boolean', default: false },
+    } });
+    if (values['no-card'] && values.select !== undefined) fail('Choose --no-card or --select, not both: one leaves the card out, and the other picks the fields to keep.');
+    const fields = values.select?.split(',').map((f) => f.trim()).filter(Boolean);
+    if (fields?.length === 0) fail('--select takes a comma-separated list of card fields, such as --select=id,title. Without it, each line carries the whole card.');
+    const c = client();
+    const stop = new AbortController();
+    const end = (): void => {
+      stop.abort();
+      // Closing a socket waits for the far end's answer, which a quiet inbox may never send, and the watch has nothing
+      // left to write. So the signal ends the watch on its own, and a stream that returns first ends it sooner.
+      setTimeout(() => process.exit(0), 500).unref();
+    };
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, end);
+    // A reader that stops reading, as `watch | head -1` does, ends the watch: it is not an error.
+    process.stdout.on('error', (e: NodeJS.ErrnoException) => { if (e.code === 'EPIPE') process.exit(0); });
+    console.error(`Watching ${c.url} for the answers to cards posted as ${values.agent}, one line of JSON each.`);
+    await c.stream(values.agent, async (ev) => {
+      process.stdout.write(`${JSON.stringify(watchLine(ev, { noCard: values['no-card'], fields }, Date.now()))}\n`);
+      // Only when asked: a watcher that acknowledged every answer would mark read what the agent waiting for it has not seen.
+      if (!values.ack || ev.type !== 'answer') return;
+      await c.ack(ev.card.id).catch((e: Error) => console.error(`Could not mark card ${ev.card.id} read: ${e.message}`));
     }, stop.signal);
     break;
   }

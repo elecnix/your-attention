@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue } from './queue.js';
 import { cardDetails } from './details.js';
 
@@ -427,6 +427,7 @@ export function App() {
       h('h1', null, 'Your attention'),
       h(NotifyToggle),
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : 'Inbox unreachable')),
+      h(DevicesLink),
       h(PhoneLink),
       h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: 'Your Attention on GitHub' },
         h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'currentColor' }, h('path', { d: OCTOCAT }))))),
