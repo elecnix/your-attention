@@ -1257,7 +1257,9 @@ export class Inbox {
 
   /** An agent opens its stream. `instance` names the agent process, and stays the same across its reconnects.
    * Returns the function that closes it. */
-  connect(caller: Caller, agent: string, send: AgentSend, instance?: string): () => void {
+  /** An agent connects. `resumed` marks a connection the platform rebuilt for a socket that stayed open, such as a
+   * Durable Object waking from hibernation: the agent already got its `hello` on that socket, so it gets none again. */
+  connect(caller: Caller, agent: string, send: AgentSend, instance?: string, opts: { resumed?: boolean } = {}): () => void {
     if (String(agent).length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     const k = this.key(caller.token, agent);
     let set = this.agents.get(k);
@@ -1268,7 +1270,7 @@ export class Inbox {
     if (instance) this.usage.saw('instances', instance);
     if (caller.token) this.usage.saw('tokens', caller.token);
     this.setPresence(agent, true);
-    send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
+    if (!opts.resumed) send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     this.flush(agent);
     if (instance) this.resend(caller.token, agent, send, instance);
     return () => {

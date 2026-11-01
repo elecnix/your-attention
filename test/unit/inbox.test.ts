@@ -90,6 +90,18 @@ describe('delivery', () => {
     assert.equal(inbox.deadLetters().length, 0);
   });
 
+  it('greets a new connection with hello, and a resumed one without, while it still delivers what waited', async () => {
+    const { inbox, agentA } = setup();
+    const fresh: AgentEvent[] = [];
+    inbox.connect(agentA, 's1', (ev) => fresh.push(ev), 'i1');
+    assert.deepEqual(fresh.map((e) => e.type), ['hello']);
+    inbox.postCard(agentA, { id: 'c1', agent: 's2', title: 'q' });
+    await inbox.answer('c1', {});
+    const resumed: AgentEvent[] = [];
+    inbox.connect(agentA, 's2', (ev) => resumed.push(ev), 'i2', { resumed: true });
+    assert.deepEqual(resumed.map((e) => e.type), ['answer'], 'a socket the platform rebuilt already had its hello');
+  });
+
   it('never sends an answer to another agent, or to another client with the same agent name', async () => {
     const { inbox, agentA, agentB } = setup();
     inbox.postCard(agentA, { id: 'c1', agent: 's1', title: 'q' });

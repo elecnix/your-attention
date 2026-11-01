@@ -466,7 +466,7 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 
 `src/cloudflare/worker.ts` runs the same core on Workers. It doesn't bundle mermaid or the OpenUI parser, since the clients check diagrams and bodies, as [Checks on the client](#checks-on-the-client) describes. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. The object hibernates when idle:
 
-- Each agent WebSocket keeps its agent id and token in the socket attachment, so the object reconnects every socket to the inbox when it wakes, and presence stays as it was.
+- Each agent WebSocket keeps its agent id and token in the socket attachment, so the object reconnects every socket to the inbox when it wakes, and presence stays as it was. The socket itself stayed open, so a wake doesn't send `hello` again: an agent gets `hello` once per socket it opens.
 - The object answers `{"type":"ping"}` with `{"type":"pong"}` through the runtime's auto-response, which does not wake it. An alarm every 30 seconds closes a socket whose last pong is older than 60 seconds.
 - The object sets its alarm for the next moment `sweep()` has work, from `nextDeadline()`, and for no other time.
 

@@ -98,10 +98,12 @@ export class InboxObject {
     this.handle = createHandler(this.inbox, { heartbeatMs: 2000, streams: false, telemetry: { source: 'hosted', destination: 'the operator of this hosted service', blocked: () => this.usageBlocked() } });
     // Heartbeats get their answer without waking the object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
-    for (const ws of ctx.getWebSockets()) this.attach(ws);
+    // Each socket here was open before the object hibernated, and its client already got its hello.
+    for (const ws of ctx.getWebSockets()) this.attach(ws, true);
   }
 
-  private attach(ws: WebSocket): Conn {
+  /** `resumed` is set for a socket the object rebuilds after waking, as opposed to one it just accepted. */
+  private attach(ws: WebSocket, resumed = false): Conn {
     const a = ws.deserializeAttachment() as SocketAttachment;
     if (a.page) {
       const conn = pageSocket(this.inbox, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, a.viewer, a.gated ? { unlock: a.unlock } : undefined);
@@ -109,7 +111,7 @@ export class InboxObject {
       return conn;
     }
     const caller = a.token && a.role ? { token: a.token, role: a.role } : undefined;
-    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance);
+    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance, resumed);
     this.sockets.set(ws, conn);
     return conn;
   }
@@ -206,7 +208,7 @@ export class InboxObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    const conn = this.sockets.get(ws) ?? this.attach(ws);
+    const conn = this.sockets.get(ws) ?? this.attach(ws, true);
     const agent = 'caller' in conn ? conn : undefined;
     const before = agent?.authenticated ?? true;
     await conn.message(typeof message === 'string' ? message : new TextDecoder().decode(message));
