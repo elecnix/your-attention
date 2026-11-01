@@ -650,7 +650,7 @@ export function PhoneLink() {
   const close = () => { ref.current?.close(); setOpen(false); setCopied(false); setQr(null); };
   const copy = () => navigator.clipboard?.writeText(address).then(() => setCopied(true), () => {});
   return h(React.Fragment, null,
-    h('button', { type: 'button', className: 'phone', onClick: () => setOpen(true), 'aria-label': 'Open this inbox on your phone', title: 'Open this inbox on your phone' },
+    h(BarIconButton, { className: 'phone', label: 'Open this inbox on your phone', onClick: () => setOpen(true) },
       h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 },
         h('rect', { x: 4, y: 1, width: 8, height: 14, rx: 1.75 }),
         h('path', { d: 'M7 12.5h2', strokeLinecap: 'round' }))),
@@ -674,6 +674,16 @@ export function PhoneLink() {
         h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: true }, 'Close'))));
 }
 
+/** The inbox's own words for a failed request, so a dialog says why it did not happen. */
+const bodyError = (r) => r.json().then(
+  (d) => Promise.reject(new Error(d.error || `The inbox answered ${r.status}.`)),
+  () => Promise.reject(new Error(`The inbox answered ${r.status}.`)));
+
+/** A top-bar button that shows an icon, named for a screen reader and on hover. */
+function BarIconButton({ className, label, onClick, children }) {
+  return h('button', { type: 'button', className, onClick, 'aria-label': label, title: label }, children);
+}
+
 /** A browser, phone or paired machine that holds a key to this inbox, and a way to sign one out. */
 export function DevicesLink() {
   const [open, setOpen] = React.useState(false);
@@ -683,7 +693,7 @@ export function DevicesLink() {
   const [busy, setBusy] = React.useState(null);
   const ref = React.useRef(null);
   const load = () => api(`${BASE}v1/tokens`)
-    .then((r) => (r.ok ? r.json() : r.json().then((d) => Promise.reject(new Error(d.error || `The inbox answered ${r.status}.`)), () => Promise.reject(new Error(`The inbox answered ${r.status}.`)))))
+    .then((r) => (r.ok ? r.json() : bodyError(r)))
     .then((list) => { setTokens(list); setError(null); }, (e) => setError(e.message || 'The list did not load.'));
   React.useEffect(() => {
     if (!open) return;
@@ -695,14 +705,14 @@ export function DevicesLink() {
   const revoke = (id) => {
     setBusy(id);
     fetch(`${BASE}v1/tokens/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'x-your-attention': '1' } })
-      .then((r) => (r.ok ? null : r.json().then((d) => Promise.reject(new Error(d.error || `The inbox answered ${r.status}.`)), () => Promise.reject(new Error(`The inbox answered ${r.status}.`)))))
+      .then((r) => (r.ok ? null : bodyError(r)))
       .then(() => { setConfirming(null); return load(); }, (e) => setError(e.message || 'That device did not sign out.'))
       .finally(() => setBusy(null));
   };
   const day = (t) => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   const role = (t) => (t.role === 'owner' ? 'signs in' : t.role === 'agent' ? 'posts cards' : 'checks cards');
   return h(React.Fragment, null,
-    h('button', { type: 'button', className: 'devices-open', onClick: () => setOpen(true), 'aria-label': 'Devices signed in to this inbox', title: 'Devices signed in to this inbox' },
+    h(BarIconButton, { className: 'devices-open', label: 'Devices signed in to this inbox', onClick: () => setOpen(true) },
       h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 },
         h('circle', { cx: 5.5, cy: 8, r: 2.75 }),
         h('path', { d: 'M8.25 8H14 M12 8v2.5 M10 8v2', strokeLinecap: 'round' }))),
