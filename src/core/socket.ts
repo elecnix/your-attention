@@ -32,15 +32,17 @@ export interface AgentSocket {
   readonly caller: Caller | undefined;
 }
 
-export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller, instance?: string): AgentSocket {
+/** `resumed` marks a socket that was already open and signed in before the platform rebuilt it, as a Durable Object does
+ * when it wakes: the client keeps the same connection, so it gets no second `hello`. */
+export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller, instance?: string, resumed = false): AgentSocket {
   let me = caller;
   let disconnect: (() => void) | undefined;
   const allow = frameBudget();
-  const start = (c: Caller): void => {
+  const start = (c: Caller, quiet: boolean): void => {
     me = c;
-    disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)), instance);
+    disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)), instance, { resumed: quiet });
   };
-  if (me) start(me);
+  if (me) start(me, resumed);
   return {
     async message(text) {
       if (!allow()) return ws.close(4429, `more than ${FRAMES_PER_MINUTE} frames a minute`);
@@ -50,7 +52,7 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
       if (!me) {
         const token = msg.type === 'auth' ? await inbox.authenticate(msg.token) : undefined;
         if (!token) return ws.close(4401, 'send {type: "auth", token} first');
-        return start({ token: token.id, role: token.role });
+        return start({ token: token.id, role: token.role }, false);
       }
       if (msg.type === 'ping') return ws.send('{"type":"pong"}');
       if (msg.type === 'ack' && msg.card) {

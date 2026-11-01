@@ -118,6 +118,38 @@ describe('the inbox Durable Object', () => {
     assert.ok(server.events().some((e) => e.type === 'answer'));
   });
 
+  it('sends each socket one hello, however often the object wakes for its heartbeat alarm', async () => {
+    const rt = runtime();
+    let obj = rt.make();
+    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    // One socket signs in with a header, the other in its first frame, as the CLI does.
+    await obj.fetch(new Request('https://inbox/v1/ws?agent=w1&instance=i1', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
+    await obj.fetch(new Request('https://inbox/v1/ws?agent=w2&instance=i2', { headers: { upgrade: 'websocket' } }));
+    const [header, frame] = [rt.sockets[0]!, rt.sockets[1]!];
+    await obj.webSocketMessage(frame as never, JSON.stringify({ type: 'auth', token: owner }));
+    const hellos = (s: FakeSocket) => s.events().filter((e) => e.type === 'hello').length;
+    assert.equal(hellos(header), 1);
+    assert.equal(hellos(frame), 1);
+    // The alarm wakes a hibernated object every 30 seconds while sockets are open; the sockets stay the same.
+    for (let i = 0; i < 3; i++) {
+      obj = rt.make();
+      await obj.alarm();
+    }
+    obj = rt.make();
+    await obj.webSocketMessage(frame as never, JSON.stringify({ type: 'ping' }));
+    assert.equal(hellos(header), 1, 'a wake is not a reconnect, so it sends no hello');
+    assert.equal(hellos(frame), 1, 'a wake is not a reconnect, so it sends no hello');
+    assert.equal(header.closed, undefined);
+    assert.equal(frame.closed, undefined);
+    // The sockets still carry answers after the wakes.
+    await call(obj, 'POST', '/v1/cards', owner, { id: 'w', agent: 'w2', title: 'still there?' });
+    await call(obj, 'POST', '/v1/cards/w/answer', owner, {});
+    assert.equal(frame.events().filter((e) => e.type === 'answer').length, 1);
+    // A new socket for the same agent is a real connection, so it gets its hello.
+    await obj.fetch(new Request('https://inbox/v1/ws?agent=w1&instance=i1', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
+    assert.equal(hellos(rt.sockets[2]!), 1);
+  });
+
   it('closes a socket that never pinged, counting from when it opened', async () => {
     const rt = runtime();
     const obj = rt.make();
