@@ -403,6 +403,8 @@ A client adds `instance=<id>` to the stream, `/v1/ws` or `/v1/poll` address, wit
 
 Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST /v1/cards/<id>/claim {agent}` hands one to a successor session.
 
+`your-attention watch` follows that stream for a script: it prints each event as one line of JSON, the inbox's own event with `receivedAt` added and nothing else changed. A `beat` is not one of those events. It reports that the stream answers, rather than a card, so the watcher drops it as the client already drops it on the event stream and the long-poll. An inbox with nothing to say prints the `hello` line when a stream opens, and then only the answers that arrive. `--agent` names the agent, `--no-card` leaves the card out, `--select` keeps the card fields it names, and `--ack` acknowledges each answer after printing it. Without `--ack` the watcher acknowledges nothing, so it never marks read what the agent waiting for that answer has not seen.
+
 ## Pages
 
 `GET /v1/state` returns `{cards, answers, presence, states, priorities, levels, settings, guidance}`. `cards` has one summary for each card except the cleared ones, enough for the queue, the levels, presence and the answer states:
@@ -449,6 +451,8 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 `your-attention serve` runs the inbox in the foreground. `your-attention start` runs `serve` in the background with the same options, and returns once the inbox answers. Its output goes to `serve.log`. The inbox writes its address to `server.json` and removes the file when it closes.
 
 `your-attention stop` sends `POST /v1/shutdown` with the owner token, and waits until the inbox no longer answers. Other tokens get 403. When a launchd or systemd service runs the inbox, `stop` stops the service, because the service manager restarts an inbox that exits. The Cloudflare build has no shutdown route.
+
+`your-attention status` reports the machine rather than changing it. The report starts with whether the inbox this machine runs answers, and gives its address, pid, inbox id, protocol, PIN state and usage setting. An address file left by a crashed inbox reads `not running`. Next come the home directory, its database size, the token files in it, the launchd or systemd unit, and `serve.log`. Each inbox this machine paired with follows, from `client.json` and `owner.json`, with whether that inbox answers. `YOUR_ATTENTION_URL` and `YOUR_ATTENTION_TOKEN` appear by name when they are set, since the client reads them before the files. The report prints the names of the three token files and of those two variables, and never a value from any of them, so a secret stays out of the scrollback. It exits 0 whether or not an inbox runs, and says which command starts one.
 
 ## The Cloudflare build
 

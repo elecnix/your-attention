@@ -202,6 +202,7 @@ Answer cards on the inbox page. Each answer reaches its agent within a second, o
 An agent's recommendation shows inside the option it recommends, under a **Recommended** tag, so you read the pick once. The agent marks that option with `recommended: true`, or starts its recommendation with the option's label, as in "Go ahead. The key is read-only." A recommendation that matches no option keeps its own box above the options.
 
 ```sh
+your-attention status           # the inbox on this machine, its files, and this machine's pairings
 your-attention clear            # clears the cards you answered or that closed; search still finds them
 your-attention reset --yes      # removes every card, answer and file; tokens and templates stay
 your-attention login-url        # prints a sign-in link that works once, within 5 minutes
@@ -211,6 +212,8 @@ your-attention stop             # stops the inbox, or its launchd or systemd ser
 A card can link a file on the agent's computer with a `file:` address, such as `file:///Users/me/report.html`. On the laptop inbox, a click opens the file in a new tab, when the card came from the same computer. The inbox serves only files that the card's text or recommendation contains, to the owner only, and a served HTML file can't run scripts. A cloud inbox, and a card from another computer, show the path as code.
 
 `clear`, `reset` and `stop` act on the inbox this machine runs. `login-url` and `open` sign in to that inbox, or, on a machine that runs none, to the inbox it paired with as owner, such as a cloud inbox: `your-attention pair <url> --role owner`.
+
+`your-attention status` says what runs here before you start or stop anything: whether the inbox on this machine answers, its address, pid, inbox id, PIN and usage setting, the home directory with its database, token files, service and log, the inboxes this machine paired with and whether each answers, and `YOUR_ATTENTION_URL` or `YOUR_ATTENTION_TOKEN` when they are set, since they win over the files. It prints the names of the token files and of those two variables, never their contents, so a secret stays out of the scrollback.
 
 ### Answer in a terminal
 
@@ -248,6 +251,21 @@ A click opens a card or presses a button. In a form, a click picks a choice, tic
 Color is never the only sign. Each state has a symbol of its own: `●` waits for you, `◉` is the card on screen, and `↩` has a new reply. In the Outbox and Sent sections, `○` means the inbox stored your answer, `◑` that the agent got it, `✓` that the model read it, and `×` that the card closed. Each waiting card shows its priority level in words, such as `now` or `soon`, beside the level's color. The card on screen has a marker, `▶`, and inverse video while the list has the keys. Set `NO_COLOR=1` or pass `--mono` for no colors at all, and pass `--ascii`, or set `YOUR_ATTENTION_TUI_ASCII=1`, for symbols such as `*`, `@`, `<` and `>`. `YOUR_ATTENTION_TUI_COLOR` forces a color depth: `mono`, `16`, `256` or `truecolor`.
 
 The client works in iTerm2, cmux, Apple Terminal, tmux and herdr panes, and Linux terminals. From 60 columns it shows the list beside the card, and below that one pane at a time. A card part that a terminal can't draw, such as a chart or an HTML card, shows a line with the card's address on the page. On a laptop, the first frame of an inbox with 200 cards appears about 130 ms after the command starts. `YOUR_ATTENTION_TUI_TRACE=<file>` writes that time and the time of each frame to the file.
+
+### Watch the answers from a script
+
+`your-attention watch` keeps one agent stream open and prints each event it receives as one line of JSON, so a script reads the answers without a front-end. The fields are the ones `SPEC.md` defines for the agent stream, with `receivedAt` added: the time this process read the event. The command adds `receivedAt` and leaves the other fields as the inbox wrote them. Output is line-delimited JSON, so `jq` reads it as it arrives. A `beat`, the frame that shows the stream answering, never becomes a line, so a quiet inbox writes only the answers that arrive.
+
+```sh
+your-attention watch --agent cli:deploy | jq -r 'select(.type == "answer") | .answer.values.choice'
+your-attention watch --no-card                    # the answer and its receipt, without the card
+your-attention watch --select id,title,status    # only these fields of the card
+your-attention watch --agent cli:deploy --ack     # marks each answer read, as the answering session does
+```
+
+A watcher receives the answers to cards that this machine's token posted as the agent it names, so it pairs with `your-attention post --agent cli:deploy`: a script that posts cards and watches them gets each answer as it arrives. Cards that other sessions post stay on the page and in `your-attention tui`. The watcher reconnects by itself with one instance id, so a restarted inbox or a dropped socket keeps every answer queued and delivers each one once, and a `hello` line marks each connection or reconnection.
+
+The inbox reports an answer as read only when something acknowledges it, so `--ack` is off by default. A watcher that acknowledged every answer would mark read what the session waiting for it has not seen.
 
 ## Protect the inbox with a PIN
 
