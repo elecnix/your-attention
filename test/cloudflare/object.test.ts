@@ -78,6 +78,22 @@ function openSocket(obj: InstanceType<typeof InboxObject>, query: string, token?
   return obj.fetch(new Request(`https://inbox/v1/ws?${query}`, { headers: { upgrade: 'websocket', ...(token ? { authorization: `Bearer ${token}` } : {}) } }));
 }
 
+/** A new inbox with one agent socket open, signed in with a header unless `signedIn` is false. */
+async function oneSocket(query: string, signedIn = true) {
+  const rt = runtime();
+  const obj = rt.make();
+  const owner = await init(obj);
+  await openSocket(obj, query, signedIn ? owner : undefined);
+  return { rt, obj, owner, server: rt.sockets[0]! as FakeSocket & { lastPong: Date | null } };
+}
+
+/** Set a socket's heartbeat clock, then run the alarm that reads it. */
+async function alarmAfter(obj: InstanceType<typeof InboxObject>, server: FakeSocket, lastPong: Date | null, openedMsAgo: number): Promise<void> {
+  server.lastPong = lastPong;
+  (server.attachment as { connectedAt: number }).connectedAt = Date.now() - openedMsAgo;
+  await obj.alarm();
+}
+
 describe('the inbox Durable Object', () => {
   it('shows at most SHOWN_CARDS_LIMIT cards, so the state fits its CPU time', async () => {
     const rt = runtime({ SHOWN_CARDS_LIMIT: '2' });
@@ -161,25 +177,14 @@ describe('the inbox Durable Object', () => {
   });
 
   it('closes a socket that never pinged, counting from when it opened', async () => {
-    const rt = runtime();
-    const obj = rt.make();
-    const owner = await init(obj);
-    await openSocket(obj, 'agent=quiet', owner);
-    const server = rt.sockets[0]! as FakeSocket & { lastPong: Date | null };
-    server.lastPong = null;
-    (server.attachment as { connectedAt: number }).connectedAt = Date.now() - 120_000;
-    await obj.alarm();
+    const { obj, server } = await oneSocket('agent=quiet');
+    await alarmAfter(obj, server, null, 120_000);
     assert.equal(server.closed, 1001);
   });
 
   it('closes a socket that stopped answering heartbeats, and the agent goes offline', async () => {
-    const rt = runtime();
-    const obj = rt.make();
-    const owner = await init(obj);
-    await openSocket(obj, 'agent=s3', owner);
-    const server = rt.sockets[0]!;
-    server.lastPong = new Date(Date.now() - 120_000);
-    await obj.alarm();
+    const { obj, owner, server } = await oneSocket('agent=s3');
+    await alarmAfter(obj, server, new Date(Date.now() - 120_000), 0);
     assert.equal(server.closed, 1001);
     await new Promise((r) => setTimeout(r, 2100));
     await obj.alarm();
@@ -220,22 +225,13 @@ describe('the owner token from the deployment', () => {
 
 describe('sockets that cost the inbox', () => {
   it('closes a socket that answers pings but never signs in', async () => {
-    const rt = runtime();
-    const obj = rt.make();
-    await openSocket(obj, 'agent=lurker');
-    const server = rt.sockets[0]! as FakeSocket & { lastPong: Date | null };
-    server.lastPong = new Date();
-    (server.attachment as { connectedAt: number }).connectedAt = Date.now() - 11_000;
-    await obj.alarm();
+    const { obj, server } = await oneSocket('agent=lurker', false);
+    await alarmAfter(obj, server, new Date(), 11_000);
     assert.equal(server.closed, 1001);
   });
 
   it('closes a socket that sends more frames than its budget', async () => {
-    const rt = runtime();
-    const obj = rt.make();
-    const owner = await init(obj);
-    await openSocket(obj, 'agent=chatty', owner);
-    const server = rt.sockets[0]!;
+    const { obj, server } = await oneSocket('agent=chatty');
     for (let i = 0; i < 130 && server.closed === undefined; i++) await obj.webSocketMessage(server as never, '{"type":"ack","card":"none"}');
     assert.equal(server.closed, 4429);
   });
