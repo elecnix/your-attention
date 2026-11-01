@@ -17,6 +17,8 @@ export interface TestInbox {
   state(): Promise<{ cards: Card[]; states: Record<string, string>; answers: Record<string, { values: Record<string, unknown>; comment: string }> }>;
   /** Receive answers for one agent, into a list the test reads. */
   listen(agentId: string): { events: AgentEvent[]; stop(): void };
+  /** The keys to this inbox, as the owner's own route lists them: one per browser, phone and paired machine. */
+  tokens(): Promise<{ id: string; name: string; role: string }[]>;
   close(): Promise<void>;
 }
 
@@ -38,6 +40,10 @@ export async function startInbox(opts: { usage?: boolean; pinPrompt?: boolean } 
     },
     async state() {
       return server.inbox.state() as unknown as Awaited<ReturnType<TestInbox['state']>>;
+    },
+    async tokens() {
+      const res = await fetch(`${server.url}/v1/tokens`, { headers: { authorization: `Bearer ${server.ownerToken}` } });
+      return (await res.json()) as { id: string; name: string; role: string }[];
     },
     listen(agentId) {
       const events: AgentEvent[] = [];

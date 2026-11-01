@@ -195,7 +195,7 @@ YOUR_ATTENTION_RELAY_KEY=... your-attention serve --relay https://relay.example
 
 ### 6. Open the inbox on your phone (optional)
 
-Select the phone button, left of the GitHub mark, and scan the QR code with the phone camera. The phone opens the inbox, signed in with its own token. The code works once, for five minutes, so keep it to yourself.
+Select the phone button, left of the GitHub mark, and scan the QR code with the phone camera. The phone opens the inbox, signed in with its own token. The code works once, for five minutes, so keep it to yourself. The devices button, left of the phone button, lists every key to the inbox and signs one out, so a phone you lost ends without touching the others.
 
 A cloud inbox works from anywhere, and a laptop inbox from a phone on the same network. The laptop inbox listens on every network interface, IPv4 and IPv6, by default. Its QR code opens the laptop's `.local` name, such as `http://my-laptop.local:4815`, and the dialog also gives an IP address, for a phone that cannot open `.local` names.
 
