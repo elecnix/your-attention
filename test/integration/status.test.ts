@@ -132,6 +132,17 @@ describe('your-attention status', () => {
     }
   }));
 
+  it('reads a server.json that holds no address as no inbox, not a crash', withHome(async (home) => {
+    // Another program, or a file written halfway, can leave anything in the address file.
+    const file = path.join(home, 'server.json');
+    for (const text of ['{"url":42}', '[]', 'null', '{"pid":7}']) {
+      fs.writeFileSync(file, text);
+      const out = await reportFor(home);
+      assert.match(out, /state\s+not running; \S+server\.json holds no address/, `server.json holding ${text}`);
+      assert.match(out, /start it\s+your-attention start/);
+    }
+  }));
+
   it('reports the environment that wins over the files, and never its token', withHome(async (home) => {
     const secret = 'ya-token-value-4c1f';
     const alone = await reportFor(home, { YOUR_ATTENTION_URL: 'https://inbox.example' });

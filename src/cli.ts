@@ -59,8 +59,16 @@ function client(): Client {
   return new Client(config);
 }
 
-function readServerInfo(): { url: string; pid: number } | undefined {
-  try { return JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string; pid: number }; } catch { return undefined; }
+/** The address this machine's inbox wrote, when server.json holds one. Another program, or a file written halfway,
+ * can leave anything there, and every row of the report is a string. */
+function readServerInfo(): { url: string; pid?: number } | undefined {
+  try {
+    const info = JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url?: unknown; pid?: unknown } | null;
+    if (typeof info?.url !== 'string' || !info.url) return undefined;
+    return { url: info.url, ...(typeof info.pid === 'number' ? { pid: info.pid } : {}) };
+  } catch {
+    return undefined;
+  }
 }
 
 /** What a your-attention inbox at this address says about itself, from GET /v1/info, or undefined when none answers there.
@@ -252,6 +260,7 @@ switch (command) {
   }
   case 'status': {
     const home = homeDir();
+    const serverFile = path.join(home, 'server.json');
     const here = readServerInfo();
     const info = here ? await infoOf(here.url) : undefined;
     const ownerToken = readHome('owner-token', home);
@@ -261,7 +270,7 @@ switch (command) {
     if (info && here) {
       inbox.push(['state', 'running']);
       inbox.push(['address', here.url]);
-      inbox.push(['pid', String(here.pid)]);
+      if (here.pid !== undefined) inbox.push(['pid', String(here.pid)]);
       if (info.id) inbox.push(['inbox id', info.id]);
       if (info.protocol !== undefined) inbox.push(['protocol', String(info.protocol)]);
       if (ownerToken) {
@@ -274,8 +283,11 @@ switch (command) {
         if (usage) inbox.push(['usage counts', telemetryLine(usage)]);
       }
     } else if (here) {
-      inbox.push(['state', `not running; ${path.join(home, 'server.json')} is left from an earlier run`]);
+      inbox.push(['state', `not running; ${serverFile} is left from an earlier run`]);
       inbox.push(['address', here.url]);
+      inbox.push(['start it', 'your-attention start']);
+    } else if (fs.existsSync(serverFile)) {
+      inbox.push(['state', `not running; ${serverFile} holds no address`]);
       inbox.push(['start it', 'your-attention start']);
     } else {
       inbox.push(['state', 'none on this machine']);
