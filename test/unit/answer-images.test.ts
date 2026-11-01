@@ -112,6 +112,9 @@ describe('where the images of an answer land', () => {
       assert.equal(imagesDir('', '.'), path.join(home, 'images', '_', '_'));
       assert.equal(imagesDir('s1', '../../etc'), path.join(home, 'images', 's1', '.._.._etc'));
       assert.equal(imagesDir('s1', 'c1'), path.join(home, 'images', 's1', 'c1'));
+      // The OpenCode plugin names its agent `opencode:<session>`, and a colon cannot be in a Windows path: the
+      // sanitiser replaces it, so the folder it makes is legal on every system.
+      assert.equal(imagesDir('opencode:s1', 'c1'), path.join(home, 'images', 'opencode_s1', 'c1'));
     });
   });
 
@@ -164,5 +167,23 @@ describe('the images of one answer share a byte budget', () => {
     await assert.rejects(inbox.answer('c1', { images: [{ src: big, name: 'one.png' }, { src: big, name: 'two.png' }] }), (e: Error & { status?: number }) => e.status === 413);
     // Nothing was stored, so the card is still waiting and its answer slot is empty.
     assert.equal((await inbox.answer('c1', { comment: 'just text' })).images, undefined);
+  });
+});
+
+describe('an answer whose card is gone by the time its images are written', () => {
+  it('gives the bytes back and leaves no file behind', async () => {
+    // `reset` can delete the card while the blobs are written. The images are charged to the lifetime upload limit
+    // before that, so a 404 that kept them would charge the inbox for files nothing names.
+    const blobs = new MemoryBlobs();
+    const inbox = new Inbox(new MemoryStorage(), Date.now, blobs);
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Which one?' });
+    const used = inbox.uploads().used;
+    const written: string[] = [];
+    const put = blobs.put.bind(blobs);
+    blobs.put = async (key, bytes, type) => { written.push(key); await put(key, bytes, type); await inbox.reset({ token: 'to', role: 'owner' }); };
+    await assert.rejects(inbox.answer('c1', { images: [{ src: png, name: 's.png' }] }), /unknown card/);
+    assert.equal(written.length, 1, 'the image was written before the card went');
+    assert.equal(inbox.uploads().used, used, 'the bytes are charged and then given back');
+    await assert.rejects(inbox.attachment(agent, written[0]!), 'the file went with the refund');
   });
 });

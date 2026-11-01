@@ -1092,10 +1092,18 @@ export class Inbox {
       throw new InboxError(400, 'a secret card takes only a sealed value: seal it with the card\'s public key');
     }
     if (posted.kind === 'secret' && input.images?.length) throw new InboxError(400, 'a secret card takes no images');
-    const images = await this.storeAnswerImages(posted, input.images);
-    // Storing images awaited, so another session may have claimed the card while the files were written. Read it
-    // again, and deliver to whoever holds it now: the claim's own flush ran before this answer existed.
-    const card = this.getCard(id);
+    const { images, refund } = await this.storeAnswerImages(posted, input.images);
+    let card: Card;
+    try {
+      // Storing images awaited, so another session may have claimed the card while the files were written. Read it
+      // again, and deliver to whoever holds it now: the claim's own flush ran before this answer existed.
+      card = this.getCard(id);
+    } catch (e) {
+      // The card went while the files were written, as `reset` does, so nothing will ever name these files: give the
+      // bytes back rather than leave them charged against the inbox's lifetime upload limit.
+      await refund();
+      throw e;
+    }
     const before = this.store.get<Answer>('answers', id);
     const answer: Answer = {
       card: id,
@@ -1127,8 +1135,9 @@ export class Inbox {
 
   /** Store the images pasted into an answer, and return their references. Each must be a base64 image of a type the page
    * shows, within the attachment limit. The files count against the upload limit like a card's files. */
-  private async storeAnswerImages(card: Card, input: (NewAttachment & { field?: string })[] | undefined): Promise<Attachment[]> {
-    if (input === undefined) return [];
+  private async storeAnswerImages(card: Card, input: (NewAttachment & { field?: string })[] | undefined): Promise<{ images: Attachment[]; refund: () => Promise<void> }> {
+    const none = { images: [] as Attachment[], refund: async (): Promise<void> => {} };
+    if (input === undefined) return none;
     if (!Array.isArray(input)) throw new InboxError(400, 'images must be a list');
     if (input.length > MAX_ANSWER_IMAGES) throw new InboxError(400, `an answer takes at most ${MAX_ANSWER_IMAGES} images`);
     const decoded = input.map((f, i) => {
@@ -1143,6 +1152,11 @@ export class Inbox {
     if (limit !== undefined && used + bytes > limit) throw new InboxError(413, `these images are ${bytes} bytes, and this inbox has stored ${used} of its lifetime limit of ${limit} bytes`);
     if (bytes) this.store.put('meta', 'uploaded-bytes', used + bytes);
     const stored: Attachment[] = [];
+    // A caller that cannot keep the references deletes the files and gives the bytes back, as a card post does.
+    const refund = async (): Promise<void> => {
+      await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
+      this.store.put('meta', 'uploaded-bytes', Math.max(0, this.uploads().used - bytes));
+    };
     const settled = await Promise.allSettled(input.map(async (f, i): Promise<void> => {
       const d = decoded[i]!;
       const key = `${card.id}.a${i}.${randomId(6)}`;
@@ -1152,11 +1166,10 @@ export class Inbox {
     }));
     const failed = settled.find((r) => r.status === 'rejected');
     if (failed) {
-      await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
-      this.store.put('meta', 'uploaded-bytes', Math.max(0, this.uploads().used - bytes));
+      await refund();
       throw (failed as PromiseRejectedResult).reason;
     }
-    return stored;
+    return { images: stored, refund };
   }
 
   /** The model has the answer in its context. */
