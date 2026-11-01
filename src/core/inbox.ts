@@ -1090,8 +1090,10 @@ export class Inbox {
     }
     if (posted.kind === 'secret' && input.images?.length) throw new InboxError(400, 'a secret card takes no images');
     // A pairing request takes a code and its card goes a day later, and the sweep deletes the answer without its
-    // files, so an image here would be stored bytes nothing can name again.
-    if (posted.id.startsWith('pair-') && input.images?.length) throw new InboxError(400, 'a pairing request takes a code, not images');
+    // files, so an image here would be stored bytes nothing can name again. The stored pairing decides, not the id:
+    // an agent may post a card of its own called `pair-something`, and that one is neither swept nor a request.
+    const request = posted.id.startsWith('pair-') && this.store.get<Pairing>('pairings', posted.id.slice('pair-'.length));
+    if (request && input.images?.length) throw new InboxError(400, 'a pairing request takes a code, not images');
     const { images, refund } = await this.storeAnswerImages(posted, input.images);
     let card: Card;
     try {
@@ -1458,10 +1460,12 @@ export class Inbox {
     for (const card of cards) {
       const answer = this.store.get<Answer>('answers', card.id);
       const images = [answer, ...(answer?.previous ?? [])].flatMap((a) => a?.images ?? []);
-      await Promise.all([...(card.attachments ?? []), ...images].filter((f) => f.id).map((f) => this.blobs.delete(f.id ?? '')));
+      // The records go first. An answer that lands while these files are deleted then finds no card, and
+      // `answer` refunds the images it had already stored instead of leaving them where this list cannot name them.
       this.store.delete('answers', card.id);
       this.store.delete('cards', card.id);
       this.store.index(card.id, '');
+      await Promise.all([...(card.attachments ?? []), ...images].filter((f) => f.id).map((f) => this.blobs.delete(f.id ?? '')));
     }
     this.emit({ type: 'change', card: '' });
     return { removed: cards.length };

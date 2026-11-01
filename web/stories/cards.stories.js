@@ -76,12 +76,20 @@ export const WithPastedImages = {
     const root = mount(view(card({ title: 'Which layout do you prefer?' })));
     // The listener outlives this story, so it names the card only while the story is on screen: a later story's paste
     // must not land on a card this one drew.
-    const here = () => (root.querySelector('textarea') ? 'c1' : null);
+    // A detached node still answers `querySelector`, so ask the document: after Storybook swaps stories the div is
+    // gone from the page, and a paste must then be left alone rather than filed under the card this one drew.
+    const here = () => (root.isConnected && root.querySelector('textarea') ? 'c1' : null);
     if (!pasteInstalled) { pasteInstalled = true; installPaste(here); }
     const bytes = Uint8Array.from(atob(PNG.split(',')[1]), (c) => c.charCodeAt(0));
+    // The story returns its root and Storybook puts it in the page afterwards, so wait for that: the listener names the
+    // card only while the field is on screen, which is exactly what a real page gives it.
+    let tries = 0;
     const paste = (name) => {
-      const box = root.querySelector('textarea');
-      if (!box) return setTimeout(() => paste(name), 50);
+      const box = root.isConnected ? root.querySelector('textarea') : null;
+      if (!box) {
+        if (++tries < 100) setTimeout(() => paste(name), 20);
+        return;
+      }
       const data = new DataTransfer();
       data.items.add(new File([bytes], name, { type: 'image/png' }));
       box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));

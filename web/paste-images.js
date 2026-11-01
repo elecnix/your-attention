@@ -148,7 +148,14 @@ function fieldOf(e, currentCard) {
 async function take(el, cardId, files) {
   const field = el.getAttribute('name') || el.id || 'answer';
   const strip = stripAfter(el, field);
-  strip.setAttribute('data-pending', '1');
+  // A count, not a flag: two pastes on one field decode at once, and the first to finish must not let the strip go
+  // while the second is still on its way.
+  const decoding = (by) => {
+    const n = Math.max(0, Number(strip.getAttribute('data-pending') || 0) + by);
+    if (n) strip.setAttribute('data-pending', String(n));
+    else strip.removeAttribute('data-pending');
+  };
+  decoding(1);
   const problems = [];
   try {
     for (const file of files) {
@@ -157,7 +164,7 @@ async function take(el, cardId, files) {
     }
     strip.setAttribute('data-note', problems.join(' '));
   } finally {
-    strip.removeAttribute('data-pending');
+    decoding(-1);
   }
   drawStrips(cardId);
 }

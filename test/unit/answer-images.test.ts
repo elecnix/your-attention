@@ -200,7 +200,16 @@ describe('what the agent reads about the images', () => {
 
   it('refuses images on a pairing request, whose card the sweep deletes without its files', async () => {
     const inbox = setup();
-    inbox.postCard(agent, { id: 'pair-p1', agent: 's1', title: 'Approve this computer?' });
-    await assert.rejects(inbox.answer('pair-p1', { images: [{ src: png, name: 's.png' }] }), (e: Error & { status?: number }) => e.status === 400 && /pairing request takes a code/.test(e.message));
+    const pairing = inbox.requestPairing('this laptop', 'owner');
+    const card = `pair-${pairing.id}`;
+    await assert.rejects(inbox.answer(card, { images: [{ src: png, name: 's.png' }] }), (e: Error & { status?: number }) => e.status === 400 && /pairing request takes a code/.test(e.message));
+  });
+
+  it('takes images on a card the agent called pair-something, which is no pairing request', async () => {
+    const inbox = setup();
+    // The id alone does not make a pairing: an agent picks its own card ids, and this one is never swept.
+    inbox.postCard(agent, { id: 'pair-check', agent: 's1', title: 'Which one?' });
+    const answered = await inbox.answer('pair-check', { comment: 'see', images: [{ src: png, name: 's.png' }] });
+    assert.equal(answered.images?.length, 1);
   });
 });

@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Client } from '../client.ts';
-import type { Answer } from '../core/types.ts';
+import type { Answer, Attachment } from '../core/types.ts';
 import { homeDir } from '../node/home.ts';
 
 /** One folder name an agent or a card id can be, with nothing in it that walks up a level. */
@@ -22,22 +22,22 @@ export function imagesDir(agent: string, card: string): string {
 export async function saveAnswerImages(inbox: Pick<Client, 'attachment'>, agent: string, answer: Answer): Promise<string[]> {
   const images = answer.images ?? [];
   if (!images.length) return [];
-  const dir = imagesDir(agent, answer.card);
   try {
+    const dir = imagesDir(agent, answer.card);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    return await Promise.all(images.map(async (f: Attachment, i) => {
+      const file = path.join(dir, `${answer.savedAt}-${i + 1}-${(f.name || 'image').replace(/[^\w.-]/g, '_')}`);
+      try {
+        fs.writeFileSync(file, await inbox.attachment(f.id ?? ''), { mode: 0o600 });
+        fs.chmodSync(file, 0o600);
+        return file;
+      } catch (e) {
+        return `${f.name} (could not be fetched: ${(e as Error).message})`;
+      }
+    }));
   } catch (e) {
-    // The answer still has to reach the agent. A folder that cannot be made costs the images, not the answer, so
-    // each file becomes a line the model reads, as a failed fetch does.
+    // The answer always reaches the agent. Every caller awaits this while building the text it sends, so a folder or a
+    // path that cannot be made costs the images, not the answer: each one becomes a line the model reads.
     return images.map((f) => `${f.name || 'an image'} (could not be saved: ${(e as Error).message})`);
   }
-  return Promise.all(images.map(async (f, i) => {
-    const file = path.join(dir, `${answer.savedAt}-${i + 1}-${(f.name || 'image').replace(/[^\w.-]/g, '_')}`);
-    try {
-      fs.writeFileSync(file, await inbox.attachment(f.id ?? ''), { mode: 0o600 });
-      fs.chmodSync(file, 0o600);
-      return file;
-    } catch (e) {
-      return `${f.name} (could not be fetched: ${(e as Error).message})`;
-    }
-  }));
 }
