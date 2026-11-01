@@ -68,11 +68,21 @@ async function call(obj: InstanceType<typeof InboxObject>, method: string, path:
   return obj.fetch(new Request(`https://inbox${path}`, { method, headers: token ? { authorization: `Bearer ${token}` } : {}, body: body === undefined ? undefined : JSON.stringify(body) }));
 }
 
+/** Create the inbox and return its owner token. */
+async function init(obj: InstanceType<typeof InboxObject>): Promise<string> {
+  return ((await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string }).owner;
+}
+
+/** Open an agent socket, signed in with a header when `token` is given. */
+function openSocket(obj: InstanceType<typeof InboxObject>, query: string, token?: string): Promise<Response> {
+  return obj.fetch(new Request(`https://inbox/v1/ws?${query}`, { headers: { upgrade: 'websocket', ...(token ? { authorization: `Bearer ${token}` } : {}) } }));
+}
+
 describe('the inbox Durable Object', () => {
   it('shows at most SHOWN_CARDS_LIMIT cards, so the state fits its CPU time', async () => {
     const rt = runtime({ SHOWN_CARDS_LIMIT: '2' });
     const obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    const owner = await init(obj);
     for (const id of ['c1', 'c2']) assert.equal((await call(obj, 'POST', '/v1/cards', owner, { id, agent: 's', title: id })).status, 201);
     assert.equal((await call(obj, 'POST', '/v1/cards', owner, { id: 'c3', agent: 's', title: 'c3' })).status, 507);
   });
@@ -89,9 +99,9 @@ describe('the inbox Durable Object', () => {
   it('keeps answering agents across hibernation', async () => {
     const rt = runtime();
     let obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    const owner = await init(obj);
     assert.equal((await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 's1', title: 'Across hibernation?' })).status, 201);
-    const ws = (await obj.fetch(new Request('https://inbox/v1/ws?agent=s1', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }))) as Response & { webSocket: FakeSocket };
+    const ws = (await openSocket(obj, 'agent=s1', owner)) as Response & { webSocket: FakeSocket };
     assert.ok(ws.webSocket);
     const server = rt.sockets[0]!;
     assert.equal(server.events()[0]?.type, 'hello');
@@ -108,8 +118,8 @@ describe('the inbox Durable Object', () => {
   it('keeps a socket that authenticated in its first frame authenticated after waking', async () => {
     const rt = runtime();
     let obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
-    await obj.fetch(new Request('https://inbox/v1/ws?agent=s2', { headers: { upgrade: 'websocket' } }));
+    const owner = await init(obj);
+    await openSocket(obj, 'agent=s2');
     const server = rt.sockets[0]!;
     await obj.webSocketMessage(server as never, JSON.stringify({ type: 'auth', token: owner }));
     await call(obj, 'POST', '/v1/cards', owner, { id: 'c2', agent: 's2', title: 'q' });
@@ -121,10 +131,10 @@ describe('the inbox Durable Object', () => {
   it('sends each socket one hello, however often the object wakes for its heartbeat alarm', async () => {
     const rt = runtime();
     let obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    const owner = await init(obj);
     // One socket signs in with a header, the other in its first frame, as the CLI does.
-    await obj.fetch(new Request('https://inbox/v1/ws?agent=w1&instance=i1', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
-    await obj.fetch(new Request('https://inbox/v1/ws?agent=w2&instance=i2', { headers: { upgrade: 'websocket' } }));
+    await openSocket(obj, 'agent=w1&instance=i1', owner);
+    await openSocket(obj, 'agent=w2&instance=i2');
     const [header, frame] = [rt.sockets[0]!, rt.sockets[1]!];
     await obj.webSocketMessage(frame as never, JSON.stringify({ type: 'auth', token: owner }));
     const hellos = (s: FakeSocket) => s.events().filter((e) => e.type === 'hello').length;
@@ -146,15 +156,15 @@ describe('the inbox Durable Object', () => {
     await call(obj, 'POST', '/v1/cards/w/answer', owner, {});
     assert.equal(frame.events().filter((e) => e.type === 'answer').length, 1);
     // A new socket for the same agent is a real connection, so it gets its hello.
-    await obj.fetch(new Request('https://inbox/v1/ws?agent=w1&instance=i1', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
+    await openSocket(obj, 'agent=w1&instance=i1', owner);
     assert.equal(hellos(rt.sockets[2]!), 1);
   });
 
   it('closes a socket that never pinged, counting from when it opened', async () => {
     const rt = runtime();
     const obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
-    await obj.fetch(new Request('https://inbox/v1/ws?agent=quiet', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
+    const owner = await init(obj);
+    await openSocket(obj, 'agent=quiet', owner);
     const server = rt.sockets[0]! as FakeSocket & { lastPong: Date | null };
     server.lastPong = null;
     (server.attachment as { connectedAt: number }).connectedAt = Date.now() - 120_000;
@@ -165,8 +175,8 @@ describe('the inbox Durable Object', () => {
   it('closes a socket that stopped answering heartbeats, and the agent goes offline', async () => {
     const rt = runtime();
     const obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
-    await obj.fetch(new Request('https://inbox/v1/ws?agent=s3', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
+    const owner = await init(obj);
+    await openSocket(obj, 'agent=s3', owner);
     const server = rt.sockets[0]!;
     server.lastPong = new Date(Date.now() - 120_000);
     await obj.alarm();
@@ -180,7 +190,7 @@ describe('the inbox Durable Object', () => {
   it('keeps file bytes in R2 under the inbox prefix', async () => {
     const rt = runtime();
     const obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    const owner = await init(obj);
     const src = `data:text/markdown;base64,${Buffer.from('# Hello').toString('base64')}`;
     const card = (await (await call(obj, 'POST', '/v1/cards', owner, { id: 'f1', agent: 's1', title: 'q', attachments: [{ src, name: 'hello.md' }] })).json()) as { attachments: { id: string }[] };
     assert.ok([...rt.blobs.keys()][0]?.startsWith('object-1/'));
@@ -212,7 +222,7 @@ describe('sockets that cost the inbox', () => {
   it('closes a socket that answers pings but never signs in', async () => {
     const rt = runtime();
     const obj = rt.make();
-    await obj.fetch(new Request('https://inbox/v1/ws?agent=lurker', { headers: { upgrade: 'websocket' } }));
+    await openSocket(obj, 'agent=lurker');
     const server = rt.sockets[0]! as FakeSocket & { lastPong: Date | null };
     server.lastPong = new Date();
     (server.attachment as { connectedAt: number }).connectedAt = Date.now() - 11_000;
@@ -223,8 +233,8 @@ describe('sockets that cost the inbox', () => {
   it('closes a socket that sends more frames than its budget', async () => {
     const rt = runtime();
     const obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
-    await obj.fetch(new Request('https://inbox/v1/ws?agent=chatty', { headers: { upgrade: 'websocket', authorization: `Bearer ${owner}` } }));
+    const owner = await init(obj);
+    await openSocket(obj, 'agent=chatty', owner);
     const server = rt.sockets[0]!;
     for (let i = 0; i < 130 && server.closed === undefined; i++) await obj.webSocketMessage(server as never, '{"type":"ack","card":"none"}');
     assert.equal(server.closed, 4429);
@@ -233,8 +243,8 @@ describe('sockets that cost the inbox', () => {
   it('carries page events to the owner page over a socket, and refuses other tokens', async () => {
     const rt = runtime();
     const obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
-    const refused = await obj.fetch(new Request('https://inbox/v1/ws?page=1', { headers: { upgrade: 'websocket' } }));
+    const owner = await init(obj);
+    const refused = await openSocket(obj, 'page=1');
     assert.equal(refused.status, 401);
     await obj.fetch(new Request('https://inbox/v1/ws?page=1&viewer=tab-1', { headers: { upgrade: 'websocket', cookie: `ya_token=${encodeURIComponent(owner)}` } }));
     assert.equal(rt.sockets.length, 1, 'the owner cookie opens the page socket');
@@ -246,7 +256,7 @@ describe('sockets that cost the inbox', () => {
   it('serves no event stream, since an open request keeps the object awake', async () => {
     const rt = runtime();
     const obj = rt.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    const owner = await init(obj);
     assert.equal((await call(obj, 'GET', '/v1/events', owner)).status, 410);
   });
 });
@@ -333,7 +343,7 @@ describe('usage counts of a hosted inbox', () => {
   it('shows no notice where the deployment sends nothing', async () => {
     const single = runtime({ MODE: 'single', TELEMETRY: { writeDataPoint: () => assert.fail('a single-inbox deployment wrote a data point') } });
     const obj = single.make();
-    const { owner } = (await (await call(obj, 'POST', '/_init', undefined, {})).json()) as { owner: string };
+    const owner = await init(obj);
     const status = (await (await call(obj, 'GET', '/v1/telemetry', owner)).json()) as { notice: boolean; blocked: string };
     assert.equal(status.notice, false);
     assert.match(status.blocked, /single/);
