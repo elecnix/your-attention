@@ -673,3 +673,54 @@ export function PhoneLink() {
         h('button', { type: 'button', className: 'btn', onClick: copy }, copied ? 'Copied' : 'Copy the address'),
         h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: true }, 'Close'))));
 }
+
+/** A browser, phone or paired machine that holds a key to this inbox, and a way to sign one out. */
+export function DevicesLink() {
+  const [open, setOpen] = React.useState(false);
+  const [tokens, setTokens] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const [confirming, setConfirming] = React.useState(null);
+  const [busy, setBusy] = React.useState(null);
+  const ref = React.useRef(null);
+  const load = () => api(`${BASE}v1/tokens`)
+    .then((r) => (r.ok ? r.json() : r.json().then((d) => Promise.reject(new Error(d.error || `The inbox answered ${r.status}.`)), () => Promise.reject(new Error(`The inbox answered ${r.status}.`)))))
+    .then((list) => { setTokens(list); setError(null); }, (e) => setError(e.message || 'The list did not load.'));
+  React.useEffect(() => {
+    if (!open) return;
+    if (ref.current && !ref.current.open) ref.current.showModal();
+    load();
+  }, [open]);
+  const close = () => { ref.current?.close(); setOpen(false); setTokens(null); setError(null); setConfirming(null); };
+  // A write that uses the cookie carries the header a cross-site form cannot set, as every page write does.
+  const revoke = (id) => {
+    setBusy(id);
+    fetch(`${BASE}v1/tokens/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { 'x-your-attention': '1' } })
+      .then((r) => (r.ok ? null : r.json().then((d) => Promise.reject(new Error(d.error || `The inbox answered ${r.status}.`)), () => Promise.reject(new Error(`The inbox answered ${r.status}.`)))))
+      .then(() => { setConfirming(null); return load(); }, (e) => setError(e.message || 'That device did not sign out.'))
+      .finally(() => setBusy(null));
+  };
+  const day = (t) => new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  const role = (t) => (t.role === 'owner' ? 'signs in' : t.role === 'agent' ? 'posts cards' : 'checks cards');
+  return h(React.Fragment, null,
+    h('button', { type: 'button', className: 'devices-open', onClick: () => setOpen(true), 'aria-label': 'Devices signed in to this inbox', title: 'Devices signed in to this inbox' },
+      h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 },
+        h('circle', { cx: 5.5, cy: 8, r: 2.75 }),
+        h('path', { d: 'M8.25 8H14 M12 8v2.5 M10 8v2', strokeLinecap: 'round' }))),
+    open && h('dialog', { ref, className: 'qr-dialog devices-dialog', onClose: close, onClick: (e) => { if (e.target === ref.current) close(); }, 'aria-labelledby': 'devices-title' },
+      h('h2', { id: 'devices-title' }, 'Devices signed in to this inbox'),
+      h('p', null, 'Each browser, phone and machine holds its own key. Signing a device out ends that key, and the others keep working.'),
+      error && h('p', { className: 'note warn', role: 'alert' }, error),
+      !tokens && !error && h('p', { className: 'muted' }, 'Reading the list…'),
+      tokens && !tokens.length && h('p', { className: 'muted' }, 'This inbox lists no device.'),
+      tokens && tokens.length > 0 && h('ul', { className: 'devices' }, tokens.map((t) => h('li', { key: t.id, className: 'device' },
+        h('div', { className: 'device-what' },
+          h('span', { className: 'device-name' }, t.name),
+          h('span', { className: 'device-facts' }, `${role(t)} · since ${day(t.createdAt)}${t.pinExempt ? ' · skips the PIN' : ''}`)),
+        confirming === t.id
+          ? h('div', { className: 'device-actions' },
+            h('span', { className: 'note warn' }, 'It loses its key and signs in again with a link.'),
+            h('button', { type: 'button', className: 'btn', onClick: () => setConfirming(null) }, 'Keep it'),
+            h('button', { type: 'button', className: 'btn danger', onClick: () => revoke(t.id), disabled: busy === t.id, autoFocus: true }, busy === t.id ? 'Signing out…' : 'Sign it out'))
+          : h('button', { type: 'button', className: 'btn', onClick: () => setConfirming(t.id) }, 'Sign out')))),
+      h('div', { className: 'qr-actions' }, h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: confirming === null }, 'Close'))));
+}
