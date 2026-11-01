@@ -25,9 +25,6 @@ async function signOut(dialog: ReturnType<Page['locator']>, name: string) {
   await expect(dialog).not.toContainText(name);
 }
 
-/** The device names the inbox still knows, read from the owner's own route. */
-const names = async () => ((await (await fetch(`${inbox.server.url}/v1/tokens`, { headers: { authorization: `Bearer ${inbox.server.ownerToken}` } })).json()) as { name: string }[]).map((t) => t.name);
-
 test('lists the keys to this inbox, and signs one device out after asking', async ({ page }) => {
   // A phone that signed in earlier, as the phone dialog leaves behind.
   const phone = 'device signed in 2026-11-01 10:00';
@@ -47,7 +44,7 @@ test('lists the keys to this inbox, and signs one device out after asking', asyn
   await signOut(dialog, phone);
 
   // The key of the tab that did the revoking still works, and the inbox no longer knows the phone.
-  const left = await names();
+  const left = (await inbox.tokens()).map((t) => t.name);
   expect(left).toContain(`page on ${os.hostname()}`);
   expect(left).not.toContain(phone);
 
@@ -68,7 +65,7 @@ test('signs a device out on an inbox with a PIN, because every page call carries
   const dialog = await openDialog(page);
   await expect(dialog).toContainText(phone);
   await signOut(dialog, phone);
-  expect(await names()).not.toContain(phone);
+  expect((await inbox.tokens()).map((t) => t.name)).not.toContain(phone);
 
   // The gate is real, and the page clears it only through the unlock header that web/env.js adds: a request without it
   // is refused, so this case fails if the page ever stops sending the token.
