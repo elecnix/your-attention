@@ -132,6 +132,25 @@ describe('your-attention status', () => {
     }
   }));
 
+  it('prints the fields of an answer only when they hold what the report can print', withHome(async (home) => {
+    // A program that names itself your-attention, with junk in the other fields, is still no crash.
+    const inbox = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'your-attention', id: 42, protocol: 'one' }));
+    });
+    await new Promise<void>((listening) => inbox.listen(0, '127.0.0.1', listening));
+    try {
+      const { port } = inbox.address() as AddressInfo;
+      fs.writeFileSync(path.join(home, 'server.json'), JSON.stringify({ url: `http://127.0.0.1:${port}`, port, pid: 1 }));
+      const out = await reportFor(home);
+      assert.match(out, /state\s+running/);
+      assert.ok(!out.includes('inbox id'), out);
+      assert.ok(!out.includes('protocol'), out);
+    } finally {
+      await new Promise<void>((closed) => inbox.close(() => closed()));
+    }
+  }));
+
   it('reads a server.json that holds no address as no inbox, not a crash', withHome(async (home) => {
     // Another program, or a file written halfway, can leave anything in the address file.
     const file = path.join(home, 'server.json');

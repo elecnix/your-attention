@@ -72,13 +72,19 @@ function readServerInfo(): { url: string; pid?: number } | undefined {
 }
 
 /** What a your-attention inbox at this address says about itself, from GET /v1/info, or undefined when none answers there.
- * Another program on the address could answer 200 with JSON of its own, so the name has to match. */
+ * Another program on the address could answer 200 with JSON of its own, so the name has to match and each field has to hold
+ * what the report can print. */
 async function infoOf(url: string): Promise<{ name: string; id?: string; protocol?: number } | undefined> {
   try {
     const res = await fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(2000) });
     if (!res.ok) return undefined;
-    const info = (await res.json()) as { name?: string; id?: string; protocol?: number };
-    return info.name === 'your-attention' ? info as { name: string; id?: string; protocol?: number } : undefined;
+    const info = (await res.json()) as { name?: unknown; id?: unknown; protocol?: unknown } | null;
+    if (info?.name !== 'your-attention') return undefined;
+    return {
+      name: 'your-attention',
+      ...(typeof info.id === 'string' ? { id: info.id } : {}),
+      ...(typeof info.protocol === 'number' ? { protocol: info.protocol } : {}),
+    };
   } catch {
     return undefined;
   }
