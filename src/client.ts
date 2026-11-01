@@ -334,7 +334,7 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
   if (answer.comment) lines.push(`Comment: ${answer.comment}`);
   // Pasted images are files: name each path, or say how many came when the integration has not saved them.
   const images = answer.images ?? [];
-  if (images.length && imagePaths) images.forEach((f, i) => lines.push(`Image${f.field ? ` pasted in ${f.field}` : ''}: ${imagePaths[i] ?? f.name}`));
+  if (imagePaths?.length) images.forEach((f, i) => lines.push(`Image${f.field ? ` pasted in ${f.field}` : ''}: ${imagePaths[i] ?? f.name}`));
   else if (images.length) lines.push(`${images.length} pasted image${images.length === 1 ? '' : 's'}`);
   // Each widget on the card can add text for the agent, filled from this answer, such as what to do next.
   for (const r of answer.responses ?? []) lines.push('', r);

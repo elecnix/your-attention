@@ -73,8 +73,11 @@ export const PullRequestWidgets = {
 let pasteInstalled = false;
 export const WithPastedImages = {
   render: () => {
-    if (!pasteInstalled) { pasteInstalled = true; installPaste(() => 'c1'); }
     const root = mount(view(card({ title: 'Which layout do you prefer?' })));
+    // The listener outlives this story, so it names the card only while the story is on screen: a later story's paste
+    // must not land on a card this one drew.
+    const here = () => (root.querySelector('textarea') ? 'c1' : null);
+    if (!pasteInstalled) { pasteInstalled = true; installPaste(here); }
     const bytes = Uint8Array.from(atob(PNG.split(',')[1]), (c) => c.charCodeAt(0));
     const paste = (name) => {
       const box = root.querySelector('textarea');

@@ -125,7 +125,9 @@ export function drawStrips(cardId) {
       p.textContent = note;
       strip.append(p);
     }
-    if (!mine.length && !note) strip.remove();
+    // A strip whose paste is still decoding stays, or its thumbnail would appear nowhere and its refusal note would
+    // be written to a node no one shows.
+    if (!mine.length && !note && !strip.hasAttribute('data-pending')) strip.remove();
   }
 }
 
@@ -146,12 +148,17 @@ function fieldOf(e, currentCard) {
 async function take(el, cardId, files) {
   const field = el.getAttribute('name') || el.id || 'answer';
   const strip = stripAfter(el, field);
+  strip.setAttribute('data-pending', '1');
   const problems = [];
-  for (const file of files) {
-    const problem = await pastedImages.add(cardId, field, file).catch((err) => String(err.message || err));
-    if (problem) problems.push(problem);
+  try {
+    for (const file of files) {
+      const problem = await pastedImages.add(cardId, field, file).catch((err) => String(err.message || err));
+      if (problem) problems.push(problem);
+    }
+    strip.setAttribute('data-note', problems.join(' '));
+  } finally {
+    strip.removeAttribute('data-pending');
   }
-  strip.setAttribute('data-note', problems.join(' '));
   drawStrips(cardId);
 }
 

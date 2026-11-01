@@ -700,10 +700,7 @@ export class Inbox {
     }
     this.store.put('meta', 'uploaded-bytes', used + bytes);
     const stored: Attachment[] = [];
-    const refund = async (): Promise<void> => {
-      await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
-      this.store.put('meta', 'uploaded-bytes', Math.max(0, this.uploads().used - bytes));
-    };
+    const refund = (): Promise<void> => this.refundUploads(stored, bytes);
     // Wait for every put, so a put that fails leaves none of the others behind. Each key is listed before its put starts.
     const settled = await Promise.allSettled(files.map(async (f, i): Promise<NewAttachment> => {
       const d = decoded[i];
@@ -1092,6 +1089,9 @@ export class Inbox {
       throw new InboxError(400, 'a secret card takes only a sealed value: seal it with the card\'s public key');
     }
     if (posted.kind === 'secret' && input.images?.length) throw new InboxError(400, 'a secret card takes no images');
+    // A pairing request takes a code and its card goes a day later, and the sweep deletes the answer without its
+    // files, so an image here would be stored bytes nothing can name again.
+    if (posted.id.startsWith('pair-') && input.images?.length) throw new InboxError(400, 'a pairing request takes a code, not images');
     const { images, refund } = await this.storeAnswerImages(posted, input.images);
     let card: Card;
     try {
@@ -1133,6 +1133,12 @@ export class Inbox {
     return this.store.get<Answer>('answers', id) ?? answer;
   }
 
+  /** Delete files a caller wrote and give their bytes back to the lifetime upload limit, for a write that cannot stand. */
+  private async refundUploads(stored: { id?: string }[], bytes: number): Promise<void> {
+    await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
+    this.store.put('meta', 'uploaded-bytes', Math.max(0, this.uploads().used - bytes));
+  }
+
   /** Store the images pasted into an answer, and return their references. Each must be a base64 image of a type the page
    * shows, within the attachment limit. The files count against the upload limit like a card's files. */
   private async storeAnswerImages(card: Card, input: (NewAttachment & { field?: string })[] | undefined): Promise<{ images: Attachment[]; refund: () => Promise<void> }> {
@@ -1153,10 +1159,7 @@ export class Inbox {
     if (bytes) this.store.put('meta', 'uploaded-bytes', used + bytes);
     const stored: Attachment[] = [];
     // A caller that cannot keep the references deletes the files and gives the bytes back, as a card post does.
-    const refund = async (): Promise<void> => {
-      await Promise.all(stored.map((f) => this.blobs.delete(f.id ?? '')));
-      this.store.put('meta', 'uploaded-bytes', Math.max(0, this.uploads().used - bytes));
-    };
+    const refund = (): Promise<void> => this.refundUploads(stored, bytes);
     const settled = await Promise.allSettled(input.map(async (f, i): Promise<void> => {
       const d = decoded[i]!;
       const key = `${card.id}.a${i}.${randomId(6)}`;

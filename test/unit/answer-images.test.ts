@@ -187,3 +187,20 @@ describe('an answer whose card is gone by the time its images are written', () =
     await assert.rejects(inbox.attachment(agent, written[0]!), 'the file went with the refund');
   });
 });
+
+describe('what the agent reads about the images', () => {
+  it('says how many came when the integration saved none, instead of saying nothing', () => {
+    const card = { id: 'c1', title: 'Which one?', kind: 'question' } as unknown as Card;
+    const answer = { comment: 'look', values: {}, images: [{ id: 'a1', name: 'one.png' }, { id: 'a2', name: 'two.png' }] } as unknown as Answer;
+    // An empty list is truthy, so the count line is what runs here.
+    assert.match(describeAnswer(card, answer, []), /2 pasted images/);
+    assert.match(describeAnswer(card, answer), /2 pasted images/);
+    assert.match(describeAnswer(card, answer, ['/tmp/one.png', '/tmp/two.png']), /Image: \/tmp\/one\.png\nImage: \/tmp\/two\.png/);
+  });
+
+  it('refuses images on a pairing request, whose card the sweep deletes without its files', async () => {
+    const inbox = setup();
+    inbox.postCard(agent, { id: 'pair-p1', agent: 's1', title: 'Approve this computer?' });
+    await assert.rejects(inbox.answer('pair-p1', { images: [{ src: png, name: 's.png' }] }), (e: Error & { status?: number }) => e.status === 400 && /pairing request takes a code/.test(e.message));
+  });
+});
