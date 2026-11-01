@@ -80,6 +80,12 @@ your-attention service serve --write
 2. The page opens your inbox, signed in. Bookmark that address, and keep it private. You type the PIN in each new tab.
 3. Pair each machine that runs agents, as [step 5](#pair-a-machine-with-a-cloud-inbox-or-another-computer) shows.
 
+The address alone does not sign a browser in. What opens a cloud inbox is an owner token kept in the browser's cookie, and the link that creates that cookie works once, within five minutes. Keep that browser signed in. When no browser holds the cookie, the page lists sign-in steps that each need a browser already signed in, and a machine paired as an agent cannot make a sign-in code.
+
+Keep a second way in. From a signed-in page, tap the phone button and use the code on your phone. Or pair a computer as owner while a page has you signed in. That saves an owner token in `owner.json`, and `your-attention open` then signs that computer's browser in from a terminal.
+
+With neither, make a new inbox. The cards in the old one remain in a place nobody can open.
+
 **On your own Cloudflare inbox:** deploy it first, as [Run your own cloud inbox](#run-your-own-cloud-inbox-optional) shows. Then pair each machine, as step 5 shows.
 
 ### 5. Connect your agents
