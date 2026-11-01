@@ -654,8 +654,7 @@ export function PhoneLink() {
       h(BarIcon, null,
         h('rect', { x: 4, y: 1, width: 8, height: 14, rx: 1.75 }),
         h('path', { d: 'M7 12.5h2', strokeLinecap: 'round' }))),
-    open && h('dialog', { ref, className: 'qr-dialog', onClose: close, onClick: (e) => { if (e.target === ref.current) close(); }, 'aria-labelledby': 'qr-title' },
-      h('h2', { id: 'qr-title' }, 'Open this inbox on your phone'),
+    open && h(BarDialog, { dialogRef: ref, className: 'qr-dialog', titleId: 'qr-title', title: 'Open this inbox on your phone', onClose: close },
       h('p', null, 'Scan the code with the phone camera. The phone opens the inbox signed in.'),
       h('div', { className: 'qr' }, qr && qr.failed
         ? h('p', { className: 'qr-failed' }, 'The QR code did not load. Copy the address below instead.')
@@ -678,6 +677,12 @@ export function PhoneLink() {
 const bodyError = (r) => r.json().then(
   (d) => Promise.reject(new Error(d.error || `The inbox answered ${r.status}.`)),
   () => Promise.reject(new Error(`The inbox answered ${r.status}.`)));
+
+/** The frame both top-bar dialogs share: the backdrop click, the escape key and the heading. */
+function BarDialog({ dialogRef, className, titleId, title, onClose, children }) {
+  return h('dialog', { ref: dialogRef, className, onClose, onClick: (e) => { if (e.target === dialogRef.current) onClose(); }, 'aria-labelledby': titleId },
+    h('h2', { id: titleId }, title), children);
+}
 
 /** A top-bar button that shows an icon, named for a screen reader and on hover. */
 function BarIconButton({ className, label, onClick, children }) {
@@ -721,8 +726,7 @@ export function DevicesLink() {
       h(BarIcon, null,
         h('circle', { cx: 5.5, cy: 8, r: 2.75 }),
         h('path', { d: 'M8.25 8H14 M12 8v2.5 M10 8v2', strokeLinecap: 'round' }))),
-    open && h('dialog', { ref, className: 'qr-dialog devices-dialog', onClose: close, onClick: (e) => { if (e.target === ref.current) close(); }, 'aria-labelledby': 'devices-title' },
-      h('h2', { id: 'devices-title' }, 'Devices signed in to this inbox'),
+    open && h(BarDialog, { dialogRef: ref, className: 'qr-dialog devices-dialog', titleId: 'devices-title', title: 'Devices signed in to this inbox', onClose: close },
       h('p', null, 'Each browser, phone and machine holds its own key. Signing a device out ends that key, and the others keep working.'),
       error && h('p', { className: 'note warn', role: 'alert' }, error),
       !tokens && !error && h('p', { className: 'muted' }, 'Reading the list…'),
