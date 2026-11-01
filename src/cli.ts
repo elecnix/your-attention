@@ -302,7 +302,9 @@ switch (command) {
     const pairings: [string, string][] = [];
     for (const [role, file] of [['agent', 'client.json'], ['owner', 'owner.json']] as const) {
       const text = readHome(file, home);
-      if (!text) continue;
+      // No such file means no such pairing. An empty file is there, and the person should see that it is.
+      if (text === undefined) continue;
+      if (!text) { pairings.push([role, `${file} is empty`]); continue; }
       let pairing: unknown;
       try { pairing = JSON.parse(text); } catch { pairings.push([role, `${file} is unreadable`]); continue; }
       // The file parses to anything at all: `null` and a bare number parse without an error.

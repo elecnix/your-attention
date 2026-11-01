@@ -105,6 +105,9 @@ describe('your-attention status', () => {
       fs.writeFileSync(file, text);
       assert.ok((await reportFor(home)).includes('client.json holds no address'), `client.json holding ${text}`);
     }
+    // A zero-byte file is there, so it gets a row of its own rather than reading as no pairing.
+    fs.writeFileSync(file, '');
+    assert.ok((await reportFor(home)).includes('client.json is empty'));
   }));
 
   it('calls an address file that no inbox answers on not running', withHome(async (home) => {
