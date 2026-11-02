@@ -235,8 +235,7 @@ export class Inbox {
     for (const p of this.store.list<Pairing>('pairings')) {
       times.push(p.status === 'pending' || p.secret ? p.createdAt + PAIRING_TTL_MS : p.createdAt + PAIRING_KEEP_MS);
     }
-    const cards = this.store.list<Card>('cards');
-    for (const c of cards) {
+    for (const c of this.store.list<Card>('cards')) {
       if (c.triage?.state === 'pending' && c.triage.deadline) times.push(c.triage.deadline);
       if (c.expiresAt && !c.closed && !this.store.get('answers', c.id)) times.push(c.expiresAt);
     }
