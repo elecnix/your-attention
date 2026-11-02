@@ -36,6 +36,7 @@
     "cloudflare:build": "node scripts/cloudflare-assets.mjs",
     "cloudflare:check": "npm run cloudflare:build && wrangler deploy --dry-run --outdir .cloudflare/dist",
     "cpu-budget": "node --disable-warning=ExperimentalWarning scripts/cpu-budget.ts",
+    "check:principles": "node --disable-warning=ExperimentalWarning scripts/check-principle-links.ts",
     "test:cloudflare": "npm run cloudflare:build && node --test --test-concurrency=1 --disable-warning=ExperimentalWarning \"test/cloudflare/**/*.test.ts\""
   },
   "dependencies": {
