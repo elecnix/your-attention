@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Client } from '../../src/client.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
-import { serve, type RunningServer } from '../../src/node/server.ts';
+import { serve, type RunningServer, type ServeOptions } from '../../src/node/server.ts';
 
 export interface Harness {
   home: string;
@@ -21,10 +21,10 @@ export interface Harness {
   stop(): Promise<void>;
 }
 
-export async function start(): Promise<Harness> {
+export async function start(extra: Partial<ServeOptions> = {}): Promise<Harness> {
   const streams = new Set<AbortController>();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'your-attention-'));
-  const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report', blocked: 'a test inbox sends nothing' } });
+  const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report', blocked: 'a test inbox sends nothing' }, ...extra });
   const h: Harness = {
     home,
     server,

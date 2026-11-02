@@ -288,6 +288,17 @@ your-attention watch --role owner --type change --no-card   # the card id, state
 
 An owner watcher sees every card and every answer. Its token is an owner token, in a file with mode 0600. Pair the machine as owner only when it is yours, and sign it out from the devices button on the page to end its access.
 
+### Send the answers to a webhook
+
+An agent that only runs when something calls it, such as a hosted bot or a CI job, can get its answers at a webhook instead of running `watch`:
+
+```sh
+your-attention subscribe --agent cli:deploy --webhook https://example.com/hooks/abc --header 'Authorization: Bearer <token>'
+your-attention unsubscribe --agent cli:deploy
+```
+
+The inbox shows the request to you as a card with the address and the header names. The inbox calls the webhook only after you approve it there, and changing your answer to Deny later stops it. Once you approve, the inbox POSTs each answer to a card of that agent, from the same token, in the format of an agent stream event. It tries again with a growing wait until the webhook answers 2xx, and that answer marks it read. `subscribe` prints the secret that signs each call, once. `your-attention status` lists the webhooks. SPEC.md, "Answer webhooks", has the details.
+
 ## Protect the inbox with a PIN
 
 An answer on a card goes straight into a coding agent's session. Someone who gets the inbox address or a sign-in link, from a bookmark, the browser history or a pasted message, could open the page and answer as you. A 4-digit PIN stops that: the address or link signs a browser in, and each new tab must also type the PIN before it shows a card or takes an answer.

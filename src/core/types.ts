@@ -230,6 +230,8 @@ export interface Card {
    * the guidance the proposal starts from, so the card can say when it changed since. `agents` is on cards stored
    * before the page listed the online agents from live presence, and nothing reads it. */
   broadcast?: { text: string; agents?: string[]; from?: string; base?: { version: number; text: string } };
+  /** On a system card that asks to send an agent's answers to a webhook: the id of that subscription. */
+  subscription?: string;
   origin?: Origin;
   /** The name the agent gives itself, such as "the release agent". The page shows it as written. */
   from?: string;
@@ -282,6 +284,34 @@ export interface Token {
   /** An owner token kept on a machine, such as the laptop's owner-token file or a paired client, which acts without the PIN. A token that can travel as a link or a cookie never has it. */
   pinExempt?: boolean;
 }
+
+/** What a client asks of the inbox on a system card. */
+export type SystemRequest =
+  | { type: 'subscribe'; webhook: { url: string; headers?: Record<string, string> }; events?: 'answer'[] }
+  | { type: 'unsubscribe' };
+
+/** A webhook that receives the answers to one agent's cards, for the token that asked. SPEC.md, "Answer webhooks". */
+export interface Subscription {
+  id: string;
+  agent: string;
+  /** The id of the token that asked. Never sent to clients. */
+  token: string;
+  url: string;
+  /** Sent with each call. The values are never sent to a client. */
+  headers: Record<string, string>;
+  events: 'answer'[];
+  /** Keys the x-your-attention-signature header. Returned once, to the client that asked. */
+  secret: string;
+  status: 'pending' | 'approved';
+  createdAt: number;
+  approvedAt?: number;
+  /** How many answers reached the webhook. */
+  delivered: number;
+  lastError?: { at: number; reason: string };
+}
+
+/** A subscription as clients read it: the header names, and no secret. */
+export type PublicSubscription = Omit<Subscription, 'token' | 'headers' | 'secret'> & { headers: string[]; waiting: number };
 
 export interface Pairing {
   id: string;
@@ -366,4 +396,6 @@ export interface NewCard {
   tags?: Record<string, string>;
   follows?: string;
   deliver?: 'stream' | 'none';
+  /** On a card of kind `system` from a client: what it asks the inbox to do. */
+  system?: SystemRequest;
 }

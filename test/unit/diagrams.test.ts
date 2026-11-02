@@ -136,7 +136,7 @@ describe('cards with diagrams', () => {
     const plain = new Inbox(new MemoryStorage());
     await assert.rejects(plain.postCardWithFiles(agent, { agent: 's1', title: 'No checker', text: `\`\`\`mermaid\n${FLOW}\n\`\`\`` }), rejects(400, /cannot check Mermaid diagrams/));
     assert.throws(() => inbox().postCard(agent, { agent: 's1', title: 'Sync', text: `\`\`\`mermaid\n${FLOW}\n\`\`\`` }), rejects(409, /did not check/));
-    // Only the inbox's own system cards skip the check: an agent that sets kind system gets none.
-    assert.throws(() => inbox().postCard(agent, { agent: 's1', kind: 'system', title: 'Sync', text: `\`\`\`mermaid\n${FLOW}\n\`\`\`` }), rejects(409, /did not check/));
+    // Only the inbox's own system cards skip the check: the inbox takes no system card from an agent.
+    assert.throws(() => inbox().postCard(agent, { agent: 's1', kind: 'system', title: 'Sync', text: `\`\`\`mermaid\n${FLOW}\n\`\`\`` }), rejects(400, /system card/));
   });
 });

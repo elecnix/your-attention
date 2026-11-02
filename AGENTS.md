@@ -89,7 +89,7 @@ flowchart TB
     ET["extension-token: extension"]
   end
   subgraph INBOX["inbox: laptop server, or hosted Durable Object at /i/inbox-id/"]
-    DB[("SHA-256 of each token, SHA-256 of the PIN key, PIN salt, sign-in codes, pairings")]
+    DB[("SHA-256 of each token, SHA-256 of the PIN key, PIN salt, sign-in codes, pairings, answer webhook headers and signing secrets")]
   end
   subgraph WORKER["hosted Worker"]
     KV[("invite codes, uses left")]
@@ -105,6 +105,7 @@ flowchart TB
   end
   PERSON(("person"))
   LF[("inbox machine's files, each one a card from this machine contains as a file: address")]
+  HOOK["agent's https webhook"]
 
   HOME -. "written by serve" .- INBOX
   OT -- "POST /v1/sign-in-codes" --> SC["sign-in code: once, 5 min"]
@@ -124,6 +125,9 @@ flowchart TB
   AT -- "bearer" --> INBOX
   CJ -- "bearer" --> INBOX
   ET -- "bearer" --> INBOX
+  CJ -- "system card: webhook url and headers" --> INBOX
+  INBOX -- "signing secret, once" --> CJ
+  INBOX -- "after the person approves: each answer, signed, with the headers" --> HOOK
   UT -- "POST /v1/cards/id/file-ticket" --> FT["folder ticket: one card's file, its folder for HTML, until the card is cleared or the unlock ends"]
   FT -- "new tab and its assets: GET /v1/files/ticket/path" --> LF
   LF -- "sandboxed" --> BROWSER
@@ -136,6 +140,8 @@ flowchart TB
 - The PIN never leaves the device that types it. The tab, the CLI and the terminal client derive a key from it with PBKDF2, using the salt from `GET /v1/pin`, and send the key. The inbox stores a SHA-256 hash of that key.
 - A token minted at `serve` or by pairing as owner skips the PIN. When the inbox has a PIN, a browser's owner token needs an unlock token as well, which the tab sends as `x-your-attention-unlock`. An unlock token ends after 12 hours without use.
 - The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. The new tab opens the file at the address of a folder ticket, and that address is the credential, since a sandboxed page loads its assets without the cookie. A ticket for an HTML file opens the files in its folder and below, except hidden ones, and never a symlink that leaves the folder. It ends when its card is cleared, and with a PIN, when the unlock of the tab that asked for it ends. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
+- The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. When the inbox has a PIN, the new tab opens the file only with a ticket that an unlocked tab asked for, which works once within 60 seconds. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
+- An agent's answer webhook gets nothing until the person approves it on its system card. The inbox keeps the header values the agent gave, and sends them only to that webhook, never to a client or a page. The signing secret goes to the agent once.
 - An invite code is the operator's secret. The hosted inbox keeps only its invite id, the first 16 hex digits of the code's SHA-256, for usage counts.
 
 ## Commands

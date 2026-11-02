@@ -516,6 +516,10 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       }
       if (method === 'DELETE' && b) { inbox.deleteWebhook(b); return json({ ok: true }); }
     }
+    if (a === 'subscriptions') {
+      if (method === 'GET' && !b) return json(inbox.listSubscriptions(me));
+      if (method === 'DELETE' && b) { inbox.deleteSubscription(me, b); return json({ ok: true }); }
+    }
     if (method === 'GET' && a === 'attachments' && b) {
       const { file, bytes } = await inbox.attachment(me, b);
       // Only types a browser renders go inline, HTML in a sandbox that runs no script. Everything else downloads.
@@ -528,7 +532,15 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
 
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
     if (a === 'cards') {
-      if (method === 'POST' && !b) return json(withWarning(publicCard(await inbox.postCardWithFiles(me, await readJson<NewCard>(req, BODY_LIMIT.card)))), 201);
+      if (method === 'POST' && !b) {
+        const input = await readJson<NewCard>(req, BODY_LIMIT.card);
+        // A system card from a client asks the inbox for something, and the answer says what the inbox did.
+        if (input?.kind === 'system') {
+          const done = inbox.systemRequest(me, input);
+          return json(done, 'secret' in done ? 201 : 200);
+        }
+        return json(withWarning(publicCard(await inbox.postCardWithFiles(me, input))), 201);
+      }
       if (method === 'GET' && !b) return json(inbox.listCards(me));
       if (!b) return json({ error: 'not found' }, 404);
       if (method === 'GET' && !c) {

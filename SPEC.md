@@ -40,7 +40,7 @@ While an extension checks a card, the card is `in-triage` and the person does no
 
 A hook call without a verdict by its deadline follows the policy: `fail-open` passes the card, and `fail-closed` holds it. The card shows the extension and the reason. With no extension on `card.created`, cards go straight to the person, and an extension that connects later screens the cards still waiting. The platform alarm resolves deadlines, so the inbox itself doesn't set timers.
 
-`POST /v1/webhooks {hook, url}` sends observe-only hook calls to an https service. Each call has the header `x-your-attention-signature: sha256=<HMAC-SHA256 of the body>`, keyed with the secret that the create call returns once.
+`POST /v1/webhooks {hook, url}` sends observe-only hook calls to an https service. Each call has the header `x-your-attention-signature: sha256=<HMAC-SHA256 of the body>`, keyed with the secret that the create call returns once. [Answer webhooks](#answer-webhooks) sends the answers to an agent's own cards to a webhook of its choice.
 
 ## The triage extension
 
@@ -107,7 +107,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | -- | -- |
 | `id` | 1 to 80 characters: letters, digits, dots, colons, dashes or the `_` character. Posting the same id again revises the card and adds 1 to its `version`. |
 | `agent` | The session that receives the answer, such as `claude:<session id>`, `pi:<session id>` or `opencode:<session id>`. |
-| `kind` | `ask` (the default), `blocked` for a harness that waits on a prompt, or `system` for cards the inbox posts. |
+| `kind` | `ask` (the default), `blocked` for a harness that waits on a prompt, or `system` for cards the inbox posts. A client's `system` card carries `system` and asks the inbox for something, as [Answer webhooks](#answer-webhooks) describes. The inbox answers 400 to a client's `system` card without one. |
 | `title`, `text`, `recommendation` | The question, its context, and what the agent would do. `title` is one line of plain text. The page, the terminal client, a notification and a search result show it as it is written, so Markdown in a title reads as its own source. A link belongs in `text`, or in a field label of the body. |
 | `options`, `multiple` | Answer options as `{id, label, description, recommended}`. The page shows each option as a box the person clicks, with its description inside, as inline Markdown. The person picks with the `choice` field. An agent marks its recommended option with `recommended: true`. A card without `multiple` takes one at most, and the inbox answers 400 to a second one. The `card_post` tool takes each option as `{label, description, recommended}` or as a plain label. |
 | `questions` | The questions of a card that asks two or more, each `{question, header, text, options, multiSelect}`, with each option as `{label, description, recommended}`. The page and the terminal client draw the card's `text` first, then each question as its own section. A section opens with the question as a heading and its `text` in Markdown, and ends with the option boxes and a comment field. A question without `options` takes a free-text answer instead. The answer gives the first question's pick in `q0`, by the option's label, and its comment in `q0_comment`. The agent reads one line per question, the question and the answer, with an indented `Comment:` line under it. The inbox answers 400 for a question with an empty `question`, for two options with one label, and for two recommended options on a question without `multiSelect`. The Claude Code `AskUserQuestion` hook posts its questions in this field too. |
@@ -269,7 +269,7 @@ Every inbox applies these:
 - A title is at most 300 characters, and an agent id at most 80.
 - A template or widget source is at most 64 KB, and each name keeps at most 50 versions.
 - A reply is at most 4,096 characters, and a card takes at most 200 replies.
-- An inbox takes at most 5 webhooks.
+- An inbox takes at most 5 webhooks and 20 answer webhooks, and an answer webhook sends up to 10 headers of its agent's, each one line of at most 2,000 characters.
 - A request body is at most 16 MB for a card post and for an answer, 4 KB on the routes open without a token, and 1 MB elsewhere. The inbox reads `content-length` first, and stops reading a body that grows past the limit.
 
 An inbox built with `storageLimitBytes` refuses writes with 507 while it stores more than the limit. It still takes deletes, `reset`, `archive`, answers, closes, sign-in and presence reports, so the owner can make room.
@@ -470,6 +470,45 @@ A page event gives a card's id only, so for each `change` the watcher reads `GET
 `--agent` keeps the cards and presence of that agent, and the `hello` lines. `--no-card` and `--select` cut the card after that filter reads it. `--type` keeps the event types it lists, with either role: `hello`, `answer`, `guidance` and `returned` for an agent, and `hello`, `change`, `presence` and `code` for the owner. `--ack` with `--role owner` exits with an error, since only the token that posted a card may acknowledge its answer. Before it opens the socket, the watcher calls `GET /v1/pin`, which only an owner may call. A 403 there, or a machine with no owner pairing, makes it exit with the advice to run `your-attention pair <url> --role owner`.
 
 An owner watcher sees every card and every answer, and the agents' presence, as a page does. It uses an owner token: the `owner-token` file, or the paired token in `owner.json`. `writePrivate` writes both with mode 0600. To end a paired watcher's access, sign that machine out from the devices list on the page, which sends `DELETE /v1/tokens/<id>`.
+
+## Answer webhooks
+
+An agent that only runs when something calls it, such as a hosted bot or a CI job, can have the inbox send each answer to its cards to a webhook, and then it doesn't need a `watch` process. The agent posts a `system` card:
+
+```json
+{
+  "kind": "system",
+  "agent": "cli:deploy",
+  "title": "Send the answers for cli:deploy to a webhook",
+  "system": {
+    "type": "subscribe",
+    "webhook": { "url": "https://example.com/hooks/abc", "headers": { "Authorization": "Bearer <token>" } },
+    "events": ["answer"]
+  }
+}
+```
+
+1. The inbox answers 201 `{subscription, card, secret}`. `subscription` has `status: "pending"`. `secret` keys the signature of each call, and the inbox returns it only this once.
+2. The inbox posts its own system card, `subscribe-<id>`, with the agent, the webhook address and the header names, and leaves out every header value.
+3. The person picks `approve` or `deny` in the `choice` field. The inbox calls the webhook only after an approve.
+4. From then on, each answer to a card of that agent id and token goes to the webhook as the agent stream's `answer` event.
+
+A webhook belongs to one agent id and the token that asked for it, and a new request from them replaces the one before. `url` must be https. A header's name must be a valid header name, and the inbox refuses `content-type`, `content-length`, `host`, `transfer-encoding`, `connection` and any `x-your-attention-` name, since it sets those itself. `events` takes `answer` only. Header values go to the webhook alone: the inbox keeps them in its storage and never sends them to a client or a page.
+
+Each call is a POST with the body `{type: "answer", id, card, answer}`, as on the agent stream, and these headers, after the agent's own:
+
+| Header | Value |
+| -- | -- |
+| `content-type` | `application/json` |
+| `x-your-attention-event` | `answer` |
+| `x-your-attention-delivery` | the answer id, the same as `id` in the body |
+| `x-your-attention-signature` | `sha256=<HMAC-SHA256 of the body>`, keyed with the secret |
+
+The answer id is `<card id>@<savedAt>`. It stays the same on every try of one answer, and a changed answer gets a new one, so a receiver can drop a copy it has seen. A 2xx marks the answer read, as `POST /v1/cards/<id>/ack` does. Any other status, or no answer in 10 seconds, counts as a failure. The inbox tries again after 5 seconds, then doubles the wait each time, up to an hour, so it delivers each answer at least once. After 24 hours it gives up on that answer and records why on the subscription. The answer still waits for the agent stream. The platform alarm runs each retry, and storage keeps the waiting calls, so a restart or a hibernation loses none. A force-send of the answer tries again at once. An answer the agent read on its stream first goes to no webhook. A secret card's answer goes to no webhook, since it opens only with the key in its session's memory.
+
+To stop, the agent posts `system: {type: "unsubscribe"}` with its agent id and gets 200 `{removed}`. The person stops it by changing the answer on the card to `deny`, or with `DELETE /v1/subscriptions/<id>`. Revoking a token removes every webhook it asked for. The card closes with what happened in each case. `GET /v1/subscriptions` lists every webhook for the owner, and its own for an agent token, as `{id, agent, url, headers, events, status, createdAt, approvedAt, delivered, waiting, lastError}`, where `headers` lists the header names without their values.
+
+`your-attention subscribe --agent cli:deploy --webhook URL --header 'Authorization: Bearer <token>'` posts the request and prints `{id, status, card, secret}`, and `your-attention unsubscribe --agent cli:deploy` stops it. `your-attention status` lists each webhook with its agent, its host, whether the person approved it, and its last failure. It prints the host and the header names without their values, because the address and the header values can contain a secret.
 
 ## Pages
 

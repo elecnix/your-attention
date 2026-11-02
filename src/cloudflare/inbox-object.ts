@@ -212,6 +212,9 @@ export class InboxObject {
     }
     const res = await this.handle(req);
     await this.schedule();
+    // An answer calls its webhook at once. When the call fails, the alarm moves to its retry.
+    const calls = [...this.inbox.deliveries];
+    if (calls.length) this.ctx.waitUntil?.(Promise.allSettled(calls).then(() => this.schedule()));
     return res;
   }
 
@@ -238,10 +241,12 @@ export class InboxObject {
     await this.webSocketClose(ws);
   }
 
-  /** The platform alarm: sweep the inbox, purge old cards, and close sockets that did not sign in or stopped answering heartbeats. */
+  /** The platform alarm: sweep the inbox, purge old cards, call the answer webhooks that are due, and close sockets that did
+   * not sign in or stopped answering heartbeats. */
   async alarm(): Promise<void> {
     this.inbox.sweep();
     await this.inbox.purge();
+    await this.inbox.deliverAnswers();
     const now = Date.now();
     for (const ws of this.ctx.getWebSockets()) {
       if (this.socketDeadline(ws, now) <= now) {
