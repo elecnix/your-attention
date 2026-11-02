@@ -493,7 +493,7 @@ An agent that only runs when something calls it, such as a hosted bot or a CI jo
 3. The person picks `approve` or `deny` in the `choice` field. The inbox calls the webhook only after an approve.
 4. From then on, each answer to a card of that agent id and token goes to the webhook as the agent stream's `answer` event.
 
-A webhook belongs to one agent id and the token that asked for it, and a new request from them replaces the one before. `url` must be https. A header's name must be a valid header name, and the inbox refuses `content-type`, `content-length`, `host`, `transfer-encoding`, `connection` and any `x-your-attention-` name, since it sets those itself. `events` takes `answer` only. Header values go to the webhook alone: the inbox keeps them in its storage and never sends them to a client or a page.
+A webhook belongs to one agent id and the token that asked for it, and a new request from them replaces the one before. `url` must be https. A header's name must be a valid header name, and the inbox refuses `content-type`, `content-length`, `host`, `transfer-encoding`, `connection` and any `x-your-attention-` name, since it sets those itself. A name given twice in two cases is refused too. `events` takes `answer` only. The card shows the agent id, the address and each header name in code spans, so none of them adds links or text to the card, and the inbox writes a backtick in the address as `%60`. Header values go to the webhook alone: the inbox keeps them in its storage and never sends them to a client or a page.
 
 Each call is a POST with the body `{type: "answer", id, card, answer}`, as on the agent stream, and these headers, after the agent's own:
 
@@ -508,7 +508,7 @@ The answer id is `<card id>@<savedAt>`. It stays the same on every try of one an
 
 To stop, the agent posts `system: {type: "unsubscribe"}` with its agent id and gets 200 `{removed}`. The person stops it by changing the answer on the card to `deny`, or with `DELETE /v1/subscriptions/<id>`. Revoking a token removes every webhook it asked for. The card closes with what happened in each case. `GET /v1/subscriptions` lists every webhook for the owner, and its own for an agent token, as `{id, agent, url, headers, events, status, createdAt, approvedAt, delivered, waiting, lastError}`, where `headers` lists the header names without their values.
 
-`your-attention subscribe --agent cli:deploy --webhook URL --header 'Authorization: Bearer <token>'` posts the request and prints `{id, status, card, secret}`, and `your-attention unsubscribe --agent cli:deploy` stops it. `your-attention status` lists each webhook with its agent, its host, whether the person approved it, and its last failure. It prints the host and the header names without their values, because the address and the header values can contain a secret.
+`your-attention subscribe --agent cli:deploy --webhook URL --header-file FILE` posts the request and prints `{id, status, card, secret}`. Each line of the file, or of stdin with `--header-file -`, is one `NAME: VALUE` header, and `--header 'NAME: VALUE'` adds one from the command line. A secret belongs in the file, since `ps` shows the arguments to every user of the machine. `your-attention unsubscribe --agent cli:deploy` stops it. `your-attention status` lists each webhook with its agent, its host, whether the person approved it, and its last failure. It prints the host and the header names without their values, because the address and the header values can contain a secret.
 
 ## Pages
 

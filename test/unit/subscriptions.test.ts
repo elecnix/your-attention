@@ -139,6 +139,29 @@ describe('answer webhooks', () => {
     assert.equal(sent.length, 0);
   });
 
+  it('shows the address and the agent id on the card as text, so neither adds links or words of its own', () => {
+    const { inbox, agent } = setup();
+    const r = inbox.subscribe(agent, { ...subscribe('bot [approve](https://evil.example)'), system: { type: 'subscribe', webhook: { url: 'https://example.com/h?x=`[click](https://evil.example)`' } } });
+    const text = inbox.getCard(r.card.id).text ?? '';
+    // A code span shows its text as typed, and neither value can close one.
+    assert.ok(text.includes('`bot [approve](https://evil.example)`'), text);
+    assert.ok(text.includes('`https://example.com/h?x=%60[click](https://evil.example)%60`'), text);
+    assert.equal(text.split('`').length % 2, 1, 'every code span closes');
+    for (const o of inbox.getCard(r.card.id).options ?? []) assert.equal((o.description ?? '').split('`').length % 2, 1);
+  });
+
+  it('keeps going when recording a call throws, so the alarm that runs it goes on to its other work', async () => {
+    const { inbox, agent, settle } = setup();
+    const r = inbox.subscribe(agent, subscribe());
+    await inbox.answer(r.card.id, { values: { choice: 'approve' } });
+    inbox.postCard(agent, { id: 'c1', agent: 'cli:deploy', title: 'q' });
+    // A store that closed while the call ran throws when the inbox records the result.
+    (inbox as unknown as { called: () => void }).called = () => { throw new Error('the store is closed'); };
+    await inbox.answer('c1', {});
+    await settle();
+    await assert.doesNotReject(inbox.deliverAnswers());
+  });
+
   it('replaces an earlier request from the same agent id and token', () => {
     const { inbox, agent, owner } = setup();
     const a = inbox.subscribe(agent, subscribe());
@@ -155,6 +178,8 @@ describe('answer webhooks', () => {
     assert.throws(() => inbox.systemRequest(agent, withHook({ url: 'https://example.com/h', headers: { 'X-Your-Attention-Signature': 'x' } })), rejects(400, /header/));
     assert.throws(() => inbox.systemRequest(agent, withHook({ url: 'https://example.com/h', headers: { A: 'x\r\nB: y' } })), rejects(400, /header/));
     assert.throws(() => inbox.systemRequest(agent, withHook({ url: 'https://example.com/h' }, ['closed'])), rejects(400, /events/));
+    // A name that differs only in case would reach the webhook as one header with two values.
+    assert.throws(() => inbox.systemRequest(agent, withHook({ url: 'https://example.com/h', headers: { Authorization: 'a', authorization: 'b' } })), rejects(400, /twice/));
     assert.throws(() => inbox.systemRequest(agent, { agent: 'a', kind: 'system', title: 's', system: { type: 'other' } as never }), rejects(400, /subscribe or unsubscribe/));
     assert.throws(() => inbox.subscribe({ token: 'tx', role: 'extension' }, subscribe()), rejects(403, /extension/));
     // A card from a client that sets kind system without a request is refused, so no agent posts as the inbox.
@@ -179,7 +204,7 @@ describe('answer webhooks', () => {
       const text = await (await call(secret, 'GET', '/v1/subscriptions')).text();
       assert.match(text, /Authorization/);
       assert.doesNotMatch(text, /hook-secret/);
-      assert.doesNotMatch(text, new RegExp(created.secret));
+      assert.ok(!text.includes(created.secret), 'the signing secret');
     }
     assert.deepEqual(await (await call(otherSecret, 'GET', '/v1/subscriptions')).json(), []);
     assert.equal((await call(otherSecret, 'DELETE', `/v1/subscriptions/${created.subscription.id}`)).status, 403);

@@ -807,13 +807,15 @@ export class Inbox {
     const sub: Subscription = { id, agent, token: caller.token, url, headers, events: ['answer'], secret: randomId(24), status: 'pending', createdAt: this.now(), delivered: 0 };
     this.store.put('subscriptions', id, sub);
     const host = new URL(url).host;
-    const names = Object.keys(headers).map((n) => `\`${n}\``);
+    // The card is Markdown, so the agent's words go in code spans, which show them as typed.
+    const code = (text: string): string => `\`${text.replace(/`/g, "'")}\``;
+    const names = Object.keys(headers).map(code);
     this.postCard(INBOX, {
       id: cardId, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
       title: `Send the answers for ${agent} to a webhook?`,
-      text: `The agent ${agent} asks the inbox to send each answer you give to its cards to \`${url}\`${names.length ? `, with the header${names.length === 1 ? '' : 's'} ${names.join(', ')}` : ''}. Whoever runs ${host} then reads those answers. Approve only if you know that address.`,
+      text: `The agent ${code(agent)} asks the inbox to send each answer you give to its cards to ${code(url)}${names.length ? `, with the header${names.length === 1 ? '' : 's'} ${names.join(', ')}` : ''}. Whoever runs ${host} then reads those answers. Approve only if you know that address.`,
       options: [
-        { id: 'approve', label: 'Approve', description: `The inbox sends each answer to the cards of ${agent} to ${host}.` },
+        { id: 'approve', label: 'Approve', description: `The inbox sends each answer to the cards of ${code(agent)} to ${host}.` },
         { id: 'deny', label: 'Deny', description: 'Nothing goes out. To stop a webhook you approved, change your answer to this.' },
       ],
     });
@@ -899,7 +901,8 @@ export class Inbox {
       const headers = { ...sub.headers, 'x-your-attention-event': 'answer', 'x-your-attention-delivery': id };
       calls.push(postSigned(sub.url, sub.secret, headers, ev, ANSWER_WEBHOOK_TIMEOUT_MS, this.fetcher).then((r) => this.called(item, r)));
     }
-    await Promise.all(calls);
+    // A call that fails to record its result, such as on a store that closed, must not stop the alarm's other work.
+    await Promise.allSettled(calls);
   }
 
   /** Record how a webhook call went: a 2xx marks the answer read, and anything else waits for the next retry. */
@@ -2097,7 +2100,8 @@ function webhookUrl(url: unknown): string {
   try { parsed = new URL(text); } catch { throw new InboxError(400, 'webhook.url must be an https URL'); }
   if (parsed.protocol !== 'https:') throw new InboxError(400, 'webhook.url must be https');
   if (text.length > 2000) throw new InboxError(400, 'webhook.url must be at most 2,000 characters');
-  return parsed.href;
+  // A backtick is the one URL character that ends a code span on the card, and %60 is the same address.
+  return parsed.href.replace(/`/g, '%60');
 }
 
 /** The headers a client sends with each call: names a header can have, values on one line, and none the inbox sets itself. */
@@ -2107,7 +2111,10 @@ function webhookHeaders(headers: unknown): Record<string, string> {
   const entries = Object.entries(headers as Record<string, unknown>);
   if (entries.length > MAX_WEBHOOK_HEADERS) throw new InboxError(400, `webhook.headers takes at most ${MAX_WEBHOOK_HEADERS} headers`);
   const out: Record<string, string> = {};
+  const seen = new Set<string>();
   for (const [name, value] of entries) {
+    if (seen.has(name.toLowerCase())) throw new InboxError(400, `webhook header ${name}: given twice, in two cases`);
+    seen.add(name.toLowerCase());
     if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(name)) throw new InboxError(400, `webhook header ${JSON.stringify(name.slice(0, 64))}: not a header name`);
     if (RESERVED_HEADER.test(name)) throw new InboxError(400, `webhook header ${name}: the inbox sets it itself`);
     const v = String(value ?? '');

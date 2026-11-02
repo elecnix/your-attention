@@ -64,6 +64,27 @@ describe('your-attention subscribe', () => {
     }
   });
 
+  it('reads secret headers from a file or stdin, so they stay out of argv', async () => {
+    const h = await start();
+    try {
+      const agent = { YOUR_ATTENTION_URL: h.server.url, YOUR_ATTENTION_TOKEN: h.agentToken };
+      const file = path.join(h.home, 'hook-headers');
+      fs.writeFileSync(file, 'Authorization: Bearer from-a-file\n\nX-Team: deploy\n');
+      const r = await cli(h.home, ['subscribe', '--agent', 'from-file', '--webhook', 'https://hooks.example.com/abc', '--header-file', file], agent);
+      assert.equal(r.code, 0, r.err);
+      const piped = await new Promise<Run>((resolve) => {
+        const child = execFile(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts'), 'subscribe', '--agent', 'from-stdin', '--webhook', 'https://hooks.example.com/abc', '--header-file', '-'],
+          { env: { ...process.env, YOUR_ATTENTION_HOME: h.home, ...agent }, encoding: 'utf8' }, (error, stdout, stderr) => resolve({ code: error ? 1 : 0, out: stdout, err: stderr }));
+        child.stdin?.end('Authorization: Bearer from-stdin\n');
+      });
+      assert.equal(piped.code, 0, piped.err);
+      const subs = h.server.inbox.listSubscriptions({ token: '', role: 'owner' });
+      assert.deepEqual(subs.map((s) => [s.agent, s.headers]).sort(), [['from-file', ['Authorization', 'X-Team']], ['from-stdin', ['Authorization']]]);
+    } finally {
+      await h.stop();
+    }
+  });
+
   it('refuses an http webhook and a header without a name', async () => {
     const h = await start();
     try {
@@ -71,9 +92,10 @@ describe('your-attention subscribe', () => {
       const plain = await cli(h.home, ['subscribe', '--agent', 'a', '--webhook', 'http://hooks.example.com/abc'], agent);
       assert.equal(plain.code, 1);
       assert.match(plain.err, /https/);
-      const bad = await cli(h.home, ['subscribe', '--agent', 'a', '--webhook', 'https://hooks.example.com/abc', '--header', 'no colon'], agent);
+      const bad = await cli(h.home, ['subscribe', '--agent', 'a', '--webhook', 'https://hooks.example.com/abc', '--header', 'Bearer sk-not-a-name'], agent);
       assert.equal(bad.code, 1);
       assert.match(bad.err, /NAME: VALUE/);
+      assert.ok(!bad.err.includes('sk-not-a-name'), 'the value of a malformed header stays out of the error');
     } finally {
       await h.stop();
     }

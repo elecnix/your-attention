@@ -33,7 +33,7 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
                                                       read, and without it the card waits in the outbox as unread
   watch --role owner [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...]
                                                       print each change to every card, or to that agent's, as the owner
-  subscribe --agent ID --webhook URL [--header 'NAME: VALUE']...
+  subscribe --agent ID --webhook URL [--header 'NAME: VALUE']... [--header-file FILE|-]
                                                       send each answer to that agent's cards to an https webhook, once you approve it
   unsubscribe --agent ID                              stop sending that agent's answers to its webhook
   claude-channel                                      the MCP channel server for Claude Code
@@ -597,12 +597,16 @@ switch (command) {
     break;
   }
   case 'subscribe': {
-    const { values } = parseArgs({ args: rest, options: { agent: { type: 'string' }, webhook: { type: 'string' }, header: { type: 'string', multiple: true } } });
-    if (!values.agent || !values.webhook) fail("Usage: your-attention subscribe --agent ID --webhook URL [--header 'NAME: VALUE']...");
+    const { values } = parseArgs({ args: rest, options: { agent: { type: 'string' }, webhook: { type: 'string' }, header: { type: 'string', multiple: true }, 'header-file': { type: 'string' } } });
+    if (!values.agent || !values.webhook) fail("Usage: your-attention subscribe --agent ID --webhook URL [--header 'NAME: VALUE']... [--header-file FILE|-]");
+    // A secret header goes in a file or on stdin: an argument shows in `ps` to every user of this machine, and in the shell history.
+    const file = values['header-file'];
+    const lines = file === undefined ? [] : (file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8')).split(/\r?\n/).filter((l) => l.trim());
     const headers: Record<string, string> = {};
-    for (const h of values.header ?? []) {
+    for (const [i, h] of [...(values.header ?? []), ...lines].entries()) {
       const at = h.indexOf(':');
-      if (at < 1) fail(`--header takes 'NAME: VALUE', such as 'Authorization: Bearer <token>', and got ${JSON.stringify(h.split(':')[0])}.`);
+      // The line may be a bare token, so the message never quotes it.
+      if (at < 1) fail(`Header ${i + 1} has no name: each --header, and each line of --header-file, takes 'NAME: VALUE', such as 'Authorization: Bearer <token>'.`);
       headers[h.slice(0, at).trim()] = h.slice(at + 1).trim();
     }
     const r = await client().subscribe(values.agent, { url: values.webhook, headers }).catch((e: Error) => fail(`The inbox refused the webhook: ${e.message}`));
