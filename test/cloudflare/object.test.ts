@@ -249,6 +249,19 @@ describe('sockets that cost the inbox', () => {
     assert.ok(page.sent.some((t: string) => JSON.parse(t).type === 'change'));
   });
 
+  it('carries page events to an owner watcher that signs in with a header and sends no page id', async () => {
+    // `your-attention watch --role owner` follows the page socket this way, so a script is not counted as a page.
+    const rt = runtime();
+    const obj = rt.make();
+    const owner = await init(obj);
+    await openSocket(obj, 'page=1', owner);
+    assert.equal(rt.sockets.length, 1, 'the owner token in the header opens the page socket');
+    await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 's1', title: 'Seen by the watcher?' });
+    assert.ok(rt.sockets[0]!.sent.some((t: string) => JSON.parse(t).type === 'change' && JSON.parse(t).card === 'c1'));
+    const person = (await (await call(obj, 'GET', '/v1/person', owner)).json()) as { pages: number };
+    assert.equal(person.pages, 0);
+  });
+
   it('serves no event stream, since an open request keeps the object awake', async () => {
     const rt = runtime();
     const obj = rt.make();

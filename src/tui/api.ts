@@ -110,9 +110,13 @@ export class InboxApi {
 
   /**
    * Follow the page events: the page socket, with the event stream when the socket never opens. `onEvent` gets each
-   * event type; `onUp` says whether the inbox answers. Returns a function that stops.
+   * event type and the event; `onUp` says whether the inbox answers. `onOpen` runs each time the socket or the stream
+   * opens, and sends a `change` by default, so the client refetches what it missed. Without `viewer`, the client follows
+   * the events without counting as a page that someone looks at. Returns a function that stops.
    */
-  live(onEvent: (type: string) => void, onUp: (up: boolean, code?: number) => void): () => void {
+  live(onEvent: (type: string, event?: Record<string, unknown>) => void, onUp: (up: boolean, code?: number) => void, opts: { viewer?: boolean; onOpen?: () => void } = {}): () => void {
+    const onOpen = opts.onOpen ?? (() => onEvent('change'));
+    const viewer = opts.viewer === false ? '' : `viewer=${this.viewer}`;
     let stopped = false;
     let ws: WebSocket | undefined;
     let ping: ReturnType<typeof setInterval> | undefined;
@@ -124,9 +128,9 @@ export class InboxApi {
     const overStream = async () => {
       sse = new AbortController();
       try {
-        const res = await fetch(`${this.url}/v1/events?viewer=${this.viewer}`, { headers: this.headers(false), signal: sse.signal });
+        const res = await fetch(`${this.url}/v1/events?${viewer}`, { headers: this.headers(false), signal: sse.signal });
         if (!res.ok || !res.body) throw new Error(String(res.status));
-        onEvent('change');
+        onOpen();
         const reader = res.body.getReader();
         const dec = new TextDecoder();
         let buf = '';
@@ -140,31 +144,32 @@ export class InboxApi {
             buf = buf.slice(at + 2);
             const type = /^event: (.+)$/m.exec(chunk)?.[1];
             if (type === 'beat') beat();
-            else if (type) { beat(); onEvent(type); }
+            else if (type) { beat(); onEvent(type, parsed(/^data: (.+)$/m.exec(chunk)?.[1])); }
           }
         }
       } catch { /* the stream ended or failed: try again */ }
-      if (!stopped) retry = setTimeout(() => { void overStream(); }, 1000);
+      // The socket again: one that failed once may open now, and an inbox that serves no event stream, as the hosted
+      // one does, answers the stream with 410 each time.
+      if (!stopped) retry = setTimeout(overSocket, 1000);
     };
     const overSocket = () => {
       let opened = false;
       // The inbox reads a socket's unlock token from its address only, as for the page.
-      const u = `${this.url.replace(/^http/, 'ws')}/v1/ws?page=1&viewer=${this.viewer}${this.unlock ? `&unlock=${encodeURIComponent(this.unlock)}` : ''}`;
+      const u = `${this.url.replace(/^http/, 'ws')}/v1/ws?page=1${viewer ? `&${viewer}` : ''}${this.unlock ? `&unlock=${encodeURIComponent(this.unlock)}` : ''}`;
       ws = new WebSocket(u, { headers: this.headers(false) });
       ws.on('open', () => {
         opened = true;
         beat();
-        onEvent('change');
+        onOpen();
         const send = () => { if (ws?.readyState === WebSocket.OPEN) ws.send('{"type":"ping"}'); };
         send();
         ping = setInterval(send, 2000);
       });
       ws.on('message', (d) => {
-        try {
-          const type = (JSON.parse(String(d)) as { type?: string }).type;
-          if (type === 'beat' || type === 'pong') beat();
-          else if (type) { beat(); onEvent(type); }
-        } catch { /* not an event */ }
+        const event = parsed(String(d));
+        const type = typeof event?.['type'] === 'string' ? event['type'] : undefined;
+        if (type === 'beat' || type === 'pong') beat();
+        else if (type) { beat(); onEvent(type, event); }
       });
       ws.on('error', () => {});
       ws.on('close', (code) => {
@@ -184,5 +189,15 @@ export class InboxApi {
       sse?.abort();
       if (ws) { ws.removeAllListeners('close'); ws.on('close', () => {}); ws.close(); }
     };
+  }
+}
+
+/** A JSON object from the inbox, or undefined for anything else. */
+function parsed(text: string | undefined): Record<string, unknown> | undefined {
+  try {
+    const v: unknown = JSON.parse(text ?? '');
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
   }
 }
