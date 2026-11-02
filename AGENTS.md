@@ -42,6 +42,40 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 - The herdr integration may send keys only to the pane of its own session. Never send keys to another pane.
 - Each user-visible string names the thing it shows. The person may leave any answer field empty.
 
+## Card states
+
+`open` to `answered` to `delivered` to `read`. A close or an expiry ends any of them. [SPEC.md](SPEC.md#card-states) holds the authority, and [PRINCIPLES.md](PRINCIPLES.md#each-card-has-one-clear-state) the rule behind it.
+
+| From | Event | To |
+| -- | -- | -- |
+| none | a post, no hook holds it | `open` |
+| none | a post, a `card.created` hook holds it | `in-triage` |
+| `in-triage` | every hook passes | `open` |
+| `in-triage` | a hook holds, returns, or times out | `held` or `closed` |
+| `held` | the owner releases it | `open` |
+| `open` | the person answers | `answered` |
+| `answered` | an agent stream receives the answer | `delivered` |
+| `delivered` | the agent acknowledges | `read` |
+| any | the agent closes it, or it expires | `closed` |
+| `closed` | the person answers after the close | `answered` |
+
+`orphaned` has no transition of its own. It reads a card in `open` whose agent has been offline for an hour, and another session may then claim it.
+
+The inbox derives the state from the card and its answer on every read. `answered` and `delivered` both mean the person answered and no agent has acknowledged yet, so the page's outbox holds your answer waiting for its agent, not a card waiting for you ([PRINCIPLES.md](PRINCIPLES.md#answered-cards-go-to-an-outbox-then-to-sent)).
+
+## Which inbox a client uses
+
+In this order, the first line that has both values decides:
+
+1. `YOUR_ATTENTION_URL` and `YOUR_ATTENTION_TOKEN`.
+2. `client.json`, an agent pairing.
+3. `server.json` with `agent-token`, the inbox this machine serves.
+4. Nothing, and every card tool fails.
+
+Owner commands read `owner.json`, then `client.json`. A browser does not read those files: it needs the token of a pairing, and an unlock token when the inbox has a PIN.
+
+A harness reads this at session start, so a running session keeps the inbox it began with. Configure one inbox per machine ([PRINCIPLES.md](PRINCIPLES.md#one-inbox-for-all-agents)). Two of them send cards where the person is not looking, and `your-attention status` shows the wiring.
+
 ## Trust boundaries
 
 Each box is a place that stores a secret, and each arrow is a secret crossing into it. A step that needs a box the person has no way into is friction. When a change touches sign-in, pairing or tokens, update this diagram in the same commit.
