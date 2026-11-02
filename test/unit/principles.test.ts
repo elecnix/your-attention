@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { check, principleHeadings } from '../../scripts/check-principle-links.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 const core = fs.readdirSync(path.join(ROOT, 'src/core')).filter((f) => f.endsWith('.ts'));
@@ -29,5 +30,30 @@ describe('principles', () => {
       const paragraphs = s.split('\n## ')[0]!.split('\n\n').slice(1).filter((p) => p.trim());
       assert.ok(paragraphs.length >= 2, `principle "${s.split('\n')[0]}" needs a statement and a reason`);
     }
+  });
+
+  it('every principle is numbered, in document order', () => {
+    const headings = principleHeadings(ROOT);
+    assert.deepEqual(
+      headings.map((h) => h.title.match(/^DP(\d+): /)?.[1]),
+      headings.map((_, i) => String(i + 1)),
+      'each heading reads DP1, DP2, … in document order',
+    );
+  });
+
+  it('every link to a principle reaches a heading', () => {
+    const { headings, links, broken, mismatched } = check(ROOT);
+    assert.ok(links.length >= 3, `found ${links.length} links to a principle`);
+    assert.deepEqual(
+      broken.map((l) => `${l.file}:${l.line}: ${l.text}`),
+      [],
+      'each link names an anchor of a heading in PRINCIPLES.md',
+    );
+    assert.deepEqual(
+      mismatched.map((l) => `${l.file}:${l.line}: ${l.text}`),
+      [],
+      'each link that shows a number shows the number of the heading it reaches',
+    );
+    assert.equal(new Set(headings.map((h) => h.anchor)).size, headings.length, 'every heading has its own anchor');
   });
 });

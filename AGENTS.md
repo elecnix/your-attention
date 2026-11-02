@@ -4,7 +4,7 @@ Your Attention is one inbox where coding agents ask a person questions as cards,
 
 ## Check every change against the principles
 
-[PRINCIPLES.md](PRINCIPLES.md) is the authority on how the system must work. Check your change against it before you open a pull request. A change that breaks a principle is not ready to merge.
+[PRINCIPLES.md](PRINCIPLES.md) is the authority on how the system must work. Check your change against it before you open a pull request. A change that breaks a principle is not ready to merge. Cite a principle by its number, such as DP7.
 
 1. Before you write code, find the principles your change touches.
 2. If the change would break a principle, stop. Either change the design, or amend the principle in the same pull request and say why in the body.
@@ -44,7 +44,7 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 
 ## Card states
 
-`open` to `answered` to `delivered` to `read`. A close or an expiry ends any of them. [SPEC.md](SPEC.md#card-states) holds the authority, and [PRINCIPLES.md](PRINCIPLES.md#each-card-has-one-clear-state) the rule behind it.
+`open` to `answered` to `delivered` to `read`. A close or an expiry ends any of them. [SPEC.md](SPEC.md#card-states) holds the authority, and [DP20](PRINCIPLES.md#dp20-each-card-has-one-clear-state) the rule behind it.
 
 | From | Event | To |
 | -- | -- | -- |
@@ -61,7 +61,7 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 
 `orphaned` has no transition of its own. It reads a card in `open` whose agent has been offline for an hour, and another session may then claim it.
 
-The inbox derives the state from the card and its answer on every read. `answered` and `delivered` both mean the person answered and no agent has acknowledged yet, so the page's outbox holds your answer waiting for its agent, not a card waiting for you ([PRINCIPLES.md](PRINCIPLES.md#answered-cards-go-to-an-outbox-then-to-sent)).
+The inbox derives the state from the card and its answer on every read. `answered` and `delivered` both mean the person answered and no agent has acknowledged yet, so the page's outbox holds your answer waiting for its agent, not a card waiting for you ([DP23](PRINCIPLES.md#dp23-answered-cards-go-to-an-outbox-then-to-sent)).
 
 ## Which inbox a client uses
 
@@ -74,7 +74,7 @@ In this order, the first line that has both values decides:
 
 Owner commands read `owner.json`, then `client.json`. A browser does not read those files: it needs the token of a pairing, and an unlock token when the inbox has a PIN.
 
-A harness reads this at session start, so a running session keeps the inbox it began with. Configure one inbox per machine ([PRINCIPLES.md](PRINCIPLES.md#one-inbox-for-all-agents)). Two of them send cards where the person is not looking, and `your-attention status` shows the wiring.
+A harness reads this at session start, so a running session keeps the inbox it began with. Configure one inbox per machine ([DP42](PRINCIPLES.md#dp42-one-inbox-for-all-agents)). Two of them send cards where the person is not looking, and `your-attention status` shows the wiring.
 
 ## Trust boundaries
 
@@ -144,6 +144,7 @@ npm ci
 npm run typecheck        # tsgo and tsc-rs, and both must pass
 npm test                 # unit, then integration
 npm run test:cloudflare  # the Durable Object, and the hosted build on wrangler dev
+npm run check:principles # every PRINCIPLES.md link reaches a heading, and the unit tests run it too
 npm run storybook:build && npm run test:browser   # Playwright, after building the stories
 vale sync && vale *.md   # prose rules, the same ones CI runs
 ```
