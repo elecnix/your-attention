@@ -7,7 +7,7 @@ This file specifies the messages, card states and delivery rules that every inbo
 Messages are JSON over HTTP. Agents receive events in whichever of three ways their environment allows:
 
 - `GET /v1/stream?agent=<id>`: server-sent events, the default. Pages use `GET /v1/events` the same way.
-- `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The client sends `{"type":"ping"}` every 20 seconds and gets `{"type":"pong"}`. An inbox closes a socket that sends nothing for 60 seconds, and the laptop build also sends WebSocket ping frames every 15 seconds.
+- `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The client sends `{"type":"ping"}` every 20 seconds and gets `{"type":"pong"}`. An inbox closes a socket that sends nothing for 60 seconds, and the laptop build also sends WebSocket ping frames every 15 seconds. The Cloudflare build counts pings only: it closes a socket 5 minutes after its last ping, whatever other frames it sends.
 - `GET /v1/poll?agent=<id>&wait=25`: a long-poll that returns `{events}` at the first answer, or after `wait` seconds.
 
 Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one. The inbox reports an agent offline 2 seconds after its last connection closes, so a reconnect or the next poll does not flicker its presence.
@@ -467,8 +467,8 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 `src/cloudflare/worker.ts` runs the same core on Workers. It doesn't bundle mermaid or the OpenUI parser, since the clients check diagrams and bodies, as [Checks on the client](#checks-on-the-client) describes. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. The object hibernates when idle:
 
 - Each agent WebSocket keeps its agent id and token in the socket attachment, so the object reconnects every socket to the inbox when it wakes, and presence stays as it was. The socket itself stayed open, so a wake doesn't send `hello` again: an agent gets `hello` once per socket it opens.
-- The object answers `{"type":"ping"}` with `{"type":"pong"}` through the runtime's auto-response, which does not wake it. An alarm every 30 seconds closes a socket whose last pong is older than 60 seconds.
-- The object sets its alarm for the next moment `sweep()` has work, from `nextDeadline()`, and for no other time.
+- The object answers `{"type":"ping"}` with `{"type":"pong"}` through the runtime's auto-response, which does not wake it. So the object notices a silent socket only when its alarm wakes it. A socket closes when its last pong, or its opening when it has not ponged yet, is 5 minutes old. With one socket open, the object wakes about 300 times a day for heartbeats, and an agent whose client stops sending pings shows offline 5 minutes after its last pong.
+- The object sets its alarm for the earliest of three times: the next moment `sweep()` has work, from `nextDeadline()`, 5 minutes after the oldest last pong among the open sockets, and 10 seconds after each socket that has not signed in opened. It doesn't set an alarm for any other time.
 
 With `MODE` set to `single`, the Worker serves one inbox, whose owner token is the `OWNER_TOKEN` secret. With `MODE` set to `hosted`, it serves many:
 
@@ -487,6 +487,6 @@ The Worker counts each request before it reaches a Durable Object, with two Work
 
 R2 deletes each file 30 days after its upload, by the lifecycle rule in `cloudflare/main.tf`.
 
-An open request keeps a Durable Object awake and billed, so the Cloudflare build answers `GET /v1/events`, `/v1/stream` and `/v1/poll` with 410. Agents and pages use hibernating WebSockets, whose pings get their answer from the runtime without waking the object. Each inbox keeps at most 64 sockets. A socket that has not signed in 10 seconds after it opened closes at the next alarm, and a socket that sends more than 120 frames in a minute closes with 4429. In single mode, each Worker isolate gives the owner token to the inbox on its first request only.
+An open request keeps a Durable Object awake and billed, so the Cloudflare build answers `GET /v1/events`, `/v1/stream` and `/v1/poll` with 410. Agents and pages use hibernating WebSockets, whose pings get their answer from the runtime without waking the object. Each inbox keeps at most 64 sockets. A socket that has not signed in 10 seconds after it opened closes then, from an alarm set when it opened, and a socket that sends more than 120 frames in a minute closes with 4429. In single mode, each Worker isolate gives the owner token to the inbox on its first request only.
 
 `npm run cloudflare:check` bundles the Worker with a dry-run deploy, and `npm run test:cloudflare` runs the hosted build on `wrangler dev` with local Durable Objects, R2 and KV. The `deploy-cloudflare` workflow deploys it when someone runs it from the Actions tab.
