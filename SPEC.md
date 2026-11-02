@@ -7,7 +7,7 @@ This file specifies the messages, card states and delivery rules that every inbo
 Messages are JSON over HTTP. Agents receive events in whichever of three ways their environment allows:
 
 - `GET /v1/stream?agent=<id>`: server-sent events, the default. Pages use `GET /v1/events` the same way.
-- `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The client sends `{"type":"ping"}` every 20 seconds and gets `{"type":"pong"}`. An inbox closes a socket that sends nothing for 60 seconds, the Cloudflare build after 5 minutes, and the laptop build also sends WebSocket ping frames every 15 seconds.
+- `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The client sends `{"type":"ping"}` every 20 seconds and gets `{"type":"pong"}`. An inbox closes a socket that sends nothing for 60 seconds, and the laptop build also sends WebSocket ping frames every 15 seconds. The Cloudflare build counts pings only: it closes a socket 5 minutes after its last ping, whatever other frames it sends.
 - `GET /v1/poll?agent=<id>&wait=25`: a long-poll that returns `{events}` at the first answer, or after `wait` seconds.
 
 Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one. The inbox reports an agent offline 2 seconds after its last connection closes, so a reconnect or the next poll does not flicker its presence.
