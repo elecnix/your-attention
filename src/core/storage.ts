@@ -2,7 +2,7 @@
 // of a Durable Object, so each inbox change runs to completion before the next
 // one starts and needs no lock.
 
-export type Collection = 'cards' | 'answers' | 'tokens' | 'pairings' | 'presence' | 'meta' | 'templates' | 'widgets' | 'messages' | 'summaries';
+export type Collection = 'cards' | 'answers' | 'tokens' | 'pairings' | 'presence' | 'meta' | 'templates' | 'widgets' | 'messages' | 'summaries' | 'cleared';
 
 export interface SearchHit {
   card: string;
@@ -14,6 +14,8 @@ export interface Storage {
   put<T>(collection: Collection, id: string, value: T): void;
   delete(collection: Collection, id: string): void;
   list<T>(collection: Collection): T[];
+  /** The first `limit` documents of a collection, in the order each id was first written. Rewriting a document keeps its place. */
+  first<T>(collection: Collection, limit: number): T[];
   /** Replace the searchable text of a card. Empty text removes the card from search. */
   index(card: string, text: string): void;
   search(query: string, limit: number): SearchHit[];
@@ -50,6 +52,10 @@ export class MemoryStorage implements Storage {
 
   list<T>(c: Collection): T[] {
     return [...this.bucket(c).values()].map((v) => JSON.parse(v) as T);
+  }
+
+  first<T>(c: Collection, limit: number): T[] {
+    return [...this.bucket(c).values()].slice(0, limit).map((v) => JSON.parse(v) as T);
   }
 
   count(c: Collection): number {

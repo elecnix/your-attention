@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { DurableSqlStorage } from '../src/cloudflare/storage.ts';
 import { createHandler } from '../src/core/http.ts';
-import { Inbox, MAX_CARD_BYTES } from '../src/core/inbox.ts';
+import { Inbox, MAX_CARD_BYTES, PURGE_AFTER_MS, PURGE_BATCH } from '../src/core/inbox.ts';
 import { newPinKey, pinKey } from '../src/core/pin.ts';
 import { HOSTED_SHOWN_CARDS } from '../src/core/summary.ts';
 import { MemoryBlobs } from '../src/core/storage.ts';
@@ -104,6 +104,27 @@ const PATHS: Path[] = [
     const h = await hosted();
     await h.inbox.postCardWithFiles({ token: 'budget', role: 'agent' }, maxCard('big'));
     return { run: () => h.call('GET', '/v1/cards/big', h.owner) };
+  } },
+  { name: `one purge pass, ${PURGE_BATCH} of 20 MB of cleared cards past their 30 days`, setup: async () => {
+    let now = Date.UTC(2026, 9, 1);
+    const store = durableStorage();
+    const inbox = new Inbox(store, () => now, new MemoryBlobs(), { keepPresence: true, clientChecks: true, usageAlwaysOn: true, storageLimitBytes: 20 * 1024 * 1024 });
+    inbox.postCard({ token: 'budget', role: 'agent' }, { id: 'p', agent: 'budget', title: 'Card', text: 'x'.repeat(500) });
+    await inbox.answer('p', {});
+    inbox.archive({ token: 'owner', role: 'owner' });
+    const card = inbox.getCard('p');
+    const answer = inbox.cardDetail('p').answer;
+    // Small cards make the most rows in 20 MB, and the purge reads every row. Copies of one cleared card fill the
+    // storage faster than posting each, whose cost grows with the cards already there.
+    for (let i = 0; store.bytes() < 20 * 1024 * 1024; i++) {
+      store.put('cards', `p${i}`, { ...card, id: `p${i}`, title: `Card ${i}` });
+      store.put('answers', `p${i}`, { ...answer, card: `p${i}` });
+      store.put('cleared', `p${i}`, { id: `p${i}`, archivedAt: card.archivedAt });
+      store.index(`p${i}`, `Card ${i} ${card.text}`);
+    }
+    now += PURGE_AFTER_MS;
+    // What InboxObject.alarm does after its sweep.
+    return { run: async () => { await inbox.purge(); return new Response(null, { status: 204 }); } };
   } },
   { name: 'GET /v1/telemetry', setup: async () => {
     const h = await hosted();

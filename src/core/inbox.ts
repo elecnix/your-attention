@@ -10,7 +10,7 @@ import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findD
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
-import { SummarizedStorage, type AnswerSummary, type CardSummary } from './summary.ts';
+import { SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import type {
   AgentEvent, Answer, Approval, ApprovalPlace, ApprovalResult, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
@@ -129,6 +129,12 @@ export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
 /** How long a closed pairing request and its card stay before the sweep deletes them. */
 export const PAIRING_KEEP_MS = 24 * 60 * 60 * 1000;
+/** How long a cleared card, or a card nobody answered, stays after its last change before the purge deletes it. */
+export const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+/** The most cards one purge pass deletes, so no alarm does unbounded work. */
+export const PURGE_BATCH = 100;
+/** The share of the storage limit the purge keeps free, by deleting the oldest of those cards sooner. */
+export const STORAGE_HEADROOM = 0.2;
 
 const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']);
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
@@ -229,10 +235,13 @@ export class Inbox {
     for (const p of this.store.list<Pairing>('pairings')) {
       times.push(p.status === 'pending' || p.secret ? p.createdAt + PAIRING_TTL_MS : p.createdAt + PAIRING_KEEP_MS);
     }
-    for (const c of this.store.list<Card>('cards')) {
+    const cards = this.store.list<Card>('cards');
+    for (const c of cards) {
       if (c.triage?.state === 'pending' && c.triage.deadline) times.push(c.triage.deadline);
       if (c.expiresAt && !c.closed && !this.store.get('answers', c.id)) times.push(c.expiresAt);
     }
+    const oldest = this.purgeQueue()[0];
+    if (oldest) times.push(this.needsRoom() ? this.now() : oldest.since + PURGE_AFTER_MS);
     return times.length ? Math.min(...times) : undefined;
   }
 
@@ -1628,18 +1637,56 @@ export class Inbox {
   async reset(caller: Caller): Promise<{ removed: number }> {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner resets the inbox');
     const cards = this.store.list<Card>('cards');
-    for (const card of cards) {
-      const answer = this.store.get<Answer>('answers', card.id);
-      const images = [answer, ...(answer?.previous ?? [])].flatMap((a) => a?.images ?? []);
-      // The records go first. An answer that lands while these files are deleted then finds no card, and
-      // `answer` refunds the images it had already stored instead of leaving them where this list cannot name them.
-      this.store.delete('answers', card.id);
-      this.store.delete('cards', card.id);
-      this.store.index(card.id, '');
-      await Promise.all([...(card.attachments ?? []), ...images].filter((f) => f.id).map((f) => this.blobs.delete(f.id ?? '')));
-    }
+    for (const card of cards) await Promise.all(this.drop(card).map((f) => this.blobs.delete(f)));
     this.emit({ type: 'change', card: '' });
     return { removed: cards.length };
+  }
+
+  /** Called by the platform alarm after sweep(). Deletes the cards of `purgeQueue` whose 30 days are up, and the oldest
+   * others while the storage is past its headroom, at most PURGE_BATCH a pass. It removes what `reset` removes for each. */
+  async purge(): Promise<{ removed: number }> {
+    const now = this.now();
+    const files: string[] = [];
+    let removed = 0;
+    for (const { id, since } of this.purgeQueue()) {
+      if (removed >= PURGE_BATCH || (now - since < PURGE_AFTER_MS && !this.needsRoom())) break;
+      const card = this.store.get<Card>('cards', id);
+      if (card) files.push(...this.drop(card));
+      removed++;
+    }
+    // Every record goes before the first await, so no request sees half a batch.
+    if (removed) this.emit({ type: 'change', card: '' });
+    await Promise.all(files.map((f) => this.blobs.delete(f)));
+    return { removed };
+  }
+
+  /** The cards the purge may delete, oldest first, each with the time its 30 days start: a cleared card from when the
+   * person cleared it, and a card nobody answered from its last revision or agent reply. An answered card on show stays.
+   * It reads the summaries and the oldest PURGE_BATCH cleared rows: a pass deletes no more, and the later rows are newer.
+   * So its time follows the cards on show, never the cleared ones or the size of their text. */
+  private purgeQueue(): { id: string; since: number }[] {
+    const queue = this.store.first<ClearedCard>('cleared', PURGE_BATCH).map((c) => ({ id: c.id, since: c.archivedAt }));
+    for (const s of this.store.list<CardSummary>('summaries')) {
+      if (!s.answer) queue.push({ id: s.id, since: Math.max(s.updatedAt, s.replyAt ?? 0) });
+    }
+    return queue.sort((a, b) => a.since - b.since);
+  }
+
+  /** Whether the storage holds more than its limit less the headroom the purge keeps free. */
+  private needsRoom(): boolean {
+    return this.storageLimit !== undefined && (this.store.bytes?.() ?? 0) > this.storageLimit * (1 - STORAGE_HEADROOM);
+  }
+
+  /** Delete a card's records and search entry, and return the ids of its files and answer images, for the caller to
+   * delete. The records go first: an answer that lands while the files are deleted then finds no card, and `answer`
+   * refunds the images it had already stored instead of leaving them where this list cannot name them. */
+  private drop(card: Card): string[] {
+    const answer = this.store.get<Answer>('answers', card.id);
+    const images = [answer, ...(answer?.previous ?? [])].flatMap((a) => a?.images ?? []);
+    this.store.delete('answers', card.id);
+    this.store.delete('cards', card.id);
+    this.store.index(card.id, '');
+    return [...(card.attachments ?? []), ...images].flatMap((f) => (f.id ? [f.id] : []));
   }
 
   /** GET /v1/state: a summary of each card the page shows, with the states, presence and levels. It reads only the
