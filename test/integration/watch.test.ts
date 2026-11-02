@@ -92,8 +92,15 @@ describe('watching the inbox from the command line', () => {
     const changes = await watching(h.home, '--role', 'owner', '--type', 'change', '--no-card');
     try {
       await until(() => wholeLines(mine.seen.out).some((l) => l.includes('"type":"hello"')));
-      await until(() => /Watching .* as the owner, for every card/.test(changes.seen.err));
       const c = new Client({ url: h.server.url, token: h.agentToken });
+      // --type change leaves out the hello line, so a probe card shows when that watcher's socket is open: the inbox
+      // replays no page event, and a card posted earlier would never reach it. Each post of the probe is a new change.
+      let probe = 0;
+      await until(async () => {
+        await c.post({ id: 'owner-probe', agent: 'cli:probe', title: `Probe ${++probe}` });
+        return wholeLines(changes.seen.out).some((l) => l.includes('"id":"owner-probe"'));
+      });
+      assert.match(changes.seen.err, /Watching .* as the owner, for every card/);
       await c.post({ id: 'owner-other', agent: 'cli:other', title: 'Someone else\'s card' });
       await c.post({ id: 'owner-mine', agent: 'cli:mine', title: 'Merge it?' });
       await h.owner('POST', '/v1/cards/owner-mine/answer', { values: {} });
