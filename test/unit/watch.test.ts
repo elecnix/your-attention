@@ -127,3 +127,11 @@ describe('the watcher filters', () => {
     assert.equal(keepEvent({ type: 'hello', agent: 'cli:watch', version: 1, guidance: 1 }, { types: ['answer'] }), false);
   });
 });
+
+describe('the owner watcher loop', () => {
+  it('returns at once for a signal that aborted before it started', async () => {
+    const { watchOwner } = await import('../../src/owner-watch.ts');
+    // Port 9 refuses connections, so a watcher that ignored the abort would retry until the test times out.
+    await watchOwner({ url: 'http://127.0.0.1:9', token: 't' }, { options: {}, filter: {}, write: () => {}, signal: AbortSignal.abort() });
+  });
+});

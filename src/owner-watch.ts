@@ -33,6 +33,8 @@ export function watchOwner(config: { url: string; token: string }, opts: { optio
     emit(ownerEvent(event, detail));
   };
   const enqueue = (work: () => void | Promise<void>): void => { queue = queue.then(work).catch(() => {}); };
+  // A signal can abort before the watcher starts, as a Ctrl-C during `checkOwner` does, and an abort event never comes again.
+  if (opts.signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const stop = api.live(
       (type, event) => {
