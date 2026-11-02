@@ -87,6 +87,8 @@ async function oneSocket(query: string, signedIn = true) {
   return { rt, obj, owner, server: rt.sockets[0]! as FakeSocket & { lastPong: Date | null } };
 }
 
+const MINUTE = 60_000;
+
 /** Set a socket's heartbeat clock, then run the alarm that reads it. */
 async function alarmAfter(obj: InstanceType<typeof InboxObject>, server: FakeSocket, lastPong: Date | null, openedMsAgo: number): Promise<void> {
   server.lastPong = lastPong;
@@ -156,7 +158,7 @@ describe('the inbox Durable Object', () => {
     const hellos = (s: FakeSocket) => s.events().filter((e) => e.type === 'hello').length;
     assert.equal(hellos(header), 1);
     assert.equal(hellos(frame), 1);
-    // The alarm wakes a hibernated object every 30 seconds while sockets are open; the sockets stay the same.
+    // The alarm wakes a hibernated object to check heartbeats while sockets are open; the sockets stay the same.
     for (let i = 0; i < 3; i++) {
       obj = rt.make();
       await obj.alarm();
@@ -178,13 +180,30 @@ describe('the inbox Durable Object', () => {
 
   it('closes a socket that never pinged, counting from when it opened', async () => {
     const { obj, server } = await oneSocket('agent=quiet');
-    await alarmAfter(obj, server, null, 120_000);
+    await alarmAfter(obj, server, null, 5 * MINUTE);
     assert.equal(server.closed, 1001);
+  });
+
+  it('keeps a socket that last answered a heartbeat under five minutes ago', async () => {
+    const { obj, server } = await oneSocket('agent=slow');
+    await alarmAfter(obj, server, new Date(Date.now() - 4 * MINUTE), 10 * MINUTE);
+    assert.equal(server.closed, undefined);
+  });
+
+  it('wakes for a heartbeat check when the oldest socket would go five minutes without a pong, not every 30 seconds', async () => {
+    const { rt, obj, server } = await oneSocket('agent=steady');
+    const before = Date.now();
+    await alarmAfter(obj, server, new Date(before - MINUTE), 10 * MINUTE);
+    const at = rt.alarm()!;
+    assert.ok(at >= before + 4 * MINUTE - 1000 && at <= Date.now() + 4 * MINUTE, `the alarm is set for ${at - before} ms from now`);
+    // A message pushes no heartbeat check later than the socket's own deadline.
+    await obj.webSocketMessage(server as never, '{"type":"ack","card":"none"}');
+    assert.ok(rt.alarm()! <= at);
   });
 
   it('closes a socket that stopped answering heartbeats, and the agent goes offline', async () => {
     const { obj, owner, server } = await oneSocket('agent=s3');
-    await alarmAfter(obj, server, new Date(Date.now() - 120_000), 0);
+    await alarmAfter(obj, server, new Date(Date.now() - 5 * MINUTE), 0);
     assert.equal(server.closed, 1001);
     await new Promise((r) => setTimeout(r, 2100));
     await obj.alarm();
@@ -228,6 +247,25 @@ describe('sockets that cost the inbox', () => {
     const { obj, server } = await oneSocket('agent=lurker', false);
     await alarmAfter(obj, server, new Date(), 11_000);
     assert.equal(server.closed, 1001);
+  });
+
+  it('wakes 10 seconds after an unsigned socket opens to close it, and not for it once it signs in', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    const owner = await init(obj);
+    const before = Date.now();
+    await openSocket(obj, 'agent=late');
+    const server = rt.sockets[0]!;
+    const opened = (server.attachment as { connectedAt: number }).connectedAt;
+    assert.equal(rt.alarm(), opened + 10_000, 'the deadline comes from the time the socket opened');
+    // The alarm fires on time, so it closes the socket at exactly 10 seconds.
+    await alarmAfter(obj, server, new Date(), 10_000);
+    assert.equal(server.closed, 1001);
+
+    await openSocket(obj, 'agent=signs-in');
+    const signed = rt.sockets[1]!;
+    await obj.webSocketMessage(signed as never, JSON.stringify({ type: 'auth', token: owner }));
+    assert.ok(rt.alarm()! >= before + 4 * MINUTE, 'a signed-in socket waits for its heartbeat deadline');
   });
 
   it('closes a socket that sends more frames than its budget', async () => {

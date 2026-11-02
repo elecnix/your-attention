@@ -34,10 +34,9 @@ export function uploadLimit(value: string | undefined): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-/** A socket closes when it has not answered a heartbeat for this long. */
-const HEARTBEAT_LIMIT_MS = 60_000;
-/** How often the alarm checks heartbeats while agent sockets are open. */
-const HEARTBEAT_CHECK_MS = 30_000;
+/** A socket closes when it has not answered a heartbeat for this long. Each check wakes the object,
+ * so the limit trades how soon a silent agent shows offline against wakes: about 300 a day with a socket open. */
+const HEARTBEAT_LIMIT_MS = 5 * 60_000;
 type Conn = AgentSocket | ReturnType<typeof pageSocket>;
 
 /** A socket that has not signed in this long after it opened closes. */
@@ -135,12 +134,21 @@ export class InboxObject {
     }
   }
 
+  /** When this socket closes unless it signs in or answers a heartbeat first. */
+  private socketDeadline(ws: WebSocket, now: number): number {
+    const a = ws.deserializeAttachment() as SocketAttachment;
+    const opened = a.connectedAt ?? now;
+    const last = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? opened;
+    // A socket that answers pings but never signed in would stay open for free, so it gets a deadline.
+    return Math.min(last + HEARTBEAT_LIMIT_MS, a.token ? Infinity : opened + AUTH_LIMIT_MS);
+  }
+
+  /** Set the alarm for the next moment `sweep()` has work or a socket reaches its deadline. */
   private async schedule(): Promise<void> {
     this.sendUsage();
-    const next = this.inbox.nextDeadline();
-    const heartbeat = this.ctx.getWebSockets().length ? Date.now() + HEARTBEAT_CHECK_MS : undefined;
-    const at = [next, heartbeat].filter((x): x is number => x !== undefined);
-    if (at.length) await this.ctx.storage.setAlarm(Math.max(Math.min(...at), Date.now() + 50));
+    const now = Date.now();
+    const at = Math.min(this.inbox.nextDeadline() ?? Infinity, ...this.ctx.getWebSockets().map((ws) => this.socketDeadline(ws, now)));
+    if (at !== Infinity) await this.ctx.storage.setAlarm(Math.max(at, now + 50));
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -230,16 +238,12 @@ export class InboxObject {
     await this.webSocketClose(ws);
   }
 
-  /** The platform alarm: sweep the inbox, and close sockets that stopped answering heartbeats. */
+  /** The platform alarm: sweep the inbox, and close sockets that did not sign in or stopped answering heartbeats. */
   async alarm(): Promise<void> {
     this.inbox.sweep();
     const now = Date.now();
     for (const ws of this.ctx.getWebSockets()) {
-      const a = ws.deserializeAttachment() as SocketAttachment;
-      const last = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? a.connectedAt ?? now;
-      // A socket that answers pings but never signed in would stay open for free, so it gets a deadline.
-      const unsigned = !a.token && now - (a.connectedAt ?? now) > AUTH_LIMIT_MS;
-      if (unsigned || now - last > HEARTBEAT_LIMIT_MS) {
+      if (this.socketDeadline(ws, now) <= now) {
         this.sockets.get(ws)?.close();
         this.sockets.delete(ws);
         ws.close(1001, 'missed heartbeats');
