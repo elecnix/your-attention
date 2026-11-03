@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { loadConfig } from '../../src/client.ts';
+import { Client, loadConfig } from '../../src/client.ts';
 
 let home = '';
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-config-')); });
@@ -61,5 +61,17 @@ describe('a reply this client does not trust', () => {
       (client as unknown as { call: unknown }).call = async () => reply;
       assert.deepEqual(await client.unread(), expected, `reply ${JSON.stringify(reply)}`);
     }
+  });
+});
+
+describe('a pairing file that carries more than an address', () => {
+  it('keeps one, drops what a client would fail on, and never crashes it', () => {
+    const withUrls = (urls: unknown) => withFile('client.json', JSON.stringify({ url: 'http://a', token: 't', urls }));
+    for (const bad of ['nope', [42], [null], {}]) {
+      const config = withUrls(bad);
+      assert.deepEqual(config, { url: 'http://a', token: 't' }, `urls holding ${JSON.stringify(bad)}`);
+      assert.doesNotThrow(() => new Client(config), 'a client built from it');
+    }
+    assert.deepEqual(withUrls(['http://b', 42, '']), { url: 'http://a', token: 't', urls: ['http://b'] }, 'the strings it can use');
   });
 });

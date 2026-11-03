@@ -89,6 +89,10 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const yaHome = path.join(home, '.your-attention');
   const env = { ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: yaHome };
+  // The environment wins over every file, so a developer's own variables would send these commands at their real inbox
+  // instead of the one this test started.
+  delete (env as Record<string, string | undefined>)['YOUR_ATTENTION_URL'];
+  delete (env as Record<string, string | undefined>)['YOUR_ATTENTION_TOKEN'];
   const serve: ChildProcess = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
   // Right after the spawn: a failed spawn emits `error` on the next tick, which would otherwise kill the test process
   // before the cleanup below exists.

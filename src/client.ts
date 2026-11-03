@@ -49,8 +49,12 @@ export function loadConfig(home = homeDir()): ClientConfig | undefined {
   // failing on `undefined.replace` or on a URL of 42.
   const usable = (value: unknown): ClientConfig | undefined => {
     if (typeof value !== 'object' || value === null) return undefined;
-    const { url, token } = value as { url?: unknown; token?: unknown };
-    return typeof url === 'string' && url !== '' && typeof token === 'string' && token !== '' ? (value as ClientConfig) : undefined;
+    const { url, token, urls, id } = value as { url?: unknown; token?: unknown; urls?: unknown; id?: unknown };
+    if (typeof url !== 'string' || url === '' || typeof token !== 'string' || token === '') return undefined;
+    // `urls` reaches `Client`, which calls `.replace` on each entry, so anything but a list of strings is dropped here
+    // rather than crashing there. So is every other field a file may carry.
+    const mirrors = Array.isArray(urls) ? urls.filter((u): u is string => typeof u === 'string' && u !== '') : [];
+    return { url, token, ...(mirrors.length ? { urls: mirrors } : {}), ...(typeof id === 'string' ? { id } : {}) };
   };
   const paired = usable(read('client.json') === undefined ? undefined : parse(read('client.json')));
   if (paired) return paired;
