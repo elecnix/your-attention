@@ -2,7 +2,10 @@
 // so a script reads the inbox as a stream. The line is the inbox's own event, unchanged,
 // plus `receivedAt`: a watcher that renamed or reshaped the fields would be a second dialect
 // to learn, and the events already carry the types in `src/core/types.ts`.
-import type { AgentEvent, Card } from './core/types.ts';
+//
+// An owner watcher follows the page events instead. A page event names a changed card by its id
+// only, so the watcher fetches the card and prints it whole, as the agent stream does.
+import type { AgentEvent, Answer, Card, CardState, PageEvent } from './core/types.ts';
 
 export interface WatchOptions {
   /** Card fields to keep, such as `id,title`. Every other field is left out. Undefined keeps them all. */
@@ -20,8 +23,13 @@ export type WatchLine = WithoutCard<AgentEvent> & { receivedAt: number };
 export function watchLine(event: AgentEvent, options: WatchOptions, receivedAt: number): WatchLine {
   if (event.type !== 'answer' && event.type !== 'returned') return { ...event, receivedAt };
   const { card, ...rest } = event;
-  const kept = options.noCard ? undefined : options.fields ? pickCard(card, options.fields) : card;
-  return { ...rest, ...(kept === undefined ? {} : { card: kept }), receivedAt } as WatchLine;
+  return { ...rest, ...cut(card, options), receivedAt } as WatchLine;
+}
+
+/** The card a line keeps, as `{card}`, or nothing with --no-card. */
+function cut(card: Card, options: WatchOptions): { card?: Partial<Card> } {
+  if (options.noCard) return {};
+  return { card: options.fields ? pickCard(card, options.fields) : card };
 }
 
 /** The card, cut to the fields a watcher named. A name the card does not carry is left out, so a
@@ -31,4 +39,54 @@ export function pickCard(card: Card, fields: string[]): Partial<Card> {
   const out: Record<string, unknown> = {};
   for (const field of fields) if (field in whole) out[field] = whole[field];
   return out as Partial<Card>;
+}
+
+/** What `GET /v1/cards/<id>` answers the owner. */
+export interface CardDetail { card: Card; answer?: Answer | undefined; state: CardState; rev?: string | undefined }
+
+/** A change to one card, with the card as the inbox stores it now. `id` is the card's id. It is empty
+ * when many cards changed at once, as after `clear`, and the line carries no card when the card is gone. */
+export interface OwnerChange { type: 'change'; id: string; card?: Card; answer?: Answer; state?: CardState; rev?: string }
+
+/** What an owner watcher receives: the page events, with each change carrying its card, and a `hello`
+ * the watcher writes itself each time the page socket opens, since the page socket sends none. */
+export type OwnerEvent = OwnerChange | Exclude<PageEvent, { type: 'change' } | { type: 'beat' }> | { type: 'hello'; role: 'owner' };
+
+/** One line of `your-attention watch --role owner` output. */
+export type OwnerLine = (Omit<OwnerChange, 'card'> & { card?: Partial<Card> } | Exclude<OwnerEvent, OwnerChange>) & { receivedAt: number };
+
+/** The owner event for one page event, with the card `GET /v1/cards/<id>` returned for a change. */
+export function ownerEvent(event: Exclude<PageEvent, { type: 'beat' }>, detail: CardDetail | undefined): OwnerEvent {
+  if (event.type !== 'change') return event;
+  if (!detail) return { type: 'change', id: event.card };
+  return {
+    type: 'change',
+    id: event.card,
+    card: detail.card,
+    ...(detail.answer ? { answer: detail.answer } : {}),
+    state: detail.state,
+    ...(detail.rev === undefined ? {} : { rev: detail.rev }),
+  };
+}
+
+/** The line for one owner event, cut to the fields the watcher asked for. */
+export function ownerLine(event: OwnerEvent, options: WatchOptions, receivedAt: number): OwnerLine {
+  if (event.type !== 'change' || !event.card) return { ...event, receivedAt };
+  const { card, ...rest } = event;
+  return { ...rest, ...cut(card, options), receivedAt };
+}
+
+export interface WatchFilter {
+  /** Event types to keep, such as `change` or `answer`. Undefined keeps every type. */
+  types?: string[] | undefined;
+  /** For an owner watcher: keep the cards and presence of this agent only. */
+  agent?: string | undefined;
+}
+
+/** Whether a watcher prints an event. The filter reads the whole event, before --select or --no-card cut the card. */
+export function keepEvent(event: AgentEvent | OwnerEvent, filter: WatchFilter): boolean {
+  if (filter.types && !filter.types.includes(event.type)) return false;
+  if (filter.agent === undefined || event.type === 'hello') return true;
+  const agent = 'card' in event && event.card && typeof event.card === 'object' ? event.card.agent : 'agent' in event ? event.agent : undefined;
+  return agent === filter.agent;
 }

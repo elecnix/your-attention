@@ -273,6 +273,16 @@ A watcher receives the answers to cards that this machine's token posted as the 
 
 The inbox reports an answer as read only when something acknowledges it, so `--ack` is off by default. A watcher that acknowledged every answer would mark read what the session waiting for it has not seen.
 
+`--role owner` follows every card in the inbox, as the page does, so one process can wake an orchestrator on any card or forward each new card to a notifier. It uses the owner token of the inbox on this machine, or the pairing from `your-attention pair <url> --role owner`, and works with the laptop inbox and the hosted one. Each change to a card prints one `change` line with the whole card, its answer and its `state`, such as `open`, `answered` or `closed`. `--agent` keeps one agent's cards, and `--type` keeps the event types it lists, with either role. `--ack` stays with the agent role: only the token that posted a card may mark its answer read.
+
+```sh
+your-attention watch --role owner | jq -c 'select(.type == "change" and .state == "answered")'
+your-attention watch --role owner --agent claude:deploy --select id,title
+your-attention watch --role owner --type change --no-card   # the card id, state and answer only
+```
+
+An owner watcher sees every card and every answer. Its token is an owner token, in a file with mode 0600. Pair the machine as owner only when it is yours, and sign it out from the devices button on the page to end its access.
+
 ## Protect the inbox with a PIN
 
 An answer on a card goes straight into a coding agent's session. Someone who gets the inbox address or a sign-in link, from a bookmark, the browser history or a pasted message, could open the page and answer as you. A 4-digit PIN stops that: the address or link signs a browser in, and each new tab must also type the PIN before it shows a card or takes an answer.

@@ -1,6 +1,8 @@
 // `your-attention watch` prints each answer for its agent as a line of JSON, and ends cleanly on a signal.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
@@ -80,6 +82,88 @@ describe('watching the inbox from the command line', () => {
     } finally {
       await whole.stop();
       await selected.stop();
+      await h.stop();
+    }
+  });
+
+  it('follows every card as the owner, narrowed by --agent and --type, without counting as a page', async () => {
+    const h = await start();
+    const mine = await watching(h.home, '--role', 'owner', '--agent', 'cli:mine', '--select', 'id,agent');
+    const changes = await watching(h.home, '--role', 'owner', '--type', 'change', '--no-card');
+    try {
+      await until(() => wholeLines(mine.seen.out).some((l) => l.includes('"type":"hello"')));
+      const c = new Client({ url: h.server.url, token: h.agentToken });
+      // --type change leaves out the hello line, so a probe card shows when that watcher's socket is open: the inbox
+      // replays no page event, and a card posted earlier would never reach it. Each post of the probe is a new change.
+      let probe = 0;
+      await until(async () => {
+        await c.post({ id: 'owner-probe', agent: 'cli:probe', title: `Probe ${++probe}` });
+        return wholeLines(changes.seen.out).some((l) => l.includes('"id":"owner-probe"'));
+      });
+      assert.match(changes.seen.err, /Watching .* as the owner, for every card/);
+      await c.post({ id: 'owner-other', agent: 'cli:other', title: 'Someone else\'s card' });
+      await c.post({ id: 'owner-mine', agent: 'cli:mine', title: 'Merge it?' });
+      await h.owner('POST', '/v1/cards/owner-mine/answer', { values: {} });
+      const answered = await until(() => wholeLines(mine.seen.out).map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l['state'] === 'answered'));
+      assert.equal(answered['type'], 'change');
+      assert.equal(answered['id'], 'owner-mine');
+      assert.deepEqual(answered['card'], { id: 'owner-mine', agent: 'cli:mine' });
+      assert.equal(typeof answered['receivedAt'], 'number');
+      assert.ok((answered['answer'] as { savedAt?: number } | undefined)?.savedAt, 'the line carries the answer');
+      const ids = wholeLines(mine.seen.out).map((l) => (JSON.parse(l) as { id?: string }).id).filter(Boolean);
+      assert.ok(!ids.includes('owner-other'), '--agent leaves out the cards of other agents');
+      // The watcher without --agent sees both cards, and --type change leaves out the hello lines and presence.
+      const all = await until(() => {
+        const lines = wholeLines(changes.seen.out).map((l) => JSON.parse(l) as Record<string, unknown>);
+        return lines.some((l) => l['id'] === 'owner-other') && lines.some((l) => l['id'] === 'owner-mine') ? lines : undefined;
+      });
+      assert.ok(all.every((l) => l['type'] === 'change' && !('card' in l)));
+      // A script is not the person: the inbox counts no page for either watcher.
+      const person = (await (await h.owner('GET', '/v1/person')).json()) as { pages: number };
+      assert.equal(person.pages, 0);
+    } finally {
+      await mine.stop();
+      await changes.stop();
+      await h.stop();
+    }
+  });
+
+  it('refuses --ack as the owner, and says to pair as owner when this machine is not', async () => {
+    const h = await start();
+    const agentOnly = fs.mkdtempSync(path.join(os.tmpdir(), 'your-attention-'));
+    const none = fs.mkdtempSync(path.join(os.tmpdir(), 'your-attention-'));
+    try {
+      const ack = await watching(h.home, '--role', 'owner', '--ack');
+      await ack.ended;
+      assert.match(ack.seen.err, /An owner watcher can't/);
+      assert.equal(ack.child.exitCode, 1);
+      fs.writeFileSync(path.join(agentOnly, 'client.json'), JSON.stringify({ url: h.server.url, token: h.agentToken }));
+      const agent = await watching(agentOnly, '--role', 'owner');
+      await agent.ended;
+      assert.match(agent.seen.err, /your-attention pair .* --role owner/);
+      assert.equal(agent.child.exitCode, 1);
+      const unpaired = await watching(none, '--role', 'owner');
+      await unpaired.ended;
+      assert.match(unpaired.seen.err, /your-attention pair <url> --role owner/);
+      assert.equal(unpaired.child.exitCode, 1);
+    } finally {
+      await h.stop();
+      fs.rmSync(agentOnly, { recursive: true, force: true });
+      fs.rmSync(none, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps only the agent events --type names', async () => {
+    const h = await start();
+    const w = await watching(h.home, '--agent', 'cli:typed', '--type', 'answer', '--no-card');
+    try {
+      const c = new Client({ url: h.server.url, token: h.agentToken });
+      await c.post({ id: 'watch-typed', agent: 'cli:typed', title: 'Typed?' });
+      await h.owner('POST', '/v1/cards/watch-typed/answer', { values: {} });
+      const line = await until(() => wholeLines(w.seen.out)[0]);
+      assert.equal((JSON.parse(line) as { type: string }).type, 'answer', 'the hello line is left out');
+    } finally {
+      await w.stop();
       await h.stop();
     }
   });

@@ -9,7 +9,7 @@ import type { Option, Priority } from './core/types.ts';
 import { homeDir, readHome, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
-import { watchLine } from './watch.ts';
+import { keepEvent, watchLine } from './watch.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
@@ -27,8 +27,10 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
                                                       post a card, and with --wait print the answer
-  watch [--agent ID] [--no-card] [--select FIELD,...] [--ack]
+  watch [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...] [--ack]
                                                       print each answer for that agent as a line of JSON
+  watch --role owner [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...]
+                                                      print each change to every card, or to that agent's, as the owner
   claude-channel                                      the MCP channel server for Claude Code
   claude-hook ask-pre|ask-post|ask-cancel             the AskUserQuestion hooks for Claude Code
   herdr-blocked                                       post a card for each herdr agent that is blocked
@@ -453,15 +455,22 @@ switch (command) {
   }
   case 'watch': {
     const { values } = parseArgs({ args: rest, options: {
-      agent: { type: 'string', default: 'cli:watch' },
+      role: { type: 'string', default: 'agent' },
+      agent: { type: 'string' },
+      type: { type: 'string' },
       'no-card': { type: 'boolean', default: false },
       select: { type: 'string' },
       ack: { type: 'boolean', default: false },
     } });
+    if (values.role !== 'agent' && values.role !== 'owner') fail(`--role is agent or owner, not ${values.role}.`);
+    const owner = values.role === 'owner';
     if (values['no-card'] && values.select !== undefined) fail('Choose --no-card or --select, not both: one leaves the card out, and the other picks the fields to keep.');
     const fields = values.select?.split(',').map((f) => f.trim()).filter(Boolean);
     if (fields?.length === 0) fail('--select takes a comma-separated list of card fields, such as --select=id,title. Without it, each line carries the whole card.');
-    const c = client();
+    const types = values.type?.split(',').map((f) => f.trim()).filter(Boolean);
+    if (types?.length === 0) fail(`--type takes a comma-separated list of event types, such as --type=${owner ? 'change,presence' : 'answer,returned'}. Without it, the watcher prints every type.`);
+    // Only the token that posted a card may acknowledge its answer, so an owner watcher has nothing it could mark read.
+    if (owner && values.ack) fail('--ack marks an answer read for the agent that posted the card, and only that agent\'s token may. An owner watcher can\'t: drop --ack, or watch as the agent with --agent ID.');
     const stop = new AbortController();
     const end = (): void => {
       stop.abort();
@@ -472,9 +481,27 @@ switch (command) {
     for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, end);
     // A reader that stops reading, as `watch | head -1` does, ends the watch: it is not an error.
     process.stdout.on('error', (e: NodeJS.ErrnoException) => { if (e.code === 'EPIPE') process.exit(0); });
-    console.error(`Watching ${c.url} for the answers to cards posted as ${values.agent}, one line of JSON each.`);
-    await c.stream(values.agent, async (ev) => {
-      process.stdout.write(`${JSON.stringify(watchLine(ev, { noCard: values['no-card'], fields }, Date.now()))}\n`);
+    const options = { noCard: values['no-card'], fields };
+    if (owner) {
+      // The owner token of the inbox this machine runs, or else the owner pairing, as for `login-url`.
+      const { checkOwner, watchOwner } = await import('./owner-watch.ts');
+      const { ApiError } = await import('./tui/api.ts');
+      const target = runningHere() ?? ownerPairing() ?? fail('This machine runs no inbox and is not paired with one as owner. Pair it as owner with `your-attention pair <url> --role owner`, or start an inbox with `your-attention start`.');
+      await checkOwner(target).catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 403) fail(notOwnerAdvice(target.url));
+        if (e instanceof ApiError && e.status === 401) fail(`The inbox at ${target.url} refused this machine's owner token. Pair it again with \`your-attention pair ${target.url} --role owner\`.`);
+        fail(`The inbox at ${target.url} did not answer: ${(e as Error).message}`);
+      });
+      console.error(`Watching ${target.url} as the owner${values.agent ? ` for the cards of ${values.agent}` : ', for every card'}, one line of JSON each.`);
+      await watchOwner(target, { options, filter: { types, agent: values.agent }, write: (line) => process.stdout.write(`${JSON.stringify(line)}\n`), signal: stop.signal });
+      break;
+    }
+    const c = client();
+    const agent = values.agent ?? 'cli:watch';
+    console.error(`Watching ${c.url} for the answers to cards posted as ${agent}, one line of JSON each.`);
+    await c.stream(agent, async (ev) => {
+      if (!keepEvent(ev, { types })) return;
+      process.stdout.write(`${JSON.stringify(watchLine(ev, options, Date.now()))}\n`);
       // Only when asked: a watcher that acknowledged every answer would mark read what the agent waiting for it has not seen.
       if (!values.ack || ev.type !== 'answer') return;
       await c.ack(ev.card.id).catch((e: Error) => console.error(`Could not mark card ${ev.card.id} read: ${e.message}`));
