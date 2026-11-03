@@ -91,7 +91,17 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
   const env = { ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: yaHome };
   const serve: ChildProcess = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
   const file = path.join(yaHome, 'server.json');
-  const { url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined));
+  let url = '';
+  try {
+    // A server that fails to boot leaves no address, and this waits a few seconds for one. Either way the child and its
+    // home must go, or a failed start leaks both for the rest of the run.
+    ({ url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined)));
+  } catch (e) {
+    serve.kill();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+    throw e;
+  }
+  serve.on('error', () => {});
   return {
     home,
     url,

@@ -560,8 +560,10 @@ switch (command) {
     say();
     // The notice above covers what this process printed. A watcher that was down, or that started after an answer
     // landed, learns the rest from the inbox: the count, and the cards to acknowledge.
+    // Every run asks, `--ack` or not: with `--ack` the stream acks what it prints, so anything still unread is an answer
+    // that arrived while nothing was listening, which is the case this line exists for.
     const left = await c.unread(agent).catch(() => undefined);
-    if (left && left.unread > 0 && !values.ack) console.error(`The inbox holds ${left.unread} unread answer${left.unread === 1 ? '' : 's'} for ${agent}: your-attention ack ${left.cards.join(' ')}${left.unread > left.cards.length ? ` (and ${left.unread - left.cards.length} more)` : ''}`);
+    if (left && left.unread > 0) console.error(`The inbox holds ${left.unread} unread answer${left.unread === 1 ? '' : 's'} for ${agent}: your-attention ack ${left.cards.join(' ')}${left.unread > left.cards.length ? ` (and ${left.unread - left.cards.length} more)` : ''}`);
     break;
   }
   case 'triage': {
