@@ -210,8 +210,14 @@ export class Client {
     return this.call('GET', `/v1/search?q=${encodeURIComponent(q)}&limit=${opts.limit ?? 20}${opts.answered ? '&answered=1' : ''}`);
   }
   deadLetters(): Promise<{ card: Card; answer: Answer }[]> { return this.call('GET', '/v1/dead-letters'); }
-  /** The answers this client has not acknowledged, with their card ids. */
-  unread(agent?: string): Promise<{ unread: number; cards: string[] }> { return this.call('GET', `/v1/unread${agent ? `?agent=${encodeURIComponent(agent)}` : ''}`); }
+  /** The answers this client has not acknowledged, with their card ids. Every field is checked: an address that answers
+   * with JSON of its own can leave `cards` out, and a caller that trusts it reads `.length` of nothing. */
+  async unread(agent?: string): Promise<{ unread: number; cards: string[] }> {
+    const reply = await this.call<{ unread?: unknown; cards?: unknown }>('GET', `/v1/unread${agent ? `?agent=${encodeURIComponent(agent)}` : ''}`);
+    const cards = Array.isArray(reply?.cards) ? reply.cards.filter((c): c is string => typeof c === 'string') : [];
+    const unread = typeof reply?.unread === 'number' && Number.isFinite(reply.unread) ? reply.unread : cards.length;
+    return { unread, cards };
+  }
 
   /** Receive answers for one agent until `signal` aborts. Reconnects after a drop, over the next link when one fails.
    * `auto`, the default, uses a WebSocket and falls back to server-sent events on a link that cannot carry one.

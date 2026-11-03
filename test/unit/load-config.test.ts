@@ -44,3 +44,22 @@ describe('the inbox a client uses', () => {
     assert.equal(withFile('server.json', '{'), undefined, 'a server.json that does not parse');
   });
 });
+
+describe('a reply this client does not trust', () => {
+  it('answers a count and a list of ids, whatever the address sends', async () => {
+    const { Client } = await import('../../src/client.ts');
+    const cases: [unknown, { unread: number; cards: string[] }][] = [
+      [{ unread: 2 }, { unread: 2, cards: [] }],
+      [{ unread: 2, cards: 'nope' }, { unread: 2, cards: [] }],
+      [{ cards: ['a', 7, 'b'] }, { unread: 2, cards: ['a', 'b'] }],
+      [{ unread: 'many', cards: ['a'] }, { unread: 1, cards: ['a'] }],
+      [null, { unread: 0, cards: [] }],
+    ];
+    for (const [reply, expected] of cases) {
+      const client = new Client({ url: 'http://inbox.test', token: 't' });
+      // A stand-in for the route, so the test is about what the client does with a reply rather than the route's shape.
+      (client as unknown as { call: unknown }).call = async () => reply;
+      assert.deepEqual(await client.unread(), expected, `reply ${JSON.stringify(reply)}`);
+    }
+  });
+});

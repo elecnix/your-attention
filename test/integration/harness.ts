@@ -90,6 +90,9 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
   const yaHome = path.join(home, '.your-attention');
   const env = { ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: yaHome };
   const serve: ChildProcess = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
+  // Right after the spawn: a failed spawn emits `error` on the next tick, which would otherwise kill the test process
+  // before the cleanup below exists.
+  serve.on('error', () => {});
   const file = path.join(yaHome, 'server.json');
   let url = '';
   try {
@@ -101,7 +104,6 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     throw e;
   }
-  serve.on('error', () => {});
   return {
     home,
     url,
