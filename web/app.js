@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue } from './queue.js';
 import { cardDetails } from './details.js';
 
@@ -39,6 +39,15 @@ export function App() {
   // Escape clears the card pane; nothing takes the pane again until the person picks a card.
   const [cleared, setCleared] = React.useState(false);
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
+  // The pinned tag values, oldest first, kept on this device next to Group by.
+  const [tagPins, setTagPins] = React.useState(() => storedTagPins());
+  const samePin = (a, b) => a[0] === b[0] && a[1] === b[1];
+  const isPinned = (tag) => tagPins.some((p) => samePin(p, tag));
+  const togglePin = (tag) => setTagPins((pins) => {
+    const next = pins.some((p) => samePin(p, tag)) ? pins.filter((p) => !samePin(p, tag)) : [...pins, tag];
+    store.set('tagPins', next);
+    return next;
+  });
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
   const [telemetry, changeTelemetry] = useTelemetry(auth === 'ok');
   // The PIN state, read once the page is signed in. `pinForm` is the form on screen: the offer to set one, or a change.
@@ -253,7 +262,7 @@ export function App() {
   if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
-  const { byId, st, levelOf, label, waiting, pending, checking, replied, outbox, sent, tagKeys, dealt, groups, order } = buildQueue(state, groupBy);
+  const { byId, st, levelOf, label, waiting, pending, checking, pinned: pinnedGroups, replied, outbox, sent, tagKeys, dealt, groups, order } = buildQueue(state, groupBy, tagPins);
   const visible = state.cards;
   const levels = state.levels || [];
   // The tab icon gets a red dot while a card waits for you.
@@ -337,7 +346,7 @@ export function App() {
       h('span', { className: 't' }, c.title, fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio),
       h(Icon, { name: icon, tip, cls: `s ${s}`, color }));
   };
-  const group = (title, items, empty, cls, action) => h(React.Fragment, { key: title },
+  const group = (title, items, empty, cls, action, key = title) => h(React.Fragment, { key },
     h('h3', { className: cls }, title, action),
     // The cards you sent are done with: they read dimmer than the ones that wait for you.
     items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty));
@@ -347,8 +356,9 @@ export function App() {
       h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); store.set('groupBy', e.target.value); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         tagKeys.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
+    pinnedGroups.map(({ key, value, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), `pin:${key}\n${value}`)),
     replied.length > 0 && group('Agent replied', replied, ''),
-    groups.length ? groups.map(([title, items]) => group(title, items, 'Nothing waiting')) : group('Waiting for you', [], 'Nothing waiting'),
+    groups.length ? groups.map(([title, items, tag]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }))) : group('Waiting for you', [], 'Nothing waiting'),
     checking.length > 0 && group('Being checked by triage', checking, ''),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent'),
     group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length })),
@@ -384,6 +394,7 @@ export function App() {
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
         h(CardAge, { card: current })),
+      h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin }),
       current.triage && current.triage.state === 'passed' && /did not answer|failed/.test(current.triage.reason || '') && h('div', { className: 'note' }, `Triage did not check this card: ${current.triage.reason}`),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,
@@ -469,6 +480,12 @@ function reloadPage() {
 }
 
 // A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.
+// The pins this device keeps, as [key, value] pairs. Anything else in the store reads as no pins.
+function storedTagPins() {
+  const pins = store.get('tagPins');
+  return Array.isArray(pins) ? pins.filter((p) => Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === 'string' && x)) : [];
+}
+
 function ClearButton({ count }) {
   const tip = `Clear ${count} answered or closed card${count === 1 ? '' : 's'}`;
   return h('button', { type: 'button', className: 'icon-btn clear-sent', title: tip, 'aria-label': tip, onClick: () => api(`${BASE}v1/archive`, {}) },

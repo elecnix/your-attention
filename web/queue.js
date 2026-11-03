@@ -21,8 +21,8 @@ export function presenceOf(card, state) {
   return unread ? ['busy', 'Agent busy: it has an answer it has not read yet'] : ['on', 'Agent listening'];
 }
 
-/** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. */
-export function buildQueue(state, groupBy) {
+/** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. `pins` lists the pinned tag values as [key, value], oldest first. */
+export function buildQueue(state, groupBy, pins = []) {
   const answers = state.answers;
   const byId = Object.fromEntries(state.cards.map((c) => [c.id, c]));
   // A reply newer than your answer brings the card back to your queue.
@@ -40,19 +40,27 @@ export function buildQueue(state, groupBy) {
   const pending = visible.filter((c) => waiting(st(c)))
     .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
   const checking = visible.filter((c) => st(c) === 'in-triage');
-  const replied = pending.filter((c) => st(c) === 'reply').sort((a, b) => lastReply(b) - lastReply(a));
+  const tagOf = (c, key) => String((c.tags || {})[key] || '').trim();
+  // Each pinned value is a group at the top, and a card that matches two pins goes to the oldest one.
+  const pinOf = (c) => pins.findIndex(([key, value]) => tagOf(c, key) === value);
+  const pinned = pins.map(([key, value], i) => ({ key, value, items: pending.filter((c) => pinOf(c) === i) }));
+  const unpinned = pending.filter((c) => pinOf(c) < 0);
+  const replied = unpinned.filter((c) => st(c) === 'reply').sort((a, b) => lastReply(b) - lastReply(a));
   const sentAt = (c) => (c.closed ? c.closed.at : answers[c.id] ? answers[c.id].savedAt : 0);
   const outbox = visible.filter((c) => ['answered', 'delivered'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
   const sent = visible.filter((c) => ['read', 'closed'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
   // No grouping by default. The choices follow the properties the cards carry.
   const tagKeys = [...new Set(visible.flatMap((c) => Object.keys(c.tags || {})))].sort();
-  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? agentName(c.agent, visible) : groupBy.startsWith('tag:') ? String((c.tags || {})[groupBy.slice(4)] || '').trim() || `No ${groupBy.slice(4)}` : 'Waiting for you');
-  const rest = pending.filter((c) => st(c) !== 'reply');
+  const tagKey = groupBy.startsWith('tag:') ? groupBy.slice(4) : null;
+  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? agentName(c.agent, visible) : tagKey !== null ? tagOf(c, tagKey) || `No ${tagKey}` : 'Waiting for you');
+  const rest = unpinned.filter((c) => st(c) !== 'reply');
   // The cards the inbox clears: answered or closed, with no agent reply you have not seen. Search still finds them.
   const dealt = visible.filter((c) => ['closed', 'answered', 'delivered', 'read'].includes(st(c)));
-  const groups = groupBy === 'none' ? [['Waiting for you', rest]] : [...rest.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];
-  const order = [...replied, ...groups.flatMap(([, items]) => items)];
-  return { byId, st, levelOf, label, waiting, pending, checking, replied, outbox, sent, tagKeys, dealt, groups, order };
+  const grouped = groupBy === 'none' ? [['Waiting for you', rest]] : [...rest.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];
+  // Under a tag grouping, a group of one value names its tag, so its heading can pin it.
+  const groups = grouped.map(([title, items]) => (tagKey !== null && tagOf(items[0], tagKey) ? [title, items, [tagKey, tagOf(items[0], tagKey)]] : [title, items]));
+  const order = [...pinned.flatMap((p) => p.items), ...replied, ...groups.flatMap(([, items]) => items)];
+  return { byId, st, levelOf, label, waiting, pending, checking, pinned, replied, outbox, sent, tagKeys, dealt, groups, order };
 }
 
 /** The card after `id` in queue order, wrapping around at the end. */

@@ -28,13 +28,16 @@ export interface Queue {
   waiting(s: ShownState): boolean;
   pending: Card[];
   checking: Card[];
+  /** One group per pinned tag value, in pin order, with the waiting cards it holds. */
+  pinned: { key: string; value: string; items: Card[] }[];
   replied: Card[];
   outbox: Card[];
   sent: Card[];
   tagKeys: string[];
   dealt: Card[];
-  groups: [string, Card[]][];
+  /** Each waiting group as [title, cards], with [key, value] third under a tag grouping when the group has a value. */
+  groups: [string, Card[], [string, string]?][];
   order: Card[];
 }
-export function buildQueue(state: InboxState, groupBy: string): Queue;
+export function buildQueue(state: InboxState, groupBy: string, pins?: [string, string][]): Queue;
 export function after(order: Card[], id: string | null): string | null;
