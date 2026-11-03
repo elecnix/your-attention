@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
-import { ROOT, until } from './harness.ts';
+import { callAt, ROOT, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 const run = (env: NodeJS.ProcessEnv, ...args: string[]) =>
@@ -21,7 +21,7 @@ describe('marking an answer read from the command line', () => {
       const file = path.join(env.YOUR_ATTENTION_HOME, 'server.json');
       const { url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined));
       const read = (f: string) => fs.readFileSync(path.join(env.YOUR_ATTENTION_HOME, f), 'utf8').trim();
-      const call = (token: string, method: string, route: string, body?: unknown) => fetch(`${url}${route}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      const call = (token: string, method: string, route: string, body?: unknown) => callAt(url, token, method, route, body);
       const agent = read('agent-token');
       const owner = read('owner-token');
       await call(agent, 'POST', '/v1/cards', { id: 'answered-card', agent: 'a', title: 'Answered' });
@@ -30,12 +30,17 @@ describe('marking an answer read from the command line', () => {
       const acked = await run(env, 'ack', 'answered-card');
       assert.equal(acked.code, 0, acked.stderr);
       assert.match(acked.stdout, /Card answered-card is read\./);
-      const answer = (await (await call(owner, 'GET', '/v1/cards/answered-card')).json()) as { answer: { readAt: number | null; deliveredAt: number | null } };
-      assert.notEqual(answer.answer.readAt, null, 'the answer is read');
-      assert.notEqual(answer.answer.deliveredAt, null, 'a card acked without a stream is delivered in the same step');
+      const answer = (await (await call(owner, 'GET', '/v1/cards/answered-card')).json()) as { answer: { readAt?: number | null; deliveredAt?: number | null } };
+      assert.equal(typeof answer.answer.readAt, 'number', 'the answer is read');
+      assert.equal(typeof answer.answer.deliveredAt, 'number', 'a card acked without a stream is delivered in the same step');
       const missing = await run(env, 'ack', 'open-card');
       assert.notEqual(missing.code, 0, 'a card nobody answered is refused');
       assert.match(missing.stderr, /no answer for this card/);
+      await call(agent, 'POST', '/v1/cards', { id: 'second-card', agent: 'a', title: 'Also answered' });
+      await call(owner, 'POST', '/v1/cards/second-card/answer', { values: {} });
+      const both = await run(env, 'ack', 'answered-card', 'second-card');
+      assert.equal(both.code, 0, both.stderr);
+      assert.match(both.stdout, /Card answered-card is read\.[\s\S]*Card second-card is read\./, 'every id given is acked');
       const usage = await run(env, 'ack');
       assert.notEqual(usage.code, 0);
       assert.match(usage.stderr, /Usage: your-attention ack <card>/);
@@ -47,7 +52,8 @@ describe('marking an answer read from the command line', () => {
 });
 
 describe('a watcher that leaves answers unread', () => {
-  it('names the ids to ack, even when --no-card keeps the card out of its output', async () => {
+  // Windows ends a child without running its signal handlers, so the notice cannot be exercised by SIGTERM there.
+  it('names the ids to ack, even when --no-card keeps the card out of its output', { skip: process.platform === 'win32' && 'a signal ends the watcher before it can speak on Windows' }, async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-watch-'));
     const env = { ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: path.join(home, '.your-attention') };
     const serve = spawn(process.execPath, [...CLI, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
@@ -56,7 +62,7 @@ describe('a watcher that leaves answers unread', () => {
       const file = path.join(env.YOUR_ATTENTION_HOME, 'server.json');
       const { url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined));
       const read = (f: string) => fs.readFileSync(path.join(env.YOUR_ATTENTION_HOME, f), 'utf8').trim();
-      const call = (token: string, method: string, route: string, body?: unknown) => fetch(`${url}${route}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      const call = (token: string, method: string, route: string, body?: unknown) => callAt(url, token, method, route, body);
       await call(read('agent-token'), 'POST', '/v1/cards', { id: 'left-unread', agent: 'a', title: 'Answer me' });
       // `--no-card` is the case the advice has to survive: the line carries no id, and the notice has to supply one.
       watch = spawn(process.execPath, [...CLI, 'watch', '--agent', 'a', '--no-card'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -71,7 +77,9 @@ describe('a watcher that leaves answers unread', () => {
       await until(() => (err.includes('without acknowledging') ? true : undefined));
       assert.match(err, /Pass --ack next time: your-attention ack left-unread/);
       // The line carries no card object, so the id in the answer payload is the only hint it gives; the notice names it.
-      assert.doesNotMatch(out, /"card":\{"id"/, 'the line leaves the card object out');
+      const answerLine = out.split('\n').find((l) => l.includes('"answer"'));
+      assert.ok(answerLine, 'the watcher printed the answer');
+      assert.equal('card' in (JSON.parse(answerLine) as object), false, 'the line leaves the card object out');
     } finally {
       watch?.kill('SIGKILL');
       serve.kill();

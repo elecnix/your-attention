@@ -9,7 +9,7 @@ import type { Option, Priority } from './core/types.ts';
 import { homeDir, readHome, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
-import { keepEvent, watchLine } from './watch.ts';
+import { keepEvent, unackedNotice, watchLine } from './watch.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
@@ -27,7 +27,7 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
                                                       post a card, and with --wait print the answer
-  ack <card>                                          mark an answer read, when a script took it out of band
+  ack <card> [<card>...]                              mark answers read, when a script took them out of band
   watch [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...] [--ack]
                                                       print each answer for that agent as a line of JSON; --ack marks each
                                                       read, and without it the card waits in the outbox as unread
@@ -457,11 +457,16 @@ switch (command) {
   }
   case 'ack': {
     // A script that takes an answer out of band, as one reading `watch` does, marks it read with this. Without the ack
-    // the card waits in the page's outbox, and the person cannot tell what the agent consumed.
-    const id = rest[0] ?? fail('Usage: your-attention ack <card>');
-    const answer = await client().ack(id).catch((e: Error) => fail(`The inbox refused: ${e.message}`));
-    if (!answer.readAt) fail(`The inbox did not mark ${id} read`);
-    console.log(`Card ${id} is read.`);
+    // the card waits in the page's outbox, and the person cannot tell what the agent consumed. It takes every id it is
+    // given, because the watcher's own advice names them all on one line.
+    const ids = rest.filter((a) => !a.startsWith('-'));
+    if (!ids.length) fail('Usage: your-attention ack <card> [<card>...]');
+    const c = client();
+    for (const id of ids) {
+      const answer = await c.ack(id).catch((e: Error) => fail(`The inbox refused ${id}: ${e.message}`));
+      if (!answer.readAt) fail(`The inbox did not mark ${id} read`);
+      console.log(`Card ${id} is read.`);
+    }
     break;
   }
   case 'watch': {
@@ -492,9 +497,7 @@ switch (command) {
       said = true;
       // The ids come from the event, not from the printed line: `--no-card` and `--select` leave the card out of that
       // line, so advice naming `<card>` would be advice the reader cannot follow.
-      const one = unacked.length === 1;
-      const list = unacked.length <= 5 ? `: your-attention ack ${unacked.join(' ')}` : ', one at a time with `your-attention ack <card>`.';
-      console.error(`Printed ${unacked.length} answer${one ? '' : 's'} without acknowledging, so ${one ? 'that card stays' : 'those cards stay'} in the person's outbox as unread. Pass --ack next time${list}`);
+      console.error(unackedNotice(unacked));
     };
     const end = (): void => {
       say();
@@ -505,7 +508,11 @@ switch (command) {
     };
     for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, end);
     // A reader that stops reading, as `watch | head -1` does, ends the watch: it is not an error.
-    process.stdout.on('error', (e: NodeJS.ErrnoException) => { if (e.code === 'EPIPE') process.exit(0); });
+    process.stdout.on('error', (e: NodeJS.ErrnoException) => {
+      if (e.code !== 'EPIPE') return;
+      say();
+      process.exit(0);
+    });
     const options = { noCard: values['no-card'], fields };
     if (owner) {
       // The owner token of the inbox this machine runs, or else the owner pairing, as for `login-url`.

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
-import { keepEvent, ownerEvent, ownerLine, pickCard, watchLine, type WatchLine } from '../../src/watch.ts';
+import { keepEvent, ownerEvent, ownerLine, pickCard, unackedNotice, watchLine, type WatchLine } from '../../src/watch.ts';
 
 const card = {
   id: 'c1',
@@ -133,5 +133,19 @@ describe('the owner watcher loop', () => {
     const { watchOwner } = await import('../../src/owner-watch.ts');
     // Port 9 refuses connections, so a watcher that ignored the abort would retry until the test times out.
     await watchOwner({ url: 'http://127.0.0.1:9', token: 't' }, { options: {}, filter: {}, write: () => {}, signal: AbortSignal.abort() });
+  });
+});
+
+describe('what a watcher says about the answers it did not acknowledge', () => {
+  it('names the command to run while the cards fit on a line', () => {
+    assert.equal(unackedNotice(['c1']), "Printed 1 answer without acknowledging, so that card stays in the person's outbox as unread. Pass --ack next time: your-attention ack c1");
+    assert.match(unackedNotice(['c1', 'c2']), /ack c1 c2$/);
+  });
+
+  it('gives up on the list past five cards, and still says what happened', () => {
+    const notice = unackedNotice(['c1', 'c2', 'c3', 'c4', 'c5', 'c6']);
+    assert.match(notice, /^Printed 6 answers without acknowledging, so those cards stay/);
+    assert.match(notice, /one at a time with `your-attention ack <card>`\.$/);
+    assert.doesNotMatch(notice, /c1/, 'a wall of ids serves nobody');
   });
 });
