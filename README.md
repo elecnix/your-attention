@@ -293,11 +293,11 @@ An owner watcher sees every card and every answer. Its token is an owner token, 
 An agent that only runs when something calls it, such as a hosted bot or a CI job, can get its answers at a webhook instead of running `watch`:
 
 ```sh
-printf 'Authorization: Bearer %s\n' "$HOOK_TOKEN" | your-attention subscribe --agent cli:deploy --webhook https://example.com/hooks/abc --header-file -
+your-attention subscribe --agent cli:deploy --webhook https://example.com/hooks/abc --header-file ~/.config/deploy-hook-headers
 your-attention unsubscribe --agent cli:deploy
 ```
 
-The inbox shows the request to you as a card with the address and the header names. The inbox calls the webhook only after you approve it there, and changing your answer to Deny later stops it. Once you approve, the inbox POSTs each answer to a card of that agent, from the same token, in the format of an agent stream event. It tries again with a growing wait until the webhook answers 2xx, and that answer marks it read. Put a secret header in a file or on stdin with `--header-file`, since `ps` shows command-line arguments to every user of the machine, and keep `--header 'NAME: VALUE'` for the rest. `subscribe` prints the secret that signs each call, once. `your-attention status` lists the webhooks. SPEC.md, "Answer webhooks", has the details.
+The inbox shows the request to you as a card with the address and the header names. The inbox calls the webhook only after you approve it there, and changing your answer to Deny later stops it. Once you approve, the inbox POSTs each answer to a card of that agent, from the same token, in the format of an agent stream event. It tries again with a growing wait until the webhook answers 2xx, and that answer marks it read. Write a secret header as a `NAME: VALUE` line in a file of mode 0600, and pass that file with `--header-file`. With `--header-file -` the headers come from stdin. Keep `--header 'NAME: VALUE'` for the rest, since `ps` shows command-line arguments to every user of the machine. `subscribe` prints the secret that signs each call, once. `your-attention status` lists the webhooks. SPEC.md, "Answer webhooks", has the details.
 
 ## Protect the inbox with a PIN
 

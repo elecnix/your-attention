@@ -149,11 +149,15 @@ function agentPairing(): { url: string; token: string } | undefined {
 
 /** One answer webhook, for `status`. */
 function describeHook(h: PublicSubscription): string {
+  // The paired address may answer with anything, and the report still prints.
+  let host: string;
+  try { host = new URL(h.url).host; } catch { return 'an entry this report cannot read'; }
+  if (!Array.isArray(h.headers) || !h.headers.every((n) => typeof n === 'string')) return 'an entry this report cannot read';
   const parts = [h.status === 'approved' ? `approved, ${h.delivered} sent` : 'waiting for your approval on its card'];
   if (h.headers.length) parts.push(`headers ${h.headers.join(', ')}`);
   if (h.waiting) parts.push(`${h.waiting} waiting to send`);
   if (h.lastError) parts.push(`last failure: ${h.lastError.reason}`);
-  return `${new URL(h.url).host} (${parts.join('; ')})`;
+  return `${host} (${parts.join('; ')})`;
 }
 
 /** A file size in a short unit, for `status`. */
@@ -376,14 +380,15 @@ switch (command) {
     const hookTarget = info && here && ownerToken ? { url: here.url, token: ownerToken } : agentPairing();
     const hooks = hookTarget
       ? await fetch(`${hookTarget.url.replace(/\/$/, '')}/v1/subscriptions`, { headers: { authorization: `Bearer ${hookTarget.token}` }, signal: AbortSignal.timeout(2000) })
-        .then(async (r) => (r.ok ? (await r.json()) as PublicSubscription[] : undefined)).catch(() => undefined)
+        .then(async (r) => (r.ok ? (await r.json()) as unknown : undefined)).catch(() => undefined)
+        .then((list) => (Array.isArray(list) ? (list as unknown[]).filter((h): h is PublicSubscription => typeof h === 'object' && h !== null) : undefined))
       : undefined;
 
     console.log(section('Inbox on this machine', inbox));
     console.log(`\n${section('Files on this machine', files)}`);
     console.log(`\n${section('Paired inboxes', pairings)}`);
     // The host only, since a webhook address can carry a secret in its path, as the header values do.
-    if (hooks) console.log(`\n${section('Answer webhooks', hooks.length ? hooks.map((h) => [h.agent, describeHook(h)]) : [['none', 'add one with `your-attention subscribe --agent ID --webhook URL`']])}`);
+    if (hooks) console.log(`\n${section('Answer webhooks', hooks.length ? hooks.map((h) => [String(h.agent ?? 'unknown agent'), describeHook(h)]) : [['none', 'add one with `your-attention subscribe --agent ID --webhook URL`']])}`);
     // Environment variables win over the files, so an agent uses them before its pairing.
     const url = process.env['YOUR_ATTENTION_URL'];
     const token = process.env['YOUR_ATTENTION_TOKEN'];
@@ -606,7 +611,7 @@ switch (command) {
     for (const [i, h] of [...(values.header ?? []), ...lines].entries()) {
       const at = h.indexOf(':');
       // The line may be a bare token, so the message never quotes it.
-      if (at < 1) fail(`Header ${i + 1} has no name: each --header, and each line of --header-file, takes 'NAME: VALUE', such as 'Authorization: Bearer <token>'.`);
+      if (at < 0 || !h.slice(0, at).trim()) fail(`Header ${i + 1} has no name: each --header, and each line of --header-file, takes 'NAME: VALUE', such as 'Authorization: Bearer <token>'.`);
       headers[h.slice(0, at).trim()] = h.slice(at + 1).trim();
     }
     const r = await client().subscribe(values.agent, { url: values.webhook, headers }).catch((e: Error) => fail(`The inbox refused the webhook: ${e.message}`));

@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -85,6 +87,25 @@ describe('your-attention subscribe', () => {
     }
   });
 
+  it('reports a pairing whose inbox answers the webhook list with rows it cannot read', async () => {
+    const other = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify([{ agent: 'x' }, { agent: 'y', url: 'not a url', headers: 'none' }]));
+    });
+    await new Promise<void>((listening) => other.listen(0, '127.0.0.1', listening));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-subscribe-'));
+    try {
+      const { port } = other.address() as AddressInfo;
+      fs.writeFileSync(path.join(home, 'client.json'), JSON.stringify({ url: `http://127.0.0.1:${port}`, token: 't' }));
+      const r = await cli(home, ['status']);
+      assert.equal(r.code, 0, r.err);
+      assert.match(r.out, /Answer webhooks\n\s+x\s+an entry this report cannot read/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      await new Promise<void>((closed) => other.close(() => closed()));
+    }
+  });
+
   it('refuses an http webhook and a header without a name', async () => {
     const h = await start();
     try {
@@ -96,6 +117,10 @@ describe('your-attention subscribe', () => {
       assert.equal(bad.code, 1);
       assert.match(bad.err, /NAME: VALUE/);
       assert.ok(!bad.err.includes('sk-not-a-name'), 'the value of a malformed header stays out of the error');
+      const blank = await cli(h.home, ['subscribe', '--agent', 'a', '--webhook', 'https://hooks.example.com/abc', '--header', ' : sk-blank-name'], agent);
+      assert.equal(blank.code, 1);
+      assert.match(blank.err, /has no name/);
+      assert.ok(!blank.err.includes('sk-blank-name'));
     } finally {
       await h.stop();
     }
