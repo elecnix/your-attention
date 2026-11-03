@@ -149,7 +149,7 @@ describe('what a watcher says about the answers it did not acknowledge', () => {
   it('gives up on the list past five cards, and still says what happened', () => {
     const notice = unackedNotice(['c1', 'c2', 'c3', 'c4', 'c5', 'c6']);
     assert.match(notice, /^Printed 6 answers without acknowledging, so those cards stay/);
-    assert.match(notice, /one at a time with `your-attention ack <card>`\.$/);
+    assert.match(notice, /any number at a time with `your-attention ack <id> \[<id>\.\.\.\]`\.$/);
     assert.doesNotMatch(notice, /c1/, 'a wall of ids serves nobody');
   });
 });
