@@ -372,12 +372,12 @@ A hosted inbox writes its own reports to the `TELEMETRY` binding at its next req
 | `answered` | The inbox stored the answer. Its agent is offline or has not received it yet. |
 | `delivered` | The harness received the answer. |
 | `read` | The model has the answer in its context: the agent called `POST /v1/cards/<id>/ack`. |
-| `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`, or the card expired. |
+| `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`, or the card expired. The inbox also closes its own system cards, a pairing request, a priority proposal or a guidance proposal, once it applies the person's answer. |
 | `in-triage` | An extension on the `card.created` hook is checking the card. |
 | `held` | A fail-closed hook timed out, or an extension stopped the card. The card shows which extension and why. |
 | `orphaned` | The card is open, and its agent has been offline for more than an hour. Another session can claim it. |
 
-An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered.
+An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered. A guidance card reads `closed` as soon as the inbox applies the answer, and its answer still goes to the agent in `broadcast.from`, so the receipt on the card shows when that agent received and read it.
 
 ## Blocked agents in herdr
 

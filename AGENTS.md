@@ -57,6 +57,7 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 | `answered` | an agent stream receives the answer | `delivered` |
 | `delivered` | the agent acknowledges | `read` |
 | any | the agent closes it, or it expires | `closed` |
+| `open` | the person answers a system card, and the inbox applies the answer | `closed` |
 | `closed` | the person answers after the close | `answered` |
 
 `orphaned` has no transition of its own. It reads a card in `open` whose agent has been offline for an hour, and another session may then claim it.
