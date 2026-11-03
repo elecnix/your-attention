@@ -45,3 +45,37 @@ describe('marking an answer read from the command line', () => {
     }
   });
 });
+
+describe('a watcher that leaves answers unread', () => {
+  it('names the ids to ack, even when --no-card keeps the card out of its output', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-watch-'));
+    const env = { ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: path.join(home, '.your-attention') };
+    const serve = spawn(process.execPath, [...CLI, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
+    let watch: ReturnType<typeof spawn> | undefined;
+    try {
+      const file = path.join(env.YOUR_ATTENTION_HOME, 'server.json');
+      const { url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined));
+      const read = (f: string) => fs.readFileSync(path.join(env.YOUR_ATTENTION_HOME, f), 'utf8').trim();
+      const call = (token: string, method: string, route: string, body?: unknown) => fetch(`${url}${route}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      await call(read('agent-token'), 'POST', '/v1/cards', { id: 'left-unread', agent: 'a', title: 'Answer me' });
+      // `--no-card` is the case the advice has to survive: the line carries no id, and the notice has to supply one.
+      watch = spawn(process.execPath, [...CLI, 'watch', '--agent', 'a', '--no-card'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      let err = '';
+      watch.stdout?.on('data', (d: Buffer) => { out += String(d); });
+      watch.stderr?.on('data', (d: Buffer) => { err += String(d); });
+      await until(() => (out.includes('hello') ? true : undefined));
+      await call(read('owner-token'), 'POST', '/v1/cards/left-unread/answer', { comment: 'here' });
+      await until(() => (out.includes('"answer"') ? true : undefined));
+      watch.kill('SIGTERM');
+      await until(() => (err.includes('without acknowledging') ? true : undefined));
+      assert.match(err, /Pass --ack next time: your-attention ack left-unread/);
+      // The line carries no card object, so the id in the answer payload is the only hint it gives; the notice names it.
+      assert.doesNotMatch(out, /"card":\{"id"/, 'the line leaves the card object out');
+    } finally {
+      watch?.kill('SIGKILL');
+      serve.kill();
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+    }
+  });
+});

@@ -485,12 +485,16 @@ switch (command) {
     const stop = new AbortController();
     // What a watcher cannot see from its side: printing an answer does not acknowledge it, and its card waits in the
     // person's outbox as unread until something does. Say so when the watch ends, rather than leaving it silent.
-    let unacked = 0;
+    const unacked: string[] = [];
     let said = false;
     const say = (): void => {
-      if (said || values.ack || !unacked) return;
+      if (said || values.ack || !unacked.length) return;
       said = true;
-      console.error(`Printed ${unacked} answer${unacked === 1 ? '' : 's'} without acknowledging: ${unacked === 1 ? 'that card stays' : 'those cards stay'} in the person's outbox as unread. Pass --ack, or run \`your-attention ack <card>\` once the answer is consumed.`);
+      // The ids come from the event, not from the printed line: `--no-card` and `--select` leave the card out of that
+      // line, so advice naming `<card>` would be advice the reader cannot follow.
+      const one = unacked.length === 1;
+      const list = unacked.length <= 5 ? `: your-attention ack ${unacked.join(' ')}` : ', one at a time with `your-attention ack <card>`.';
+      console.error(`Printed ${unacked.length} answer${one ? '' : 's'} without acknowledging, so ${one ? 'that card stays' : 'those cards stay'} in the person's outbox as unread. Pass --ack next time${list}`);
     };
     const end = (): void => {
       say();
@@ -526,7 +530,7 @@ switch (command) {
       // Only when asked: a watcher that acknowledged every answer would mark read what the agent waiting for it has not seen.
       if (ev.type !== 'answer') return;
       if (!values.ack) {
-        unacked += 1;
+        unacked.push(ev.card.id);
         return;
       }
       await c.ack(ev.card.id).catch((e: Error) => console.error(`Could not mark card ${ev.card.id} read: ${e.message}`));
