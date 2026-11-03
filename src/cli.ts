@@ -27,8 +27,10 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
                                                       post a card, and with --wait print the answer
+  ack <card>                                          mark an answer read, when a script took it out of band
   watch [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...] [--ack]
-                                                      print each answer for that agent as a line of JSON
+                                                      print each answer for that agent as a line of JSON; --ack marks each
+                                                      read, and without it the card waits in the outbox as unread
   watch --role owner [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...]
                                                       print each change to every card, or to that agent's, as the owner
   claude-channel                                      the MCP channel server for Claude Code
@@ -453,6 +455,15 @@ switch (command) {
     }, stop.signal);
     break;
   }
+  case 'ack': {
+    // A script that takes an answer out of band, as one reading `watch` does, marks it read with this. Without the ack
+    // the card waits in the page's outbox, and the person cannot tell what the agent consumed.
+    const id = rest[0] ?? fail('Usage: your-attention ack <card>');
+    const answer = await client().ack(id).catch((e: Error) => fail(`The inbox refused: ${e.message}`));
+    if (!answer.readAt) fail(`The inbox did not mark ${id} read`);
+    console.log(`Card ${id} is read.`);
+    break;
+  }
   case 'watch': {
     const { values } = parseArgs({ args: rest, options: {
       role: { type: 'string', default: 'agent' },
@@ -472,7 +483,17 @@ switch (command) {
     // Only the token that posted a card may acknowledge its answer, so an owner watcher has nothing it could mark read.
     if (owner && values.ack) fail('--ack marks an answer read for the agent that posted the card, and only that agent\'s token may. An owner watcher can\'t: drop --ack, or watch as the agent with --agent ID.');
     const stop = new AbortController();
+    // What a watcher cannot see from its side: printing an answer does not acknowledge it, and its card waits in the
+    // person's outbox as unread until something does. Say so when the watch ends, rather than leaving it silent.
+    let unacked = 0;
+    let said = false;
+    const say = (): void => {
+      if (said || values.ack || !unacked) return;
+      said = true;
+      console.error(`Printed ${unacked} answer${unacked === 1 ? '' : 's'} without acknowledging: ${unacked === 1 ? 'that card stays' : 'those cards stay'} in the person's outbox as unread. Pass --ack, or run \`your-attention ack <card>\` once the answer is consumed.`);
+    };
     const end = (): void => {
+      say();
       stop.abort();
       // Closing a socket waits for the far end's answer, which a quiet inbox may never send, and the watch has nothing
       // left to write. So the signal ends the watch on its own, and a stream that returns first ends it sooner.
@@ -503,9 +524,14 @@ switch (command) {
       if (!keepEvent(ev, { types })) return;
       process.stdout.write(`${JSON.stringify(watchLine(ev, options, Date.now()))}\n`);
       // Only when asked: a watcher that acknowledged every answer would mark read what the agent waiting for it has not seen.
-      if (!values.ack || ev.type !== 'answer') return;
+      if (ev.type !== 'answer') return;
+      if (!values.ack) {
+        unacked += 1;
+        return;
+      }
       await c.ack(ev.card.id).catch((e: Error) => console.error(`Could not mark card ${ev.card.id} read: ${e.message}`));
     }, stop.signal);
+    say();
     break;
   }
   case 'triage': {
