@@ -167,19 +167,11 @@ Keep each code you give out as `<code> <label>` in a private file, which is what
 
 ## Before you open a pull request
 
-CI runs the same checks against the push, so a red run reports what the branch could have answered first. Merge `main` into the branch, then work through this list. The merge matters as much as the checks: it is where a conflict, or a name that both sides introduced, appears.
+CI runs the same checks against the push, so a red run reports what the branch could have answered first. Merge `main` into the branch first, because the merge is where a conflict, or a name that both sides introduced, appears. Then run the gates with `mise run pre-pr -- path/to/body.md`. That task runs every job CI runs, the prose check on the pull request body included, and a failed gate does not stop the rest. The summary at the end lists each gate with its result, and the task exits non-zero when one failed. A fresh checkout asks `mise trust` once before the first run.
 
-1. `npm ci` when the lock file moved, so the tree these checks read is the tree CI installs.
-2. `npm run typecheck` runs tsgo and tsc-rs over the Node and Worker projects. CI runs them as two jobs, `typecheck (tsgo)` and `typecheck (tsc-rs)`, and one can fail while the other passes.
-3. `npm test` is `test:unit` then `test:integration`. CI runs both on Ubuntu, macOS and Windows, so a Windows run has caught a file lock that Linux never showed. Say in the body when the suite ran on one system only.
-4. `npm run cloudflare:check` and `npm run test:cloudflare`. The second builds the Worker. The first is the dry-run deploy that CI runs in the same job.
-5. `npm run storybook:build && npm run test:browser`. The browser job builds the stories before Playwright starts, and a story that does not build fails the job on its own.
-6. `vale sync && vale *.md` runs the prose rules over this file and its link, CLAUDE.md. The prose job reports errors only, so a warning here is advice. Run `vale sync` in a fresh worktree, or every file fails with `style 'ai-tells' does not exist`.
-7. The body is the strict one. `vale --no-global --config .vale.ini <body>.md` must report neither errors nor warnings, because the pr-body job runs gh-pr-body-action with `prose-fail: 'true'` at `MinAlertLevel = warning`. A body that reads well still fails on a section whose sentences open the same way, on a passive "was created", or on the word "unlock".
+dupdelta has no local command, so read its annotations after the push: a run of about a hundred tokens is a helper that belongs in one place, and every `test/browser` spec opens with the same lines.
 
-dupdelta reads the diff against the merge base and reports new duplicate runs, as warnings. It has no local command, so read its annotations after the push: a run of about a hundred tokens is a helper that belongs in one place. Every `test/browser` spec opens with the same lines, and dupdelta reports those as well.
-
-When a check fails and the cause is not yours, say so in the body. The mDNS test needs multicast, which GitHub's macOS runners drop, so that job sets `YOUR_ATTENTION_SKIP_MDNS`. A Windows job occasionally reports `EBUSY` on an inbox file right after a server stops, and a rerun passes.
+When a check fails for a cause that is not yours, say so in the body.
 
 ## Pull requests
 

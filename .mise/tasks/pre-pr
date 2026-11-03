@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+#MISE description="Run every gate CI runs, on the branch and on a pull request body"
+#USAGE arg "<body>" help="Path to the pull request body; it gets the strict prose check the pr-body job runs"
+
+# These gates are the jobs of .github/workflows/ci.yml, prose.yml and
+# pr-body.yml, at the commands and flags those jobs use. When a workflow
+# changes, change this task in the same pull request.
+#
+# Every gate runs even after one fails, and the summary says what happened to
+# each, because stopping at the first red costs a whole suite per fix.
+#
+# Two failures belong to the environment and not to the branch. They are kept
+# here so that nobody has to hold them in memory:
+#   - the integration suite's mDNS test needs multicast, which GitHub's macOS
+#     runners drop, so that matrix cell sets YOUR_ATTENTION_SKIP_MDNS=1. Set it
+#     here the same way on a network that drops multicast.
+#   - a Windows job occasionally reports EBUSY on an inbox file right after a
+#     server stops, and a rerun passes. It does not reproduce on Linux.
+#
+# A fresh worktree has no vale packages yet, so `vale sync` runs once as its
+# own gate, and the two prose gates sit out when it fails: without the packages
+# every file reports "style 'ai-tells' does not exist", which names the wrong
+# problem.
+
+set -uo pipefail
+
+usage_error() {
+	printf 'error: %s\n\nusage: mise run pre-pr -- <body.md>\n\n' "$1" >&2
+	printf 'The body check is the point of this task, so there is no run without it.\n' >&2
+	exit 2
+}
+
+[[ $# -ge 1 && -n ${1:-} ]] || usage_error "the pull request body is required"
+
+body_path=$1
+# mise runs a file task from the root of the repository, so a path written in
+# a subdirectory is looked for there first and then beside the caller.
+if [[ ! -f $body_path && -n ${MISE_ORIGINAL_CWD:-} && -f $MISE_ORIGINAL_CWD/$body_path ]]; then
+	body_path=$MISE_ORIGINAL_CWD/$body_path
+fi
+[[ -f $body_path ]] || usage_error "no such file: $1"
+case $body_path in
+/*) ;;
+*) body_path=$PWD/$body_path ;;
+esac
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null) ||
+	usage_error "$script_dir is not inside a git worktree"
+cd -- "$repo_root" || usage_error "cannot enter $repo_root"
+
+gate_names=()
+gate_states=()
+gate_notes=()
+failed=0
+skipped=0
+last_status=0
+
+record() {
+	gate_names+=("$1")
+	gate_states+=("$2")
+	gate_notes+=("${3:-}")
+}
+
+gate() {
+	local name=$1
+	shift
+	local started=$SECONDS
+	printf '\n\033[1m== %s\033[0m\n   $ %s\n' "$name" "$*"
+	last_status=0
+	"$@" || last_status=$?
+	local took=$(($SECONDS - started))
+	if ((last_status == 0)); then
+		record "$name" pass "${took}s"
+		printf '   \033[32mpass\033[0m (%ss)\n' "$took"
+	else
+		record "$name" fail "exit $last_status, ${took}s"
+		failed=$((failed + 1))
+		printf '   \033[31mFAIL\033[0m (exit %s, %ss) — carrying on\n' "$last_status" "$took"
+	fi
+	return 0
+}
+
+skip() {
+	record "$1" skip "$2"
+	skipped=$((skipped + 1))
+	printf '\n\033[1m== %s\033[0m\n   skipped: %s\n' "$1" "$2"
+}
+
+# vale exits 0 when it reports warnings alone, and the pr-body job fails on a
+# warning just as it fails on an error, so this gate counts the alerts rather
+# than trusting the exit code.
+strict_body_gate() {
+	local body=$1 alerts=0
+	printf '\n\033[1m== pr body (%s)\033[0m\n   $ vale --no-global --config .vale.ini %s\n' "$(basename "$body")" "$body"
+	vale --no-global --config "$repo_root/.vale.ini" "$body" || true
+	alerts=$(vale --no-global --config "$repo_root/.vale.ini" --output=JSON "$body" 2>/dev/null | grep -o '"Line":' | wc -l)
+	alerts=${alerts// /}
+	if ((alerts == 0)); then
+		record "pr body ($(basename "$body"))" pass "0 alerts"
+		printf '   \033[32mpass\033[0m: 0 alerts\n'
+	else
+		record "pr body ($(basename "$body"))" fail "$alerts alert(s)"
+		failed=$((failed + 1))
+		printf '   \033[31mFAIL\033[0m: %s alert(s); the pr-body job fails on a warning as well as an error\n' "$alerts"
+	fi
+	last_status=0
+	return 0
+}
+
+# 1. npm ci, only when the lock file moved since the merge base, or when the
+# tree has no node_modules yet: CI installs the tree these checks read.
+base_ref=
+for ref in origin/main main; do
+	git rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1 || continue
+	if base=$(git merge-base HEAD "$ref" 2>/dev/null); then
+		base_ref=$base
+		break
+	fi
+done
+
+if [[ -n $base_ref ]] && git diff --quiet "$base_ref" -- package-lock.json 2>/dev/null && [[ -d node_modules ]]; then
+	skip "install" "package-lock.json is unchanged since $(git rev-parse --short "$base_ref") and node_modules exists"
+else
+	gate "install" npm ci
+fi
+
+# 2. typecheck, as the two matrix cells of the typecheck job run it: one can
+# fail while the other passes.
+gate "typecheck (tsgo)" npm run typecheck:tsgo
+gate "typecheck (tsc-rs)" npm run typecheck:tsc-rs
+
+# 3. the test job, one gate per step. CI runs it on Ubuntu, macOS and Windows;
+# a Windows run has caught a file lock that Linux never showed.
+gate "test (unit)" npm run test:unit
+gate "test (integration)" npm run test:integration
+
+# 4. the cloudflare job: the dry-run bundle, then the hosted build on workerd.
+gate "cloudflare (dry-run deploy)" npm run cloudflare:check
+gate "cloudflare (tests)" npm run test:cloudflare
+
+# 5. the browser job. CI installs chromium with its OS packages before the
+# build; that needs root here, so this task fetches the browser alone and
+# leaves the packages to the machine.
+gate "browser (chromium)" npx playwright install chromium
+gate "browser (stories)" npm run storybook:build
+gate "browser (tests)" npm run test:browser
+
+# 6. the prose job. Its file list and its error floor come from prose.yml;
+# CLAUDE.md is a symlink to AGENTS.md, so the same text is read.
+if ! command -v vale >/dev/null 2>&1; then
+	record "prose (vale sync)" fail "vale is not installed"
+	failed=$((failed + 1))
+	vale_ready=0
+	vale_reason="vale is not installed, so there is nothing to run the prose rules"
+	printf '\n\033[1m== prose (vale sync)\033[0m\n   \033[31mFAIL\033[0m: vale is not installed\n'
+else
+	gate "prose (vale sync)" vale sync
+	if ((last_status == 0)); then
+		vale_ready=1
+	else
+		vale_ready=0
+		vale_reason="vale sync failed, so every file would report a missing style instead"
+	fi
+fi
+
+if ((vale_ready)); then
+	gate "prose (documents)" vale --minAlertLevel=error README.md AGENTS.md PRINCIPLES.md SPEC.md
+
+	# 7. the pr-body job: gh-pr-body-action runs this with prose-fail: 'true'
+	# at MinAlertLevel = warning, so errors and warnings both fail it.
+	printf '\n   strict body check: neither errors nor warnings may be reported\n'
+	strict_body_gate "$body_path"
+else
+	skip "prose (documents)" "$vale_reason"
+	skip "pr body ($(basename "$body_path"))" "$vale_reason"
+fi
+
+printf '\n\033[1mSummary\033[0m\n'
+for i in "${!gate_names[@]}"; do
+	printf '  %-30s %-5s %s\n' "${gate_names[$i]}" "${gate_states[$i]}" "${gate_notes[$i]}"
+done
+printf '\n  %s gates: %s passed, %s failed, %s skipped\n' \
+	"${#gate_names[@]}" "$((${#gate_names[@]} - failed - skipped))" "$failed" "$skipped"
+
+if ((failed > 0)); then
+	printf '\n\033[31mNot ready: %s gate(s) failed.\033[0m\n' "$failed"
+	exit 1
+fi
+printf '\n\033[32mEvery gate passed.\033[0m\n'
