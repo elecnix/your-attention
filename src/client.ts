@@ -38,11 +38,24 @@ export function loadConfig(home = homeDir()): ClientConfig | undefined {
   const read = (f: string): string | undefined => {
     try { return fs.readFileSync(path.join(home, f), 'utf8').trim(); } catch { return undefined; }
   };
-  const paired = read('client.json');
-  if (paired) return JSON.parse(paired) as ClientConfig;
-  const server = read('server.json');
-  const agentToken = read('agent-token');
-  if (server && agentToken) return { url: (JSON.parse(server) as { url: string }).url, token: agentToken };
+  // A file that does not parse is a file this machine cannot use, the same as a missing one: `status` reports it as
+  // unreadable, and every other caller answers "no inbox" rather than a stack trace.
+  const parse = (text: string | undefined): unknown => {
+    if (!text) return undefined;
+    try { return JSON.parse(text); } catch { return undefined; }
+  };
+  // A file that parses to anything but a pair of strings is a pairing this machine cannot use, the same as a missing
+  // one: `status` reports it as unreadable or addressless, and every other caller answers "no inbox" rather than
+  // failing on `undefined.replace` or on a URL of 42.
+  const usable = (value: unknown): ClientConfig | undefined => {
+    if (typeof value !== 'object' || value === null) return undefined;
+    const { url, token } = value as { url?: unknown; token?: unknown };
+    return typeof url === 'string' && url !== '' && typeof token === 'string' && token !== '' ? (value as ClientConfig) : undefined;
+  };
+  const paired = usable(read('client.json') === undefined ? undefined : parse(read('client.json')));
+  if (paired) return paired;
+  const server = usable({ url: (parse(read('server.json')) as { url?: unknown } | undefined)?.url, token: read('agent-token') });
+  if (server) return server;
   return undefined;
 }
 

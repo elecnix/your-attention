@@ -6,20 +6,17 @@ import { describe, it } from 'node:test';
 import type { Answer, Card } from '../../src/core/types.ts';
 import { describeAnswer } from '../../src/client.ts';
 import { createHandler } from '../../src/core/http.ts';
-import { Inbox, type Caller } from '../../src/core/inbox.ts';
-import { imagesDir, saveAnswerImages } from '../../src/integrations/images.ts';
+import { Inbox } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
+import { imagesDir, saveAnswerImages } from '../../src/integrations/images.ts';
+
 import { checkImage, draftProblem, imageFiles, IMAGE_LIMIT_BYTES, IMAGE_TYPES } from '../../web/paste-images.js';
+import { agent, owner, setup } from './fixture.ts';
 
 // A 1x1 PNG.
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-const agent: Caller = { token: 'ta', role: 'agent' };
 
-function setup() {
-  const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs());
-  inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Which one?' });
-  return inbox;
-}
+
 
 describe('images pasted into an answer', () => {
   it('stores each image and serves its bytes to the agent that asked', async () => {

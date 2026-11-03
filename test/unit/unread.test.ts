@@ -1,17 +1,11 @@
 // `GET /v1/unread`: the answers a client stored but never acknowledged, which is what a watcher asks about at exit.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Inbox, type Caller } from '../../src/core/inbox.ts';
-import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
+import type { Caller } from '../../src/core/inbox.ts';
+import { agent, owner, setup } from './fixture.ts';
 
-const agent: Caller = { token: 'ta', role: 'agent' };
-const owner: Caller = { token: 'to', role: 'owner' };
 
-function setup() {
-  const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs());
-  inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Which one?' });
-  return inbox;
-}
+
 describe('the answers a client has not consumed', () => {
   it('counts what was answered and never acknowledged, for that agent and that token', async () => {
     const inbox = setup();

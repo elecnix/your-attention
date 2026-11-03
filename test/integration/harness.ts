@@ -1,4 +1,5 @@
 // Starts a real inbox in a temporary home for one test file.
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,4 +69,38 @@ export const ROOT = path.resolve(import.meta.dirname, '..', '..');
 export function callAt(url: string, token: string, method: string, route: string, body?: unknown): Promise<Response> {
   // A body is sent whenever one is given: `0`, `''`, `false` and `null` are bodies a route may want, not absences.
   return fetch(`${url}${route}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+}
+
+export interface CliServer {
+  home: string;
+  url: string;
+  /** The environment a CLI run in this home needs, so the command talks to this inbox. */
+  env: NodeJS.ProcessEnv;
+  /** A file the inbox wrote in its home, trimmed. */
+  read(file: string): string;
+  call(token: string, method: string, route: string, body?: unknown): Promise<Response>;
+  close(): void;
+}
+
+export const CLI_ARGS = [path.join(ROOT, 'src', 'cli.ts')];
+
+/** Start `your-attention serve` as its own process in a temporary home, which is what tests of the CLI itself need. */
+export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const yaHome = path.join(home, '.your-attention');
+  const env = { ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: yaHome };
+  const serve: ChildProcess = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
+  const file = path.join(yaHome, 'server.json');
+  const { url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined));
+  return {
+    home,
+    url,
+    env,
+    read: (f) => fs.readFileSync(path.join(yaHome, f), 'utf8').trim(),
+    call: (token, method, route, body) => callAt(url, token, method, route, body),
+    close: () => {
+      serve.kill();
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+    },
+  };
 }
