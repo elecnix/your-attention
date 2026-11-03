@@ -184,6 +184,22 @@ describe('guidance', () => {
     assert.equal(inbox.guidance().version, 1);
   });
 
+  it('lists a guidance answer for an offline proposer in dead letters, and a successor session claims it', async () => {
+    const { inbox, agent } = setup();
+    const card = inbox.proposeGuidance('Never mind.', { caller: agent, agent: 's1' });
+    await inbox.answer(card.id, { values: { choice: 'reject' }, comment: 'Too vague.' });
+    assert.deepEqual(inbox.deadLetters().map((d) => d.card.id), [card.id]);
+    const heard: AgentEvent[] = [];
+    inbox.connect(agent, 's2', (e) => heard.push(e));
+    const claimed = inbox.claim(agent, card.id, 's2');
+    assert.equal(claimed.broadcast?.from, 's2');
+    assert.equal(claimed.agent, 'system', 'the card stays the inbox system card');
+    const ev = heard.find((e) => e.type === 'answer');
+    assert.ok(ev && ev.type === 'answer');
+    assert.equal(ev.answer.comment, 'Too vague.');
+    assert.deepEqual(inbox.deadLetters(), []);
+  });
+
   it('keeps the proposing agent token out of the card that clients read', () => {
     const { inbox } = setup();
     const caller: Caller = { token: 'proposer-token-id', role: 'agent' };

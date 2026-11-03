@@ -1094,10 +1094,14 @@ export class Inbox {
   claim(caller: Caller, id: string, agent: string): Card {
     const card = this.getCard(id);
     if (caller.role !== 'owner' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
-    const next = { ...card, agent: String(agent), token: caller.role === 'owner' ? card.token : caller.token };
+    const token = caller.role === 'owner' ? card.token : caller.token;
+    // A guidance card stays the inbox's system card: the successor takes over as the agent that proposed the text.
+    const next = card.kind === 'system' && card.broadcast
+      ? { ...card, token, broadcast: { ...card.broadcast, from: String(agent) } }
+      : { ...card, agent: String(agent), token };
     this.store.put('cards', id, next);
     this.emit({ type: 'change', card: id });
-    this.flush(next.agent);
+    this.flush(String(agent));
     return next;
   }
 
@@ -1233,7 +1237,7 @@ export class Inbox {
     return this.store.list<Answer>('answers')
       .filter((a) => !a.deliveredAt)
       .map((a) => ({ card: this.getCard(a.card), answer: a }))
-      .filter(({ card }) => card.deliver === 'stream' && cardState(card, this.store.get('answers', card.id)) !== 'closed' && !this.isOnline(card.agent));
+      .filter(({ card, answer }) => { const to = recipient(card, answer); return to !== null && !this.isOnline(to); });
   }
 
   /** The answers this caller has not consumed: stored, and never acknowledged. `agent` narrows it to one agent, which
