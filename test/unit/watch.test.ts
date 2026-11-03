@@ -142,6 +142,10 @@ describe('what a watcher says about the answers it did not acknowledge', () => {
     assert.match(unackedNotice(['c1', 'c2']), /ack c1 c2$/);
   });
 
+  it('says nothing at all when nothing was left unread', () => {
+    assert.equal(unackedNotice([]), '', 'no command without a card to name');
+  });
+
   it('gives up on the list past five cards, and still says what happened', () => {
     const notice = unackedNotice(['c1', 'c2', 'c3', 'c4', 'c5', 'c6']);
     assert.match(notice, /^Printed 6 answers without acknowledging, so those cards stay/);
