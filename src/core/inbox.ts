@@ -996,7 +996,9 @@ export class Inbox {
     const from = by ? String(by.agent ?? '').trim() : '';
     if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
-    const agents = this.store.list<Presence>('presence').map((p) => p.agent).filter((a) => a !== SYSTEM_AGENT);
+    // Only the agents online now: the page lists the online agents from live presence when it draws the card, and an
+    // offline agent reads the new version when it reconnects or calls card_guidance.
+    const agents = this.store.list<Presence>('presence').filter((p) => p.online && p.agent !== SYSTEM_AGENT).map((p) => p.agent);
     const base = this.guidance();
     const id = `guidance-${randomId(4)}`;
     this.postCard({ token: '', role: 'owner' }, {
@@ -1024,13 +1026,14 @@ export class Inbox {
 
   private applyBroadcast(broadcast: NonNullable<Card['broadcast']>, answer: Answer): string {
     if ([answer.values['choice']].flat()[0] !== 'approve') return 'Rejected: the guidance did not change.';
-    const picked = Array.isArray(answer.values['agents']) ? (answer.values['agents'] as unknown[]).map(String) : broadcast.agents;
+    // The ticked agents, or every connected one when the answer names none. Only connected agents get the event.
+    const picked = Array.isArray(answer.values['agents']) ? new Set((answer.values['agents'] as unknown[]).map(String)) : undefined;
     const guidance: Guidance = { text: broadcast.text, version: this.guidance().version + 1, at: this.now() };
     this.store.put('meta', 'guidance', guidance);
     let sent = 0;
     for (const [k, subs] of this.agents) {
       const agent = k.slice(k.indexOf('\n') + 1);
-      if (!picked.includes(agent)) continue;
+      if (picked && !picked.has(agent)) continue;
       for (const send of subs) send({ type: 'guidance', id: randomId(6), guidance });
       sent++;
     }

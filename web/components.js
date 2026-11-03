@@ -512,9 +512,12 @@ export function Changes({ card }) {
 
 // The system card for new guidance: the proposal as a diff against the current guidance, the agents to send it to,
 // all of them at first, and the comment, which goes with the answer to the agent that proposed the text.
-export function BroadcastForm({ card, cards = [], guidance, onDone, onSkip }) {
+export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDone, onSkip }) {
   const b = card.broadcast;
-  const [picked, setPicked] = React.useState(() => new Set(b.agents));
+  // The agents online now, from live presence, every one ticked until the person unticks it: an agent that comes
+  // online while the card is open joins ticked, and one that leaves drops off the list.
+  const online = Object.values(presence).filter((p) => p.online && p.agent !== 'system').map((p) => p.agent).sort();
+  const [unticked, setUnticked] = React.useState(() => new Set());
   // The comment draft belongs to the card, as on an HTML card.
   const draftKey = `draft:${card.id}:comment`;
   const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
@@ -529,7 +532,7 @@ export function BroadcastForm({ card, cards = [], guidance, onDone, onSkip }) {
   async function send(choice) {
     setError(null);
     try {
-      const res = await api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] }, comment: comment.trim() });
+      const res = await api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: online.filter((a) => !unticked.has(a)) }, comment: comment.trim() });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
       store.del(draftKey);
       onDone();
@@ -557,9 +560,11 @@ export function BroadcastForm({ card, cards = [], guidance, onDone, onSkip }) {
     changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
     h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
     same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
-    h('div', { className: 'agents' }, b.agents.length ? b.agents.map((a) => h('label', { key: a },
-      h('input', { type: 'checkbox', checked: picked.has(a), onChange: () => setPicked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards)))
-      : h('span', null, 'No agent has connected yet. Agents get the guidance when they connect.')),
+    h('fieldset', { className: 'agents' },
+      h('legend', null, `Send to ${online.length} online agent${online.length === 1 ? '' : 's'}`),
+      online.map((a) => h('label', { key: a },
+        h('input', { type: 'checkbox', checked: !unticked.has(a), onChange: () => setUnticked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards))),
+      h('span', { className: 'hint' }, 'Offline agents get the new guidance when they reconnect, or when they call card_guidance.')),
     h('div', { className: 'html-answer' },
       h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: b.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
       h('div', { className: 'html-answer-actions' },

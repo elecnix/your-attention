@@ -397,7 +397,7 @@ export function App() {
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
       current.broadcast && !current.closed
-        ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, guidance: state.guidance, onDone: skip, onSkip: skip })
+        ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip })
         : current.html !== undefined
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); } })
         : current.kind === 'secret'

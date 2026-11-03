@@ -54,11 +54,17 @@ export const ClosedByAgent = {
 
 // A proposal that edits one word and adds one line: the unchanged lines collapse behind a control.
 const GUIDANCE = 'Lead with the goal.\nGive two options, with the one you recommend first.\nEnd with a recommendation.';
+// Live presence: two agents online, and one that connected once and left.
+const PRESENCE = {
+  'claude:3239ab8e': { agent: 'claude:3239ab8e', online: true, lastSeen: 0 },
+  'pi:01a17c01': { agent: 'pi:01a17c01', online: true, lastSeen: 0 },
+  'herdr:w1:p2': { agent: 'herdr:w1:p2', online: false, lastSeen: 0 },
+};
 const PROPOSAL = 'Lead with the goal.\nGive three options, with the one you recommend first.\nEnd with a recommendation.\nAttach a screenshot to every UI card.';
 export const GuidanceBroadcast = {
   render: () => mount(h(BroadcastForm, {
-    card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, agents: ['claude:3239ab8e', 'pi:01a17c01', 'herdr:w1:p2'], from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
-    guidance: { text: GUIDANCE, version: 3, at: 0 }, onDone: () => {}, onSkip: () => {},
+    card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, agents: ['claude:3239ab8e', 'pi:01a17c01'], from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
+    presence: PRESENCE, guidance: { text: GUIDANCE, version: 3, at: 0 }, onDone: () => {}, onSkip: () => {},
   })),
 };
 
@@ -66,7 +72,7 @@ export const GuidanceBroadcast = {
 export const GuidanceBroadcastAfterAChange = {
   render: () => mount(h(BroadcastForm, {
     card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, agents: ['claude:3239ab8e'], from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
-    guidance: { text: `${GUIDANCE}\nName the files the card is about.`, version: 4, at: 0 }, onDone: () => {}, onSkip: () => {},
+    presence: PRESENCE, guidance: { text: `${GUIDANCE}\nName the files the card is about.`, version: 4, at: 0 }, onDone: () => {}, onSkip: () => {},
   })),
 };
 

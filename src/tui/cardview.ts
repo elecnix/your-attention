@@ -31,7 +31,7 @@ export interface CardViewHost {
 }
 
 /** OpenUI Lang for the cards the page draws with its own components: secret, broadcast and HTML cards. */
-export function terminalSource(c: Card, cards: CardSummary[]): string {
+export function terminalSource(c: Card, cards: CardSummary[], online: string[] = []): string {
   const buttons = (list: [string, string, string][]) => `b = Buttons([${list.map(([label, msg, variant]) => `Button(${J(label)}, @ToAssistant(${J(msg)}), ${J(variant)})`).join(', ')}], "row")`;
   if (c.kind === 'secret' && c.secret) {
     return [
@@ -43,12 +43,14 @@ export function terminalSource(c: Card, cards: CardSummary[]): string {
     ].join('\n');
   }
   if (c.broadcast && !c.closed) {
-    const agents = c.broadcast.agents;
+    // The agents online now, from live presence, as the page lists them.
+    const agents = online;
     // The card view draws the proposal as a diff above this form.
     return [
       'root = Card([f])',
-      `f = Form("broadcast", b, [${agents.length ? 'fa, ' : ''}fc])`,
-      ...(agents.length ? [`fa = FormControl("Agents", CheckBoxGroup("agents", [${agents.map((a) => `CheckBoxItem(${J(agentName(a, cards))}, "", ${J(a)}, true)`).join(', ')}]))`] : []),
+      `f = Form("broadcast", b, [${agents.length ? 'fa, ' : ''}fh, fc])`,
+      ...(agents.length ? [`fa = FormControl(${J(`Send to ${agents.length} online agent${agents.length === 1 ? '' : 's'}`)}, CheckBoxGroup("agents", [${agents.map((a) => `CheckBoxItem(${J(agentName(a, cards))}, "", ${J(a)}, true)`).join(', ')}]))`] : []),
+      `fh = TextContent(${J(`${agents.length ? '' : 'Send to 0 online agents. '}Offline agents get the new guidance when they reconnect, or when they call card_guidance.`)})`,
       `fc = FormControl("Comment", TextArea("comment", ${J(c.broadcast.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?')}, 3))`,
       buttons([['Approve and send', 'approve', 'primary'], ['Reject', 'reject', 'secondary'], ['Skip for now', 'skip', 'secondary']]),
     ].join('\n');
@@ -62,6 +64,11 @@ export function terminalSource(c: Card, cards: CardSummary[]): string {
     ].join('\n');
   }
   return cardSource(c);
+}
+
+/** The agents online now, as a guidance card lists them. */
+export function onlineAgents(s: Pick<InboxState, 'presence'>): string[] {
+  return Object.values(s.presence).filter((p) => p.online && p.agent !== 'system').map((p) => p.agent).sort();
 }
 
 const time = (t: number): string => new Date(t).toLocaleTimeString();
@@ -293,7 +300,7 @@ export class CardView {
     };
     // A body stored before the inbox checked bodies may not draw whole: the inbox sends what the page draws in its place.
     if (card.bodyFallback) doc.para([{ text: 'Warning: part of this card did not draw, because its body has an error. The source from that error on is at the end of the card.', style: st.warn }]);
-    const result = parse(terminalSource(card.bodyFallback ? { ...card, body: card.bodyFallback.body } : card, s.cards));
+    const result = parse(terminalSource(card.bodyFallback ? { ...card, body: card.bodyFallback.body } : card, s.cards, onlineAgents(s)));
     if (!result) doc.para([{ text: 'Loading the form…', style: st.dim }]);
     else {
       this.renderer = new BodyRenderer(doc, ctx);

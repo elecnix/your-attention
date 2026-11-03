@@ -8,7 +8,7 @@ import { buildQueue, type InboxState } from '../../web/queue.js';
 import { editKey } from '../../src/tui/edit.ts';
 import type { Card } from '../../src/core/types.ts';
 import { loadParser } from '../../src/tui/body.ts';
-import { CardView, type CardViewHost } from '../../src/tui/cardview.ts';
+import { CardView, onlineAgents, type CardViewHost } from '../../src/tui/cardview.ts';
 import type { KeyEvent } from '../../src/tui/input.ts';
 import { makeTheme } from '../../src/tui/theme.ts';
 
@@ -196,6 +196,20 @@ describe('a guidance card', () => {
     const view = new CardView(same, { theme, address: () => '', act: () => {}, fileText: () => undefined, now: () => 0 });
     const shown = view.build(70, s, buildQueue(s, 'none')).lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
     assert.match(shown, /The proposal matches the current guidance\./);
+  });
+
+  it('lists only the agents online now, all ticked, with the count and the line about offline agents', () => {
+    const presence: InboxState['presence'] = Object.fromEntries([
+      ...Array.from({ length: 25 }, (_, i) => [`gone-${i}`, { agent: `gone-${i}`, online: false, lastSeen: 0 }]),
+      ['s1', { agent: 's1', online: true, lastSeen: 0 }], ['s2', { agent: 's2', online: true, lastSeen: 0 }],
+    ]);
+    const s: InboxState = { cards: [summarize(proposal, undefined)], answers: {}, presence, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };
+    const view = new CardView(proposal, { theme, address: () => '', act: () => {}, fileText: () => undefined, now: () => 0 });
+    const shown = view.build(70, s, buildQueue(s, 'none')).lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+    assert.match(shown, /Send to 2 online agents/);
+    assert.match(shown, /Offline agents get the new guidance when they reconnect, or when they\s+call card_guidance\./);
+    assert.doesNotMatch(shown, /gone-/);
+    assert.deepEqual(onlineAgents(s), ['s1', 's2'], 'the answer goes to these, less any the person unticks');
   });
 
   it('has a comment field, Skip for now, and sends the comment with the answer', () => {

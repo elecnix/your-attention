@@ -93,6 +93,8 @@ export class Client {
   private readonly seen = new Set<string>();
   /** This process, the same across reconnects, so the inbox sends a restarted agent the answers its earlier process never read. */
   readonly instance = crypto.randomUUID();
+  /** The newest guidance version each agent of this process has seen, from a hello or a guidance event. */
+  private readonly guidanceSeen = new Map<string, number>();
   /** What the inbox checks itself, from GET /v1/info. An inbox from before the field checks everything. */
   private inboxChecks: Promise<{ diagrams: boolean; body: boolean }> | undefined;
 
@@ -230,7 +232,22 @@ export class Client {
   async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto'): Promise<void> {
     let link = 0;
     const noSocket = new Set<string>();
-    const deliver = async (ev: AgentEvent): Promise<void> => { if (this.fresh(ev)) await onEvent(ev); };
+    const deliver = async (ev: AgentEvent): Promise<void> => {
+      if (!this.fresh(ev)) return;
+      await onEvent(ev);
+      // The inbox sends guidance events only to agents online at the approval. A hello on a reconnect carries the
+      // current version, so an agent that was away when the person approved a newer one fetches it and gets it here.
+      if (ev.type === 'guidance') this.guidanceSeen.set(agent, Math.max(this.guidanceSeen.get(agent) ?? 0, ev.guidance.version));
+      if (ev.type !== 'hello') return;
+      const known = this.guidanceSeen.get(agent);
+      this.guidanceSeen.set(agent, Math.max(known ?? 0, ev.guidance));
+      if (known === undefined || ev.guidance <= known) return;
+      try {
+        const g = await this.guidance();
+        this.guidanceSeen.set(agent, Math.max(ev.guidance, g.version));
+        await onEvent({ type: 'guidance', id: `hello-${g.version}`, guidance: { text: g.text, version: g.version, at: g.at } });
+      } catch { /* the agent can still read the guidance with card_guidance */ }
+    };
     while (!signal.aborted) {
       const url = this.urls[link % this.urls.length] ?? this.url;
       try {

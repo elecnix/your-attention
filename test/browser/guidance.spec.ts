@@ -70,3 +70,27 @@ test('a proposal that matches the current guidance says so', async ({ page }) =>
   await inbox.open(page);
   await expect(page.locator('.guidance-diff')).toContainText('The proposal matches the current guidance.');
 });
+
+test('the card lists only the agents online now, all ticked, out of many that connected once', async ({ page }) => {
+  const gone = Array.from({ length: 30 }, (_, i) => inbox.listen(`s-gone-${i}`));
+  const presence = async () => ((await inbox.state()) as unknown as { presence: Record<string, { online: boolean }> }).presence;
+  await expect.poll(async () => Object.keys(await presence()).filter((a) => a.startsWith('s-gone-')).length).toBe(30);
+  for (const g of gone) g.stop();
+  await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => a.startsWith('s-gone-') && p.online).length, { timeout: 10_000 }).toBe(0);
+  const online = ['s-on-1', 's-on-2', 's-on-3'].map((a) => inbox.listen(a));
+  await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => a.startsWith('s-on-') && p.online).length).toBe(3);
+  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', 's-on-1');
+  const stored = (await inbox.state()).cards.find((c) => c.id === card.id);
+  expect(stored?.broadcast?.agents.slice().sort()).toEqual(['s-on-1', 's-on-2', 's-on-3']);
+  await inbox.open(page);
+  const agents = page.locator('.broadcast .agents');
+  await expect(agents.locator('legend')).toHaveText('Send to 3 online agents');
+  await expect(agents.locator('input[type=checkbox]')).toHaveCount(3);
+  await expect(agents.locator('input[type=checkbox]:checked')).toHaveCount(3);
+  await expect(agents).toContainText('Offline agents get the new guidance when they reconnect, or when they call card_guidance.');
+  await expect(agents).not.toContainText('s-gone-');
+  online[2]!.stop();
+  await expect(agents.locator('legend')).toHaveText('Send to 2 online agents', { timeout: 10_000 });
+  await page.getByRole('button', { name: 'Approve and send' }).click();
+  await expect.poll(async () => (await inbox.state()).answers[card.id]?.values['agents']).toEqual(['s-on-1', 's-on-2']);
+});

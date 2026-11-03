@@ -10,7 +10,7 @@ import type { Attachment } from '../core/types.ts';
 import { notOwnerAdvice } from '../client.ts';
 import { ApiError, InboxApi, ownerConfig } from './api.ts';
 import { loadParser, parserReady, type Action } from './body.ts';
-import { CardView, type CardViewHost } from './cardview.ts';
+import { CardView, onlineAgents, type CardViewHost } from './cardview.ts';
 import type { Hit } from './doc.ts';
 import type { InputEvent, KeyEvent, MouseEvent } from './input.ts';
 import { encodeFrame, type Grid } from './screen.ts';
@@ -140,7 +140,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     } else if (c.broadcast && !c.closed) {
       const picked = (view.store.get('broadcast', 'agents') ?? {}) as Record<string, boolean>;
       const comment = String(view.store.get('broadcast', 'comment') ?? '').trim();
-      body = { values: { choice: msg === 'approve' ? 'approve' : 'reject', agents: c.broadcast.agents.filter((a) => picked[a] ?? true) }, comment };
+      body = { values: { choice: msg === 'approve' ? 'approve' : 'reject', agents: (m.state ? onlineAgents(m.state) : []).filter((a) => picked[a] ?? true) }, comment };
     } else {
       body = { ...view.answer(), version: c.version };
     }
