@@ -9,7 +9,7 @@ import type { Option, Priority } from './core/types.ts';
 import { homeDir, readHome, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
-import { keepEvent, watchLine } from './watch.ts';
+import { keepEvent, unackedNotice, watchLine } from './watch.ts';
 
 const HELP = `your-attention: one inbox for the questions your coding agents ask you.
 
@@ -27,8 +27,10 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
                                                       post a card, and with --wait print the answer
+  ack <card> [<card>...]                              mark answers read, when a script took them out of band
   watch [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...] [--ack]
-                                                      print each answer for that agent as a line of JSON
+                                                      print each answer for that agent as a line of JSON; --ack marks each
+                                                      read, and without it the card waits in the outbox as unread
   watch --role owner [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...]
                                                       print each change to every card, or to that agent's, as the owner
   claude-channel                                      the MCP channel server for Claude Code
@@ -453,6 +455,20 @@ switch (command) {
     }, stop.signal);
     break;
   }
+  case 'ack': {
+    // A script that takes an answer out of band, as one reading `watch` does, marks it read with this. Without the ack
+    // the card waits in the page's outbox, and the person cannot tell what the agent consumed. It takes every id it is
+    // given, because the watcher's own advice names them all on one line.
+    const ids = rest.filter((a) => !a.startsWith('-'));
+    if (!ids.length) fail('Usage: your-attention ack <card> [<card>...]');
+    const c = client();
+    for (const id of ids) {
+      const answer = await c.ack(id).catch((e: Error) => fail(`The inbox refused ${id}: ${e.message}`));
+      if (!answer.readAt) fail(`The inbox did not mark ${id} read`);
+      console.log(`Card ${id} is read.`);
+    }
+    break;
+  }
   case 'watch': {
     const { values } = parseArgs({ args: rest, options: {
       role: { type: 'string', default: 'agent' },
@@ -472,7 +488,19 @@ switch (command) {
     // Only the token that posted a card may acknowledge its answer, so an owner watcher has nothing it could mark read.
     if (owner && values.ack) fail('--ack marks an answer read for the agent that posted the card, and only that agent\'s token may. An owner watcher can\'t: drop --ack, or watch as the agent with --agent ID.');
     const stop = new AbortController();
+    // What a watcher cannot see from its side: printing an answer does not acknowledge it, and its card waits in the
+    // person's outbox as unread until something does. Say so when the watch ends, rather than leaving it silent.
+    const unacked: string[] = [];
+    let said = false;
+    const say = (): void => {
+      if (said || values.ack || !unacked.length) return;
+      said = true;
+      // The ids come from the event, not from the printed line: `--no-card` and `--select` leave the card out of that
+      // line, so advice naming `<card>` would be advice the reader cannot follow.
+      console.error(unackedNotice(unacked));
+    };
     const end = (): void => {
+      say();
       stop.abort();
       // Closing a socket waits for the far end's answer, which a quiet inbox may never send, and the watch has nothing
       // left to write. So the signal ends the watch on its own, and a stream that returns first ends it sooner.
@@ -480,7 +508,11 @@ switch (command) {
     };
     for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, end);
     // A reader that stops reading, as `watch | head -1` does, ends the watch: it is not an error.
-    process.stdout.on('error', (e: NodeJS.ErrnoException) => { if (e.code === 'EPIPE') process.exit(0); });
+    process.stdout.on('error', (e: NodeJS.ErrnoException) => {
+      if (e.code !== 'EPIPE') return;
+      say();
+      process.exit(0);
+    });
     const options = { noCard: values['no-card'], fields };
     if (owner) {
       // The owner token of the inbox this machine runs, or else the owner pairing, as for `login-url`.
@@ -503,9 +535,14 @@ switch (command) {
       if (!keepEvent(ev, { types })) return;
       process.stdout.write(`${JSON.stringify(watchLine(ev, options, Date.now()))}\n`);
       // Only when asked: a watcher that acknowledged every answer would mark read what the agent waiting for it has not seen.
-      if (!values.ack || ev.type !== 'answer') return;
+      if (ev.type !== 'answer') return;
+      if (!values.ack) {
+        unacked.push(ev.card.id);
+        return;
+      }
       await c.ack(ev.card.id).catch((e: Error) => console.error(`Could not mark card ${ev.card.id} read: ${e.message}`));
     }, stop.signal);
+    say();
     break;
   }
   case 'triage': {

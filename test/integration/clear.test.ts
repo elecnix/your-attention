@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
-import { ROOT, until } from './harness.ts';
+import { callAt, ROOT, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 const run = (env: NodeJS.ProcessEnv, ...args: string[]) =>
@@ -21,7 +21,7 @@ describe('clearing the inbox from the command line', () => {
       const file = path.join(env.YOUR_ATTENTION_HOME, 'server.json');
       const { url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined));
       const read = (f: string) => fs.readFileSync(path.join(env.YOUR_ATTENTION_HOME, f), 'utf8').trim();
-      const call = (token: string, method: string, route: string, body?: unknown) => fetch(`${url}${route}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      const call = (token: string, method: string, route: string, body?: unknown) => callAt(url, token, method, route, body);
       const agent = read('agent-token');
       const owner = read('owner-token');
       await call(agent, 'POST', '/v1/cards', { id: 'done', agent: 'a', title: 'Answered' });

@@ -63,3 +63,9 @@ export async function until<T>(check: () => T | undefined | Promise<T | undefine
 }
 
 export const ROOT = path.resolve(import.meta.dirname, '..', '..');
+
+/** Call one route of a test inbox as the token's owner or agent. */
+export function callAt(url: string, token: string, method: string, route: string, body?: unknown): Promise<Response> {
+  // A body is sent whenever one is given: `0`, `''`, `false` and `null` are bodies a route may want, not absences.
+  return fetch(`${url}${route}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+}

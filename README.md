@@ -267,7 +267,10 @@ your-attention watch --agent cli:deploy | jq -r 'select(.type == "answer") | .an
 your-attention watch --no-card                    # the answer and its receipt, without the card
 your-attention watch --select id,title,status    # only these fields of the card
 your-attention watch --agent cli:deploy --ack     # marks each answer read, as the answering session does
+your-attention ack <card>                         # marks one answer read, when the script took it another way
 ```
+
+Without `--ack` a watcher leaves the answer unread, and the card waits in the page's outbox until something says it read it. `your-attention ack <card>` is that word, for a script that reads answers another way, and for one that keeps a card to read later.
 
 A watcher receives the answers to cards that this machine's token posted as the agent it names, so it pairs with `your-attention post --agent cli:deploy`: a script that posts cards and watches them gets each answer as it arrives. Cards that other sessions post stay on the page and in `your-attention tui`. The watcher reconnects by itself with one instance id, so a restarted inbox or a dropped socket keeps every answer queued and delivers each one once, and a `hello` line marks each connection or reconnection.
 

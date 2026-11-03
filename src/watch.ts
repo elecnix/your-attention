@@ -90,3 +90,15 @@ export function keepEvent(event: AgentEvent | OwnerEvent, filter: WatchFilter): 
   const agent = 'card' in event && event.card && typeof event.card === 'object' ? event.card.agent : 'agent' in event ? event.agent : undefined;
   return agent === filter.agent;
 }
+
+/** What a watcher says when it printed answers without acknowledging them. The ids come from the events, not from the
+ * line, because `--no-card` and a `--select` that drops the id keep the card out of what was printed. */
+export function unackedNotice(ids: string[]): string {
+  // Nothing to say, and no card to name: the caller prints this only when it counted answers it left unread.
+  if (!ids.length) return '';
+  const one = ids.length === 1;
+  // `ack` takes any number of ids, so both branches name a command that works. Past five, a line of ids stops being
+  // readable, so the shape is spelled out instead of the cards.
+  const how = ids.length <= 5 ? `: your-attention ack ${ids.join(' ')}` : ', any number at a time with `your-attention ack <id> [<id>...]`.';
+  return `Printed ${ids.length} answer${one ? '' : 's'} without acknowledging, so ${one ? 'that card stays' : 'those cards stay'} in the person's outbox as unread. Pass --ack next time${how}`;
+}
