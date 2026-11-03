@@ -34,6 +34,18 @@ describe('guidanceDiff', () => {
     assert.deepEqual(rows.filter((r) => r.kind === 'del').map((r) => [r.text, !!r.undone]), [['Name the files.', true]]);
   });
 
+  it('diffs a long guidance against a short proposal', () => {
+    const long = Array.from({ length: 300_000 }, (_, i) => `l${i}`).join('\n');
+    const rows = guidanceDiff(long, 'l0\nnew line');
+    assert.equal(rows.filter((r) => r.kind === 'del').length, 299_999);
+    assert.deepEqual(rows.filter((r) => r.kind !== 'del').map((r) => [r.kind, r.text]), [['same', 'l0'], ['add', 'new line']]);
+  });
+
+  it('keeps the shared first and last lines as unchanged rows around an edit', () => {
+    const rows = guidanceDiff('a\nb\nc\nd', 'a\nB\nc\nd');
+    assert.deepEqual(rows.map((r) => r.kind), ['same', 'del', 'add', 'same', 'same']);
+  });
+
   it('marks nothing as undone when the guidance has not changed since the proposal', () => {
     const rows = guidanceDiff('A.\nB.', 'A.', 'A.\nB.');
     assert.equal(rows.some((r) => r.undone), false);

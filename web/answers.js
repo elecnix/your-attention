@@ -325,23 +325,33 @@ export function wordDiff(before, after) {
 export function guidanceDiff(current, proposed, base) {
   const x = String(current ?? '').split('\n');
   const y = String(proposed ?? '').split('\n');
-  const rows = [];
-  if (x.length * y.length > 4000000) {
-    for (const text of x) rows.push({ kind: 'del', text });
-    for (const text of y) rows.push({ kind: 'add', text });
+  // The lines both texts start and end with need no table, and a proposal usually changes a few lines in the middle.
+  let head = 0;
+  while (head < x.length && head < y.length && x[head] === y[head]) head++;
+  let tail = 0;
+  while (tail < x.length - head && tail < y.length - head && x[x.length - 1 - tail] === y[y.length - 1 - tail]) tail++;
+  const xm = x.slice(head, x.length - tail);
+  const ym = y.slice(head, y.length - tail);
+  const rows = x.slice(0, head).map((text) => ({ kind: 'same', text }));
+  const w = ym.length + 1;
+  // One flat table of at most four million cells, 16 MB. Past that the middle shows as removed, then added.
+  if ((xm.length + 1) * w > 4000000) {
+    for (const text of xm) rows.push({ kind: 'del', text });
+    for (const text of ym) rows.push({ kind: 'add', text });
   } else {
-    const t = Array.from({ length: x.length + 1 }, () => new Uint32Array(y.length + 1));
-    for (let i = x.length - 1; i >= 0; i--) for (let j = y.length - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+    const t = new Uint32Array((xm.length + 1) * w);
+    for (let i = xm.length - 1; i >= 0; i--) for (let j = ym.length - 1; j >= 0; j--) t[i * w + j] = xm[i] === ym[j] ? t[(i + 1) * w + j + 1] + 1 : Math.max(t[(i + 1) * w + j], t[i * w + j + 1]);
     let i = 0;
     let j = 0;
-    while (i < x.length && j < y.length) {
-      if (x[i] === y[j]) { rows.push({ kind: 'same', text: x[i++] }); j++; }
-      else if (t[i + 1][j] >= t[i][j + 1]) rows.push({ kind: 'del', text: x[i++] });
-      else rows.push({ kind: 'add', text: y[j++] });
+    while (i < xm.length && j < ym.length) {
+      if (xm[i] === ym[j]) { rows.push({ kind: 'same', text: xm[i++] }); j++; }
+      else if (t[(i + 1) * w + j] >= t[i * w + j + 1]) rows.push({ kind: 'del', text: xm[i++] });
+      else rows.push({ kind: 'add', text: ym[j++] });
     }
-    while (i < x.length) rows.push({ kind: 'del', text: x[i++] });
-    while (j < y.length) rows.push({ kind: 'add', text: y[j++] });
+    while (i < xm.length) rows.push({ kind: 'del', text: xm[i++] });
+    while (j < ym.length) rows.push({ kind: 'add', text: ym[j++] });
   }
+  for (const text of x.slice(x.length - tail)) rows.push({ kind: 'same', text });
   for (let k = 0; k < rows.length;) {
     if (rows[k].kind !== 'del') { k++; continue; }
     let d = k;

@@ -126,7 +126,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `follows` | The card this one follows up on. The inbox sets `followedBy` on that card. |
 | `deliver` | `stream` (the default) or `none` for a card that only shows state. |
 
-Only the token that posted a card can change it or acknowledge its answer. The inbox never sends that token id to clients.
+Only the token that posted a card can change it or acknowledge its answer. The inbox posts a guidance card itself and gives it the token of the proposing agent, so that agent may acknowledge the answer and close the card, and an edit fails with 403 because only the inbox may post as `system`. The inbox never sends that token id to clients.
 
 ## Answers
 

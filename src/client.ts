@@ -240,13 +240,16 @@ export class Client {
       if (ev.type === 'guidance') this.guidanceSeen.set(agent, Math.max(this.guidanceSeen.get(agent) ?? 0, ev.guidance.version));
       if (ev.type !== 'hello') return;
       const known = this.guidanceSeen.get(agent);
-      this.guidanceSeen.set(agent, Math.max(known ?? 0, ev.guidance));
-      if (known === undefined || ev.guidance <= known) return;
+      // The first hello of this process sets the version it starts from.
+      if (known === undefined) { this.guidanceSeen.set(agent, ev.guidance); return; }
+      if (ev.guidance <= known) return;
       try {
         const g = await this.guidance();
-        this.guidanceSeen.set(agent, Math.max(ev.guidance, g.version));
+        // A guidance event may have arrived while the fetch ran: hand over the fetched text only when it is newer still.
+        if (g.version <= (this.guidanceSeen.get(agent) ?? 0)) return;
+        this.guidanceSeen.set(agent, g.version);
         await onEvent({ type: 'guidance', id: `hello-${g.version}`, guidance: { text: g.text, version: g.version, at: g.at } });
-      } catch { /* the agent can still read the guidance with card_guidance */ }
+      } catch { /* the next hello tries again, and the agent can read the guidance with card_guidance */ }
     };
     while (!signal.aborted) {
       const url = this.urls[link % this.urls.length] ?? this.url;
