@@ -169,7 +169,7 @@ describe('guidance', () => {
     assert.equal(ev.card.id, card.id);
     assert.deepEqual([ev.answer.values['choice']].flat(), ['approve']);
     assert.equal(ev.answer.comment, 'Keep it short next time.');
-    assert.equal(inbox.ack(agent, card.id).readAt !== null, true, 'the proposer acknowledges the answer');
+    assert.equal(typeof inbox.ack(agent, card.id).readAt, 'number', 'the proposer acknowledges the answer');
   });
 
   it('delivers a rejection and its comment to a proposing agent that connects later', async () => {

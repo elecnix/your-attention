@@ -519,16 +519,29 @@ export function BroadcastForm({ card, cards = [], guidance, onDone, onSkip }) {
   const draftKey = `draft:${card.id}:comment`;
   const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
   const [whole, setWhole] = React.useState(false);
+  const [error, setError] = React.useState(null);
   const current = guidance || b.base || { text: '', version: 0 };
   const changed = !!(b.base && guidance && b.base.version !== guidance.version);
   const rows = guidanceDiff(current.text, b.text, changed ? b.base.text : undefined);
   const same = rows.filter((r) => r.kind === 'same').length;
-  const send = (choice) => api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] }, comment: comment.trim() })
-    .then(() => { store.del(draftKey); onDone(); });
+  const matches = same === rows.length;
+  // A failed answer keeps the comment and says why, so the person can send it again.
+  async function send(choice) {
+    setError(null);
+    try {
+      const res = await api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] }, comment: comment.trim() });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+      store.del(draftKey);
+      onDone();
+    } catch (e) {
+      setError(`The answer did not go: ${String(e.message || e)}`);
+    }
+  }
   const lines = [];
   for (let k = 0; k < rows.length; k++) {
     const r = rows[k];
     if (r.kind === 'same' && !whole) {
+      if (matches) break;
       let n = k;
       while (n < rows.length && rows[n].kind === 'same') n++;
       lines.push(h('div', { key: k, className: 'same-run' }, `${n - k} unchanged line${n - k === 1 ? '' : 's'}`));
@@ -542,7 +555,7 @@ export function BroadcastForm({ card, cards = [], guidance, onDone, onSkip }) {
   return h('div', { className: 'broadcast' },
     h('div', { className: 'field' }, `${b.from ? `${agentName(b.from, cards)} proposes` : 'Proposed'} changes to card guidance version ${current.version}`),
     changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
-    h('div', { className: 'guidance-diff' }, lines.length ? lines : h('div', { className: 'same-run' }, 'The proposal matches the current guidance.')),
+    h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
     same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
     h('div', { className: 'agents' }, b.agents.length ? b.agents.map((a) => h('label', { key: a },
       h('input', { type: 'checkbox', checked: picked.has(a), onChange: () => setPicked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards)))
@@ -552,7 +565,8 @@ export function BroadcastForm({ card, cards = [], guidance, onDone, onSkip }) {
       h('div', { className: 'html-answer-actions' },
         h('button', { type: 'button', className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),
         h('button', { type: 'button', className: 'btn', onClick: () => send('reject') }, 'Reject'),
-        h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now'))));
+        h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now')),
+      error && h('div', { className: 'note warn' }, error)));
 }
 
 export function NotifyToggle() {

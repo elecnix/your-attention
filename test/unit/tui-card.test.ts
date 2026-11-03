@@ -190,6 +190,14 @@ describe('a guidance card', () => {
     assert.match(text(), /Lead with the goal/);
   });
 
+  it('says when the proposal matches the current guidance', () => {
+    const same = card({ ...proposal, broadcast: { ...proposal.broadcast!, text: current } });
+    const s: InboxState = { cards: [summarize(same, undefined)], answers: {}, presence: {}, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };
+    const view = new CardView(same, { theme, address: () => '', act: () => {}, fileText: () => undefined, now: () => 0 });
+    const shown = view.build(70, s, buildQueue(s, 'none')).lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+    assert.match(shown, /The proposal matches the current guidance\./);
+  });
+
   it('has a comment field, Skip for now, and sends the comment with the answer', () => {
     const { view, text } = draw();
     assert.match(text(), /Comment[\s\S]*\[ Approve and send \][\s\S]*\[ Reject \][\s\S]*\[ Skip for now \]/);

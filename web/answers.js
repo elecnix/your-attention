@@ -320,8 +320,8 @@ export function wordDiff(before, after) {
 
 // The proposed guidance against the current guidance, line by line in order, from the longest common run of lines.
 // A run of removed lines and the run of added lines after it pair up, line by line, for word marks, as Changes pairs
-// them. With `base`, the guidance the proposal started from, a removed line that `base` lacks is marked `undone`: it
-// came after the proposal, and approving removes it.
+// them. With `base`, the guidance the proposal started from, a removed line is marked `undone` when the current guidance
+// has more copies of it than `base`: it came after the proposal, and approving removes it.
 export function guidanceDiff(current, proposed, base) {
   const x = String(current ?? '').split('\n');
   const y = String(proposed ?? '').split('\n');
@@ -355,8 +355,14 @@ export function guidanceDiff(current, proposed, base) {
     k = e;
   }
   if (base !== undefined && base !== current) {
-    const before = new Set(String(base).split('\n'));
-    for (const r of rows) if (r.kind === 'del' && r.text.trim() && !before.has(r.text)) r.undone = true;
+    const gained = new Map();
+    for (const l of x) gained.set(l, (gained.get(l) || 0) + 1);
+    for (const l of String(base).split('\n')) gained.set(l, (gained.get(l) || 0) - 1);
+    for (const r of rows) {
+      if (r.kind !== 'del' || !r.text.trim() || !(gained.get(r.text) > 0)) continue;
+      r.undone = true;
+      gained.set(r.text, gained.get(r.text) - 1);
+    }
   }
   return rows;
 }

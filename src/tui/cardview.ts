@@ -382,7 +382,7 @@ export class CardView {
     doc.para([{ text: `${b.from ? `${sanitize(agentName(b.from, s.cards))} proposes` : 'Proposed'} changes to card guidance version ${current.version}`, style: st.dim }]);
     if (changed) doc.para([{ text: `Warning: the guidance changed after the agent proposed this text. The proposal starts from version ${b.base!.version}, and the guidance is now version ${s.guidance!.version}. Approving removes the lines marked as added after the proposal.`, style: st.warn }]);
     const whole = same > 0 && toggle('meta:guidance-full', `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`);
-    if (!rows.length) doc.para([{ text: 'The proposal matches the current guidance.', style: st.dim }]);
+    if (same === rows.length && !whole) { doc.para([{ text: 'The proposal matches the current guidance.', style: st.dim }]); return; }
     for (let k = 0; k < rows.length; k++) {
       const r = rows[k]!;
       if (r.kind === 'same' && !whole) {

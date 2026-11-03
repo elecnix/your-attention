@@ -52,3 +52,21 @@ test('a comment and Reject go to the agent that proposed the guidance', async ({
   expect(ev?.type === 'answer' && ev.answer.comment).toBe('Name the widget instead of the screenshot.');
   expect((await inbox.agent.guidance()).text).not.toContain(p.added);
 });
+
+test('a guidance answer that fails keeps the comment and says why', async ({ page }) => {
+  const p = await proposal();
+  await inbox.agent.proposeGuidance(p.text, 's-guide');
+  await inbox.open(page);
+  await page.route('**/v1/cards/*/answer', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'the inbox is restarting' }) }));
+  await page.getByLabel('Comment').fill('Keep this comment.');
+  await page.getByRole('button', { name: 'Reject' }).click();
+  await expect(page.locator('.broadcast .note.warn')).toContainText('the inbox is restarting');
+  await expect(page.getByLabel('Comment')).toHaveValue('Keep this comment.');
+  await expect(page.locator('.card-title')).toHaveText('Send new card guidance to agents?');
+});
+
+test('a proposal that matches the current guidance says so', async ({ page }) => {
+  await inbox.agent.proposeGuidance((await inbox.agent.guidance()).text, 's-guide');
+  await inbox.open(page);
+  await expect(page.locator('.guidance-diff')).toContainText('The proposal matches the current guidance.');
+});

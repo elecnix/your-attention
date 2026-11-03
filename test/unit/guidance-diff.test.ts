@@ -29,6 +29,11 @@ describe('guidanceDiff', () => {
     assert.deepEqual(undone, ['Name the files.']);
   });
 
+  it('marks the second copy of a line that the guidance gained after the proposal', () => {
+    const rows = guidanceDiff('Lead with the goal.\nName the files.\nName the files.', 'Lead with the goal.\nName the files.', 'Lead with the goal.\nName the files.');
+    assert.deepEqual(rows.filter((r) => r.kind === 'del').map((r) => [r.text, !!r.undone]), [['Name the files.', true]]);
+  });
+
   it('marks nothing as undone when the guidance has not changed since the proposal', () => {
     const rows = guidanceDiff('A.\nB.', 'A.', 'A.\nB.');
     assert.equal(rows.some((r) => r.undone), false);
