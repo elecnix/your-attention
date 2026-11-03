@@ -87,3 +87,32 @@ describe('a watcher that leaves answers unread', () => {
     }
   });
 });
+
+describe('finding what arrived while no watcher was running', () => {
+  it('counts the answers this token has not acknowledged, and names the cards', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-unread-'));
+    const env = { ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: path.join(home, '.your-attention') };
+    const serve = spawn(process.execPath, [...CLI, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
+    try {
+      const file = path.join(env.YOUR_ATTENTION_HOME, 'server.json');
+      const { url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined));
+      const read = (f: string) => fs.readFileSync(path.join(env.YOUR_ATTENTION_HOME, f), 'utf8').trim();
+      const agent = read('agent-token');
+      const owner = read('owner-token');
+      await callAt(url, agent, 'POST', '/v1/cards', { id: 'one', agent: 'cli:deploy', title: 'First' });
+      await callAt(url, agent, 'POST', '/v1/cards', { id: 'two', agent: 'cli:deploy', title: 'Second' });
+      await callAt(url, agent, 'POST', '/v1/cards', { id: 'elsewhere', agent: 'cli:other', title: 'Other agent' });
+      const before = (await (await callAt(url, agent, 'GET', '/v1/unread?agent=cli:deploy')).json()) as { unread: number; cards: string[] };
+      assert.deepEqual(before, { unread: 0, cards: [] }, 'a card nobody answered is not unread');
+      for (const id of ['one', 'two', 'elsewhere']) await callAt(url, owner, 'POST', `/v1/cards/${id}/answer`, { values: {} });
+      const after = (await (await callAt(url, agent, 'GET', '/v1/unread?agent=cli:deploy')).json()) as { unread: number; cards: string[] };
+      assert.deepEqual(after, { unread: 2, cards: ['one', 'two'] }, 'the two answers for that agent');
+      await callAt(url, agent, 'POST', '/v1/cards/one/ack', {});
+      const left = (await (await callAt(url, agent, 'GET', '/v1/unread?agent=cli:deploy')).json()) as { unread: number; cards: string[] };
+      assert.deepEqual(left, { unread: 1, cards: ['two'] }, 'an ack takes one out');
+    } finally {
+      serve.kill();
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+    }
+  });
+});

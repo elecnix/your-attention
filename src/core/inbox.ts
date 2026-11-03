@@ -89,6 +89,8 @@ export const DEFAULT_GUIDANCE = [
 export const MAX_ATTACHMENTS = 10;
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_ANSWER_IMAGES = 10;
+/** How many card ids `unread` names before it only counts. A command line has a length. */
+export const UNREAD_ID_LIMIT = 20;
 // The images of one answer share a byte budget, because the route reads a body of 16 MB and base64 costs four thirds:
 // ten images of 8 MB each would make a body no route accepts.
 export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -1209,6 +1211,22 @@ export class Inbox {
       .filter((a) => !a.deliveredAt)
       .map((a) => ({ card: this.getCard(a.card), answer: a }))
       .filter(({ card }) => card.deliver === 'stream' && cardState(card, this.store.get('answers', card.id)) !== 'closed' && !this.isOnline(card.agent));
+  }
+
+  /** The answers this caller has not consumed: stored, and never acknowledged. `agent` narrows it to one agent, which
+   * is what a watcher asks about. The ids come with the count, so a caller can acknowledge them without a second read. */
+  unread(caller: Caller, agent?: string): { unread: number; cards: string[] } {
+    const mine = this.store.list<Answer>('answers')
+      .filter((a) => !a.readAt)
+      .filter((a) => {
+        const card = this.store.get<Card>('cards', a.card);
+        if (!card || cardState(card, a) === 'closed') return false;
+        if (caller.role !== 'owner' && card.token !== caller.token) return false;
+        return agent === undefined || card.agent === agent;
+      })
+      .map((a) => a.card)
+      .sort();
+    return { unread: mine.length, cards: mine.slice(0, UNREAD_ID_LIMIT) };
   }
 
   /** Cards that match the words, best first. `answered` keeps only cards the person answered. */

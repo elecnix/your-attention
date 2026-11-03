@@ -336,6 +336,21 @@ switch (command) {
     }
     if (!pairings.length) pairings.push(['none', 'pair with `your-attention pair <url>`']);
 
+    // What the agent this machine resolves to was given and never acknowledged. This is the command an agent runs when
+    // it wonders whether an answer arrived while it was away.
+    // `client.json` can parse to anything at all, and `loadConfig` trusts it: a file holding `null` or `{"url":42}` is a
+    // pairing this machine cannot use, and `status` reports that below rather than failing on it.
+    const mine = loadConfig();
+    const usable = mine && typeof mine.url === 'string' && typeof mine.token === 'string' ? mine : undefined;
+    const left = usable ? await new Client(usable).unread().catch(() => undefined) : undefined;
+    if (left) {
+      const more = left.unread - left.cards.length;
+      const line = left.unread
+        ? `${left.unread}: your-attention ack ${left.cards.join(' ')}${more > 0 ? ` (and ${more} more)` : ''}`
+        : 'none';
+      console.log(`${section('Answers this machine has not read', [['not read', line]])}\n`);
+    }
+
     console.log(section('Inbox on this machine', inbox));
     console.log(`\n${section('Files on this machine', files)}`);
     console.log(`\n${section('Paired inboxes', pairings)}`);
@@ -543,6 +558,10 @@ switch (command) {
       await c.ack(ev.card.id).catch((e: Error) => console.error(`Could not mark card ${ev.card.id} read: ${e.message}`));
     }, stop.signal);
     say();
+    // The notice above covers what this process printed. A watcher that was down, or that started after an answer
+    // landed, learns the rest from the inbox: the count, and the cards to acknowledge.
+    const left = await c.unread(agent).catch(() => undefined);
+    if (left && left.unread > 0 && !values.ack) console.error(`The inbox holds ${left.unread} unread answer${left.unread === 1 ? '' : 's'} for ${agent}: your-attention ack ${left.cards.join(' ')}${left.unread > left.cards.length ? ` (and ${left.unread - left.cards.length} more)` : ''}`);
     break;
   }
   case 'triage': {
