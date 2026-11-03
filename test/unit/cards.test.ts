@@ -1,7 +1,7 @@
 // Card features from the batch of principles about the card model.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Inbox, InboxError, MAX_CARD_BYTES, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, type Caller } from '../../src/core/inbox.ts';
+import { Inbox, InboxError, MAX_CARD_BYTES, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 
@@ -145,6 +145,51 @@ describe('guidance', () => {
     await inbox.answer(card.id, { values: { choice: 'reject' } });
     assert.equal(inbox.guidance().version, 1);
     assert.equal(inbox.getCard(card.id).closed?.kind, 'resolved');
+  });
+
+  it('records the proposing agent and the guidance the proposal starts from', () => {
+    const { inbox, agent } = setup();
+    const before = inbox.guidance();
+    const card = inbox.proposeGuidance('Always include a diff.', { caller: agent, agent: 's1' });
+    assert.equal(card.broadcast?.from, 's1');
+    assert.deepEqual(card.broadcast?.base, { version: before.version, text: before.text });
+    assert.throws(() => inbox.patchCard(agent, card.id, [{ old: 'diff', new: 'table' }]), (e: unknown) => e instanceof InboxError && e.status === 403);
+    assert.equal(inbox.close(agent, card.id, 'retracted', 'Never mind.').closed?.kind, 'retracted', 'the proposer may retract its proposal');
+  });
+
+  it('updates the guidance on Approve, and delivers the answer and its comment to the proposing agent', async () => {
+    const { inbox, agent } = setup();
+    const heard: AgentEvent[] = [];
+    inbox.connect(agent, 's1', (e) => heard.push(e));
+    const card = inbox.proposeGuidance('Always include a diff.', { caller: agent, agent: 's1' });
+    await inbox.answer(card.id, { values: { choice: 'approve', agents: [] }, comment: 'Keep it short next time.' });
+    assert.equal(inbox.guidance().text, 'Always include a diff.');
+    const ev = heard.find((e) => e.type === 'answer');
+    assert.ok(ev && ev.type === 'answer', 'the proposer receives the answer');
+    assert.equal(ev.card.id, card.id);
+    assert.deepEqual([ev.answer.values['choice']].flat(), ['approve']);
+    assert.equal(ev.answer.comment, 'Keep it short next time.');
+    assert.equal(inbox.ack(agent, card.id).readAt !== null, true, 'the proposer acknowledges the answer');
+  });
+
+  it('delivers a rejection and its comment to a proposing agent that connects later', async () => {
+    const { inbox, agent } = setup();
+    const card = inbox.proposeGuidance('Never mind.', { caller: agent, agent: 's1' });
+    await inbox.answer(card.id, { values: { choice: 'reject' }, comment: 'Too vague.' });
+    const heard: AgentEvent[] = [];
+    inbox.connect(agent, 's1', (e) => heard.push(e));
+    const ev = heard.find((e) => e.type === 'answer');
+    assert.ok(ev && ev.type === 'answer');
+    assert.equal(ev.answer.comment, 'Too vague.');
+    assert.equal(inbox.guidance().version, 1);
+  });
+
+  it('keeps the proposing agent token out of the card that clients read', () => {
+    const { inbox } = setup();
+    const caller: Caller = { token: 'proposer-token-id', role: 'agent' };
+    const card = inbox.proposeGuidance('Always include a diff.', { caller, agent: 's1' });
+    assert.equal(publicCard(card).token, undefined);
+    assert.equal(JSON.stringify(inbox.state().cards).includes(caller.token), false);
   });
 });
 

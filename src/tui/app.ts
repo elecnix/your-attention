@@ -139,7 +139,8 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       }
     } else if (c.broadcast && !c.closed) {
       const picked = (view.store.get('broadcast', 'agents') ?? {}) as Record<string, boolean>;
-      body = { values: { choice: msg === 'approve' ? 'approve' : 'reject', agents: c.broadcast.agents.filter((a) => picked[a] ?? true) }, comment: '' };
+      const comment = String(view.store.get('broadcast', 'comment') ?? '').trim();
+      body = { values: { choice: msg === 'approve' ? 'approve' : 'reject', agents: c.broadcast.agents.filter((a) => picked[a] ?? true) }, comment };
     } else {
       body = { ...view.answer(), version: c.version };
     }

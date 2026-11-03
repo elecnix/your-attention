@@ -19,3 +19,9 @@ export function recommendationNames(recommendation: string | undefined, label: s
 export function recommendedOptions(card: Pick<Card, 'options'> & Partial<Card>): { ids: string[]; inside: boolean; text: string };
 /** The recommendation without the label it starts with, capitalized, or as it is when it does not start with the label. */
 export function recommendationRest(recommendation: string | undefined, label: string): string;
+/** The words of a removed line and of the added line that replaced it, each marked changed or not, or null when they share no word. */
+export function wordDiff(before: string, after: string): { del: [string, boolean][]; add: [string, boolean][] } | null;
+/** One line of a guidance diff: unchanged, removed or added, with its words marked when it pairs with a changed line. */
+export interface GuidanceRow { kind: 'same' | 'del' | 'add'; text: string; words?: [string, boolean][]; undone?: boolean }
+/** The proposed guidance against the current one, line by line in order. With `base`, a removed line the proposal never saw is `undone`. */
+export function guidanceDiff(current: string, proposed: string, base?: string): GuidanceRow[];

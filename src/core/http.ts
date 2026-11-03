@@ -379,7 +379,10 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     }
     if (a === 'guidance') {
       if (method === 'GET') return json({ ...inbox.guidance(), widgets: inbox.widgetCatalog() });
-      if (method === 'POST') return json(publicCard(inbox.proposeGuidance(String((await readJson<{ text?: string }>(req)).text ?? ''))), 201);
+      if (method === 'POST') {
+        const g = await readJson<{ text?: string; agent?: string }>(req);
+        return json(publicCard(inbox.proposeGuidance(String(g.text ?? ''), g.agent ? { caller: me, agent: String(g.agent) } : undefined)), 201);
+      }
     }
     if (a === 'telemetry' && !b && (method === 'GET' || method === 'PUT')) {
       owner();

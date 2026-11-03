@@ -160,6 +160,43 @@ describe('the card pane', () => {
   });
 });
 
+describe('a guidance card', () => {
+  const current = 'Lead with the goal.\nGive two options.\nEnd with a recommendation.';
+  const proposal = card({
+    id: 'g', title: 'Send new card guidance to agents?', agent: 'system', kind: 'system', deliver: 'none',
+    broadcast: { text: 'Lead with the goal.\nGive three options.\nEnd with a recommendation.\nAttach a screenshot.', agents: ['s1'], from: 's1', base: { version: 1, text: current } },
+  });
+  const draw = () => {
+    const acts: unknown[] = [];
+    const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: (_v, a) => acts.push(a), fileText: () => undefined, now: () => 600_000 };
+    const s: InboxState = { cards: [summarize(proposal, undefined)], answers: {}, presence: {}, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };
+    const view = new CardView(proposal, host);
+    const text = () => view.build(70, s, buildQueue(s, 'none')).lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+    return { view, text, acts };
+  };
+
+  it('shows the proposal as a diff against the current guidance, with the unchanged lines collapsed', () => {
+    const { view, text } = draw();
+    const shown = text();
+    assert.match(shown, /− Give two options\./);
+    assert.match(shown, /\+ Give three options\./);
+    assert.match(shown, /\+ Attach a screenshot\./);
+    assert.doesNotMatch(shown, /Lead with the goal/);
+    const stop = view.stops().find((x) => x === 'meta:guidance-full');
+    assert.ok(stop, `no stop for the full text in ${view.stops().join(', ')}`);
+    view.focus = stop;
+    text();
+    view.key({ type: 'key', name: 'enter', ctrl: false, alt: false, shift: false });
+    assert.match(text(), /Lead with the goal/);
+  });
+
+  it('has a comment field, Skip for now, and sends the comment with the answer', () => {
+    const { view, text } = draw();
+    assert.match(text(), /Comment[\s\S]*\[ Approve and send \][\s\S]*\[ Reject \][\s\S]*\[ Skip for now \]/);
+    assert.ok(view.stops().some((x) => x.startsWith('field:broadcast/comment')), `no comment field in ${view.stops().join(', ')}`);
+  });
+});
+
 describe('focus on a card that has not drawn yet', () => {
   it('puts the focus on the first field, or the last stop, at the first draw', () => {
     const c = card({ id: 'fresh', title: 'Fresh', options: [{ id: 'y', label: 'Yes' }] });

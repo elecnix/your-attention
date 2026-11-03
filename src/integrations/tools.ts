@@ -80,7 +80,7 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_guidance',
-    description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it.',
+    description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it, or rejects it. Their answer and comment come back to you, so you can revise the text and propose again.',
     schema: { type: 'object', properties: { propose: { type: 'string', description: 'The new guidance text. Leave it out to read the current guidance.' } } },
   },
   {

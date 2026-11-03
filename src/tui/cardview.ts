@@ -3,7 +3,7 @@
 // A recommendation that names an option shows inside that option instead.
 // Each interactive part is a Tab stop. Secret, broadcast and HTML cards get forms in OpenUI Lang too, so one
 // renderer draws every card.
-import { answerValues, cardSource, changeSteps, describe, formValues, optionValue, recommendedOptions } from '../../web/answers.js';
+import { answerValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, recommendedOptions } from '../../web/answers.js';
 import { cardAge } from '../../web/age.js';
 import { CLOSED_LABEL, STATE_LABEL, agentName, presenceOf, type InboxState, type Queue } from '../../web/queue.js';
 import type { CardSummary } from '../core/summary.ts';
@@ -44,12 +44,13 @@ export function terminalSource(c: Card, cards: CardSummary[]): string {
   }
   if (c.broadcast && !c.closed) {
     const agents = c.broadcast.agents;
+    // The card view draws the proposal as a diff above this form.
     return [
-      'root = Card([t, f])',
-      `t = CodeBlock("text", ${J(c.broadcast.text)})`,
-      `f = Form("broadcast", b, [${agents.length ? 'fa' : ''}])`,
+      'root = Card([f])',
+      `f = Form("broadcast", b, [${agents.length ? 'fa, ' : ''}fc])`,
       ...(agents.length ? [`fa = FormControl("Agents", CheckBoxGroup("agents", [${agents.map((a) => `CheckBoxItem(${J(agentName(a, cards))}, "", ${J(a)}, true)`).join(', ')}]))`] : []),
-      buttons([['Approve and send', 'approve', 'primary'], ['Reject', 'reject', 'secondary']]),
+      `fc = FormControl("Comment", TextArea("comment", ${J(c.broadcast.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?')}, 3))`,
+      buttons([['Approve and send', 'approve', 'primary'], ['Reject', 'reject', 'secondary'], ['Skip for now', 'skip', 'secondary']]),
     ].join('\n');
   }
   if (c.html !== undefined) {
@@ -257,6 +258,7 @@ export class CardView {
     doc.gap();
     doc.para([{ text: sanitize(card.title), style: { ...st.title, ...(theme.caps.color ? {} : { underline: true }) } }]);
     if (!card.broadcast && card.text) { doc.gap(); markdown(doc, card.text, md); linkStops(); }
+    if (card.broadcast && !card.closed) this.guidance(doc, toggle, s);
     // A recommendation that names one of the options shows inside that option, as on the page.
     const recommends = recommendedOptions(card);
     if (card.recommendation && !recommends.inside) {
@@ -365,6 +367,38 @@ export class CardView {
       table(sub, rows, [], this.host.theme);
     } else codeBlock(sub, text, [], this.host.theme);
     for (const l of sub.lines) doc.push({ spans: [{ text: '  ' }, ...l.spans] });
+  }
+
+  /** A guidance proposal as a diff against the current guidance, as the page shows it: the unchanged lines collapse
+   * behind a toggle, and a note says when the guidance changed after the agent proposed the text. */
+  private guidance(doc: Doc, toggle: (id: string, label: string) => boolean, s: InboxState): void {
+    const { s: st } = this.host.theme;
+    const b = this.card.broadcast!;
+    const current = s.guidance ?? b.base ?? { text: '', version: 0 };
+    const changed = !!(b.base && s.guidance && b.base.version !== s.guidance.version);
+    const rows = guidanceDiff(current.text, b.text, changed ? b.base!.text : undefined);
+    const same = rows.filter((r) => r.kind === 'same').length;
+    doc.gap();
+    doc.para([{ text: `${b.from ? `${sanitize(agentName(b.from, s.cards))} proposes` : 'Proposed'} changes to card guidance version ${current.version}`, style: st.dim }]);
+    if (changed) doc.para([{ text: `Warning: the guidance changed after the agent proposed this text. The proposal starts from version ${b.base!.version}, and the guidance is now version ${s.guidance!.version}. Approving removes the lines marked as added after the proposal.`, style: st.warn }]);
+    const whole = same > 0 && toggle('meta:guidance-full', `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`);
+    if (!rows.length) doc.para([{ text: 'The proposal matches the current guidance.', style: st.dim }]);
+    for (let k = 0; k < rows.length; k++) {
+      const r = rows[k]!;
+      if (r.kind === 'same' && !whole) {
+        let n = k;
+        while (n < rows.length && rows[n]!.kind === 'same') n++;
+        doc.para([{ text: `  ${n - k} unchanged line${n - k === 1 ? '' : 's'}`, style: st.dim }]);
+        k = n - 1;
+        continue;
+      }
+      const style = r.kind === 'del' ? st.warn : r.kind === 'add' ? st.ok : {};
+      const sign = r.kind === 'del' ? '− ' : r.kind === 'add' ? '+ ' : '  ';
+      const words: Span[] = r.words
+        ? r.words.map(([w, marked]) => ({ text: sanitize(w), style: marked && w.trim() ? { ...style, bold: true, underline: true } : style }))
+        : [{ text: sanitize(r.text), style }];
+      doc.para([{ text: sign, style }, ...words, ...(r.undone ? [{ text: ' (added after the proposal)', style: st.dim }] : [])]);
+    }
   }
 
   /** What changed, edit by edit, behind a toggle as the page shows it. */

@@ -1,4 +1,4 @@
-import type { CardState, Presence, PriorityLevel, Settings } from '../src/core/types.ts';
+import type { CardState, Guidance, Presence, PriorityLevel, Settings } from '../src/core/types.ts';
 import type { AnswerSummary, CardSummary } from '../src/core/summary.ts';
 
 type Card = CardSummary;
@@ -12,6 +12,8 @@ export interface InboxState {
   priorities?: Record<string, string>;
   levels?: PriorityLevel[];
   settings?: Settings;
+  /** The current card guidance, which a guidance card diffs its proposal against. */
+  guidance?: Guidance;
 }
 export type ShownState = CardState | 'reply';
 export const CLOSED_LABEL: Record<string, string>;

@@ -197,8 +197,9 @@ export interface Card {
   rating?: number;
   triage?: Triage;
   history?: CardVersion[];
-  /** On a system card that proposes new guidance: the text and the agents it would reach. */
-  broadcast?: { text: string; agents: string[] };
+  /** On a system card that proposes new guidance: the text and the agents it would reach, the agent that proposed it,
+   * which receives the answer, and the guidance the proposal starts from, so the card can say when it changed since. */
+  broadcast?: { text: string; agents: string[]; from?: string; base?: { version: number; text: string } };
   origin?: Origin;
   /** The name the agent gives itself, such as "the release agent". The page shows it as written. */
   from?: string;

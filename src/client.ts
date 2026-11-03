@@ -206,7 +206,8 @@ export class Client {
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
   /** The card guidance, and the catalog of widgets an agent can place. */
   guidance(): Promise<Guidance & { widgets?: string }> { return this.call('GET', '/v1/guidance'); }
-  proposeGuidance(text: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text }); }
+  /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. */
+  proposeGuidance(text: string, agent?: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text, ...(agent ? { agent } : {}) }); }
   reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }

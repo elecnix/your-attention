@@ -5,7 +5,7 @@ import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { installCopy } from './copy.js';
-import { answerValues, cardSource, changeSteps, describe, formValues, optionValue, parseSource, recommendedOptions } from './answers.js';
+import { answerValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
@@ -492,32 +492,10 @@ export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
     footer);
 }
 
+const marked = (words) => words.map(([w, changed], k) => (changed && w.trim() ? h('mark', { key: k }, w) : w));
+
 // What changed since the version before, line by line.
 // Every revision, newest first: for each one, the lines it removed and added in each field.
-// The words that differ between a removed line and the added line that replaced it,
-// from the longest common run of words. Lines that share no word, or are very long,
-// get no word marks: the whole line changed.
-export function wordDiff(before, after) {
-  const x = before.split(/(\s+)/);
-  const y = after.split(/(\s+)/);
-  if (x.length * y.length > 250000) return null;
-  const t = Array.from({ length: x.length + 1 }, () => new Uint16Array(y.length + 1));
-  for (let i = x.length - 1; i >= 0; i--) for (let j = y.length - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
-  const del = [];
-  const add = [];
-  let i = 0;
-  let j = 0;
-  while (i < x.length && j < y.length) {
-    if (x[i] === y[j]) { del.push([x[i++], false]); add.push([y[j++], false]); }
-    else if (t[i + 1][j] >= t[i][j + 1]) del.push([x[i++], true]);
-    else add.push([y[j++], true]);
-  }
-  while (i < x.length) del.push([x[i++], true]);
-  while (j < y.length) add.push([y[j++], true]);
-  if (!del.some(([w, changed]) => !changed && w.trim())) return null;
-  return { del, add };
-}
-const marked = (words) => words.map(([w, changed], k) => (changed && w.trim() ? h('mark', { key: k }, w) : w));
 
 export function Changes({ card }) {
   const steps = changeSteps(card);
@@ -532,18 +510,49 @@ export function Changes({ card }) {
         f.added.map((l, i) => { const w = i < f.removed.length && wordDiff(f.removed[i], l); return h('div', { key: `a${i}`, className: 'add' }, '+ ', w ? marked(w.add) : l); }))))));
 }
 
-// The system card for new guidance: the person picks the agents, all of them at first.
-export function BroadcastForm({ card, cards = [], onDone }) {
-  const [picked, setPicked] = React.useState(() => new Set(card.broadcast.agents));
-  const send = (choice) => api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] } }).then(onDone);
+// The system card for new guidance: the proposal as a diff against the current guidance, the agents to send it to,
+// all of them at first, and the comment, which goes with the answer to the agent that proposed the text.
+export function BroadcastForm({ card, cards = [], guidance, onDone, onSkip }) {
+  const b = card.broadcast;
+  const [picked, setPicked] = React.useState(() => new Set(b.agents));
+  // The comment draft belongs to the card, as on an HTML card.
+  const draftKey = `draft:${card.id}:comment`;
+  const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
+  const [whole, setWhole] = React.useState(false);
+  const current = guidance || b.base || { text: '', version: 0 };
+  const changed = !!(b.base && guidance && b.base.version !== guidance.version);
+  const rows = guidanceDiff(current.text, b.text, changed ? b.base.text : undefined);
+  const same = rows.filter((r) => r.kind === 'same').length;
+  const send = (choice) => api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] }, comment: comment.trim() })
+    .then(() => { store.del(draftKey); onDone(); });
+  const lines = [];
+  for (let k = 0; k < rows.length; k++) {
+    const r = rows[k];
+    if (r.kind === 'same' && !whole) {
+      let n = k;
+      while (n < rows.length && rows[n].kind === 'same') n++;
+      lines.push(h('div', { key: k, className: 'same-run' }, `${n - k} unchanged line${n - k === 1 ? '' : 's'}`));
+      k = n - 1;
+      continue;
+    }
+    const sign = r.kind === 'del' ? '− ' : r.kind === 'add' ? '+ ' : '  ';
+    lines.push(h('div', { key: k, className: r.kind === 'same' ? 'same' : r.kind, title: r.undone ? 'Added to the guidance after the agent proposed this text. Approving removes it.' : undefined },
+      sign, r.words ? marked(r.words) : r.text, r.undone && h('span', { className: 'undone' }, ' (added after the proposal)')));
+  }
   return h('div', { className: 'broadcast' },
-    h('pre', null, card.broadcast.text),
-    h('div', { className: 'agents' }, card.broadcast.agents.length ? card.broadcast.agents.map((a) => h('label', { key: a },
+    h('div', { className: 'field' }, `${b.from ? `${agentName(b.from, cards)} proposes` : 'Proposed'} changes to card guidance version ${current.version}`),
+    changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
+    h('div', { className: 'guidance-diff' }, lines.length ? lines : h('div', { className: 'same-run' }, 'The proposal matches the current guidance.')),
+    same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
+    h('div', { className: 'agents' }, b.agents.length ? b.agents.map((a) => h('label', { key: a },
       h('input', { type: 'checkbox', checked: picked.has(a), onChange: () => setPicked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards)))
       : h('span', null, 'No agent has connected yet. Agents get the guidance when they connect.')),
-    h('div', { className: 'nav' },
-      h('button', { className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),
-      h('button', { className: 'btn', onClick: () => send('reject') }, 'Reject')));
+    h('div', { className: 'html-answer' },
+      h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: b.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
+      h('div', { className: 'html-answer-actions' },
+        h('button', { type: 'button', className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),
+        h('button', { type: 'button', className: 'btn', onClick: () => send('reject') }, 'Reject'),
+        h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now'))));
 }
 
 export function NotifyToggle() {

@@ -126,6 +126,13 @@ export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, a
   return 'answered';
 }
 
+/** The agent an answer goes to, or null for none. A guidance card closes as the person answers it, and its answer
+ * still goes to the agent that proposed the text. */
+function recipient(card: Card, answer: Answer): string | null {
+  if (card.kind === 'system' && card.broadcast) return card.broadcast.from && card.token ? card.broadcast.from : null;
+  return card.deliver === 'stream' && cardState(card, answer) !== 'closed' ? card.agent : null;
+}
+
 type AgentSend = (ev: AgentEvent) => void;
 type PageSend = (ev: PageEvent) => void;
 
@@ -981,29 +988,44 @@ export class Inbox {
     return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: 1, at: 0 };
   }
 
-  /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. */
-  proposeGuidance(text: string): Card {
+  /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. With `by`,
+   * the answer and its comment go to the agent that proposed the text, which may acknowledge it or retract the card. */
+  proposeGuidance(text: string, by?: { caller: Caller; agent: string }): Card {
     const clean = String(text ?? '').trim();
     if (!clean) throw new InboxError(400, 'text is required');
+    const from = by ? String(by.agent ?? '').trim() : '';
+    if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
     const agents = this.store.list<Presence>('presence').map((p) => p.agent).filter((a) => a !== SYSTEM_AGENT);
+    const base = this.guidance();
     const id = `guidance-${randomId(4)}`;
     this.postCard({ token: '', role: 'owner' }, {
       id, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
       title: 'Send new card guidance to agents?',
-      text: `An agent proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`,
+      text: `${from ? `The agent ${from}` : 'An agent'} proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`,
       options: [{ id: 'approve', label: 'Approve and send' }, { id: 'reject', label: 'Reject' }],
     });
-    const card = { ...this.getCard(id), broadcast: { text: clean, agents } };
+    const card: Card = {
+      ...this.getCard(id),
+      ...(from && by?.caller.token ? { token: by.caller.token } : {}),
+      broadcast: { text: clean, agents, ...(from ? { from } : {}), base: { version: base.version, text: base.text } },
+    };
     this.store.put('cards', id, card);
     this.emit({ type: 'change', card: id });
     return card;
   }
 
+  /** Apply or drop the proposed guidance, close the card, and send the answer to the agent that proposed the text. */
   private resolveBroadcast(card: Card, answer: Answer): void {
     if (!card.broadcast) return;
-    if ([answer.values['choice']].flat()[0] !== 'approve') { this.closeAs(card, 'resolved', 'Rejected: the guidance did not change.'); return; }
-    const picked = Array.isArray(answer.values['agents']) ? (answer.values['agents'] as unknown[]).map(String) : card.broadcast.agents;
-    const guidance: Guidance = { text: card.broadcast.text, version: this.guidance().version + 1, at: this.now() };
+    this.closeAs(card, 'resolved', this.applyBroadcast(card.broadcast, answer));
+    if (card.broadcast.from) this.flush(card.broadcast.from);
+  }
+
+  private applyBroadcast(broadcast: NonNullable<Card['broadcast']>, answer: Answer): string {
+    if ([answer.values['choice']].flat()[0] !== 'approve') return 'Rejected: the guidance did not change.';
+    const picked = Array.isArray(answer.values['agents']) ? (answer.values['agents'] as unknown[]).map(String) : broadcast.agents;
+    const guidance: Guidance = { text: broadcast.text, version: this.guidance().version + 1, at: this.now() };
     this.store.put('meta', 'guidance', guidance);
     let sent = 0;
     for (const [k, subs] of this.agents) {
@@ -1012,7 +1034,7 @@ export class Inbox {
       for (const send of subs) send({ type: 'guidance', id: randomId(6), guidance });
       sent++;
     }
-    this.closeAs(card, 'resolved', `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`);
+    return `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`;
   }
 
   /** The cards a client may read, with their states: all of them for the owner. */
@@ -1201,7 +1223,8 @@ export class Inbox {
     const next: Answer = { ...answer, delivery: 'force', deliveredAt: null, forcedAt: this.now() };
     this.store.put('answers', id, next);
     this.emit({ type: 'change', card: id });
-    this.flush(this.getCard(id).agent);
+    const card = this.getCard(id);
+    this.flush(recipient(card, next) ?? card.agent);
     return this.store.get<Answer>('answers', id) ?? next;
   }
 
@@ -1310,8 +1333,7 @@ export class Inbox {
     for (const answer of this.store.list<Answer>('answers')) {
       if (!answer.deliveredAt || answer.readAt || answer.deliveredTo?.includes(instance)) continue;
       const card = this.store.get<Card>('cards', answer.card);
-      if (!card || card.agent !== agent || (card.token ?? '') !== token || card.deliver !== 'stream') continue;
-      if (cardState(card, answer) === 'closed') continue;
+      if (!card || recipient(card, answer) !== agent || (card.token ?? '') !== token) continue;
       const next: Answer = { ...answer, deliveredTo: [...(answer.deliveredTo ?? []), instance] };
       this.store.put('answers', answer.card, next);
       send({ type: 'answer', id: randomId(6), card: publicCard(card), answer: next });
@@ -1323,8 +1345,7 @@ export class Inbox {
     for (const answer of this.store.list<Answer>('answers')) {
       if (answer.deliveredAt) continue;
       const card = this.store.get<Card>('cards', answer.card);
-      if (!card || card.agent !== agent || card.deliver !== 'stream') continue;
-      if (cardState(card, answer) === 'closed') continue;
+      if (!card || recipient(card, answer) !== agent) continue;
       const subs = this.agents.get(this.key(card.token ?? '', agent));
       if (!subs || subs.size === 0) continue;
       const to = [...subs].map((f) => this.instances.get(f)).filter((x): x is string => !!x);

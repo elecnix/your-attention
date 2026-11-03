@@ -207,7 +207,15 @@
   details.changes mark { color: inherit; border-radius: 3px; padding: 0 2px; }
   details.changes .del mark { background: var(--bad-bg); }
   details.changes .add mark { background: var(--ok-bg); }
-  .broadcast pre { white-space: pre-wrap; background: var(--bg); padding: 10px; border-radius: 8px; }
+  .broadcast .field { color: var(--muted); font-size: calc(13px * var(--text-scale)); }
+  .broadcast .guidance-diff { background: var(--bg); padding: 10px; border-radius: 8px; margin: 6px 0; font-size: calc(13px * var(--text-scale)); }
+  .broadcast .guidance-diff > div { white-space: pre-wrap; }
+  .broadcast .guidance-diff .del { color: var(--bad); }
+  .broadcast .guidance-diff .add { color: var(--ok); }
+  .broadcast .guidance-diff .same-run, .broadcast .guidance-diff .undone { color: var(--muted); font-style: italic; }
+  .broadcast .guidance-diff mark { color: inherit; border-radius: 3px; padding: 0 2px; }
+  .broadcast .guidance-diff .del mark { background: var(--bad-bg); }
+  .broadcast .guidance-diff .add mark { background: var(--ok-bg); }
   .broadcast .agents { display: grid; gap: 4px; margin: 8px 0; font-size: calc(14px * var(--text-scale)); }
   .markdown a, .card-text a, .focus-card label a { color: var(--accent); }
   .card-title { font-size: calc(18px * var(--text-scale)); margin: 4px 0 8px; }
