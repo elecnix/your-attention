@@ -82,6 +82,12 @@ export const ICONS = {
   'self-answered': ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'm9 12 2 2 4-4'],
   'answered-in-terminal': ['M4 17l6-6-6-6', 'M12 19h8'],
   resolved: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'm9 12 2 2 4-4'],
+  // Lucide's file icons, for a file chip by the file's type, and its copy icon.
+  file: ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4'],
+  'file-code': ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4', 'm10 13-2 2 2 2', 'm14 17 2-2-2-2'],
+  'file-image': ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4', 'M10 11a2 2 0 1 0 0 4a2 2 0 1 0 0-4', 'm20 17-1.3-1.3a2.4 2.4 0 0 0-3.4 0L9 22'],
+  'file-text': ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4', 'M10 9H8', 'M16 13H8', 'M16 17H8'],
+  copy: ['M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z', 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'],
 };
 export const Icon = ({ name, tip, cls = '', dim = false, color }) => h('span', { className: `ico ${cls} ${dim ? 'dim' : ''}`, style: color ? { color } : undefined, 'data-tip': tip, role: 'img', 'aria-label': tip, tabIndex: 0 },
   h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, (ICONS[name] || ICONS.circle).map((p) => (typeof p === 'string' ? h('path', { key: p, d: p }) : h('path', { key: p.d, d: p.d, className: p.cls })))));
