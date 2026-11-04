@@ -12,10 +12,11 @@ import { bodyErrors, fallbackBody } from '../adapters/openui-body.ts';
 import { SqliteStorage } from '../adapters/sqlite.ts';
 import { randomId } from '../core/crypto.ts';
 import { createHandler } from '../core/http.ts';
-import type { Caller } from '../core/inbox.ts';
+import type { ApprovalSender, Caller } from '../core/inbox.ts';
 import { agentSocket, pageSocket } from '../core/socket.ts';
 import { WebSocketServer } from 'ws';
 import { Inbox } from '../core/inbox.ts';
+import { herdrApprovals } from '../integrations/herdr/approve.ts';
 import { focusHerdrPane, focusSessionLink } from '../integrations/herdr/focus.ts';
 import { homeDir, writePrivate } from './home.ts';
 import { relayClient } from './links.ts';
@@ -55,6 +56,8 @@ export interface ServeOptions {
   telemetry?: TelemetryEnv;
   /** Offer usage counts in the terminal the inbox runs in, once. Without it, the page offers them. */
   ask?: (question: string) => Promise<boolean>;
+  /** Types approved sentences into panes. The default runs herdr. */
+  approvals?: ApprovalSender;
 }
 
 export interface RunningServer {
@@ -101,7 +104,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals() });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');

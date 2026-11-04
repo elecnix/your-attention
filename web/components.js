@@ -5,11 +5,11 @@ import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { installCopy } from './copy.js';
-import { answerValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, recommendedOptions, wordDiff } from './answers.js';
+import { answerValues, approvalPlace, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
-export { agentName, answerValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions };
+export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions };
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 // Code on every card copies with a click, on the page and in each story.
@@ -432,6 +432,27 @@ function frameTheme() {
 const MAX_FRAME_HEIGHT = 20000;
 /** Turn showing HTML cards on or off for the whole inbox. */
 const setAllowHtml = (on) => fetch(BASE + 'v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: on }) });
+
+// Sentences the inbox types into a herdr pane as the person's message. Each one is off until the person turns it on,
+// and Send answer sends the ones that are on. A sentence already sent for this version stays on and can't be turned off.
+export function Approvals({ card, answer, picks, onToggle }) {
+  const results = answer && answer.version === card.version ? answer.approvalResults || [] : [];
+  return h('div', { className: 'approvals' }, card.approvals.map((a, i) => {
+    const r = results[i];
+    const locked = !!(r && (r.sentAt || r.sendingAt));
+    const on = locked || !!picks[i];
+    const result = approvalResult(a, r);
+    return h('div', { key: i, className: 'approval' },
+      a.label && h('div', { className: 'approval-label' }, a.label),
+      h('div', { className: 'approval-row' },
+        codeBlock(h, a.text, 'text'),
+        h('div', { className: 'approval-actions' },
+          h('button', { type: 'button', className: `btn approval-toggle${on ? ' on' : ''}`, 'aria-pressed': on ? 'true' : 'false', disabled: locked, onClick: () => onToggle(i, !on) }, on ? 'Approved' : 'Approve'),
+          h('a', { className: 'session-link', href: `https://herdr.invalid/v1/pane/${a.pane}`, title: 'Open this pane in herdr' }, 'Open pane'))),
+      h('div', { className: 'approval-place' }, approvalPlace(a)),
+      result && h('div', { className: `approval-result${r.error ? ' failed' : ''}` }, result));
+  }));
+}
 
 // A card with the agent's own HTML. It shows only when the owner allows HTML cards, or asks to see this one.
 export function HtmlCard({ card, allowed, onAnswer, onSkip }) {

@@ -18,6 +18,15 @@ export const cardTools: CardTool[] = [
         recommendation: { type: 'string', description: 'What you would do, and why. Markdown, like text. With options, mark the option you recommend with recommended: true and write only the reasons here: the page shows them inside that option, under a Recommended tag. A recommendation that starts with an option\'s label, such as "Go ahead. The key is read-only.", marks that option too.' },
         options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string', description: 'The choice, in a few words.' }, description: { type: 'string', description: 'What happens if the person picks it, with you in the third person: "This agent reruns the deploy, which changes …". Inline Markdown: **bold**, `code`, links. It shows inside the option\'s box.' }, recommended: { type: 'boolean', description: 'true on the option you recommend. One option at most, unless multiple is true.' } }, required: ['label'] }, description: 'Answer options for a card that asks one question. The page shows each option as a box the person clicks, with its description inside it. Explain each option there, not in a list in the text. For several questions, give each its own field in body forms instead. Every option is optional to the person.' },
         multiple: { type: 'boolean', description: 'Allow more than one option.' },
+        approvals: {
+          type: 'array',
+          description: 'Sentences the inbox types into a herdr pane as the person\'s own message, once the person approves them on the card. Use one when an action needs the person\'s own words in a session, such as lifting an auto-mode denial, instead of asking the person to type the sentence there. The card shows each text with an Approve toggle and an Open pane link. When the person sends the answer with the toggle on, the inbox checks that the pane exists and that its input box holds no draft, then submits the text with `herdr agent prompt`. The answer carries approval_<i> true or false for each one, by its place in this list, and the card shows when each was sent or why it was not. Only the laptop inbox sends approvals: the hosted inbox refuses the card. At most 5.',
+          items: { type: 'object', properties: {
+            pane: { type: 'string', description: 'The herdr pane id to type into, such as w6P:p2, from `herdr agent list` or HERDR_PANE_ID.' },
+            text: { type: 'string', description: 'The exact message to send, at most 1,000 characters, not starting with a dash. Write it in the person\'s voice, as they would type it.' },
+            label: { type: 'string', description: 'Optional. What the approval allows, in a few words, shown above the text.' },
+          }, required: ['pane', 'text'] },
+        },
         priority: { type: 'string', enum: ['now', 'soon', 'later'], description: 'now: blocks your work. soon: needed before you finish. later: can wait.' },
         follows: { type: 'string', description: 'The id of the card this one follows up on.' },
         body: { type: 'string', description: [

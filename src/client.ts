@@ -410,8 +410,14 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
       lines.push(`${q.question} ${v.length ? v.join(', ') : '(no option picked)'}`);
     });
   }
+  card.approvals?.forEach((a, i) => {
+    const r = answer.approvalResults?.[i];
+    const done = !answer.values[`approval_${i}`] ? 'not approved' : r && 'error' in r ? `approved, but not sent: ${r.error}` : 'approved, and the inbox types it into the pane as the person\'s message';
+    lines.push(`Approval ${i + 1} for pane ${a.pane}, "${a.text}": ${done}`);
+  });
   for (const [k, v] of Object.entries(answer.values)) {
     if (card.questions?.length && /^q\d+$/.test(k)) continue;
+    if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;
     // A check box or switch group answers with each item on or off, by the item names the agent gave.
     const on = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => (v as Record<string, unknown>)[x]) : undefined;
     const label = on ? on.join(', ') || '(none turned on)'

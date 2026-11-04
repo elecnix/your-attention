@@ -233,6 +233,27 @@ export function answerValues(card, values) {
   return out;
 }
 
+/** One approval_<i> value per approval on the card: true for each the person turned on, false for the rest. */
+export function approvalValues(card, picks) {
+  return Object.fromEntries((card.approvals || []).map((_, i) => [`approval_${i}`, !!(picks && picks[i])]));
+}
+
+/** The line under an approval that names its pane, and the agent and tab when herdr knew them. */
+export function approvalPlace(a) {
+  const p = a.place || {};
+  const who = [p.agent, p.title].filter(Boolean).join(', ');
+  const where = p.tab ? `tab ${p.tab}${p.workspace ? ` in workspace ${p.workspace}` : ''}` : p.workspace ? `workspace ${p.workspace}` : '';
+  return [`Pane ${a.pane}`, who, where].filter(Boolean).join(' · ');
+}
+
+/** What the inbox did with one approval, or '' for one it did not touch. */
+export function approvalResult(a, r) {
+  if (!r) return '';
+  if (r.sentAt) return `Sent to ${a.pane} at ${new Date(r.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  if (r.sendingAt) return `Sending to ${a.pane}`;
+  return `Not sent to ${a.pane}: ${r.error}`;
+}
+
 // Form values by field name, without the comment.
 export function formValues(formState) {
   const values = {};
@@ -259,6 +280,8 @@ export function describe(card, a) {
   const picks = Object.entries(a.values || {}).map(([k, v]) => {
     const list = [].concat(v);
     if (k === 'choice' && card.options) return list.map((x) => (card.options.find((o) => o.id === x) || {}).label || x).join(', ');
+    const ai = /^approval_(\d+)$/.exec(k);
+    if (ai && card.approvals) { const ap = card.approvals[Number(ai[1])]; return v === true && ap ? `Approved: ${ap.label || ap.text}` : ''; }
     const qi = /^q(\d+)$/.exec(k);
     if (qi && card.questions) return `${card.questions[Number(qi[1])]?.question || k} ${list.join(', ')}`;
     const f = (fields ??= fieldLabels(card.body))[k];
