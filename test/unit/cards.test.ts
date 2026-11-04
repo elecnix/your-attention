@@ -131,7 +131,7 @@ describe('guidance', () => {
     inbox.connect(agent, 's1', (e) => a.push(e));
     inbox.connect(agent, 's2', (e) => b.push(e));
     const card = inbox.proposeGuidance('Always include a diff.');
-    assert.deepEqual(card.broadcast?.agents.sort(), ['s1', 's2']);
+    assert.equal(card.broadcast?.agents, undefined, 'the page lists the online agents from live presence');
     assert.equal(inbox.guidance().version, 1, 'nothing changes before approval');
     await inbox.answer(card.id, { values: { choice: 'approve', agents: ['s1'] } });
     assert.equal(inbox.guidance().text, 'Always include a diff.');
@@ -200,7 +200,7 @@ describe('guidance', () => {
     assert.deepEqual(inbox.deadLetters(), []);
   });
 
-  it('lists only the agents online at the proposal, out of many that connected once, and sends to the ticked ones still online', async () => {
+  it('stores no list of agents, out of many that connected once, and sends to the ticked ones still online', async () => {
     const { inbox, agent, clock } = setup();
     const leave = Array.from({ length: 40 }, (_, i) => inbox.connect(agent, `gone-${i}`, () => {}));
     for (const close of leave) close();
@@ -209,8 +209,7 @@ describe('guidance', () => {
     const heard: Record<string, AgentEvent[]> = { s1: [], s2: [], s3: [] };
     for (const a of ['s1', 's2', 's3']) inbox.connect(agent, a, (e) => heard[a]!.push(e));
     const card = inbox.proposeGuidance('Always include a diff.', { caller: agent, agent: 's1' });
-    assert.deepEqual(card.broadcast?.agents.sort(), ['s1', 's2', 's3']);
-    assert.deepEqual(inbox.getCard(card.id).broadcast?.agents.sort(), ['s1', 's2', 's3'], 'the stored card holds only the online agents');
+    assert.equal(inbox.getCard(card.id).broadcast?.agents, undefined, 'the stored card keeps no list of agents');
     await inbox.answer(card.id, { values: { choice: 'approve', agents: ['s1', 's2', 'gone-0'] } });
     assert.deepEqual(Object.entries(heard).map(([a, evs]) => [a, evs.filter((e) => e.type === 'guidance').length]), [['s1', 1], ['s2', 1], ['s3', 0]]);
     assert.equal(JSON.stringify(inbox.getCard(card.id)).includes('gone-'), false, 'nothing about the offline agents is stored on the card');

@@ -63,7 +63,7 @@ const PRESENCE = {
 const PROPOSAL = 'Lead with the goal.\nGive three options, with the one you recommend first.\nEnd with a recommendation.\nAttach a screenshot to every UI card.';
 const guidanceStory = (guidance) => ({
   render: () => mount(h(BroadcastForm, {
-    card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, agents: ['claude:3239ab8e', 'pi:01a17c01'], from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
+    card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
     presence: PRESENCE, guidance, onDone: () => {}, onSkip: () => {},
   })),
 });

@@ -996,13 +996,12 @@ export class Inbox {
     const from = by ? String(by.agent ?? '').trim() : '';
     if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
-    // Only the agents online now: the page lists the online agents from live presence when it draws the card, and an
-    // offline agent reads the new version when it reconnects or calls card_guidance.
-    const agents = this.store.list<Presence>('presence').filter((p) => p.online && p.agent !== SYSTEM_AGENT).map((p) => p.agent);
     const base = this.guidance();
     const id = `guidance-${randomId(4)}`;
     const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`;
-    const broadcast = { text: clean, agents, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
+    // The card keeps no list of agents: the page lists the online ones from live presence when it draws the card, and
+    // an offline agent reads the new version when it reconnects or calls card_guidance.
+    const broadcast = { text: clean, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
     // The stored card has the proposal in its text and in broadcast, and the guidance it starts from, so it is measured
     // whole before anything is stored. The margin covers the card's other fields, which stay under a kilobyte.
     const size = new TextEncoder().encode(JSON.stringify({ text: cardText, broadcast })).length + 2048;

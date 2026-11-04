@@ -82,7 +82,8 @@ test('the card lists only the agents online now, all ticked, out of many that co
   await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => a.startsWith('s-on-') && p.online).length).toBe(3);
   const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', 's-on-1');
   const stored = (await inbox.state()).cards.find((c) => c.id === card.id);
-  expect(stored?.broadcast?.agents.slice().sort()).toEqual(['s-on-1', 's-on-2', 's-on-3']);
+  expect(stored?.broadcast?.agents).toBeUndefined();
+  expect(JSON.stringify(stored)).not.toContain('s-gone-');
   await inbox.open(page);
   const agents = page.locator('.broadcast .agents');
   await expect(agents.locator('legend')).toHaveText('Send to 3 online agents');
