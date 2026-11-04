@@ -93,6 +93,8 @@ export class Client {
   private readonly seen = new Set<string>();
   /** This process, the same across reconnects, so the inbox sends a restarted agent the answers its earlier process never read. */
   readonly instance = crypto.randomUUID();
+  /** The newest guidance version each agent of this process has seen, from a hello or a guidance event. */
+  private readonly guidanceSeen = new Map<string, number>();
   /** What the inbox checks itself, from GET /v1/info. An inbox from before the field checks everything. */
   private inboxChecks: Promise<{ diagrams: boolean; body: boolean }> | undefined;
 
@@ -206,7 +208,8 @@ export class Client {
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
   /** The card guidance, and the catalog of widgets an agent can place. */
   guidance(): Promise<Guidance & { widgets?: string }> { return this.call('GET', '/v1/guidance'); }
-  proposeGuidance(text: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text }); }
+  /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. */
+  proposeGuidance(text: string, agent?: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text, ...(agent ? { agent } : {}) }); }
   reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
@@ -229,7 +232,26 @@ export class Client {
   async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto'): Promise<void> {
     let link = 0;
     const noSocket = new Set<string>();
-    const deliver = async (ev: AgentEvent): Promise<void> => { if (this.fresh(ev)) await onEvent(ev); };
+    const deliver = async (ev: AgentEvent): Promise<void> => {
+      if (!this.fresh(ev)) return;
+      // Record a guidance version before the handler runs, so a fetch that a hello started never hands over older text.
+      if (ev.type === 'guidance') this.guidanceSeen.set(agent, Math.max(this.guidanceSeen.get(agent) ?? 0, ev.guidance.version));
+      await onEvent(ev);
+      // The inbox sends guidance events only to agents online at the approval. A hello on a reconnect carries the
+      // current version, so an agent that was away when the person approved a newer one fetches it and gets it here.
+      if (ev.type !== 'hello') return;
+      const known = this.guidanceSeen.get(agent);
+      // The first hello of this process sets the version it starts from.
+      if (known === undefined) { this.guidanceSeen.set(agent, ev.guidance); return; }
+      if (ev.guidance <= known) return;
+      try {
+        const g = await this.guidance();
+        // A guidance event may have arrived while the fetch ran: hand over the fetched text only when it is newer still.
+        if (g.version <= (this.guidanceSeen.get(agent) ?? 0)) return;
+        this.guidanceSeen.set(agent, g.version);
+        await onEvent({ type: 'guidance', id: `hello-${g.version}`, guidance: { text: g.text, version: g.version, at: g.at } });
+      } catch { /* the next hello tries again, and the agent can read the guidance with card_guidance */ }
+    };
     while (!signal.aborted) {
       const url = this.urls[link % this.urls.length] ?? this.url;
       try {

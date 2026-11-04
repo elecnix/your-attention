@@ -126,6 +126,13 @@ export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, a
   return 'answered';
 }
 
+/** The agent an answer goes to, or null for none. A guidance card closes as the person answers it, and its answer
+ * still goes to the agent that proposed the text. */
+function recipient(card: Card, answer: Answer): string | null {
+  if (card.kind === 'system' && card.broadcast) return card.broadcast.from && card.token ? card.broadcast.from : null;
+  return card.deliver === 'stream' && cardState(card, answer) !== 'closed' ? card.agent : null;
+}
+
 type AgentSend = (ev: AgentEvent) => void;
 type PageSend = (ev: PageEvent) => void;
 
@@ -981,38 +988,61 @@ export class Inbox {
     return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: 1, at: 0 };
   }
 
-  /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. */
-  proposeGuidance(text: string): Card {
+  /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. With `by`,
+   * the answer and its comment go to the agent that proposed the text, which may acknowledge it or retract the card. */
+  proposeGuidance(text: string, by?: { caller: Caller; agent: string }): Card {
     const clean = String(text ?? '').trim();
     if (!clean) throw new InboxError(400, 'text is required');
-    const agents = this.store.list<Presence>('presence').map((p) => p.agent).filter((a) => a !== SYSTEM_AGENT);
+    const from = by ? String(by.agent ?? '').trim() : '';
+    if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
+    const base = this.guidance();
     const id = `guidance-${randomId(4)}`;
+    const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`;
+    // The card keeps no list of agents: the page lists the online ones from live presence when it draws the card, and
+    // an offline agent reads the new version when it reconnects or calls card_guidance.
+    const broadcast = { text: clean, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
+    // The stored card has the proposal in its text and in broadcast, and the guidance it starts from, so it is measured
+    // whole before anything is stored. The margin covers the card's other fields, which stay under a kilobyte.
+    const size = new TextEncoder().encode(JSON.stringify({ text: cardText, broadcast })).length + 2048;
+    if (size > MAX_CARD_BYTES) throw new InboxError(413, `the guidance card would be ${size} bytes, over the limit of ${MAX_CARD_BYTES}: propose a shorter text`);
     this.postCard({ token: '', role: 'owner' }, {
       id, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
       title: 'Send new card guidance to agents?',
-      text: `An agent proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`,
+      text: cardText,
       options: [{ id: 'approve', label: 'Approve and send' }, { id: 'reject', label: 'Reject' }],
     });
-    const card = { ...this.getCard(id), broadcast: { text: clean, agents } };
+    const card: Card = {
+      ...this.getCard(id),
+      ...(from && by?.caller.token ? { token: by.caller.token } : {}),
+      broadcast,
+    };
     this.store.put('cards', id, card);
     this.emit({ type: 'change', card: id });
     return card;
   }
 
+  /** Apply or drop the proposed guidance, close the card, and send the answer to the agent that proposed the text. */
   private resolveBroadcast(card: Card, answer: Answer): void {
     if (!card.broadcast) return;
-    if ([answer.values['choice']].flat()[0] !== 'approve') { this.closeAs(card, 'resolved', 'Rejected: the guidance did not change.'); return; }
-    const picked = Array.isArray(answer.values['agents']) ? (answer.values['agents'] as unknown[]).map(String) : card.broadcast.agents;
-    const guidance: Guidance = { text: card.broadcast.text, version: this.guidance().version + 1, at: this.now() };
+    this.closeAs(card, 'resolved', this.applyBroadcast(card.broadcast, answer));
+    if (card.broadcast.from) this.flush(card.broadcast.from);
+  }
+
+  private applyBroadcast(broadcast: NonNullable<Card['broadcast']>, answer: Answer): string {
+    if ([answer.values['choice']].flat()[0] !== 'approve') return 'Rejected: the guidance did not change.';
+    // The ticked agents, or every connected one when the answer names none. Only connected agents get the event.
+    const picked = Array.isArray(answer.values['agents']) ? new Set((answer.values['agents'] as unknown[]).map(String)) : undefined;
+    const guidance: Guidance = { text: broadcast.text, version: this.guidance().version + 1, at: this.now() };
     this.store.put('meta', 'guidance', guidance);
     let sent = 0;
     for (const [k, subs] of this.agents) {
       const agent = k.slice(k.indexOf('\n') + 1);
-      if (!picked.includes(agent)) continue;
+      if (picked && !picked.has(agent)) continue;
       for (const send of subs) send({ type: 'guidance', id: randomId(6), guidance });
       sent++;
     }
-    this.closeAs(card, 'resolved', `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`);
+    return `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`;
   }
 
   /** The cards a client may read, with their states: all of them for the owner. */
@@ -1072,10 +1102,14 @@ export class Inbox {
   claim(caller: Caller, id: string, agent: string): Card {
     const card = this.getCard(id);
     if (caller.role !== 'owner' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
-    const next = { ...card, agent: String(agent), token: caller.role === 'owner' ? card.token : caller.token };
+    const token = caller.role === 'owner' ? card.token : caller.token;
+    // A guidance card stays the inbox's system card: the successor takes over as the agent that proposed the text.
+    const next = card.kind === 'system' && card.broadcast
+      ? { ...card, token, broadcast: { ...card.broadcast, from: String(agent) } }
+      : { ...card, agent: String(agent), token };
     this.store.put('cards', id, next);
     this.emit({ type: 'change', card: id });
-    this.flush(next.agent);
+    this.flush(String(agent));
     return next;
   }
 
@@ -1201,7 +1235,8 @@ export class Inbox {
     const next: Answer = { ...answer, delivery: 'force', deliveredAt: null, forcedAt: this.now() };
     this.store.put('answers', id, next);
     this.emit({ type: 'change', card: id });
-    this.flush(this.getCard(id).agent);
+    const card = this.getCard(id);
+    this.flush(recipient(card, next) ?? card.agent);
     return this.store.get<Answer>('answers', id) ?? next;
   }
 
@@ -1210,7 +1245,7 @@ export class Inbox {
     return this.store.list<Answer>('answers')
       .filter((a) => !a.deliveredAt)
       .map((a) => ({ card: this.getCard(a.card), answer: a }))
-      .filter(({ card }) => card.deliver === 'stream' && cardState(card, this.store.get('answers', card.id)) !== 'closed' && !this.isOnline(card.agent));
+      .filter(({ card, answer }) => { const to = recipient(card, answer); return to !== null && !this.isOnline(to); });
   }
 
   /** The answers this caller has not consumed: stored, and never acknowledged. `agent` narrows it to one agent, which
@@ -1220,9 +1255,12 @@ export class Inbox {
       .filter((a) => !a.readAt)
       .filter((a) => {
         const card = this.store.get<Card>('cards', a.card);
-        if (!card || cardState(card, a) === 'closed') return false;
+        if (!card) return false;
+        // A guidance card closes as the person answers it, and its answer waits for the agent that proposed the text.
+        const guidance = card.kind === 'system' && card.broadcast;
+        if (guidance ? recipient(card, a) === null : cardState(card, a) === 'closed') return false;
         if (caller.role !== 'owner' && card.token !== caller.token) return false;
-        return agent === undefined || card.agent === agent;
+        return agent === undefined || (guidance ? card.broadcast?.from : card.agent) === agent;
       })
       .map((a) => a.card)
       .sort();
@@ -1310,8 +1348,7 @@ export class Inbox {
     for (const answer of this.store.list<Answer>('answers')) {
       if (!answer.deliveredAt || answer.readAt || answer.deliveredTo?.includes(instance)) continue;
       const card = this.store.get<Card>('cards', answer.card);
-      if (!card || card.agent !== agent || (card.token ?? '') !== token || card.deliver !== 'stream') continue;
-      if (cardState(card, answer) === 'closed') continue;
+      if (!card || recipient(card, answer) !== agent || (card.token ?? '') !== token) continue;
       const next: Answer = { ...answer, deliveredTo: [...(answer.deliveredTo ?? []), instance] };
       this.store.put('answers', answer.card, next);
       send({ type: 'answer', id: randomId(6), card: publicCard(card), answer: next });
@@ -1323,8 +1360,7 @@ export class Inbox {
     for (const answer of this.store.list<Answer>('answers')) {
       if (answer.deliveredAt) continue;
       const card = this.store.get<Card>('cards', answer.card);
-      if (!card || card.agent !== agent || card.deliver !== 'stream') continue;
-      if (cardState(card, answer) === 'closed') continue;
+      if (!card || recipient(card, answer) !== agent) continue;
       const subs = this.agents.get(this.key(card.token ?? '', agent));
       if (!subs || subs.size === 0) continue;
       const to = [...subs].map((f) => this.instances.get(f)).filter((x): x is string => !!x);

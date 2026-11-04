@@ -293,3 +293,86 @@ export function changeSteps(card) {
   }
   return steps;
 }
+
+// The words that differ between a removed line and the added line that replaced it,
+// from the longest common run of words. Lines that share no word, or are very long,
+// get no word marks: the whole line changed.
+export function wordDiff(before, after) {
+  const x = before.split(/(\s+)/);
+  const y = after.split(/(\s+)/);
+  if (x.length * y.length > 250000) return null;
+  const t = Array.from({ length: x.length + 1 }, () => new Uint16Array(y.length + 1));
+  for (let i = x.length - 1; i >= 0; i--) for (let j = y.length - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+  const del = [];
+  const add = [];
+  let i = 0;
+  let j = 0;
+  while (i < x.length && j < y.length) {
+    if (x[i] === y[j]) { del.push([x[i++], false]); add.push([y[j++], false]); }
+    else if (t[i + 1][j] >= t[i][j + 1]) del.push([x[i++], true]);
+    else add.push([y[j++], true]);
+  }
+  while (i < x.length) del.push([x[i++], true]);
+  while (j < y.length) add.push([y[j++], true]);
+  if (!del.some(([w, changed]) => !changed && w.trim())) return null;
+  return { del, add };
+}
+
+// The proposed guidance against the current guidance, line by line in order, from the longest common run of lines.
+// A run of removed lines and the run of added lines after it pair up, line by line, for word marks, as Changes pairs
+// them. With `base`, the guidance the proposal started from, a removed line is marked `undone` when the current guidance
+// has more copies of it than `base`: it came after the proposal, and approving removes it.
+export function guidanceDiff(current, proposed, base) {
+  const x = String(current ?? '').split('\n');
+  const y = String(proposed ?? '').split('\n');
+  // The lines both texts start and end with need no table, and a proposal usually changes a few lines in the middle.
+  let head = 0;
+  while (head < x.length && head < y.length && x[head] === y[head]) head++;
+  let tail = 0;
+  while (tail < x.length - head && tail < y.length - head && x[x.length - 1 - tail] === y[y.length - 1 - tail]) tail++;
+  const xm = x.slice(head, x.length - tail);
+  const ym = y.slice(head, y.length - tail);
+  const rows = x.slice(0, head).map((text) => ({ kind: 'same', text }));
+  const w = ym.length + 1;
+  // One flat table of at most four million cells, 16 MB. Past that the middle shows as removed, then added.
+  if ((xm.length + 1) * w > 4000000) {
+    for (const text of xm) rows.push({ kind: 'del', text });
+    for (const text of ym) rows.push({ kind: 'add', text });
+  } else {
+    const t = new Uint32Array((xm.length + 1) * w);
+    for (let i = xm.length - 1; i >= 0; i--) for (let j = ym.length - 1; j >= 0; j--) t[i * w + j] = xm[i] === ym[j] ? t[(i + 1) * w + j + 1] + 1 : Math.max(t[(i + 1) * w + j], t[i * w + j + 1]);
+    let i = 0;
+    let j = 0;
+    while (i < xm.length && j < ym.length) {
+      if (xm[i] === ym[j]) { rows.push({ kind: 'same', text: xm[i++] }); j++; }
+      else if (t[(i + 1) * w + j] >= t[i * w + j + 1]) rows.push({ kind: 'del', text: xm[i++] });
+      else rows.push({ kind: 'add', text: ym[j++] });
+    }
+    while (i < xm.length) rows.push({ kind: 'del', text: xm[i++] });
+    while (j < ym.length) rows.push({ kind: 'add', text: ym[j++] });
+  }
+  for (const text of x.slice(x.length - tail)) rows.push({ kind: 'same', text });
+  for (let k = 0; k < rows.length;) {
+    if (rows[k].kind !== 'del') { k++; continue; }
+    let d = k;
+    while (d < rows.length && rows[d].kind === 'del') d++;
+    let e = d;
+    while (e < rows.length && rows[e].kind === 'add') e++;
+    for (let n = 0; n < Math.min(d - k, e - d); n++) {
+      const w = wordDiff(rows[k + n].text, rows[d + n].text);
+      if (w) { rows[k + n].words = w.del; rows[d + n].words = w.add; }
+    }
+    k = e;
+  }
+  if (base !== undefined && base !== current) {
+    const gained = new Map();
+    for (const l of x) gained.set(l, (gained.get(l) || 0) + 1);
+    for (const l of String(base).split('\n')) gained.set(l, (gained.get(l) || 0) - 1);
+    for (const r of rows) {
+      if (r.kind !== 'del' || !r.text.trim() || !(gained.get(r.text) > 0)) continue;
+      r.undone = true;
+      gained.set(r.text, gained.get(r.text) - 1);
+    }
+  }
+  return rows;
+}

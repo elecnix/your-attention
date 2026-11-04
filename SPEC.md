@@ -126,7 +126,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `follows` | The card this one follows up on. The inbox sets `followedBy` on that card. |
 | `deliver` | `stream` (the default) or `none` for a card that only shows state. |
 
-Only the token that posted a card can change it or acknowledge its answer. The inbox never sends that token id to clients.
+Only the token that posted a card can change it or acknowledge its answer. The inbox posts a guidance card itself and gives it the token of the proposing agent, so that agent may acknowledge the answer and close the card, and an edit fails with 403 because only the inbox may post as `system`. The inbox never sends that token id to clients.
 
 ## Answers
 
@@ -310,7 +310,11 @@ The inbox ignores a report on a closed or answered card, so a second page that d
 
 ## Card guidance
 
-`GET /v1/guidance` returns `{text, version, widgets}`, with the widget catalog in `widgets`. `POST /v1/guidance {text}` proposes new guidance: the inbox posts a system card that lists the agents it knows, all picked. An owner client approves with `choice: approve` and the `agents` to reach. The inbox then stores the new version and sends `guidance` events to the picked agents that are online. The `hello` event carries the current guidance version, so an agent that was offline can fetch it.
+`GET /v1/guidance` returns `{text, version, widgets}`, with the widget catalog in `widgets`. `POST /v1/guidance {text, agent}` proposes new guidance: the inbox posts a system card. The inbox doesn't store a list of agents for it. An older card may have one in `broadcast.agents`, which nothing reads. That card keeps the proposal in `broadcast`, with the proposing agent in `broadcast.from` and the guidance it starts from in `broadcast.base`, as `{version, text}`. Each guidance card stores the proposal twice, in its text and in `broadcast`, beside the guidance it starts from. When that makes the card larger than the limit for one card, the proposal fails with 413. An owner client approves with `choice: approve` and the `agents` to reach, or rejects with `choice: reject`, and either answer may carry a comment. An approval makes the inbox store the new version and send `guidance` events to the picked agents that are still online. An answer without `agents` picks every connected agent. A rejection leaves the guidance as it was. The inbox doesn't store a list of the offline agents. The `hello` event carries the current guidance version, and on a reconnect the client compares it with the version it last saw: when the inbox has a newer one, the client fetches it and hands it to the agent as a `guidance` event. `card_guidance` returns the current version at any time. `card_guidance` with `propose` sends the session's agent name as `agent`.
+
+Both the page and the terminal client show the proposal as a diff against the current guidance. A removed line starts with `−`, an added line with `+`, and a changed line marks the words that changed, as **What changed** does for a revised card. Unchanged lines collapse, and a control shows the full text. When the guidance changed after the agent proposed its text, the card says so, and it marks each line that approving removes because the proposal never saw it. The page and the terminal client read live presence and list the agents that are online now, under a heading such as "Send to 73 online agents". Each one starts ticked. An agent that comes online while the card is open joins the list, and one that leaves drops off it. One line says that offline agents get the new guidance when they reconnect, or when they call `card_guidance`. Like other cards, it has a comment box and **Skip for now**.
+
+An answer closes the card, and the inbox delivers it with the comment to the agent in `broadcast.from` as an `answer` event, as for a card the agent posted itself. That agent can then revise the text and propose again. It may acknowledge the answer, and closing the card retracts the proposal. An edit to the card answers 403. A proposal without `agent` delivers its answer to nobody.
 
 ## Settings
 
@@ -368,12 +372,12 @@ A hosted inbox writes its own reports to the `TELEMETRY` binding at its next req
 | `answered` | The inbox stored the answer. Its agent is offline or has not received it yet. |
 | `delivered` | The harness received the answer. |
 | `read` | The model has the answer in its context: the agent called `POST /v1/cards/<id>/ack`. |
-| `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`, or the card expired. |
+| `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`, or the card expired. The inbox also closes its own system cards, a pairing request, a priority proposal or a guidance proposal, once it applies the person's answer. |
 | `in-triage` | An extension on the `card.created` hook is checking the card. |
 | `held` | A fail-closed hook timed out, or an extension stopped the card. The card shows which extension and why. |
 | `orphaned` | The card is open, and its agent has been offline for more than an hour. Another session can claim it. |
 
-An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered.
+An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered. A guidance card reads `closed` as soon as the inbox applies the answer, and its answer still goes to the agent in `broadcast.from`, so the receipt on the card shows when that agent received and read it.
 
 ## Blocked agents in herdr
 
@@ -407,7 +411,7 @@ The OpenCode plugin follows one stream per session, as agent `opencode:<session 
 
 A client adds `instance=<id>` to the stream, `/v1/ws` or `/v1/poll` address, with one id per process that stays the same across its reconnects. The inbox records the instance that received each answer. When a different instance of the agent connects, such as a session restarted before it read an answer, the inbox sends it every answer that was delivered but never read. A reconnect from the same instance gets nothing twice.
 
-Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST /v1/cards/<id>/claim {agent}` hands one to a successor session. `GET /v1/unread` counts every answer this caller has not acknowledged, and names up to 20 cards to acknowledge. `?agent=<id>` narrows it to one agent, which is what a watcher asks when it starts or ends: an answer that arrived while nothing was listening is in that count and in no event.
+Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST /v1/cards/<id>/claim {agent}` hands one to a successor session. A guidance answer waits for the agent in `broadcast.from`, and a claim of that card sets `broadcast.from` to the successor. `GET /v1/unread` counts every answer this caller has not acknowledged, and names up to 20 cards to acknowledge. `?agent=<id>` narrows it to one agent, which is what a watcher asks when it starts or ends: an answer that arrived while nothing was listening is in that count and in no event. A guidance answer counts for the agent in `broadcast.from` until that agent acknowledges it.
 
 `your-attention watch` follows that stream for a script: it prints each event as one line of JSON, the inbox's own event with `receivedAt` added and nothing else changed. A `beat` is not one of those events. It reports that the stream answers, rather than a card, so the watcher drops it as the client already drops it on the event stream and the long-poll. An inbox with nothing to say prints the `hello` line when a stream opens, and then only the answers that arrive. `--agent` names the agent, `--no-card` leaves the card out, `--select` keeps the card fields it names, and `--ack` acknowledges each answer after printing it. Without `--ack` the watcher acknowledges nothing, so it never marks read what the agent waiting for that answer has not seen. A script that takes an answer out of band marks it read with `your-attention ack <card>`, which is the `POST /v1/cards/<id>/ack` route.
 

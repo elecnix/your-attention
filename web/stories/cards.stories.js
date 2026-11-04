@@ -52,9 +52,25 @@ export const ClosedByAgent = {
   render: () => mount(h(ClosedCard, { closed: { kind: 'self-answered', outcome: 'Found it in the README.', at: Date.now() }, onNext: () => {}, animate: false }, view(card()))),
 };
 
-export const GuidanceBroadcast = {
-  render: () => mount(h(BroadcastForm, { card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: 'Attach a screenshot to every UI card.', agents: ['claude:3239ab8e', 'pi:01a17c01', 'herdr:w1:p2'] } }), onDone: () => {} })),
+// A proposal that edits one word and adds one line: the unchanged lines collapse behind a control.
+const GUIDANCE = 'Lead with the goal.\nGive two options, with the one you recommend first.\nEnd with a recommendation.';
+// Live presence: two agents online, and one that connected once and left.
+const PRESENCE = {
+  'claude:3239ab8e': { agent: 'claude:3239ab8e', online: true, lastSeen: 0 },
+  'pi:01a17c01': { agent: 'pi:01a17c01', online: true, lastSeen: 0 },
+  'herdr:w1:p2': { agent: 'herdr:w1:p2', online: false, lastSeen: 0 },
 };
+const PROPOSAL = 'Lead with the goal.\nGive three options, with the one you recommend first.\nEnd with a recommendation.\nAttach a screenshot to every UI card.';
+const guidanceStory = (guidance) => ({
+  render: () => mount(h(BroadcastForm, {
+    card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
+    presence: PRESENCE, guidance, onDone: () => {}, onSkip: () => {},
+  })),
+});
+export const GuidanceBroadcast = guidanceStory({ text: GUIDANCE, version: 3, at: 0 });
+
+// The guidance changed after the agent proposed its text: approving would remove the line added since.
+export const GuidanceBroadcastAfterAChange = guidanceStory({ text: `${GUIDANCE}\nName the files the card is about.`, version: 4, at: 0 });
 
 // A saved widget, placed twice in one card. The inbox expands the placing lines when the card is posted.
 export const PullRequestWidgets = {
