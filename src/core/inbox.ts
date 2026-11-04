@@ -1001,16 +1001,22 @@ export class Inbox {
     const agents = this.store.list<Presence>('presence').filter((p) => p.online && p.agent !== SYSTEM_AGENT).map((p) => p.agent);
     const base = this.guidance();
     const id = `guidance-${randomId(4)}`;
+    const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`;
+    const broadcast = { text: clean, agents, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
+    // The stored card has the proposal in its text and in broadcast, and the guidance it starts from, so it is measured
+    // whole before anything is stored. The margin covers the card's other fields, which stay under a kilobyte.
+    const size = new TextEncoder().encode(JSON.stringify({ text: cardText, broadcast })).length + 2048;
+    if (size > MAX_CARD_BYTES) throw new InboxError(413, `the guidance card would be ${size} bytes, over the limit of ${MAX_CARD_BYTES}: propose a shorter text`);
     this.postCard({ token: '', role: 'owner' }, {
       id, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
       title: 'Send new card guidance to agents?',
-      text: `${from ? `The agent ${from}` : 'An agent'} proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`,
+      text: cardText,
       options: [{ id: 'approve', label: 'Approve and send' }, { id: 'reject', label: 'Reject' }],
     });
     const card: Card = {
       ...this.getCard(id),
       ...(from && by?.caller.token ? { token: by.caller.token } : {}),
-      broadcast: { text: clean, agents, ...(from ? { from } : {}), base: { version: base.version, text: base.text } },
+      broadcast,
     };
     this.store.put('cards', id, card);
     this.emit({ type: 'change', card: id });

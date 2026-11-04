@@ -225,6 +225,15 @@ describe('guidance', () => {
     assert.equal(heard.filter((e) => e.type === 'guidance').length, 1);
   });
 
+  it('refuses a proposal whose card would pass the card size limit, and stores nothing', () => {
+    const { inbox, agent } = setup();
+    const before = inbox.state().cards.length;
+    assert.throws(() => inbox.proposeGuidance('x'.repeat(MAX_CARD_BYTES * 0.6), { caller: agent, agent: 's1' }), (e: unknown) => e instanceof InboxError && e.status === 413);
+    assert.equal(inbox.state().cards.length, before);
+    const fits = inbox.proposeGuidance('x'.repeat(MAX_CARD_BYTES * 0.4), { caller: agent, agent: 's1' });
+    assert.ok(new TextEncoder().encode(JSON.stringify(inbox.getCard(fits.id))).length <= MAX_CARD_BYTES);
+  });
+
   it('keeps the proposing agent token out of the card that clients read', () => {
     const { inbox } = setup();
     const caller: Caller = { token: 'proposer-token-id', role: 'agent' };
