@@ -348,6 +348,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined), heartbeatMs);
     }
     if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, 100), url.searchParams.get('answered') === '1'));
+    if (method === 'GET' && a === 'unread') return json(inbox.unread(me, url.searchParams.get('agent') ?? undefined));
     if (method === 'GET' && a === 'dead-letters') return json(inbox.deadLetters());
     if (a === 'templates') {
       if (method === 'GET' && !b) return json(inbox.listTemplates());
