@@ -438,11 +438,11 @@ If all three hold, the sidecar sends the choice's number with `herdr agent send-
 The inbox also deletes old cards by itself. `purge()` removes the same card, answer, search entry, files and answer images that `reset` removes for a card:
 
 - A cleared card goes 30 days after the person cleared it.
-- A card without an answer goes 30 days after its agent last revised it or replied on it. This includes an open card that still waits on the person, and a closed card nobody answered.
+- A card without an answer goes 30 days after its agent last revised it or replied on it. This includes an open card that still waits on the person, a `held` card the owner never released, and a closed card nobody answered.
 - An answered card that the person hasn't cleared stays.
 - An inbox built with `storageLimitBytes` deletes those cards sooner, oldest first, while it stores more than 80% of its limit.
 
-Each pass deletes at most 100 cards, oldest first, so no alarm does unbounded work. A pass reads the summaries and the first 100 `cleared` rows, then only the cards it deletes, so its time follows the cards on show, whatever the number of cleared cards. `npm run cpu-budget` measures one pass over 20 MB of cleared cards. `nextDeadline()` includes the earliest purge time, and returns the current time while more cards are due, so the alarm runs again at once. The laptop inbox runs `purge()` after `sweep()` every second, and doesn't start a purge while the last one still deletes files.
+Each pass deletes at most 100 cards, oldest first, so no alarm does unbounded work. The pass deletes the records first, then waits for every file delete. A file delete that fails leaves the file, and R2 deletes it 30 days after its upload. A pass reads the summaries and the first 100 `cleared` rows, then only the cards it deletes, so its time follows the cards on show, whatever the number of cleared cards. `npm run cpu-budget` measures one pass over 20 MB of cleared cards. `nextDeadline()` includes the earliest purge time, and returns the current time while more cards are due, so the alarm runs again at once. The laptop inbox runs `purge()` after `sweep()` every second, and doesn't start a purge while the last one still deletes files.
 
 ## Delivery
 

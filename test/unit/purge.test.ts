@@ -155,4 +155,21 @@ describe('the purge of old cards', () => {
     const inbox = new Inbox(store, () => 1 + PURGE_AFTER_MS);
     assert.deepEqual(await inbox.purge(), { removed: 1 });
   });
+
+  it('finishes the pass when a file delete fails, since the records are gone and R2 expires the file', async () => {
+    const { inbox, clock, blobs } = setup();
+    await inbox.postCardWithFiles(agent, { id: 'old', agent: 's1', title: 'q', attachments: [file] });
+    blobs.delete = async () => { throw new Error('R2 is down'); };
+    clock.advance(PURGE_AFTER_MS);
+    assert.deepEqual(await inbox.purge(), { removed: 1 });
+    assert.equal(exists(inbox, 'old'), false);
+  });
+
+  it('drops a queue row whose card is gone, so the alarm does not come back for it forever', async () => {
+    const { inbox, clock, store } = setup();
+    store.put('cleared', 'ghost', { id: 'ghost', archivedAt: clock.now() });
+    clock.advance(PURGE_AFTER_MS);
+    assert.deepEqual(await inbox.purge(), { removed: 0 });
+    assert.equal(inbox.nextDeadline(), undefined);
+  });
 });

@@ -1650,12 +1650,20 @@ export class Inbox {
     for (const { id, since } of this.purgeQueue()) {
       if (removed >= PURGE_BATCH || (now - since < PURGE_AFTER_MS && !this.needsRoom())) break;
       const card = this.store.get<Card>('cards', id);
-      if (card) files.push(...this.drop(card));
+      if (!card) {
+        // A row whose card is gone would stay due forever, so it goes too.
+        this.store.delete('cleared', id);
+        this.store.delete('summaries', id);
+        continue;
+      }
+      files.push(...this.drop(card));
       removed++;
     }
     // Every record goes before the first await, so no request sees half a batch.
     if (removed) this.emit({ type: 'change', card: '' });
-    await Promise.all(files.map((f) => this.blobs.delete(f)));
+    // The records are gone already, so a failed delete must not stop the alarm that called this. R2 deletes the file
+    // 30 days after its upload anyway.
+    await Promise.allSettled(files.map((f) => this.blobs.delete(f)));
     return { removed };
   }
 
