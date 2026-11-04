@@ -234,10 +234,11 @@ export class Client {
     const noSocket = new Set<string>();
     const deliver = async (ev: AgentEvent): Promise<void> => {
       if (!this.fresh(ev)) return;
+      // Record a guidance version before the handler runs, so a fetch that a hello started never hands over older text.
+      if (ev.type === 'guidance') this.guidanceSeen.set(agent, Math.max(this.guidanceSeen.get(agent) ?? 0, ev.guidance.version));
       await onEvent(ev);
       // The inbox sends guidance events only to agents online at the approval. A hello on a reconnect carries the
       // current version, so an agent that was away when the person approved a newer one fetches it and gets it here.
-      if (ev.type === 'guidance') this.guidanceSeen.set(agent, Math.max(this.guidanceSeen.get(agent) ?? 0, ev.guidance.version));
       if (ev.type !== 'hello') return;
       const known = this.guidanceSeen.get(agent);
       // The first hello of this process sets the version it starts from.
