@@ -61,20 +61,16 @@ const PRESENCE = {
   'herdr:w1:p2': { agent: 'herdr:w1:p2', online: false, lastSeen: 0 },
 };
 const PROPOSAL = 'Lead with the goal.\nGive three options, with the one you recommend first.\nEnd with a recommendation.\nAttach a screenshot to every UI card.';
-export const GuidanceBroadcast = {
+const guidanceStory = (guidance) => ({
   render: () => mount(h(BroadcastForm, {
     card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, agents: ['claude:3239ab8e', 'pi:01a17c01'], from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
-    presence: PRESENCE, guidance: { text: GUIDANCE, version: 3, at: 0 }, onDone: () => {}, onSkip: () => {},
+    presence: PRESENCE, guidance, onDone: () => {}, onSkip: () => {},
   })),
-};
+});
+export const GuidanceBroadcast = guidanceStory({ text: GUIDANCE, version: 3, at: 0 });
 
 // The guidance changed after the agent proposed its text: approving would remove the line added since.
-export const GuidanceBroadcastAfterAChange = {
-  render: () => mount(h(BroadcastForm, {
-    card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, agents: ['claude:3239ab8e'], from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
-    presence: PRESENCE, guidance: { text: `${GUIDANCE}\nName the files the card is about.`, version: 4, at: 0 }, onDone: () => {}, onSkip: () => {},
-  })),
-};
+export const GuidanceBroadcastAfterAChange = guidanceStory({ text: `${GUIDANCE}\nName the files the card is about.`, version: 4, at: 0 });
 
 // A saved widget, placed twice in one card. The inbox expands the placing lines when the card is posted.
 export const PullRequestWidgets = {

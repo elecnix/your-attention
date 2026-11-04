@@ -11,6 +11,7 @@ test.afterEach(async () => { await inbox.close(); });
 async function proposal(): Promise<{ edited: string; word: string; added: string; text: string; same: number }> {
   const lines = (await inbox.agent.guidance()).text.split('\n');
   const at = lines.findIndex((l) => l.split(' ').length >= 3);
+  if (at < 0) throw new Error('these tests edit a word in a guidance line of three words or more, and the default guidance has none');
   const words = lines[at]!.split(' ');
   words[1] = 'Xyzzy';
   const edited = words.join(' ');

@@ -18,6 +18,9 @@ function card(c: Partial<Card> & { id: string; title: string }): Card {
   return { agent: 'a1', kind: 'ask', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], ...c };
 }
 
+/** The text a card view draws, one line of the terminal per line. */
+const plain = (doc: { lines: { spans: { text: string }[] }[] }): string => doc.lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+
 function setup(c: Card) {
   const acts: unknown[] = [];
   const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: (_v, a) => acts.push(a), fileText: () => undefined, now: () => 600_000 };
@@ -25,7 +28,7 @@ function setup(c: Card) {
   const view = new CardView(c, host);
   const build = () => view.build(70, s, buildQueue(s, 'none'));
   build();
-  const text = () => build().lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+  const text = () => plain(build());
   /** Focus the stop whose id starts with `prefix`. */
   const focus = (prefix: string) => { build(); const id = view.stops().find((x) => x.startsWith(prefix)); assert.ok(id, `no stop ${prefix} in ${view.stops().join(', ')}`); view.focus = id; build(); };
   const key = (name: string, mods: Partial<KeyEvent> = {}) => { const ok = view.key({ type: 'key', name, ctrl: false, alt: false, shift: false, ...mods }); build(); return ok; };
@@ -166,13 +169,12 @@ describe('a guidance card', () => {
     id: 'g', title: 'Send new card guidance to agents?', agent: 'system', kind: 'system', deliver: 'none',
     broadcast: { text: 'Lead with the goal.\nGive three options.\nEnd with a recommendation.\nAttach a screenshot.', agents: ['s1'], from: 's1', base: { version: 1, text: current } },
   });
-  const draw = () => {
-    const acts: unknown[] = [];
-    const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: (_v, a) => acts.push(a), fileText: () => undefined, now: () => 600_000 };
-    const s: InboxState = { cards: [summarize(proposal, undefined)], answers: {}, presence: {}, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };
-    const view = new CardView(proposal, host);
-    const text = () => view.build(70, s, buildQueue(s, 'none')).lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
-    return { view, text, acts };
+  const draw = (c: Card = proposal, presence: InboxState['presence'] = {}) => {
+    const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 600_000 };
+    const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };
+    const view = new CardView(c, host);
+    const text = () => plain(view.build(70, s, buildQueue(s, 'none')));
+    return { view, text, s };
   };
 
   it('shows the proposal as a diff against the current guidance, with the unchanged lines collapsed', () => {
@@ -191,11 +193,8 @@ describe('a guidance card', () => {
   });
 
   it('says when the proposal matches the current guidance', () => {
-    const same = card({ ...proposal, broadcast: { ...proposal.broadcast!, text: current } });
-    const s: InboxState = { cards: [summarize(same, undefined)], answers: {}, presence: {}, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };
-    const view = new CardView(same, { theme, address: () => '', act: () => {}, fileText: () => undefined, now: () => 0 });
-    const shown = view.build(70, s, buildQueue(s, 'none')).lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
-    assert.match(shown, /The proposal matches the current guidance\./);
+    const { text } = draw(card({ ...proposal, broadcast: { ...proposal.broadcast!, text: current } }));
+    assert.match(text(), /The proposal matches the current guidance\./);
   });
 
   it('lists only the agents online now, all ticked, with the count and the line about offline agents', () => {
@@ -203,9 +202,8 @@ describe('a guidance card', () => {
       ...Array.from({ length: 25 }, (_, i) => [`gone-${i}`, { agent: `gone-${i}`, online: false, lastSeen: 0 }]),
       ['s1', { agent: 's1', online: true, lastSeen: 0 }], ['s2', { agent: 's2', online: true, lastSeen: 0 }],
     ]);
-    const s: InboxState = { cards: [summarize(proposal, undefined)], answers: {}, presence, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };
-    const view = new CardView(proposal, { theme, address: () => '', act: () => {}, fileText: () => undefined, now: () => 0 });
-    const shown = view.build(70, s, buildQueue(s, 'none')).lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+    const { text, s } = draw(proposal, presence);
+    const shown = text();
     assert.match(shown, /Send to 2 online agents/);
     assert.match(shown, /Offline agents get the new guidance when they reconnect, or when they\s+call card_guidance\./);
     assert.doesNotMatch(shown, /gone-/);
