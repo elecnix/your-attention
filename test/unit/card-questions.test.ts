@@ -94,4 +94,18 @@ describe('a card with questions', () => {
     const saved = await inbox.answer('c1', { values: { q0: 'Postgres', q0_comment: 'We run it already.' }, comment: '' });
     assert.deepEqual(saved.values, { q0: 'Postgres', q0_comment: 'We run it already.' });
   });
+
+  it('marks a stored AskUserQuestion card from before the dialog field, once, and leaves other cards alone', () => {
+    const store = new MemoryStorage();
+    const base = { agent: 'claude:s1', kind: 'ask', priority: 'now', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, replies: [] };
+    const asked = [{ question: 'Which port?', options: [{ label: '4815' }, { label: '8080' }] }];
+    store.put('cards', 'ask-0a1b2c3d', { ...base, id: 'ask-0a1b2c3d', title: 'Which port?', questions: asked, origin: { harness: 'claude-code', session: 's1' } });
+    store.put('cards', 'raw', { ...base, id: 'raw', title: 'Which port?', questions: asked, origin: { harness: 'pi' } });
+    const inbox = new Inbox(store, () => 1);
+    assert.equal(inbox.getCard('ask-0a1b2c3d').dialog, true);
+    assert.equal(inbox.getCard('raw').dialog, undefined);
+    // A card posted after the inbox marked the old ones keeps the field its poster gave, whatever its id.
+    inbox.postCard(agent, { id: 'ask-99999999', agent: 'claude:s2', title: 'Later', questions: asked, origin: { harness: 'claude-code' } });
+    assert.equal(new Inbox(store, () => 1).getCard('ask-99999999').dialog, undefined);
+  });
 });

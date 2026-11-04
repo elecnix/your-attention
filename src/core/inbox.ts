@@ -205,6 +205,7 @@ export class Inbox {
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
     this.pin.onChange(() => this.closeLockedPages());
+    markDialogCards(this.store);
     // On a laptop, connections do not survive a restart, so nobody is online at start.
     if (!opts.keepPresence) {
       for (const p of store.list<Presence>('presence')) {
@@ -1717,6 +1718,19 @@ const TYPES_BY_EXTENSION: Record<string, string> = {
 };
 
 const index = (i: number): number => i + 1;
+
+/**
+ * Before cards had `dialog`, the Claude Code AskUserQuestion hook was the only poster of `questions`, and the channel and
+ * the herdr sidecar read `questions` as "this card has a terminal dialog". This marks each card that hook stored then, once
+ * per inbox, so an answer on a card still open at the upgrade closes its dialog. The hook posts ids `ask-<8 hex digits>`.
+ */
+function markDialogCards(store: Storage): void {
+  if (store.get<boolean>('meta', 'dialog-marked')) return;
+  for (const c of store.list<Card>('cards')) {
+    if (c.dialog === undefined && c.questions?.length && c.origin?.harness === 'claude-code' && /^ask-[0-9a-f]{8}$/.test(c.id)) store.put('cards', c.id, { ...c, dialog: true });
+  }
+  store.put('meta', 'dialog-marked', true);
+}
 
 /** The page draws each question from these fields, and the answer picks an option by its label, so two options with one label could not be told apart. */
 function checkQuestions(questions: unknown): void {
