@@ -233,6 +233,16 @@ describe('guidance', () => {
     assert.ok(new TextEncoder().encode(JSON.stringify(inbox.getCard(fits.id))).length <= MAX_CARD_BYTES);
   });
 
+  it('counts an unacknowledged guidance answer as unread for the proposing agent, until it acknowledges it', async () => {
+    const { inbox, agent } = setup();
+    const card = inbox.proposeGuidance('Never mind.', { caller: agent, agent: 's1' });
+    await inbox.answer(card.id, { values: { choice: 'reject' }, comment: 'Too vague.' });
+    assert.deepEqual(inbox.unread(agent, 's1'), { unread: 1, cards: [card.id] });
+    assert.deepEqual(inbox.unread(agent, 'system'), { unread: 0, cards: [] });
+    inbox.ack(agent, card.id);
+    assert.deepEqual(inbox.unread(agent, 's1'), { unread: 0, cards: [] });
+  });
+
   it('keeps the proposing agent token out of the card that clients read', () => {
     const { inbox } = setup();
     const caller: Caller = { token: 'proposer-token-id', role: 'agent' };
