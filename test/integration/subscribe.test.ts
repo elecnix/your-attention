@@ -72,7 +72,9 @@ describe('your-attention subscribe', () => {
       const agent = { YOUR_ATTENTION_URL: h.server.url, YOUR_ATTENTION_TOKEN: h.agentToken };
       const file = path.join(h.home, 'hook-headers');
       fs.writeFileSync(file, 'Authorization: Bearer from-a-file\n\nX-Team: deploy\n');
-      const r = await cli(h.home, ['subscribe', '--agent', 'from-file', '--webhook', 'https://hooks.example.com/abc', '--header-file', file], agent);
+      const urlFile = path.join(h.home, 'hook-url');
+      fs.writeFileSync(urlFile, 'https://hooks.example.com/abc/secret-path\n');
+      const r = await cli(h.home, ['subscribe', '--agent', 'from-file', '--webhook-file', urlFile, '--header-file', file], agent);
       assert.equal(r.code, 0, r.err);
       const piped = await new Promise<Run>((resolve) => {
         const child = execFile(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts'), 'subscribe', '--agent', 'from-stdin', '--webhook', 'https://hooks.example.com/abc', '--header-file', '-'],
@@ -82,6 +84,7 @@ describe('your-attention subscribe', () => {
       assert.equal(piped.code, 0, piped.err);
       const subs = h.server.inbox.listSubscriptions({ token: '', role: 'owner' });
       assert.deepEqual(subs.map((s) => [s.agent, s.headers]).sort(), [['from-file', ['Authorization', 'X-Team']], ['from-stdin', ['Authorization']]]);
+      assert.equal(subs.find((s) => s.agent === 'from-file')?.url, 'https://hooks.example.com/abc/secret-path');
     } finally {
       await h.stop();
     }
@@ -121,6 +124,10 @@ describe('your-attention subscribe', () => {
       assert.equal(blank.code, 1);
       assert.match(blank.err, /has no name/);
       assert.ok(!blank.err.includes('sk-blank-name'));
+      const missing = await cli(h.home, ['subscribe', '--agent', 'a', '--webhook', 'https://hooks.example.com/abc', '--header-file', path.join(h.home, 'no-such-file')], agent);
+      assert.equal(missing.code, 1);
+      assert.match(missing.err, /Could not read the headers in \S+no-such-file/);
+      assert.doesNotMatch(missing.err, /at \S+\.ts:\d+/, 'no stack trace');
     } finally {
       await h.stop();
     }

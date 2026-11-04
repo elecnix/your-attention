@@ -13,6 +13,8 @@ import { PROTOCOL_VERSION } from './types.ts';
 export const COOKIE = 'ya_token';
 /** Cookie-authenticated writes must carry this header, which a cross-site form cannot set. */
 export const CSRF_HEADER = 'x-your-attention';
+/** Marks a reply the message store must not keep, such as one with a secret the inbox returns once. */
+const ONCE_HEADER = 'x-your-attention-once';
 /** A client-chosen id that makes a write idempotent across links and retries. */
 export const MESSAGE_HEADER = 'x-message-id';
 /** File types the page shows in place. Any other file is served as a download. */
@@ -300,7 +302,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         inbox.forgetMessage(key);
         throw e;
       }
-      if (res.status < 500 && (res.headers.get('content-type') ?? '').startsWith('application/json')) inbox.rememberMessage(key, res.status, await res.clone().text());
+      // A reply that carries a secret shown once is never kept to replay. A retry of that request makes a new subscription.
+      if (res.status < 500 && !res.headers.has(ONCE_HEADER) && (res.headers.get('content-type') ?? '').startsWith('application/json')) inbox.rememberMessage(key, res.status, await res.clone().text());
       else inbox.forgetMessage(key);
       return res;
     }
@@ -537,7 +540,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         // A system card from a client asks the inbox for something, and the answer says what the inbox did.
         if (input?.kind === 'system') {
           const done = inbox.systemRequest(me, input);
-          return json(done, 'secret' in done ? 201 : 200);
+          return 'secret' in done ? json(done, 201, { [ONCE_HEADER]: '1' }) : json(done, 200);
         }
         return json(withWarning(publicCard(await inbox.postCardWithFiles(me, input))), 201);
       }

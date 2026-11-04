@@ -186,7 +186,10 @@ interface OutboxItem {
   savedAt: number;
   attempts: number;
   firstAt: number;
+  /** When the next call is due. While a call runs, the end of its lease. */
   nextAt: number;
+  /** A call is running, or a crash cut it off before its lease ended. */
+  calling?: true;
 }
 
 /** The id of an answer: the same on every webhook call that carries it, and new when the person changes the answer. */
@@ -895,7 +898,7 @@ export class Inbox {
         continue;
       }
       // Hold the call before the await, so a second run does not make it again. A call that a crash cut off goes after the lease.
-      this.store.put<OutboxItem>('outbox', item.key, { ...item, nextAt: now + DELIVERY_LEASE_MS });
+      this.store.put<OutboxItem>('outbox', item.key, { ...item, nextAt: now + DELIVERY_LEASE_MS, calling: true });
       const id = answerId(card.id, answer.savedAt);
       const ev: AnswerEvent = { type: 'answer', id, card: publicCard(card), answer };
       const headers = { ...sub.headers, 'x-your-attention-event': 'answer', 'x-your-attention-delivery': id };
@@ -932,7 +935,8 @@ export class Inbox {
     }
     const attempts = item.attempts + 1;
     this.store.put<Subscription>('subscriptions', sub.id, { ...sub, lastError: { at: now, reason } });
-    this.store.put<OutboxItem>('outbox', item.key, { ...current, attempts, nextAt: now + Math.min(RETRY_FIRST_MS * 2 ** (attempts - 1), RETRY_MAX_MS) });
+    const { calling: _c, ...waiting } = current;
+    this.store.put<OutboxItem>('outbox', item.key, { ...waiting, attempts, nextAt: now + Math.min(RETRY_FIRST_MS * 2 ** (attempts - 1), RETRY_MAX_MS) });
   }
 
   getCard(id: string): Card {
@@ -1582,8 +1586,11 @@ export class Inbox {
     this.emit({ type: 'change', card: id });
     const card = this.getCard(id);
     this.flush(recipient(card, next) ?? card.agent);
-    // A webhook call that waits for its retry goes now.
-    for (const d of this.store.list<OutboxItem>('outbox')) if (d.card === id) this.store.put<OutboxItem>('outbox', d.key, { ...d, nextAt: Math.min(d.nextAt, this.now()) });
+    // A webhook call that waits for its retry goes now. A call still running keeps its lease, so it never goes twice at once.
+    const now = this.now();
+    for (const d of this.store.list<OutboxItem>('outbox')) {
+      if (d.card === id && !(d.calling && d.nextAt > now)) this.store.put<OutboxItem>('outbox', d.key, { ...d, nextAt: Math.min(d.nextAt, now) });
+    }
     this.track(this.deliverAnswers());
     return this.store.get<Answer>('answers', id) ?? next;
   }

@@ -162,6 +162,32 @@ describe('answer webhooks', () => {
     await assert.doesNotReject(inbox.deliverAnswers());
   });
 
+  it('never makes a second call while one runs, even when the person force-sends the answer', async () => {
+    let release: () => void = () => {};
+    const sent: string[] = [];
+    let t = 1_000_000;
+    const fetcher = (async (_u: string | URL | Request, init?: RequestInit) => {
+      sent.push(String(init?.body));
+      await new Promise<void>((r) => { release = r; });
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    const inbox = new Inbox(new MemoryStorage(), () => t, undefined, { fetch: fetcher });
+    const agent: Caller = { token: 'ta', role: 'agent' };
+    const r = inbox.subscribe(agent, subscribe());
+    await inbox.answer(r.card.id, { values: { choice: 'approve' } });
+    inbox.postCard(agent, { id: 'c1', agent: 'cli:deploy', title: 'q' });
+    await inbox.answer('c1', {});
+    await new Promise((r) => setImmediate(r));
+    t += 1000;
+    inbox.force('c1');
+    await new Promise((r) => setImmediate(r));
+    assert.equal(sent.length, 1, 'the running call holds its lease');
+    release();
+    while (inbox.deliveries.size) await Promise.all([...inbox.deliveries]);
+    assert.equal(sent.length, 1);
+    assert.equal(inbox.state().states['c1'], 'read');
+  });
+
   it('replaces an earlier request from the same agent id and token', () => {
     const { inbox, agent, owner } = setup();
     const a = inbox.subscribe(agent, subscribe());
@@ -196,8 +222,11 @@ describe('answer webhooks', () => {
     const call = (secret: string, method: string, route: string, body?: unknown) => handle(new Request(`http://inbox${route}`, {
       method, headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
     }));
-    const posted = await call(agentSecret, 'POST', '/v1/cards', subscribe());
+    const once = { 'x-message-id': 'subscribe-0001' };
+    const posted = await handle(new Request('http://inbox/v1/cards', { method: 'POST', headers: { authorization: `Bearer ${agentSecret}`, 'content-type': 'application/json', ...once }, body: JSON.stringify(subscribe()) }));
     assert.equal(posted.status, 201);
+    // The message store never keeps the secret to replay it.
+    assert.doesNotMatch(JSON.stringify(inbox.recallMessage(`${(await inbox.authenticate(agentSecret))!.id}:subscribe-0001`) ?? {}), /secret/);
     const created = await posted.json() as { subscription: { id: string; headers: string[] }; card: { id: string }; secret: string };
     assert.deepEqual(created.subscription.headers, ['Authorization']);
     for (const secret of [ownerSecret, agentSecret]) {
