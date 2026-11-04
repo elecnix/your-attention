@@ -13,7 +13,7 @@ import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { SummarizedStorage, type AnswerSummary, type CardSummary } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import type {
-  AgentEvent, Answer, Approval, ApprovalPlace, ApprovalResult, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  AgentEvent, Answer, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, PersonPresence, PriorityLevel, Role, Settings, Template, Token,
 } from './types.ts';
 
@@ -93,12 +93,12 @@ export const DEFAULT_GUIDANCE = [
   'Write each card so the person can answer it without opening the session.',
   'State the goal, the options you weighed, the evidence, and your recommendation.',
   'Shape the answer options to the question. The person may leave any field empty.',
-  'Put each question next to the field that answers it. One question uses options. Several questions use forms in the body, each beside the text or table it is about.',
+  'Put each question next to the field that answers it. One question uses options. Two or more questions use questions, each with its own text and options, and never one options list after all the text. The page draws each question as its own section with a comment field. A question that needs a table or a widget beside it uses a form in the body.',
   'Explain each option inside it, in its description: what this agent does if the person picks it, such as "This agent reruns the deploy." Never list the options with their explanations in the text.',
   'Mark the option this agent recommends with recommended: true, and put only the reasons in the recommendation. The page shows them inside that option, so the person reads the pick once.',
   'Never list questions in the text with the answers at the bottom. Write what you will check yourself as statements, not questions.',
   'The page adds a comment box, Send answer and Skip at the bottom of every card. Add no general comment box or send button of your own.',
-  'When a card asks several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
+  'When a card body or HTML asks several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
   'When a card is about another agent, link its session so the person can go there in one click: [label](https://herdr.invalid/v1/pane/<pane id>), from `herdr agent list`. Link another card with [[card-id]].',
   'Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click.',
   'When an action needs the person\'s own words in a session, post the sentence as an approval on the card instead of asking the person to type it there.',
@@ -399,6 +399,7 @@ export class Inbox {
     if (!levels.some((l) => l.id === priority)) throw new InboxError(400, `priority must be one of ${levels.map((l) => l.id).join(', ')}`);
     if (input.rating !== undefined && !(Number.isInteger(input.rating) && input.rating >= 1 && input.rating <= 5)) throw new InboxError(400, 'rating must be 1 to 5');
     if (!input.multiple && Array.isArray(input.options) && input.options.filter((o) => o?.recommended === true).length > 1) throw new InboxError(400, 'a card without multiple takes at most one recommended option');
+    checkQuestions(input.questions);
     const id = input.id ? String(input.id) : randomId(8);
     if (!/^[\w.:-]{1,80}$/.test(id)) throw new InboxError(400, 'id must be 1 to 80 letters, digits, dots, colons, dashes or underscores');
 
@@ -463,6 +464,7 @@ export class Inbox {
       multiple: input.multiple,
       questions: input.questions,
       approvals,
+      dialog: input.dialog === true ? true : undefined,
       screen: input.screen,
       secret: kind === 'secret' ? { name: String(input.secret?.name), publicKey: (input.secret?.publicKey ?? {}) as JsonWebKey } : undefined,
       html: input.html,
@@ -1716,9 +1718,30 @@ const TYPES_BY_EXTENSION: Record<string, string> = {
 
 const index = (i: number): number => i + 1;
 
+/** The page draws each question from these fields, and the answer picks an option by its label, so two options with one label could not be told apart. */
+function checkQuestions(questions: unknown): void {
+  if (questions === undefined) return;
+  if (!Array.isArray(questions)) throw new InboxError(400, 'questions must be a list of {question, text, options, multiSelect}');
+  questions.forEach((q: Partial<AskQuestion> | null, i) => {
+    const at = `question ${index(i)}`;
+    if (!q || typeof q !== 'object' || typeof q.question !== 'string' || !q.question.trim()) throw new InboxError(400, `${at}: question must be a non-empty string`);
+    if (q.text !== undefined && typeof q.text !== 'string') throw new InboxError(400, `${at}: text must be a string`);
+    if (q.options === undefined) return;
+    if (!Array.isArray(q.options)) throw new InboxError(400, `${at}: options must be a list of {label, description, recommended}`);
+    const labels = new Set<string>();
+    for (const o of q.options) {
+      if (!o || typeof o !== 'object' || typeof o.label !== 'string') throw new InboxError(400, `${at}: each option needs a label`);
+      if (labels.has(o.label)) throw new InboxError(400, `${at}: two options have the label ${o.label}`);
+      labels.add(o.label);
+    }
+    if (!q.multiSelect && q.options.filter((o) => o.recommended === true).length > 1) throw new InboxError(400, `${at}: a question without multiSelect takes at most one recommended option`);
+  });
+}
+
 /** The text search matches: the card's words, its tags, and its file names. */
 function searchText(card: Card): string {
-  return [card.title, card.text, card.recommendation, card.body, card.status, ...Object.entries(card.tags ?? {}).map(([k, v]) => `${k} ${v}`), ...(card.attachments ?? []).map((a) => a.name)]
+  const questions = (card.questions ?? []).flatMap((q) => [q.question, q.text, ...(q.options ?? []).map((o) => o.label)]);
+  return [card.title, card.text, card.recommendation, card.body, ...questions, card.status, ...Object.entries(card.tags ?? {}).map(([k, v]) => `${k} ${v}`), ...(card.attachments ?? []).map((a) => a.name)]
     .filter(Boolean).join('\n');
 }
 

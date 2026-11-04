@@ -64,6 +64,7 @@ export async function main(mode: string): Promise<void> {
         agent: `claude:${sid}`,
         title: questions[0]?.question ?? 'A question from the agent',
         questions,
+        dialog: true,
         priority: 'now',
         origin: { harness: 'claude-code', session: sid, name: claudeSessionName(sid), host: os.hostname(), cwd: process.cwd(), herdrPane: process.env['HERDR_PANE_ID'], ...(await herdrPlace(process.env['HERDR_PANE_ID'])) },
       });

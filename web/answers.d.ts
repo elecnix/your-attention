@@ -5,6 +5,10 @@ export function cardSource(card: Card): string;
 export function parseSource(source: string | undefined): Record<string, { call: string; args: unknown[] }>;
 /** The picks the card still offers, by option id. */
 export function answerValues(card: Card, values: Record<string, unknown>): Record<string, unknown>;
+/** The answer text for a card's questions: a line per question with its answer, and an indented line per comment. */
+export function questionLines(card: Pick<Card, 'questions'>, values: Record<string, unknown>): string[];
+/** The options each question recommends, by field name, such as {q0: ['SQLite']}. */
+export function questionRecommendations(card: Pick<Card, 'questions'>): Record<string, string[]>;
 /** Form values by field name, and the comments joined, from the renderer's state: {form: {field: {value}}}. */
 export function formValues(formState: unknown): { values: Record<string, unknown>; comment: string };
 /** An answer as a person reads it. */

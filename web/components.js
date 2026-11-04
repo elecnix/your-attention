@@ -5,7 +5,7 @@ import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { copyText, installCopy } from './copy.js';
-import { answerValues, approvalPlace, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, recommendedOptions, wordDiff } from './answers.js';
+import { answerValues, approvalPlace, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
@@ -142,18 +142,19 @@ export function Diagram({ source }) {
 const PlainFormControl = openuiChatLibrary.components.FormControl.component;
 const MarkdownFormControl = (args) => PlainFormControl({ ...args, props: { ...args.props, label: h(React.Fragment, null, renderInline(h, args.props.label)) } });
 // The option a card recommends shows a Recommended tag, and the card's recommendation, below its description.
-// CardView gives the recommended option values and the recommendation to the `choice` field the page builds from the options.
+// CardView gives the recommended option values by field name: the `choice` field the page builds from the options, with
+// the recommendation, and each question's field, with the tag alone.
 const Recommended = React.createContext(null);
 const RECOMMENDED = { type: 'recommended-option' };
 function RecommendedNote({ note }) {
   // A link in the recommendation opens without picking the option around it.
   return h('div', { className: 'rec-in-option', onClick: (e) => { if (e.target.closest('a')) e.stopPropagation(); } },
-    h('strong', { className: 'rec-tag' }, 'Recommended'), note);
+    h('strong', { className: 'rec-tag' }, 'Recommended'), note || null);
 }
 const PlainOptionCards = openuiChatLibrary.components.OptionCards.component;
 function RecommendingOptionCards(args) {
-  const rec = React.useContext(Recommended);
-  if (!rec || args.props.name !== 'choice') return PlainOptionCards(args);
+  const rec = React.useContext(Recommended)?.[args.props.name];
+  if (!rec) return PlainOptionCards(args);
   // OpenUI draws an option's top content through renderNode, so the note goes there and the stylesheet moves it below the text.
   const items = (args.props.items || []).map((it) => (rec.values.includes(it?.props?.value) ? { ...it, props: { ...it.props, topContent: RECOMMENDED } } : it));
   const renderNode = (n) => (n === RECOMMENDED ? h(RecommendedNote, { note: rec.note }) : args.renderNode(n));
@@ -201,7 +202,8 @@ export function CardView({ draftKey, card, onAction, recommendationText }) {
   // `recommendationText` draws a recommendation as the page does, for the option it recommends.
   const { ids, text } = recommendedOptions(card);
   const values = (card.options || []).filter((o) => ids.includes(o.id)).map(optionValue);
-  const rec = values.length ? { values, note: text && recommendationText ? recommendationText(text) : null } : null;
+  const rec = Object.fromEntries(Object.entries(questionRecommendations(card)).map(([name, labels]) => [name, { values: labels, note: null }]));
+  if (values.length) rec.choice = { values, note: text && recommendationText ? recommendationText(text) : null };
   return h(React.Fragment, null, checker, h(Recommended.Provider, { value: rec },
     h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction })));
 }

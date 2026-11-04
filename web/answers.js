@@ -35,14 +35,23 @@ export function cardSource(c) {
   const parts = [];
   const L = [];
   if (c.body) { parts.push('custom'); L.push(c.body.replace(/^\s*root\s*=/m, 'custom =')); }
-  const controls = [];
+  // Each question is a section of its own: the question as a heading, its text, its options and a comment field, so the
+  // person answers it while it is in mind. Each section is a form without buttons, and Send answer carries every form.
   (c.questions || []).forEach((q, i) => {
-    controls.push(`fc${i}`);
+    parts.push(`qt${i}`, `qf${i}`);
+    L.push(`qt${i} = TextContent(${J([`### ${q.question}`, q.text].filter(Boolean).join('\n\n'))})`);
     const opts = (q.options || []).map((o, j) => [`o${i}_${j}`, o]);
-    L.push(`fc${i} = FormControl(${J(q.question)}, q${i})`);
+    if (!opts.length) {
+      L.push(`qf${i} = Form(${J(`${c.id}:q${i}`)}, qb${i}, [fc${i}])`, `qb${i} = Buttons([])`, `fc${i} = FormControl("Your answer", TextArea("q${i}", "", 3))`);
+      return;
+    }
+    L.push(`qf${i} = Form(${J(`${c.id}:q${i}`)}, qb${i}, [fc${i}, fcc${i}])`, `qb${i} = Buttons([])`);
+    L.push(`fc${i} = FormControl(${J(q.multiSelect ? 'Your answers' : 'Your answer')}, q${i})`);
     L.push(`q${i} = OptionCards("q${i}", ${J(q.multiSelect ? 'multiple' : 'single')}, [${opts.map(([r]) => r).join(', ')}])`);
     opts.forEach(([r, o]) => L.push(`${r} = OptionCard(${J(o.label)}, ${J(o.label)}, ${J(o.description || '')})`));
+    L.push(`fcc${i} = FormControl("Comment on this question", TextArea(${J(`q${i}_comment`)}, "Why, or anything to add", 2))`);
   });
+  const controls = [];
   if (c.options && c.options.length) {
     controls.push('fcChoice');
     L.push('fcChoice = FormControl("Your answer", choice)');
@@ -216,6 +225,35 @@ export function recommendedOptions(c) {
   return { ids, inside, text };
 }
 
+// The fields the page builds for a card's questions: q0 for the first one's answer, q0_comment for its comment.
+const QUESTION_FIELD = /^q(\d+)(_comment)?$/;
+
+/** The answer to each question, in order: the question, what the person picked or wrote, and the comment. */
+export function questionAnswers(card, values) {
+  // A body with forms of its own draws no questions, so none has an answer.
+  if (keepsOwnForm(card)) return [];
+  return (card.questions || []).map((q, i) => {
+    const v = [values[`q${i}`] ?? []].flat().map(String).filter((x) => x.trim());
+    const comment = String(values[`q${i}_comment`] ?? '').trim();
+    return { question: q.question, answer: v.length ? v.join(', ') : q.options?.length ? '(no option picked)' : '(no answer)', comment };
+  });
+}
+
+/** The answer text for a card's questions, one line per question and an indented line per comment. The page and the agent read the same lines. */
+export function questionLines(card, values) {
+  return questionAnswers(card, values).flatMap((a) => [`${a.question} ${a.answer}`, ...(a.comment ? [`  Comment: ${a.comment}`] : [])]);
+}
+
+/** The options each question recommends, by field name: {q0: ['SQLite']}. The page and the terminal client tag them. */
+export function questionRecommendations(card) {
+  const out = {};
+  (card.questions || []).forEach((q, i) => {
+    const labels = (q.options || []).filter((o) => o.recommended === true).map((o) => o.label);
+    if (labels.length) out[`q${i}`] = labels;
+  });
+  return out;
+}
+
 /** The picks the card still offers, by option id. A revision that dropped or relabeled an option drops its pick. */
 export function answerValues(card, values) {
   const out = { ...values };
@@ -227,9 +265,13 @@ export function answerValues(card, values) {
     else delete out[key];
   };
   keep('choice', new Map((card.options || []).map((o) => [optionValue(o), o.id])));
-  (card.questions || []).forEach((q, i) => keep(`q${i}`, new Map((q.options || []).map((o) => [o.label, o.label]))));
-  // A pick for a question a revision removed goes too.
-  if (card.questions) for (const k of Object.keys(out)) { const m = /^q(\d+)$/.exec(k); if (m && Number(m[1]) >= card.questions.length) delete out[k]; }
+  // A question without options takes its answer as text, and an empty comment says nothing.
+  (card.questions || []).forEach((q, i) => {
+    if (q.options?.length) keep(`q${i}`, new Map(q.options.map((o) => [o.label, o.label])));
+    for (const k of q.options?.length ? [`q${i}_comment`] : [`q${i}`]) if (k in out && !String(out[k] ?? '').trim()) delete out[k];
+  });
+  // A pick or comment for a question a revision removed goes too.
+  if (card.questions) for (const k of Object.keys(out)) { const m = QUESTION_FIELD.exec(k); if (m && Number(m[1]) >= card.questions.length) delete out[k]; }
   return out;
 }
 
@@ -277,13 +319,14 @@ export function describe(card, a) {
   if (!a) return '';
   if (card.kind === 'secret') return [a.values && a.values.sealed ? 'Sent sealed' : 'Declined', a.comment].filter(Boolean).join('\n');
   let fields;
-  const picks = Object.entries(a.values || {}).map(([k, v]) => {
+  const values = a.values || {};
+  const asked = card.questions?.length ? questionLines(card, values) : [];
+  const picks = Object.entries(values).map(([k, v]) => {
     const list = [].concat(v);
     if (k === 'choice' && card.options) return list.map((x) => (card.options.find((o) => o.id === x) || {}).label || x).join(', ');
     const ai = /^approval_(\d+)$/.exec(k);
     if (ai && card.approvals) { const ap = card.approvals[Number(ai[1])]; return v === true && ap ? `Approved: ${ap.label || ap.text}` : ''; }
-    const qi = /^q(\d+)$/.exec(k);
-    if (qi && card.questions) return `${card.questions[Number(qi[1])]?.question || k} ${list.join(', ')}`;
+    if (asked.length && QUESTION_FIELD.test(k)) return '';
     const f = (fields ??= fieldLabels(card.body))[k];
     // A check box or switch group answers with each item on or off: the summary lists the ones turned on.
     const picked = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => v[x]) : list;
@@ -293,7 +336,7 @@ export function describe(card, a) {
     const label = (f && f.label) || (f && Object.keys(f.choices).length ? '' : k);
     return label ? `${label}: ${shown}` : shown;
   });
-  return [...picks, a.comment].filter(Boolean).join('\n') || 'Empty answer';
+  return [...asked, ...picks, a.comment && (asked.length ? `Comment: ${a.comment}` : a.comment)].filter(Boolean).join('\n') || 'Empty answer';
 }
 
 // What changed since the version before, line by line.

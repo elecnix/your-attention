@@ -26,6 +26,8 @@ describe('the AskUserQuestion hooks', () => {
   it('close the card when the person cancels the dialog in the terminal', async () => {
     assert.equal((await hook('ask-pre', ask('s1', 'Cancel me?'))).status, 0);
     assert.equal((await card('s1', 'Cancel me?'))?.closed, undefined);
+    // The card says its questions are open in the terminal too, so an answer on the card closes that dialog.
+    assert.equal((await card('s1', 'Cancel me?'))?.dialog, true);
     assert.equal((await hook('ask-cancel', { session_id: 's1', hook_event_name: 'PostToolUseFailure', tool_name: 'AskUserQuestion', is_interrupt: true })).status, 0);
     assert.equal((await card('s1', 'Cancel me?'))?.closed?.kind, 'resolved');
   });

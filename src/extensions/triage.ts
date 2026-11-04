@@ -68,6 +68,7 @@ export function triagePrompt(card: Card, guidance: string, earlier: { title: str
     'Pass it otherwise. Cards from a harness prompt that blocks the agent always pass.',
     'A secret card (kind "secret") asks for one value, such as an API key: pass it when it names the value and says why the agent needs it. It has no options or recommendation, by design.',
     'An HTML card brings its own form in "html": read its options and recommendation there.',
+    'Return a card whose text asks two or more questions above one options list: each question goes in "questions", with its own text and options, so the person answers it beside its context.',
     '',
     `Guidance for agents: ${guidance}`,
     '',
