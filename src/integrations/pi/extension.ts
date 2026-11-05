@@ -11,6 +11,9 @@ import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { cardTools } from '../tools.ts';
 
+// stdout belongs to pi, so a stream that stops for good says why on stderr instead of vanishing.
+const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
+
 // The parts of pi's ExtensionAPI this extension uses.
 interface PiContext {
   isIdle(): boolean;
@@ -70,7 +73,7 @@ export default function yourAttention(pi: PiApi): void {
       // Steer by default; start a new turn when the agent is idle.
       if (ctx.isIdle()) pi.sendUserMessage(text);
       else pi.sendUserMessage(text, { deliverAs: ev.answer.delivery === 'followUp' ? 'followUp' : 'steer' });
-    }, stop.signal);
+    }, stop.signal).catch((e: Error) => log('stream stopped:', e.message));
   });
 
   pi.on('session_shutdown', () => {
