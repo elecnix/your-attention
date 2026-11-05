@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
-import { callAt, ROOT, until } from './harness.ts';
+import { callAt, ROOT, stopAndRemove, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 const run = (env: NodeJS.ProcessEnv, ...args: string[]) =>
@@ -43,8 +43,7 @@ describe('clearing the inbox from the command line', () => {
       assert.match(reset.stdout, /Removed 2 cards/);
       assert.deepEqual(await ids(), []);
     } finally {
-      serve.kill();
-      fs.rmSync(home, { recursive: true, force: true });
+      await stopAndRemove(serve, home);
     }
   });
 });

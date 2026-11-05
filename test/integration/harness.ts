@@ -65,6 +65,15 @@ export async function until<T>(check: () => T | undefined | Promise<T | undefine
 
 export const ROOT = path.resolve(import.meta.dirname, '..', '..');
 
+/** Stop a process this test spawned, and remove its home once the process has let go of the files in it. A Windows
+ * process holds its SQLite file until it exits, so a delete right after the kill fails with EBUSY. */
+export async function stopAndRemove(child: ChildProcess, home: string): Promise<void> {
+  const exited = new Promise<void>((r) => { if (child.exitCode !== null || child.signalCode !== null) r(); else child.once('exit', () => r()); });
+  child.kill();
+  await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 5000))]);
+  fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
 /** Call one route of a test inbox as the token's owner or agent. */
 export function callAt(url: string, token: string, method: string, route: string, body?: unknown): Promise<Response> {
   // A body is sent whenever one is given: `0`, `''`, `false` and `null` are bodies a route may want, not absences.
@@ -79,7 +88,7 @@ export interface CliServer {
   /** A file the inbox wrote in its home, trimmed. */
   read(file: string): string;
   call(token: string, method: string, route: string, body?: unknown): Promise<Response>;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export const CLI_ARGS = [path.join(ROOT, 'src', 'cli.ts')];
@@ -93,6 +102,9 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
   // instead of the one this test started.
   delete (env as Record<string, string | undefined>)['YOUR_ATTENTION_URL'];
   delete (env as Record<string, string | undefined>)['YOUR_ATTENTION_TOKEN'];
+  // A test inbox takes its place from the home it is given, never from the herdr session that runs the tests: a card
+  // posted here must not ask herdr about the developer's own pane.
+  for (const k of Object.keys(env)) if (k.startsWith('HERDR_')) delete (env as Record<string, string | undefined>)[k];
   const serve: ChildProcess = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
   // Right after the spawn: a failed spawn emits `error` on the next tick, which would otherwise kill the test process
   // before the cleanup below exists.
@@ -104,8 +116,7 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
     // home must go, or a failed start leaks both for the rest of the run.
     ({ url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined)));
   } catch (e) {
-    serve.kill();
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+    await stopAndRemove(serve, home);
     throw e;
   }
   return {
@@ -114,9 +125,6 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
     env,
     read: (f) => fs.readFileSync(path.join(yaHome, f), 'utf8').trim(),
     call: (token, method, route, body) => callAt(url, token, method, route, body),
-    close: () => {
-      serve.kill();
-      fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
-    },
+    close: () => stopAndRemove(serve, home),
   };
 }

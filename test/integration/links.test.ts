@@ -48,6 +48,17 @@ describe('transports', () => {
     stop.abort();
   });
 
+  it('takes a long-polling agent offline soon after its client stops polling', async () => {
+    const client = new Client({ url: h.server.url, token: h.agentToken });
+    const stop = new AbortController();
+    void client.stream('poller-gone', () => {}, stop.signal, 'poll');
+    await until(async () => (await presence('poller-gone')) || undefined);
+    stop.abort();
+    // The client aborted its long-poll fetch. The inbox must see the dropped connection, not wait out the poll's 25
+    // second timeout with the agent still marked online.
+    await until(async () => (await presence('poller-gone')) === false || undefined, 5000);
+  });
+
   it('refuses a WebSocket that never authenticates', async () => {
     const ws = new WebSocket(`${h.server.url.replace('http', 'ws')}/v1/ws?agent=nobody`);
     await new Promise((r) => ws.addEventListener('open', r));

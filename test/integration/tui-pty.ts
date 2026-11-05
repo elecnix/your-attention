@@ -72,6 +72,9 @@ export function startTui(opts: { url: string; token: string; cols?: number; rows
     const start = t.events().find((e) => e.event === 'start') as { pid?: number } | undefined;
     if (child.exitCode === null) {
       child.stdin!.write('\x03');
+      // The client quits on Ctrl+C, and ending its input lets the `cat` that feeds the pseudo-terminal see EOF, so the
+      // shell around the client exits with it instead of waiting on a pipe nobody will write to.
+      child.stdin!.end();
       await Promise.race([exited, new Promise((r) => setTimeout(r, 2000))]);
     }
     if (start?.pid) { try { process.kill(start.pid, 'SIGTERM'); } catch { /* already gone */ } }

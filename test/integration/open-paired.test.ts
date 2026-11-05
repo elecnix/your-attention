@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { ROOT, until } from './harness.ts';
+import { ROOT, stopAndRemove, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 const envFor = (home: string) => ({ ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: path.join(home, '.your-attention'), YOUR_ATTENTION_URL: '', YOUR_ATTENTION_TOKEN: '' });
@@ -26,10 +26,8 @@ describe('your-attention open on a paired machine', () => {
     agent = fs.readFileSync(path.join(inboxEnv.YOUR_ATTENTION_HOME, 'agent-token'), 'utf8').trim();
   });
   after(async () => {
-    serve.kill();
-    // The inbox must let go of its files before the folder goes, or Windows refuses to delete them.
-    await until(async () => (await fetch(`${url}/v1/info`).then(() => false, () => true)) || undefined);
-    fs.rmSync(inboxHome, { recursive: true, force: true });
+    // The inbox must exit before the folder goes, or Windows refuses to delete the file it reads.
+    await stopAndRemove(serve, inboxHome);
   });
 
   /** A machine with no inbox of its own, paired with the inbox above with `token`, or not paired when it is undefined. */

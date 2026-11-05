@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { pinKey } from '../../src/core/pin.ts';
-import { ROOT, until } from './harness.ts';
+import { ROOT, stopAndRemove, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 
@@ -53,8 +53,7 @@ describe('your-attention pin', () => {
       assert.equal((await page('/v1/state')).status, 200);
       assert.match(cli(['pin', 'status']).stdout, /has no PIN/);
     } finally {
-      serve.kill();
-      fs.rmSync(home, { recursive: true, force: true });
+      await stopAndRemove(serve, home);
     }
   });
 });
