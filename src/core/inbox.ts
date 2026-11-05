@@ -376,7 +376,7 @@ export class Inbox {
   // ---- cards ----
 
   /** `checked` holds what checkCard found for the card's diagrams. A card with a diagram it does not hold is refused. */
-  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams): Card {
+  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams, places?: (Approval['place'] | undefined)[]): Card {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
     const title = String(input.title ?? '').trim();
     if (!title) throw new InboxError(400, 'title is required');
@@ -401,7 +401,7 @@ export class Inbox {
       if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(String(s.name ?? ''))) throw new InboxError(400, 'secret.name must be a variable name, such as API_KEY');
       if (s.publicKey.kty !== 'RSA') throw new InboxError(400, 'secret.publicKey must be an RSA-OAEP key');
     }
-    const approvals = this.cleanApprovals(input.approvals, kind, true);
+    const approvals = this.cleanApprovals(input.approvals, kind, places);
 
     const now = this.now();
     const before = this.store.get<Card>('cards', id);
@@ -711,15 +711,12 @@ export class Inbox {
   async postCardWithFiles(caller: Caller, input: NewCard): Promise<Card> {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
     // Only herdr names a pane's agent and tab: a place the agent sent is dropped.
-    const approvals = this.cleanApprovals(input.approvals, input.kind ?? 'ask', false);
-    if (approvals) {
-      const describe = this.approvalSender?.describe?.bind(this.approvalSender);
-      const places = await Promise.all(approvals.map((a) => (describe ? describe(a.pane).catch(() => ({})) : Promise.resolve({}))));
-      input = { ...input, approvals: approvals.map((a, i) => (cleanPlace(places[i]) ? { ...a, place: cleanPlace(places[i]) } : a)) };
-    }
+    // Only herdr names a pane's agent and tab: the places go around postCard, so an agent cannot supply one.
+    const approvals = this.cleanApprovals(input.approvals, input.kind ?? 'ask');
+    const places = approvals ? await this.describePanes(approvals) : undefined;
     const checked = await this.checkCard(input);
     const files = input.attachments;
-    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input, undefined, checked);
+    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input, undefined, checked, places);
     if (files.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
     const id = input.id ? String(input.id) : randomId(8);
     // Check the id before it goes into a blob key.
@@ -760,7 +757,7 @@ export class Inbox {
     try {
       // Read the card again right before the commit, with no await between: another update may have landed meanwhile.
       prior = this.store.get<Card>('cards', id);
-      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')), checked);
+      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')), checked, places);
     } catch (e) {
       await refund();
       throw e;
@@ -1248,8 +1245,15 @@ export class Inbox {
     this.emit({ type: 'change', card: id });
   }
 
-  /** A card's approvals, checked. `keepPlace` keeps what herdr said about each pane, which only the inbox sets. */
-  private cleanApprovals(input: unknown, kind: string, keepPlace: boolean): Approval[] | undefined {
+  /** What herdr says about each approval's pane, one entry per approval, empty when herdr does not know the pane. */
+  private async describePanes(approvals: Approval[]): Promise<(Approval['place'] | undefined)[]> {
+    const describe = this.approvalSender?.describe?.bind(this.approvalSender);
+    if (!describe) return approvals.map(() => undefined);
+    return Promise.all(approvals.map((a) => describe(a.pane).catch(() => undefined)));
+  }
+
+  /** A card's approvals, checked. A place comes only from `places`, which herdr answered, so an agent cannot set one. */
+  private cleanApprovals(input: unknown, kind: string, places?: (Approval['place'] | undefined)[]): Approval[] | undefined {
     if (input === undefined || input === null) return undefined;
     if (!this.approvalSender) throw new InboxError(400, 'this inbox does not send approvals: only an inbox on the computer that runs herdr types into a pane');
     if (kind !== 'ask') throw new InboxError(400, 'only an ask card takes approvals');
@@ -1259,14 +1263,14 @@ export class Inbox {
     return input.map((a: unknown, i): Approval => {
       const at = `approval ${i + 1}`;
       if (!a || typeof a !== 'object') throw new InboxError(400, `${at}: must be an object with pane and text`);
-      const { pane, text, label, place } = a as Record<string, unknown>;
+      const { pane, text, label } = a as Record<string, unknown>;
       if (typeof pane !== 'string' || !PANE_ID.test(pane)) throw new InboxError(400, `${at}: pane must be a herdr pane id, such as w6P:p2`);
       if (typeof text !== 'string' || !text.trim()) throw new InboxError(400, `${at}: text must be the message to send`);
       if (text.length > MAX_APPROVAL_CHARS) throw new InboxError(400, `${at}: text must be at most 1,000 characters`);
       // herdr reads an argument that starts with a dash as an option, and takes no -- before the text.
       if (text.startsWith('-')) throw new InboxError(400, `${at}: text must not start with a dash`);
       if (label !== undefined && (typeof label !== 'string' || label.length > MAX_APPROVAL_LABEL_CHARS)) throw new InboxError(400, `${at}: label must be at most ${MAX_APPROVAL_LABEL_CHARS} characters`);
-      const kept = keepPlace ? cleanPlace(place) : undefined;
+      const kept = cleanPlace(places?.[i]);
       return { pane, text, ...(label ? { label } : {}), ...(kept ? { place: kept } : {}) };
     });
   }

@@ -12,7 +12,8 @@ const { React, createRoot } = window.__OpenUI;
 export function App() {
   const [state, setState] = React.useState(null);
   // The approvals the person turned on, by card version: a revision may change the sentences, so it starts with all off.
-  const [approvalPicks, setApprovalPicks] = React.useState({});
+  // They live in the device store, so an idle reload of the page for new code keeps them, as it keeps a comment draft.
+  const [approvalPicks, setApprovalPicks] = React.useState(() => { try { return JSON.parse(store.get('approvalPicks') || '{}'); } catch { return {}; } });
   // GET /v1/state sends card summaries. The whole card on screen, and the one after it, come from GET /v1/cards/<id>.
   const [, setLoaded] = React.useState(0);
   const detailsRef = React.useRef(null);
@@ -305,7 +306,11 @@ export function App() {
   };
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
   const picksOf = (c) => approvalPicks[`${c.id}:${c.version}`] || {};
-  const toggleApproval = (c, i, on) => setApprovalPicks((all) => ({ ...all, [`${c.id}:${c.version}`]: { ...(all[`${c.id}:${c.version}`] || {}), [i]: on } }));
+  const toggleApproval = (c, i, on) => setApprovalPicks((all) => {
+    const next = { ...all, [`${c.id}:${c.version}`]: { ...(all[`${c.id}:${c.version}`] || {}), [i]: on } };
+    store.set('approvalPicks', JSON.stringify(next));
+    return next;
+  });
 
   async function onAction(c, ev) {
     if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return skip();

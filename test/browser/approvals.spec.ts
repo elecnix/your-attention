@@ -35,6 +35,11 @@ test('the person approves one sentence beside an option, and the inbox sends tha
   await expect(first.getByRole('button', { name: 'Approve' })).toHaveAttribute('aria-pressed', 'false');
   await first.getByRole('button', { name: 'Approve' }).click();
 
+  // The page reloads itself for new code while idle, so a pick must survive a reload.
+  await page.reload();
+  await inbox.open(page);
+  await expect(page.locator('.approval').nth(0).getByRole('button', { name: 'Approved' })).toHaveAttribute('aria-pressed', 'true');
+
   await page.getByText('Push now', { exact: true }).click();
   await page.getByRole('button', { name: 'Send answer' }).click();
   await expect.poll(async () => (await inbox.state()).answers['approve']?.values).toEqual({ choice: 'o1', approval_0: true, approval_1: false });

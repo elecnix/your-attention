@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createHandler } from '../../src/core/http.ts';
+import { describeAnswer } from '../../src/client.ts';
 import { Inbox, type ApprovalSender } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { Answer } from '../../src/core/types.ts';
@@ -67,6 +68,15 @@ describe('the send rule', () => {
     assert.deepEqual(s.sent, [['w6P:p2', 'Yes, push the tag v1.2.0.']]);
     assert.equal(typeof (answer?.approvalResults?.[0] as { sentAt: number }).sentAt, 'number');
     assert.equal(answer?.approvalResults?.[1], null);
+  });
+
+  it('tells the agent a send only when one was recorded', () => {
+    const card = { id: 'c1', agent: 's1', title: 'Push?', approvals: [approval] } as never;
+    const said = (a: Record<string, unknown>) => describeAnswer(card, a as never);
+    assert.match(said({ values: { approval_0: true }, approvalResults: [{ sentAt: 1793760000000 }] }), /typed it into the pane/);
+    assert.match(said({ values: { approval_0: true }, approvalResults: [{ error: 'the input box holds a draft' }] }), /but not sent: the input box holds a draft/);
+    assert.match(said({ values: { approval_0: true } }), /recorded no send/);
+    assert.match(said({ values: { approval_0: false } }), /not approved/);
   });
 
   it('sends nothing for an approval that is off', async () => {

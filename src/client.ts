@@ -412,7 +412,11 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
   }
   card.approvals?.forEach((a, i) => {
     const r = answer.approvalResults?.[i];
-    const done = !answer.values[`approval_${i}`] ? 'not approved' : r && 'error' in r ? `approved, but not sent: ${r.error}` : 'approved, and the inbox types it into the pane as the person\'s message';
+    // Only a recorded send reads as sent: an answer with no result entry says nothing about the pane.
+    const done = !answer.values[`approval_${i}`] ? 'not approved'
+      : r && 'sentAt' in r ? 'approved, and the inbox typed it into the pane as the person\'s message'
+      : r && 'error' in r ? `approved, but not sent: ${r.error}`
+      : 'approved, but the inbox recorded no send';
     lines.push(`Approval ${i + 1} for pane ${a.pane}, "${a.text}": ${done}`);
   });
   for (const [k, v] of Object.entries(answer.values)) {
