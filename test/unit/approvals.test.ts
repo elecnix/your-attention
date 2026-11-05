@@ -52,6 +52,16 @@ describe('approvals on a card', () => {
     const card = await inbox.postCardWithFiles(agent, { agent: 's1', title: 'Push?', approvals: [{ ...approval, place: { tab: 'forged' } }, { pane: 'w9:p1', text: 'Go.' }] } as never);
     assert.deepEqual(card.approvals, [{ ...approval, place: { agent: 'claude', title: 'release', tab: 'login fix', workspace: 'DevEx' } }, { pane: 'w9:p1', text: 'Go.' }]);
   });
+
+  it('keeps that place when the agent revises the card, and drops it for a pane it changes', async () => {
+    const inbox = inboxWith(stub());
+    const card = await inbox.postCardWithFiles(agent, { agent: 's1', title: 'Push?', text: 'The release is tagged.', approvals: [approval] } as never);
+    const revised = await inbox.patchCardChecked(agent, card.id, [{ old: 'tagged', new: 'built' }]);
+    assert.deepEqual(revised.approvals?.[0]?.place, { agent: 'claude', title: 'release', tab: 'login fix', workspace: 'DevEx' });
+    // A repost that moves the approval to another pane carries no place, because herdr has not answered for that pane.
+    const moved = await inbox.postCard(agent, { id: card.id, agent: 's1', title: 'Push?', text: 'The release is built.', approvals: [{ pane: 'w9:p1', text: 'Yes, push it.' }] } as never);
+    assert.deepEqual(moved.approvals, [{ pane: 'w9:p1', text: 'Yes, push it.' }]);
+  });
 });
 
 describe('the send rule', () => {

@@ -401,11 +401,14 @@ export class Inbox {
       if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(String(s.name ?? ''))) throw new InboxError(400, 'secret.name must be a variable name, such as API_KEY');
       if (s.publicKey.kty !== 'RSA') throw new InboxError(400, 'secret.publicKey must be an RSA-OAEP key');
     }
-    const approvals = this.cleanApprovals(input.approvals, kind, places);
-
     const now = this.now();
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
+    // A revision keeps what herdr answered about a pane it does not change, since only herdr sets a place.
+    const approvals = this.cleanApprovals(input.approvals, kind, places)?.map((a, i) => {
+      const kept = a.place ?? (before?.approvals?.[i]?.pane === a.pane ? before.approvals[i].place : undefined);
+      return kept ? { ...a, place: kept } : a;
+    });
     const { body, template, expanded } = this.cardBody(input);
     // The page drops what it cannot read of a body without a word, so the agent hears it here.
     const bodyProblems = body === undefined || !this.checkBody || this.clientChecks ? [] : this.checkBody(String(body));
