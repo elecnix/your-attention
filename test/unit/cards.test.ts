@@ -1,7 +1,7 @@
 // Card features from the batch of principles about the card model.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
+import { DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 
@@ -132,7 +132,7 @@ describe('guidance', () => {
     inbox.connect(agent, 's2', (e) => b.push(e));
     const card = inbox.proposeGuidance('Always include a diff.');
     assert.equal(card.broadcast?.agents, undefined, 'the page lists the online agents from live presence');
-    assert.equal(inbox.guidance().version, 1, 'nothing changes before approval');
+    assert.equal(inbox.guidance().version, DEFAULT_GUIDANCE_VERSION, 'nothing changes before approval');
     await inbox.answer(card.id, { values: { choice: 'approve', agents: ['s1'] } });
     assert.equal(inbox.guidance().text, 'Always include a diff.');
     assert.equal(a.filter((e) => e.type === 'guidance').length, 1);
@@ -143,7 +143,7 @@ describe('guidance', () => {
     const { inbox } = setup();
     const card = inbox.proposeGuidance('Never mind.');
     await inbox.answer(card.id, { values: { choice: 'reject' } });
-    assert.equal(inbox.guidance().version, 1);
+    assert.equal(inbox.guidance().version, 2);
     assert.equal(inbox.getCard(card.id).closed?.kind, 'resolved');
   });
 
@@ -181,7 +181,7 @@ describe('guidance', () => {
     const ev = heard.find((e) => e.type === 'answer');
     assert.ok(ev && ev.type === 'answer');
     assert.equal(ev.answer.comment, 'Too vague.');
-    assert.equal(inbox.guidance().version, 1);
+    assert.equal(inbox.guidance().version, DEFAULT_GUIDANCE_VERSION);
   });
 
   it('lists a guidance answer for an offline proposer in dead letters, and a successor session claims it', async () => {

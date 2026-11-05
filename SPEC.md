@@ -108,7 +108,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `id` | 1 to 80 characters: letters, digits, dots, colons, dashes or the `_` character. Posting the same id again revises the card and adds 1 to its `version`. |
 | `agent` | The session that receives the answer, such as `claude:<session id>`, `pi:<session id>` or `opencode:<session id>`. |
 | `kind` | `ask` (the default), `blocked` for a harness that waits on a prompt, or `system` for cards the inbox posts. |
-| `title`, `text`, `recommendation` | The question, its context, and what the agent would do. |
+| `title`, `text`, `recommendation` | The question, its context, and what the agent would do. `title` is one line of plain text. The page, the terminal client, a notification and a search result show it as it is written, so Markdown in a title reads as its own source. A link belongs in `text`, or in a field label of the body. |
 | `options`, `multiple` | Answer options as `{id, label, description, recommended}`. The page shows each option as a box the person clicks, with its description inside, as inline Markdown. The person picks with the `choice` field. An agent marks its recommended option with `recommended: true`. A card without `multiple` takes one at most, and the inbox answers 400 to a second one. The `card_post` tool takes each option as `{label, description, recommended}` or as a plain label. |
 | `questions` | Claude Code `AskUserQuestion` questions. Field `q0` answers the first one. |
 | `approvals` | Up to 5 sentences, each `{pane, text, label}`, that the inbox types into a herdr pane as the person's own message once the person approves it. Field `approval_0` answers the first one. See [Approvals](#approvals). |

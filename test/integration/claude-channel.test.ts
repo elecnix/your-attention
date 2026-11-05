@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { DEFAULT_GUIDANCE_VERSION } from '../../src/core/inbox.ts';
 import type { Card } from '../../src/core/types.ts';
 import { seal } from '../../web/sealed.js';
 import { ROOT, start, until, type Harness } from './harness.ts';
@@ -115,7 +116,7 @@ describe('the batch of card model tools', () => {
     assert.match(JSON.stringify((await mcp.callTool({ name: 'card_patch', arguments: { card_id: 'cc-files', edits: [{ old: 'one', new: 'two' }] } })).content), /version 2/);
     await mcp.callTool({ name: 'card_status', arguments: { card_id: 'cc-files', status: 'drafting' } });
     assert.match(JSON.stringify((await mcp.callTool({ name: 'card_template_save', arguments: { name: 'plan', source: 'root = Card([TextContent({{x}})])' } })).content), /version 1/);
-    assert.match(JSON.stringify((await mcp.callTool({ name: 'card_guidance', arguments: {} })).content), /version 1/);
+    assert.match(JSON.stringify((await mcp.callTool({ name: 'card_guidance', arguments: {} })).content), new RegExp(`version ${DEFAULT_GUIDANCE_VERSION}`));
     assert.match(JSON.stringify((await mcp.callTool({ name: 'card_widget_save', arguments: { name: 'pr', source: 'root = Card([head])\nhead = CardHeader({{title}}, {{repo}})' } })).content), /widget pr version 1/);
     await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-widget', title: 'Merge it?', body: 'root = Card([one])\none = widget pr {"title": "Add stop", "repo": "your-attention"}' } });
     const placed = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-widget');
@@ -130,6 +131,7 @@ describe('the batch of card model tools', () => {
     const id = /card (\S+)\./.exec(JSON.stringify(proposed.content))?.[1];
     await h.owner('POST', `/v1/cards/${id}/answer`, { values: { choice: 'approve' } });
     const note = await until(() => notes.find((n) => n.content.includes('Attach a screenshot')));
-    assert.match(note.content, /version 2/);
+    // One past the default text's own version, which is the version this approval replaces.
+    assert.match(note.content, new RegExp(`version ${DEFAULT_GUIDANCE_VERSION + 1}`));
   });
 });
