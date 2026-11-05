@@ -361,7 +361,7 @@
   .approval-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
   .approval-row > .code-block { flex: 1 1 260px; min-width: 0; }
   .approval-row pre { margin: 0; padding: 10px 40px 10px 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .approval-actions { display: flex; gap: 10px; align-items: center; }
+  .approval-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
   .approval-toggle { min-width: 96px; }
   .approval-toggle.on { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
   .approval-toggle:disabled { opacity: 1; }
