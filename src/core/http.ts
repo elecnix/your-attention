@@ -332,7 +332,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       const woken = new Promise<void>((r) => { wake = r; });
       const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } }, url.searchParams.get('instance') ?? undefined);
       let timer: ReturnType<typeof setTimeout> | undefined;
-      if (!events.length) await Promise.race([woken, new Promise<void>((r) => { timer = setTimeout(r, wait); })]);
+      // A client that drops its connection ends the wait at once, so the inbox lets go of its subscriber and its timer.
+      const gone = req.signal.aborted ? Promise.resolve() : new Promise<void>((r) => req.signal.addEventListener('abort', () => r(), { once: true }));
+      if (!events.length) await Promise.race([woken, gone, new Promise<void>((r) => { timer = setTimeout(r, wait); })]);
       if (timer !== undefined) clearTimeout(timer);
       disconnect();
       return json({ events });

@@ -157,12 +157,18 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const headers = new Headers();
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v);
+    // A client that goes away before its answer aborts this signal, so a long-poll stops waiting, and drops its
+    // subscriber, instead of holding a connection and a timer until its wait expires.
+    const gone = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) gone.abort(); });
     const request = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, {
       method: req.method,
       headers,
       body: chunks.length && req.method !== 'GET' && req.method !== 'HEAD' ? Buffer.concat(chunks) : undefined,
+      signal: gone.signal,
     });
     const response = await handle(request);
+    if (res.destroyed || res.writableEnded) return;
     res.writeHead(response.status, Object.fromEntries(response.headers));
     if (!response.body) return void res.end();
     const reader = response.body.getReader();

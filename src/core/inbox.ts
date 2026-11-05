@@ -1632,7 +1632,11 @@ function decodeDataUrl(i: number, f: NewAttachment): { type: string; bytes: Uint
   if (size > MAX_ATTACHMENT_BYTES + 2) throw new InboxError(413, `attachment ${i + 1}${f.name ? ` (${cleanName(f.name)})` : ''} is ${size} bytes, over the limit of ${MAX_ATTACHMENT_BYTES}`);
   let raw: string;
   try { raw = atob(data); } catch { throw new InboxError(400, `attachment ${i + 1}: the base64 data is malformed`); }
-  return { type: (m[1] ?? '').toLowerCase(), bytes: Uint8Array.from(raw, (c) => c.charCodeAt(0)) };
+  // A loop, not `Uint8Array.from(raw, ...)`: the callback that form calls once per byte is most of the time this route
+  // spends on a large screenshot.
+  const bytes = new Uint8Array(raw.length);
+  for (let k = 0; k < raw.length; k++) bytes[k] = raw.charCodeAt(k);
+  return { type: (m[1] ?? '').toLowerCase(), bytes };
 }
 
 /** The type of a file by its extension, or application/octet-stream for an extension the inbox does not know. */

@@ -9,9 +9,16 @@ import { cardTools } from '../../src/integrations/tools.ts';
 import { start, until, type Harness } from './harness.ts';
 
 let h: Harness;
+// The plugin reads the herdr pane from the environment of the process that posts a card. These tests run it in this
+// process, so the pane of the terminal that runs the tests would reach the inbox, and herdr with it.
+const savedPane = process.env['HERDR_PANE_ID'];
+delete process.env['HERDR_PANE_ID'];
 before(async () => {
   h = await start();
   process.env['YOUR_ATTENTION_HOME'] = h.home;
+});
+after(() => {
+  if (savedPane !== undefined) process.env['HERDR_PANE_ID'] = savedPane;
 });
 after(async () => {
   await hooks?.dispose?.();

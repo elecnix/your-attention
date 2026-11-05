@@ -93,6 +93,9 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
   // instead of the one this test started.
   delete (env as Record<string, string | undefined>)['YOUR_ATTENTION_URL'];
   delete (env as Record<string, string | undefined>)['YOUR_ATTENTION_TOKEN'];
+  // A test inbox takes its place from the home it is given, never from the herdr session that runs the tests: a card
+  // posted here must not ask herdr about the developer's own pane.
+  for (const k of Object.keys(env)) if (k.startsWith('HERDR_')) delete (env as Record<string, string | undefined>)[k];
   const serve: ChildProcess = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
   // Right after the spawn: a failed spawn emits `error` on the next tick, which would otherwise kill the test process
   // before the cleanup below exists.
