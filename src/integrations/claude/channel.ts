@@ -141,4 +141,4 @@ void inbox.stream(agent, async (ev) => {
     params: { content: body, meta: { card_id: card.id, receipt } },
   });
   log('pushed', card.id, receipt);
-}, stop.signal);
+}, stop.signal).catch((e: Error) => log('stream stopped:', e.message));

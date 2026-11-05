@@ -232,6 +232,9 @@ export class Client {
   async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto'): Promise<void> {
     let link = 0;
     const noSocket = new Set<string>();
+    // A link that answered 410 for its event stream serves events over its socket only. Asking it again every
+    // second is what woke a hosted inbox's Durable Object ~35 times a second, so it is never asked again.
+    const noStream = new Set<string>();
     const deliver = async (ev: AgentEvent): Promise<void> => {
       if (!this.fresh(ev)) return;
       // Record a guidance version before the handler runs, so a fetch that a hello started never hands over older text.
@@ -252,27 +255,57 @@ export class Client {
         await onEvent({ type: 'guidance', id: `hello-${g.version}`, guidance: { text: g.text, version: g.version, at: g.at } });
       } catch { /* the next hello tries again, and the agent can read the guidance with card_guidance */ }
     };
+    // A retry after a failure waits longer each time, so an inbox that is down, or that refuses a transport,
+    // is not woken once a second forever. A transport that ran to its end resets the count.
+    let failures = 0;
+    const backoff = (): number => {
+      const base = Math.min(30_000, 1000 * 2 ** Math.min(Math.max(failures, 1) - 1, 5));
+      return Math.round(base * (0.8 + Math.random() * 0.4));
+    };
     while (!signal.aborted) {
       const url = this.urls[link % this.urls.length] ?? this.url;
+      let wait = 1000;
       try {
         if (this.urls.length > 1 && !(await this.sameInbox(url))) throw new Error('another inbox');
         this.url = url;
+        // The event stream is a fallback for a link whose socket does not open, and only until it refuses.
+        const overStream = transport === 'sse' || (transport === 'auto' && noSocket.has(url) && !noStream.has(url));
+        let ran = true;
         if (transport === 'poll') await this.overPoll(url, agent, deliver, signal);
-        else if (transport === 'sse' || (transport === 'auto' && noSocket.has(url))) await this.overSse(url, agent, deliver, signal);
+        else if (overStream) await this.overSse(url, agent, deliver, signal);
         else {
           const opened = await this.overSocket(url, agent, deliver, signal);
           // A socket that never opened on a link that answers means the link cannot carry one. A link that does not answer is down: retry it.
           if (!opened && transport === 'auto') {
             if (!(await this.answers(url))) throw new Error('the link is down');
             noSocket.add(url);
-            continue;
+            ran = false;
+            // Try the stream once when the link has not refused it; otherwise wait before the next socket.
+            wait = noStream.has(url) ? (failures++, backoff()) : 0;
           }
         }
-      } catch {
+        if (ran) failures = 0;
+      } catch (e) {
         if (signal.aborted) return;
-        link++;
+        const status = (e as { status?: number }).status;
+        if (status === 410) {
+          // The inbox serves events over its socket only, as a hosted inbox does. An explicit transport asked for
+          // a stream that this link will never serve, so it reports instead of retrying.
+          if (transport !== 'auto') throw e;
+          noStream.add(url);
+          failures++;
+          wait = backoff();
+        } else if (status === 401 || status === 403 || status === 404) {
+          // A token or address the inbox refuses stays refused: report it instead of retrying forever.
+          throw e;
+        } else {
+          link++;
+          failures++;
+          wait = backoff();
+        }
       }
-      if (!signal.aborted) await new Promise((r) => setTimeout(r, 1000));
+      if (wait === 0) continue;
+      if (!signal.aborted) await new Promise((r) => setTimeout(r, wait));
     }
   }
 
@@ -285,7 +318,7 @@ export class Client {
       headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
       signal,
     });
-    if (!res.ok || !res.body) throw new Error(`stream: ${res.status}`);
+    if (!res.ok || !res.body) throw new TransportRefused('stream', res.status);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -346,9 +379,18 @@ export class Client {
   private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
       const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&instance=${this.instance}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
-      if (!res.ok) throw new Error(`poll: ${res.status}`);
+      if (!res.ok) throw new TransportRefused('poll', res.status);
       for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }
+  }
+}
+
+/** A transport the inbox answered with an HTTP status instead of a stream, so the loop can tell permanent from transient. */
+class TransportRefused extends Error {
+  readonly status: number;
+  constructor(name: string, status: number) {
+    super(`${name}: ${status}`);
+    this.status = status;
   }
 }
 
