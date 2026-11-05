@@ -131,6 +131,8 @@ const MAX_SIGN_IN_CODES = 5;
 export const PAIRING_KEEP_MS = 24 * 60 * 60 * 1000;
 /** How long a cleared card, or a card nobody answered, stays after its last change before the purge deletes it. */
 export const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+/** Where the purge keeps the files a delete could not remove, so a laptop retries them on its next pass. */
+const PENDING_FILE_DELETES = 'pending-file-deletes';
 /** The most cards one purge pass deletes, so no alarm does unbounded work. */
 export const PURGE_BATCH = 100;
 /** The share of the storage limit the purge keeps free, by deleting the oldest of those cards sooner. */
@@ -1662,8 +1664,12 @@ export class Inbox {
     // Every record goes before the first await, so no request sees half a batch.
     if (removed) this.emit({ type: 'change', card: '' });
     // The records are gone already, so a failed delete must not stop the alarm that called this. R2 deletes the file
-    // 30 days after its upload anyway.
-    await Promise.allSettled(files.map((f) => this.blobs.delete(f)));
+    // 30 days after its upload anyway, and a laptop retries the delete on its next pass.
+    const retry = this.store.get<string[]>('meta', PENDING_FILE_DELETES) ?? [];
+    const settled = await Promise.allSettled([...retry, ...files].map((f) => this.blobs.delete(f)));
+    const failed = [...retry, ...files].filter((_, i) => settled[i]?.status === 'rejected').slice(0, PURGE_BATCH * 10);
+    if (failed.length) this.store.put('meta', PENDING_FILE_DELETES, failed);
+    else if (retry.length) this.store.delete('meta', PENDING_FILE_DELETES);
     return { removed };
   }
 

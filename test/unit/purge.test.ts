@@ -173,3 +173,28 @@ describe('the purge of old cards', () => {
     assert.equal(inbox.nextDeadline(), undefined);
   });
 });
+
+describe('a file delete that fails', () => {
+  it('is retried on the next pass, so a laptop does not leave the file on disk for good', async () => {
+    let t = 1_000_000_000;
+    const store = new MemoryStorage();
+    const blobs = new MemoryBlobs();
+    let fail = true;
+    const flaky = {
+      put: blobs.put.bind(blobs),
+      get: blobs.get.bind(blobs),
+      delete: async (key: string) => { if (fail) throw new Error('EACCES'); return blobs.delete(key); },
+    };
+    const inbox = new Inbox(store, () => t, flaky);
+    const card = await inbox.postCardWithFiles(agent, { id: 'old', agent: 's1', title: 'walrus', attachments: [file] });
+    const fileId = card.attachments?.[0]?.id ?? '';
+    assert.equal((await blobs.get(fileId)) !== undefined, true, 'the file is stored');
+    inbox.archive(owner);
+    t += 31 * DAY;
+    await inbox.purge();
+    assert.equal((await blobs.get(fileId)) !== undefined, true, 'the failed delete leaves the file');
+    fail = false;
+    await inbox.purge();
+    assert.equal(await blobs.get(fileId), undefined, 'the next pass removes it');
+  });
+});
