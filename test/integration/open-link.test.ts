@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { ROOT, until } from './harness.ts';
+import { ROOT, stopAndRemove, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 
@@ -33,8 +33,7 @@ describe('your-attention open --link', () => {
       assert.notEqual(down.status, 0);
       assert.match(down.stderr, /No inbox runs on this machine/);
     } finally {
-      serve.kill();
-      fs.rmSync(home, { recursive: true, force: true });
+      await stopAndRemove(serve, home);
     }
   });
 });

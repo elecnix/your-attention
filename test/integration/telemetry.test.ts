@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { promisify } from 'node:util';
-import { ROOT, until } from './harness.ts';
+import { ROOT, stopAndRemove, until } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 /** The inbox address, once server.json is complete. A read in the middle of the write waits for the next poll. */
@@ -64,8 +64,7 @@ describe('usage counts from the command line', () => {
       assert.notEqual(report.code, 0);
       assert.match(report.stderr, /CLOUDFLARE_ACCOUNT_ID/);
     } finally {
-      serve.kill();
-      fs.rmSync(home, { recursive: true, force: true });
+      await stopAndRemove(serve, home);
     }
   });
 
@@ -80,8 +79,7 @@ describe('usage counts from the command line', () => {
       assert.equal(shown.code, 0, shown.stderr);
       assert.match(shown.stdout, /DO_NOT_TRACK/);
     } finally {
-      serve.kill();
-      fs.rmSync(home, { recursive: true, force: true });
+      await stopAndRemove(serve, home);
     }
   });
 

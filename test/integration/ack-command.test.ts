@@ -41,7 +41,7 @@ describe('marking an answer read from the command line', () => {
       assert.notEqual(usage.code, 0);
       assert.match(usage.stderr, /Usage: your-attention ack <card>/);
     } finally {
-      server.close();
+      await server.close();
     }
   });
 });
@@ -70,7 +70,7 @@ describe('a watcher that leaves answers unread', () => {
       assert.equal('card' in (JSON.parse(answerLine) as object), false, 'the line leaves the card object out');
     } finally {
       watch?.kill('SIGKILL');
-      server.close();
+      await server.close();
     }
   });
 });
@@ -95,7 +95,7 @@ describe('finding what arrived while no watcher was running', () => {
       const left = (await (await server.call(agent, 'GET', '/v1/unread?agent=cli:deploy')).json()) as { unread: number; cards: string[] };
       assert.deepEqual(left, { unread: 1, cards: ['two'] }, 'an ack takes one out');
     } finally {
-      server.close();
+      await server.close();
     }
   });
 });
