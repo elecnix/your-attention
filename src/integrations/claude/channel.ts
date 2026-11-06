@@ -18,7 +18,7 @@ import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { claudeSessionName } from './session-name.ts';
 import { devChannelEnabled, parentArgs } from './channel-flag.ts';
-import { boxState } from '../herdr/approve.ts';
+import { boxState, runHerdr } from '../herdr/approve.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { cardTools } from '../tools.ts';
 
@@ -196,16 +196,13 @@ async function fallback(receipt: string, push: Push): Promise<void> {
 /** Type the answer into this session's own pane, under the rule an approval follows: never over a draft the person
  * is typing, and never into a pane without an input box. The reason is short because a card's status is 60 characters. */
 async function typeIntoOwnPane(at: string, text: string): Promise<void> {
-  const herdr = (...args: string[]): Promise<string> => new Promise((resolve, reject) => {
-    execFile(process.env['HERDR_BIN_PATH'] ?? 'herdr', args, { timeout: 5000, maxBuffer: 8 << 20 }, (err, out) => (err ? reject(err) : resolve(out)));
-  });
   let exists = false;
-  try { exists = Boolean((JSON.parse(await herdr('pane', 'get', at)) as { result?: { pane?: unknown } }).result?.pane); } catch { exists = false; }
+  try { exists = Boolean((JSON.parse(await runHerdr('pane', 'get', at)) as { result?: { pane?: unknown } }).result?.pane); } catch { exists = false; }
   if (!exists) throw new Error(`herdr has no pane ${at}`);
-  const box = boxState(await herdr('pane', 'read', at, '--lines', '40', '--source', 'visible', '--format', 'ansi'));
+  const box = boxState(await runHerdr('pane', 'read', at, '--lines', '40', '--source', 'visible', '--format', 'ansi'));
   if (box.state === 'NO-BOX') throw new Error('the pane shows no input box');
   if (box.state === 'DRAFT') throw new Error('the pane holds a draft');
-  await herdr('agent', 'prompt', at, text);
+  await runHerdr('agent', 'prompt', at, text);
 }
 
 async function markNotSeen(card: string, reason: string): Promise<void> {

@@ -54,6 +54,14 @@ exit 0
   return { bin: path.join(dir, 'herdr'), text, calls: () => text().split('\n').filter(Boolean) };
 }
 
+/** Connect to a channel, and wait until the inbox reports its agent online. */
+async function connectChannel(session: string, command: string, args: string[]): Promise<McpClient> {
+  const mcp = new McpClient({ name: 'test', version: '1' });
+  await mcp.connect(new StdioClientTransport({ command, args, env: envFor({ CLAUDE_CODE_SESSION_ID: session }), stderr: 'ignore' }));
+  await until(async () => ((await h.stored()) as { presence: Record<string, { online: boolean }> }).presence[`claude:${session}`]?.online);
+  return mcp;
+}
+
 /** A channel process the test speaks MCP to itself, so it can answer a card before the client connects. */
 function rawChannel(env: Record<string, string>) {
   const child: ChildProcess = spawn(process.execPath, CHANNEL_ARGS, { env, stdio: ['pipe', 'pipe', 'ignore'] });
@@ -197,10 +205,8 @@ describe('the channel at startup', () => {
   it('reports Channel off on the agent\'s presence when its session started without the flag', { skip: posixOnly }, async () => {
     const SESSION = 'startup-session-2';
     const agent = `claude:${SESSION}`;
-    const mcp = new McpClient({ name: 'test', version: '1' });
+    const mcp = await connectChannel(SESSION, process.execPath, CHANNEL_ARGS);
     try {
-      await mcp.connect(new StdioClientTransport({ command: process.execPath, args: CHANNEL_ARGS, env: envFor({ CLAUDE_CODE_SESSION_ID: SESSION }), stderr: 'ignore' }));
-      await until(async () => ((await h.stored()) as { presence: Record<string, { online: boolean; channelOff?: boolean }> }).presence[agent]?.online);
       const presence = ((await h.stored()) as { presence: Record<string, { channelOff?: boolean }> }).presence[agent];
       assert.equal(presence?.channelOff, true);
     } finally {
@@ -219,10 +225,8 @@ const [script] = process.argv.slice(2);
 const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', script, 'claude-channel'], { stdio: 'inherit', env: process.env });
 child.on('exit', (code) => process.exit(code ?? 0));
 `);
-    const mcp = new McpClient({ name: 'test', version: '1' });
+    const mcp = await connectChannel(SESSION, process.execPath, [wrapper, CLI]);
     try {
-      await mcp.connect(new StdioClientTransport({ command: process.execPath, args: [wrapper, CLI], env: envFor({ CLAUDE_CODE_SESSION_ID: SESSION }), stderr: 'ignore' }));
-      await until(async () => ((await h.stored()) as { presence: Record<string, { online: boolean }> }).presence[agent]?.online);
       const presence = ((await h.stored()) as { presence: Record<string, { channelOff?: boolean }> }).presence[agent];
       assert.equal(presence?.channelOff, undefined);
     } finally {
