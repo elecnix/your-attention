@@ -534,6 +534,18 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'tokens') { owner(); return json(inbox.listTokens()); }
     if (method === 'DELETE' && a === 'tokens' && b) { owner(); inbox.revokeToken(b); return json({ ok: true }); }
 
+    // The default tags an agent's cards inherit. A token reads and writes only its own, and the owner lists them all.
+    if (a === 'tags' && !b) {
+      if (method === 'GET') {
+        if (me.role === 'owner') return json({ defaults: inbox.defaultTagsList(me, url.searchParams.get('agent') ?? undefined) });
+        if (me.role !== 'agent') throw new InboxError(403, 'only an agent reads its own default tags');
+        const agent = url.searchParams.get('agent');
+        if (!agent) return json({ error: 'agent is required' }, 400);
+        return json(inbox.defaultTags(me, agent));
+      }
+      if (method === 'PUT') return json(inbox.setDefaultTags(me, (await readJson(req)) ?? {}));
+    }
+
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
     if (a === 'cards') {
       if (method === 'POST' && !b) {
@@ -543,7 +555,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           const done = inbox.systemRequest(me, input);
           return 'secret' in done ? json(done, 201, { [ONCE_HEADER]: '1' }) : json(done, 200);
         }
-        return json(withWarning(publicCard(await inbox.postCardWithFiles(me, input))), 201);
+        const card = await inbox.postCardWithFiles(me, input);
+        // The reply names the tags the card took from the agent's defaults, so the agent knows what it inherited.
+        return json({ ...withWarning(publicCard(card)), inheritedTags: inbox.inheritedTags(me, input) }, 201);
       }
       if (method === 'GET' && !b) return json(inbox.listCards(me));
       if (!b) return json({ error: 'not found' }, 404);

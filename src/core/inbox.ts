@@ -12,8 +12,9 @@ import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
+import { MAX_TAGS } from './types.ts';
 import type {
-  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
@@ -207,6 +208,41 @@ export function answerId(card: string, savedAt: number): string {
 
 type AgentSend = (ev: AgentEvent) => void;
 type PageSend = (ev: PageEvent) => void;
+
+/** A token's default tags, by agent id, as the inbox stores them under one `meta` key. */
+interface DefaultTagRow {
+  token: string;
+  agents: Record<string, Record<string, DefaultTag>>;
+  at: number;
+}
+
+/**
+ * The tags a card stores: the agent's default tags under the card's own. A key on the card wins, and a key the card
+ * passes with an empty string drops that default for that card alone. Defaults past the tag limit lose, so the card's
+ * own tags always fit. Returns the merged tags, and the keys the card took from the defaults.
+ */
+export function mergeDefaultTags(defaults: Record<string, string>, own: Record<string, string> | undefined): { tags: Record<string, string> | undefined; inherited: string[] } {
+  const tags: Record<string, string> = {};
+  const inherited: string[] = [];
+  for (const [k, value] of Object.entries(defaults)) {
+    // A plain object answers `toString` for every key, so the card's own tags are read by their own key only.
+    const mine = own !== undefined && Object.hasOwn(own, k) ? own[k] : undefined;
+    if (mine === '') continue;
+    if (mine !== undefined) { tags[k] = String(mine); continue; }
+    tags[k] = value;
+    inherited.push(k);
+  }
+  for (const [k, value] of Object.entries(own ?? {})) {
+    // `in` would see `constructor` and `toString` on any object, so a tag by those names would be dropped.
+    if (Object.hasOwn(defaults, k) || value === '') continue;
+    tags[k] = String(value);
+  }
+  // The card's own tags come last in insertion order, so the defaults give way at the limit, and a card that names
+  // more than the limit is refused rather than cut.
+  while (Object.keys(tags).length > MAX_TAGS && inherited.length) delete tags[inherited.pop() as string];
+  if (Object.keys(tags).length > MAX_TAGS) throw new InboxError(400, `a card takes at most ${MAX_TAGS} tags, with its agent's defaults`);
+  return { tags: Object.keys(tags).length ? tags : undefined, inherited };
+}
 
 export class Inbox {
   private readonly store: Storage;
@@ -447,8 +483,9 @@ export class Inbox {
 
   // ---- cards ----
 
-  /** `checked` holds what checkCard found for the card's diagrams. A card with a diagram it does not hold is refused. */
-  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams, places?: (Approval['place'] | undefined)[]): Card {
+  /** `checked` holds what checkCard found for the card's diagrams. A card with a diagram it does not hold is refused.
+   * `opts.revise` marks a patch, which edits one field and keeps the tags the card already carries. */
+  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams, places?: (Approval['place'] | undefined)[], opts: { revise?: boolean } = {}): Card {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
     const title = String(input.title ?? '').trim();
     if (!title) throw new InboxError(400, 'title is required');
@@ -516,6 +553,10 @@ export class Inbox {
     const history: CardVersion[] = before
       ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, recommendation: before.recommendation, body: before.body, html: before.html, at: before.updatedAt }].slice(-HISTORY_LIMIT)
       : [];
+    // Every card an agent posts inherits its default tags, under the card's own. The inbox's own system cards keep none.
+    const mergedTags = caller.token === '' || kind === 'system' || opts.revise === true
+      ? { tags: input.tags }
+      : mergeDefaultTags(this.tagValues(caller.token, agent), ownTags(input.tags));
     const card: Card = {
       id,
       agent,
@@ -546,7 +587,7 @@ export class Inbox {
       broadcast: before?.broadcast,
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
-      tags: cleanTags(input.tags),
+      tags: mergedTags.tags,
       follows: input.follows ?? before?.follows,
       followedBy: before?.followedBy,
       deliver: input.deliver ?? 'stream',
@@ -1062,7 +1103,7 @@ export class Inbox {
   /** Edit a card the way a coding agent edits a file: each edit replaces text that occurs exactly once. */
   patchCard(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string, checked?: CheckedDiagrams): Card {
     const { card, input } = this.patched(caller, id, edits, field);
-    const next = this.postCard(caller, input, undefined, checked);
+    const next = this.postCard(caller, input, undefined, checked, undefined, { revise: true });
     // A patch edits the body the widgets already filled, so the card still shows them and keeps their responses, and any the patch placed.
     if (!card.widgets) return next;
     const responses = [...(card.responses ?? []), ...(next.responses ?? [])];
@@ -1767,6 +1808,85 @@ export class Inbox {
     this.store.delete('messages', key);
   }
 
+  // ---- default tags ----
+
+  /** The default tags this caller set for one agent id. A token reads only the defaults it set itself. */
+  defaultTags(caller: Caller, agent: string): DefaultTags {
+    if (caller.role !== 'agent') throw new InboxError(403, 'only an agent reads its own default tags');
+    const id = this.agentId(agent);
+    return { agent: id, tags: this.storedTags(caller.token, id) };
+  }
+
+  /** Set, merge, remove or clear the default tags this caller keeps for one agent id. Every card that agent posts
+   * inherits them, under its own tags. */
+  setDefaultTags(caller: Caller, input: Partial<DefaultTagsWrite>): DefaultTags {
+    if (caller.role !== 'agent') throw new InboxError(403, 'only an agent sets its own default tags');
+    const agent = this.agentId(input.agent);
+    const from = input.from === undefined ? 'card_tags' : String(input.from);
+    if (!/^[A-Za-z_][\w.-]{0,39}$/.test(from)) throw new InboxError(400, 'from must be 1 to 40 letters, digits, dots, dashes or underscores');
+    const key = `tags:${caller.token}`;
+    const row = this.store.get<DefaultTagRow>('meta', key);
+    const agents = { ...(row?.agents ?? {}) };
+    const tags: Record<string, DefaultTag> = input.clear === true ? {} : { ...(agents[agent] ?? {}) };
+    if (input.tags !== undefined) {
+      if (!input.tags || typeof input.tags !== 'object' || Array.isArray(input.tags)) throw new InboxError(400, 'tags must be an object of tag keys and values');
+      for (const [k, v] of Object.entries(input.tags)) {
+        if (!k) throw new InboxError(400, 'each tag needs a key');
+        if (k.length > MAX_TAG_CHARS) throw new InboxError(400, `tag key ${k.slice(0, 20)}… must be at most ${MAX_TAG_CHARS} characters`);
+        const value = String(v ?? '');
+        if (!value) throw new InboxError(400, `tag ${k} has an empty value: leave it out, or remove it`);
+        if (value.length > MAX_TAG_CHARS) throw new InboxError(400, `tag ${k} must be at most ${MAX_TAG_CHARS} characters`);
+        tags[k] = { value, from };
+      }
+    }
+    if (input.remove !== undefined) {
+      if (!Array.isArray(input.remove)) throw new InboxError(400, 'remove must be a list of tag keys');
+      for (const k of input.remove.map(String)) delete tags[String(k)];
+    }
+    if (Object.keys(tags).length > MAX_TAGS) throw new InboxError(400, `an agent keeps at most ${MAX_TAGS} default tags`);
+    if (Object.keys(tags).length) agents[agent] = tags;
+    else delete agents[agent];
+    if (Object.keys(agents).length) this.store.put<DefaultTagRow>('meta', key, { token: caller.token, agents, at: this.now() });
+    else this.store.delete('meta', key);
+    return { agent, tags };
+  }
+
+  /** Every token's default tags, or one agent's, for the owner. */
+  defaultTagsList(caller: Caller, agent?: string): { token: string; agent: string; tags: Record<string, DefaultTag> }[] {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner reads every default tag');
+    const out: { token: string; agent: string; tags: Record<string, DefaultTag> }[] = [];
+    for (const row of this.store.list<DefaultTagRow>('meta')) {
+      if (typeof row?.token !== 'string' || !row.agents) continue;
+      for (const [id, tags] of Object.entries(row.agents)) {
+        if ((agent === undefined || id === agent) && tags && Object.keys(tags).length) out.push({ token: row.token, agent: id, tags });
+      }
+    }
+    return out;
+  }
+
+  /** The tag keys a post by this caller takes from its defaults, read after the card commits. The route names them in
+   * the reply, so an agent knows what it inherited without reading the card back. */
+  inheritedTags(caller: Caller, input: NewCard): string[] {
+    if (caller.token === '' || (input.kind ?? 'ask') === 'system') return [];
+    return mergeDefaultTags(this.tagValues(caller.token, String(input.agent ?? '').trim()), ownTags(input.tags)).inherited;
+  }
+
+  /** The defaults this token keeps for one agent id, by value. */
+  private tagValues(token: string, agent: string): Record<string, string> {
+    return Object.fromEntries(Object.entries(this.storedTags(token, agent)).map(([k, t]) => [k, t.value]));
+  }
+
+  private storedTags(token: string, agent: string): Record<string, DefaultTag> {
+    return this.store.get<DefaultTagRow>('meta', `tags:${token}`)?.agents?.[agent] ?? {};
+  }
+
+  private agentId(agent: unknown): string {
+    const id = String(agent ?? '').trim();
+    if (!id) throw new InboxError(400, 'agent is required');
+    if (id.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    return id;
+  }
+
   // ---- connections ----
 
   private key(token: string, agent: string): string {
@@ -2182,6 +2302,12 @@ function searchText(card: Card): string {
 }
 
 const ORIGIN_FIELDS = ['harness', 'session', 'name', 'host', 'cwd', 'herdrPane', 'herdrWorkspace', 'herdrTab'] as const;
+
+/** A post's tags as the merge reads them: an object of values, or nothing. A client that sends anything else keeps the
+ * tags it sent on the card, as it always did. */
+function ownTags(tags: unknown): Record<string, string> | undefined {
+  return tags && typeof tags === 'object' && !Array.isArray(tags) ? (tags as Record<string, string>) : undefined;
+}
 
 /** The origin fields the page knows, each a string of at most 200 characters. */
 function cleanOrigin(origin: unknown): Origin | undefined {

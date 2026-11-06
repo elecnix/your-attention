@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerPairing } from './client.ts';
+import { parseTagsFlag } from './integrations/tags.ts';
 import type { Option, Priority, PublicSubscription } from './core/types.ts';
 import { homeDir, readHome, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
@@ -36,6 +37,8 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   subscribe --agent ID (--webhook URL | --webhook-file FILE) [--header 'NAME: VALUE']... [--header-file FILE|-]
                                                       send each answer to that agent's cards to an https webhook, once you approve it
   unsubscribe --agent ID                              stop sending that agent's answers to its webhook
+  pi [--tags repo=acme/api,topic=billing] -- [pi args]  run pi, and give every card it posts default tags
+                                                      (YOUR_ATTENTION_TAGS, read by the pi extension at session start)
   claude-channel                                      the MCP channel server for Claude Code
   claude-hook ask-pre|ask-post|ask-cancel             the AskUserQuestion hooks for Claude Code
   herdr-blocked                                       post a card for each herdr agent that is blocked
@@ -686,6 +689,27 @@ switch (command) {
     const r = await (await import('./node/links.ts')).relayServer({ port: Number(values.port), host: values.host, key });
     console.error(`[relay] listening on ${r.url}; inboxes are at /i/<inbox id>/`);
     break;
+  }
+  case 'pi': {
+    // pi rejects a flag it does not know, such as --tags, so this launcher takes the flag and hands pi the rest.
+    const sep = rest.indexOf('--');
+    const own = sep === -1 ? rest : rest.slice(0, sep);
+    const piArgs = sep === -1 ? [] : rest.slice(sep + 1);
+    const { values } = parseArgs({ args: own, options: { tags: { type: 'string' } } });
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (values.tags !== undefined) {
+      parseTagsFlag(values.tags);
+      env['YOUR_ATTENTION_TAGS'] = values.tags;
+    }
+    // pi draws in the terminal, so it inherits this one's input, output and errors, and it gets every argument after
+    // -- unchanged.
+    // Windows runs a `.cmd` only through the shell it belongs to.
+    const win = process.platform === 'win32';
+    const child = win
+      ? spawnSync(process.env['COMSPEC'] ?? 'cmd.exe', ['/d', '/s', '/c', 'pi', ...piArgs], { stdio: 'inherit', env })
+      : spawnSync('pi', piArgs, { stdio: 'inherit', env });
+    if (child.error) fail(`Could not run pi: ${child.error.message}`);
+    process.exit(child.status ?? 1);
   }
   case 'claude-channel':
     await import('./integrations/claude/channel.ts');

@@ -2,6 +2,10 @@
 
 export const PROTOCOL_VERSION = 1;
 
+/** The card tag limit: a card and an agent's default tags share it. */
+export const MAX_TAGS = 10;
+export const MAX_TAG_CHARS = 100;
+
 /** The id of a priority level. The defaults are now, soon and later. */
 export type Priority = string;
 export type CardKind = 'ask' | 'blocked' | 'system' | 'secret';
@@ -172,6 +176,29 @@ export interface TagValueCount {
 export interface TagCount {
   key: string;
   values: TagValueCount[];
+}
+
+/** A default tag an agent keeps in the inbox: its value, and what set it, such as card_tags or YOUR_ATTENTION_TAGS. */
+export interface DefaultTag {
+  value: string;
+  from: string;
+}
+
+/** The default tags one agent holds under one token. Every card that agent posts inherits them under its own tags. */
+export interface DefaultTags {
+  agent: string;
+  tags: Record<string, DefaultTag>;
+}
+
+/** A default tags write, as card_tags sends it and PUT /v1/tags takes it. The inbox clears first, then merges `tags`,
+ * then drops `remove`, so one call shows the result of all three. */
+export interface DefaultTagsWrite {
+  agent: string;
+  tags?: Record<string, string>;
+  remove?: string[];
+  clear?: boolean;
+  /** What sets these tags: card_tags by default, or YOUR_ATTENTION_TAGS from the pi launcher. */
+  from?: string;
 }
 
 export interface Settings {

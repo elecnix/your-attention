@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError } from './core/inbox.ts';
-import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, PublicSubscription, TagCount, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CloseKind, DefaultTags, DefaultTagsWrite, Guidance, NewCard, PublicSubscription, TagCount, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 
@@ -167,10 +167,21 @@ export class Client {
     throw new Error(`no link answered (${(lastError as Error)?.message ?? 'none tried'})`);
   }
 
-  /** The posted card. A revision the person won't see carries `warning`. */
-  async post(card: NewCard): Promise<Card & { warning?: string }> {
+  /** The posted card. A revision the person won't see carries `warning`, and `inheritedTags` names the keys the card
+   * took from the agent's default tags. */
+  async post(card: NewCard): Promise<Card & { warning?: string; inheritedTags?: string[] }> {
     await this.checkFirst('POST /v1/cards', { card: { ...card, attachments: undefined } });
     return this.call('POST', '/v1/cards', card);
+  }
+
+  /** The default tags this token keeps for one agent id: every card that agent posts inherits them. */
+  defaultTags(agent: string): Promise<DefaultTags> {
+    return this.call('GET', `/v1/tags?agent=${encodeURIComponent(agent)}`);
+  }
+
+  /** Set, merge, remove or clear the default tags this token keeps for one agent id. */
+  setDefaultTags(agent: string, write: Omit<DefaultTagsWrite, 'agent'>): Promise<DefaultTags> {
+    return this.call('PUT', '/v1/tags', { agent, ...write });
   }
 
   /** An inbox that does not check diagrams or bodies itself, such as the hosted one, takes them unchecked. So the client

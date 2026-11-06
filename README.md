@@ -138,6 +138,14 @@ claude() {
 pi install git:github.com/elecnix/your-attention
 ```
 
+A session's cards can take default tags, such as the repository and the topic. Start pi through the launcher, which sets `YOUR_ATTENTION_TAGS` and passes the rest of the command to pi unchanged:
+
+```sh
+your-attention pi --tags repo=acme/api,topic=billing -- [pi args]
+```
+
+Every card the session posts inherits them, under the tags on the card itself. The agent reads or changes them with the `card_tags` tool, so a compaction loses nothing.
+
 #### OpenCode
 
 Write the plugin file once. It gives every session the card tools, and brings each answer into its session as a new message. A message that arrives while the agent works waits for the turn to end.

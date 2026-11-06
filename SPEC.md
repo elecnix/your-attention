@@ -124,11 +124,29 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `priority` | The id of a priority level: `now`, `soon` (the default) or `later` unless the levels changed. |
 | `origin` | Where the session runs: `harness`, `session`, `name`, `host`, `cwd`, `herdrPane`, and the labels of the herdr workspace and tab, `herdrWorkspace` and `herdrTab`. The integration fills it in when the agent posts, and the inbox keeps each field to 200 characters. |
 | `from` | A label the agent picks for itself, such as `the release agent`, at most 80 characters. It changes nothing about access: only the token that posted a card can change that card. |
-| `tags` | String properties for grouping. The card header shows each one as `key: value`, and the person can pin a value to the top of the queue. A card keeps at most 10, and each key and value is one line of at most 100 characters. |
+| `tags` | String properties for grouping. The card header shows each one as `key: value`, and the person can pin a value to the top of the queue. The agent's default tags appear on every card it posts: see [Default tags](#default-tags). A card keeps at most 10 merged, and each key and value is one line of at most 100 characters. |
 | `follows` | The card this one follows up on. The inbox sets `followedBy` on that card. |
 | `deliver` | `stream` (the default) or `none` for a card that only shows state. |
 
 Only the token that posted a card can change it or acknowledge its answer. The inbox posts a guidance card itself and gives it the token of the proposing agent, so that agent may acknowledge the answer and close the card, and an edit fails with 403 because only the inbox may post as `system`. The inbox never sends that token id to clients.
+
+## Default tags
+
+An agent keeps default tags in the inbox, and every card it posts inherits them. `PUT /v1/tags` sets them:
+
+```json
+{ "agent": "pi:5f2a", "tags": { "repo": "acme/api", "topic": "billing" } }
+```
+
+Every field except `agent` is optional. A write with `clear` true wipes the defaults first, then merges `tags` into them, then drops the keys in `remove`, so one call can do all three. Each tag is stored as `{value, from}`, where `from` says what set it, such as `card_tags` or `YOUR_ATTENTION_TAGS` from the pi launcher. The route returns `{agent, tags}`.
+
+`GET /v1/tags?agent=<id>` returns the calling token's defaults for one agent id, with the same fields. The owner lists them for every token with `GET /v1/tags`, or for one agent with `?agent=<id>`, as `{defaults: [{token, agent, tags}]}`. Each token reads and changes only the defaults it set, because the inbox keys them by token and agent id. The same agent id under another token has its own row. An extension token has none. The limits follow the card tag limit: at most 10 keys, and each key and value at most 100 characters. The inbox answers 400 past them, and refuses an empty value, since a default with no value means nothing.
+
+When an agent posts a card, the inbox puts the defaults under the card's own `tags`. A key on the card takes its own value, and a key the card passes with an empty string drops that default for that card alone. A default past the 10-key limit of the merged tags loses to the card's own. Cards keep the merged result, so the page, the terminal client, search and the guidance all read the final tags. `POST /v1/cards` replies with `inheritedTags`, which lists each default key the card took, and `card_post` tells the agent. The defaults apply to every card an agent posts, a secret card included. The inbox posts `system` cards itself, and they take no defaults. A patch leaves the card's tags as they are.
+
+The inbox keeps a default tag under its agent id, so a compaction, a restart or a different harness leaves it in place. `card_tags` with no fields returns them, with `from` for each one.
+
+The pi launcher seeds them. `pi` rejects a flag it does not know, so `your-attention pi --tags repo=acme/api,topic=billing -- <pi args>` exports `YOUR_ATTENTION_TAGS` and runs pi with the rest of its arguments unchanged. The pi extension reads the variable at session start and sets the session's defaults with `from: "YOUR_ATTENTION_TAGS"`.
 
 ## Answers
 
