@@ -361,10 +361,18 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     if (!key || !m.current) { status('Group by a tag first (g), then p pins the open card’s value.', 'warn'); return; }
     if (!value) { status(`This card has no ${key} tag.`, 'warn'); return; }
     // The inbox keeps one list of pins for every device, so the toggle applies to the freshest list it has, not to the
-    // one this terminal read when it last connected: another device may have pinned something since.
-    await refresh();
-    const had = pins.some(([k, v]) => k === key && v === value);
-    const next: [string, string][] = had ? pins.filter(([k, v]) => !(k === key && v === value)) : [...pins, [key, value]];
+    // one this terminal read when it last connected: another device may have pinned something since. A read that fails
+    // leaves nothing to base the write on, so nothing is written.
+    let fresh: [string, string][];
+    try {
+      const s = await api.state();
+      fresh = Array.isArray(s.settings?.pins) ? (s.settings.pins as [string, string][]) : [];
+    } catch (e) {
+      status(`The inbox did not answer, so nothing was pinned: ${(e as Error).message}`, 'warn');
+      return;
+    }
+    const had = fresh.some(([k, v]) => k === key && v === value);
+    const next: [string, string][] = had ? fresh.filter(([k, v]) => !(k === key && v === value)) : [...fresh, [key, value]];
     pins = next;
     if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins) as Queue;
     status(had ? `Unpinned ${key}: ${value}.` : `Pinned ${key}: ${value} to the top.`, 'ok');
