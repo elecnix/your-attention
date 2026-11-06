@@ -1371,7 +1371,9 @@ export class Inbox {
     const current = this.getCard(card.id);
     // A card closed while triage checks it needs no verdict any more.
     const triage = current.triage?.state === 'pending' ? { ...current.triage, state: 'skipped' as const, waiting: [], reason: 'The card closed before triage answered.' } : current.triage;
-    const closed: Card = { ...current, triage, closed: { kind, outcome, at: this.now(), ...(draft ? { draft } : {}) } };
+    // A draft the person recorded stays with the card, whoever closes it next, so their words are never lost.
+    const kept = draft ?? current.closed?.draft;
+    const closed: Card = { ...current, triage, closed: { kind, outcome, at: this.now(), ...(kept ? { draft: kept } : {}) } };
     this.store.put('cards', card.id, closed);
     this.emit({ type: 'change', card: card.id });
     return closed;
