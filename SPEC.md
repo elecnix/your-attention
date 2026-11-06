@@ -446,7 +446,7 @@ If all three hold, the sidecar sends the choice's number with `herdr agent send-
 
 ## Clearing the inbox
 
-`POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer for 30 days, or until the inbox deletes the card to stay under its storage limit, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
+`POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved, dismissed or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer for 30 days, or until the inbox deletes the card to stay under its storage limit, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
 
 `POST /v1/reset {"confirm": "reset"}` removes every card, answer and attached file, and it cannot be undone. Tokens, templates, widgets, settings and guidance stay. Only the owner can reset, and `your-attention reset --yes` calls it.
 
