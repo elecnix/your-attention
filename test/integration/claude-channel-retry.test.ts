@@ -211,16 +211,17 @@ describe('the channel at startup', () => {
   it('leaves the presence alone when the parent carries the flag', { skip: posixOnly }, async () => {
     const SESSION = 'startup-session-3';
     const agent = `claude:${SESSION}`;
-    // A parent process whose command line carries the flag, as Claude Code's does.
+    // A parent process whose command line carries the flag, as Claude Code's does. ps reads the title.
     const wrapper = path.join(h.home, 'claude-parent.mjs');
     fs.writeFileSync(wrapper, `import { spawn } from 'node:child_process';
+process.title = 'claude ${FLAG}';
 const [script] = process.argv.slice(2);
 const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', script, 'claude-channel'], { stdio: 'inherit', env: process.env });
 child.on('exit', (code) => process.exit(code ?? 0));
 `);
     const mcp = new McpClient({ name: 'test', version: '1' });
     try {
-      await mcp.connect(new StdioClientTransport({ command: process.execPath, args: [wrapper, CLI, FLAG], env: envFor({ CLAUDE_CODE_SESSION_ID: SESSION }), stderr: 'ignore' }));
+      await mcp.connect(new StdioClientTransport({ command: process.execPath, args: [wrapper, CLI], env: envFor({ CLAUDE_CODE_SESSION_ID: SESSION }), stderr: 'ignore' }));
       await until(async () => ((await h.stored()) as { presence: Record<string, { online: boolean }> }).presence[agent]?.online);
       const presence = ((await h.stored()) as { presence: Record<string, { channelOff?: boolean }> }).presence[agent];
       assert.equal(presence?.channelOff, undefined);

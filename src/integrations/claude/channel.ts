@@ -17,7 +17,7 @@ import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { claudeSessionName } from './session-name.ts';
-import { devChannelEnabled, parentCommandLine } from './channel-flag.ts';
+import { devChannelEnabled, parentArgs } from './channel-flag.ts';
 import { boxState } from '../herdr/approve.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { cardTools } from '../tools.ts';
@@ -36,7 +36,7 @@ const secrets = new SecretRequests();
 const origin = { harness: 'claude-code', session, host: os.hostname(), cwd: process.env['CLAUDE_PROJECT_DIR'] ?? process.cwd(), herdrPane: pane };
 // Claude Code discards every channel notification of a session started without the flag, so the inbox shows
 // that this session cannot receive an answer. An unreadable command line claims nothing.
-const channelOff = devChannelEnabled(parentCommandLine(process.ppid)) === false;
+const channelOff = devChannelEnabled(parentArgs(process.ppid)) === false;
 /** How long a pushed answer waits in the transcript before the channel sends it again. */
 const retryMs = Number(process.env['YOUR_ATTENTION_CHANNEL_RETRY_MS']);
 const RETRY_MS = retryMs > 0 ? retryMs : 60_000;/** A client that never asks for a tool still gets its answers, so a push waits for registration at most this long. */

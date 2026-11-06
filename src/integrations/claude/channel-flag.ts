@@ -2,28 +2,56 @@
 // Claude Code discards every channel notification of a session started without them, so the
 // inbox tells the person when their session cannot receive an answer.
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 
 const FLAG = '--dangerously-load-development-channels';
 const OURS = 'server:your-attention';
 
-/** The command line of a process, or undefined when the platform cannot read one. */
-export function parentCommandLine(pid: number): string | undefined {
+/** The words of a command line that can hold an option, up to the word where the prompt starts.
+ * ps joins the arguments with spaces and loses their quoting, so a prompt reads as a run of words.
+ * Claude Code takes its options first, and its prompt after `-p` or as the first word that opens no
+ * dash, so the scan reaches no word of a prompt. */
+export function psOptions(commandLine: string): string[] {
+  const words = commandLine.trim().split(/\s+/);
+  const options: string[] = [];
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i] ?? '';
+    if (!word.startsWith('-') || word === '--') break;
+    options.push(word);
+    // `-p` and `--print` take the prompt, and every later word belongs to it.
+    if (word === '-p' || word === '--print') break;
+    // An option's value is the next word when it opens no dash. The development-channels flag
+    // reads its own value here too, so `--flag server:your-attention` counts.
+    const next = words[i + 1];
+    if (next !== undefined && !next.startsWith('-')) { options.push(next); i++; }
+  }
+  return options;
+}
+
+/** The argument vector of a process, the program first. Linux keeps it byte exact, separated by
+ * NUL, and elsewhere ps prints the command line it joined with spaces, widened so a long one keeps
+ * its last word. Undefined when the platform offers no way to read one. */
+export function parentArgs(pid: number): string[] | undefined {
   try {
-    return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).trim() || undefined;
+    const argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter((a) => a !== '');
+    if (argv.length) return argv;
+  } catch { /* no /proc, as on macOS and Windows */ }
+  try {
+    const line = execFileSync('ps', ['-ww', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+    if (!line) return undefined;
+    return [line.split(/\s+/)[0] ?? '', ...psOptions(line)];
   } catch {
     // Windows has no ps, and a process that ended before the read leaves nothing to read.
     return undefined;
   }
 }
 
-/** Whether a command line enables this channel. `undefined` when there is no command line to read.
- * The flag takes its value as the next word or after `=`, and a comma joins several servers. */
-export function devChannelEnabled(commandLine: string | undefined): boolean | undefined {
-  if (commandLine === undefined) return undefined;
-  const words = commandLine.split(/\s+/);
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i] ?? '';
-    const value = word === FLAG ? words[i + 1] : word.startsWith(`${FLAG}=`) ? word.slice(FLAG.length + 1) : undefined;
+/** Whether an argument vector enables this channel. `undefined` when there is no vector to read. */
+export function devChannelEnabled(argv: readonly string[] | undefined): boolean | undefined {
+  if (argv === undefined) return undefined;
+  for (let i = 1; i < argv.length; i++) {
+    const word = argv[i] ?? '';
+    const value = word === FLAG ? argv[i + 1] : word.startsWith(`${FLAG}=`) ? word.slice(FLAG.length + 1) : undefined;
     if (value?.split(',').includes(OURS)) return true;
   }
   return false;
