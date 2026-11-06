@@ -87,7 +87,7 @@ export const DEFAULT_PRIORITIES: PriorityLevel[] = [
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
 /** The version of `DEFAULT_GUIDANCE`. It moves whenever that text changes, so a client reads the words it has not seen. */
-export const DEFAULT_GUIDANCE_VERSION = 2;
+export const DEFAULT_GUIDANCE_VERSION = 3;
 export const DEFAULT_GUIDANCE = [
   'On a card, "you" is the person who reads it. Write about yourself in the third person, as "this agent" or the name in `from`, never "I" or "we", so the person always knows who acts.',
   'Write each card so the person can answer it without opening the session.',
@@ -1754,7 +1754,8 @@ function checkQuestions(questions: unknown): void {
 
 /** The text search matches: the card's words, its tags, and its file names. */
 function searchText(card: Card): string {
-  const questions = (card.questions ?? []).flatMap((q) => [q.question, q.text, ...(q.options ?? []).map((o) => o.label)]);
+  // A card stored before this field existed may hold anything the store accepted then, so read it defensively.
+  const questions = (Array.isArray(card.questions) ? card.questions : []).flatMap((q) => [q?.question, q?.text, ...(Array.isArray(q?.options) ? q.options : []).map((o) => o?.label)]);
   return [card.title, card.text, card.recommendation, card.body, ...questions, card.status, ...Object.entries(card.tags ?? {}).map(([k, v]) => `${k} ${v}`), ...(card.attachments ?? []).map((a) => a.name)]
     .filter(Boolean).join('\n');
 }

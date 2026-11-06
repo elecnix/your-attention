@@ -143,7 +143,7 @@ describe('guidance', () => {
     const { inbox } = setup();
     const card = inbox.proposeGuidance('Never mind.');
     await inbox.answer(card.id, { values: { choice: 'reject' } });
-    assert.equal(inbox.guidance().version, 2);
+    assert.equal(inbox.guidance().version, DEFAULT_GUIDANCE_VERSION);
     assert.equal(inbox.getCard(card.id).closed?.kind, 'resolved');
   });
 
