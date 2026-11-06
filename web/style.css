@@ -173,6 +173,20 @@
   .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn.danger { background: var(--bad); color: var(--bg); border-color: var(--bad); }
   .btn:disabled { opacity: .5; cursor: default; }
+  /* A commented reply on a card whose agent answered: the answer form folds away below it. */
+  .follow-up { display: grid; gap: 8px; margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .follow-up label { display: grid; gap: 4px; font-size: calc(13px * var(--text-scale)); font-weight: 600; color: var(--muted); }
+  .follow-up textarea { font: inherit; font-weight: 400; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .follow-up-actions { display: flex; gap: 8px; align-items: center; }
+  details.change-answer { margin-top: 12px; }
+  details.change-answer summary { cursor: pointer; color: var(--muted); font-size: calc(13px * var(--text-scale)); }
+  details.change-answer[open] summary { margin-bottom: 10px; }
+  /* An icon button inside a row of card buttons, such as Dismiss: it keeps its own tooltip, so the span carries it. */
+  .ib-titled { display: inline-flex; }
+  /* What the person had typed on a card they dismissed. Only they read it. */
+  .dismiss-draft { margin: 10px 0 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--bg); }
+  .dismiss-draft-head { font-size: calc(12px * var(--text-scale)); font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+  .dismiss-draft-body { white-space: pre-wrap; font-size: calc(14px * var(--text-scale)); }
   .group-by { display: flex; gap: 6px; align-items: center; font-size: calc(12px * var(--text-scale)); color: var(--muted); padding: 4px 8px; }
   .group-by select { font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
   .prio.small { font-size: calc(11px * var(--text-scale)); padding: 0 6px; margin-left: 6px; }

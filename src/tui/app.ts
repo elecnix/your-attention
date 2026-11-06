@@ -67,7 +67,6 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   let pinTyped = '';
   let confirmAction: (() => void) | undefined;
   let reported: string | null | undefined;
-  let seenKey: string | null = null;
   let frames = 0;
   let slowest = 0;
   let done: (code: number) => void = () => {};
@@ -133,6 +132,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     }
     const msg = action.message;
     if (msg === 'skip' || msg === 'Skip for now') { skip(); return; }
+    if (msg === 'dismiss') { await dismissCurrent(); return; }
     if (c.kind === 'blocked' && msg !== 'send answer') {
       try { await api.post(`/v1/cards/${encodeURIComponent(c.id)}/open`); status('Opened the session.', 'ok'); } catch (e) { status(`Could not open the session: ${(e as Error).message}`, 'warn'); }
       return;
@@ -186,6 +186,27 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     schedule();
   };
   const skip = () => { pinned = null; go(after(order(), m.current ? m.current.id : null)); };
+  /** Dismiss the card on screen: it closes without the agent hearing anything, and the inbox keeps what was typed as a
+   * draft only the person reads. The card leaves the queue for Sent, as a sent answer does. */
+  async function dismissCurrent(): Promise<void> {
+    const c = m.current;
+    if (!c || c.closed) return;
+    const view = m.view;
+    const draft = c.kind === 'secret'
+      ? { values: {}, comment: String(view?.store.get('secret', 'comment') ?? '').trim() }
+      : view?.card.broadcast
+        ? { values: {}, comment: String(view?.store.get('broadcast', 'comment') ?? '').trim() }
+        : view ? view.answer() : { values: {}, comment: '' };
+    try {
+      await api.post(`/v1/cards/${encodeURIComponent(c.id)}/dismiss`, draft);
+    } catch (e) {
+      if (view) { view.notice = { text: `The card was not dismissed: ${(e as Error).message}`, style: 'warn' }; schedule(); }
+      return;
+    }
+    status('Dismissed, and the agent was not told.', 'ok');
+    answered(c.id);
+    await refresh();
+  }
   // An answer shows its receipt for a moment, then opens the card after the answered one, so a skipped card stays skipped.
   const answered = (id: string) => {
     const then = after(order(), id);
@@ -230,16 +251,8 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     view.earlier = earlier ? { card: earlier.card, answer: earlier.answer } : undefined;
     m.view = view;
     if (m.entering) settle();
-    // A reply you have looked at for a moment counts as seen.
-    const sk = `${current.id}:${current.replyAt ?? 0}`;
-    if (current.unseenReplies && seenKey !== sk) {
-      seenKey = sk;
-      setTimeout(() => {
-        // A glance shorter than the delay does not count, and the next visit starts the delay again.
-        if (m.current?.id !== current.id) { if (seenKey === sk) seenKey = null; return; }
-        api.post(`/v1/cards/${encodeURIComponent(current.id)}/seen`).catch(() => {});
-      }, 1500);
-    }
+    // A reply counts as seen when the person acts on the card, not when the card is on screen: a reply they scrolled past
+    // stays under "Agent replied" until they dismiss the card, reply to it, or change their answer.
   }
 
   /** Act on a waiting Enter, once the card on screen has changed or loaded. */
@@ -453,6 +466,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       if (ev.name === 'escape') { focus = null; pinned = null; m.cleared = true; pick(); return; }
     }
     if (ev.ctrl || ev.alt) return;
+    if (ev.name === 'd') { void dismissCurrent(); return; }
     if (ev.name === 'q') { quit(0); return; }
     if (ev.name === '?') { m.help = true; return; }
     if (ev.name === 'g') { cycleGroup(); return; }

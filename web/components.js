@@ -1,11 +1,11 @@
 // The parts of the page, each one renderable alone, as the stories do.
-import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, notifyOn, store } from './env.js';
+import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, notifyOn, store, time } from './env.js';
 import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { copyText, installCopy } from './copy.js';
-import { answerValues, approvalPlace, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
+import { DISMISS, answerValues, approvalPlace, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
@@ -160,11 +160,17 @@ function RecommendingOptionCards(args) {
   const renderNode = (n) => (n === RECOMMENDED ? h(RecommendedNote, { note: rec.note }) : args.renderNode(n));
   return PlainOptionCards({ ...args, props: { ...args.props, items }, renderNode });
 }
+// An icon button's name is its accessible label in OpenUI, and the page shows it as a tooltip too. Every card's row of
+// buttons ends with Dismiss, whose name says what it does to the agent.
+const PlainIconButton = openuiChatLibrary.components.IconButton.component;
+const TitledIconButton = (args) => h('span', { className: 'ib-titled', title: String(args.props.name ?? '') }, h(PlainIconButton, args));
+
 const library = extendLibrary(openuiChatLibrary, {
   CheckWithText,
   Mermaid: ({ props }) => h(Diagram, { source: String(props.source ?? '') }),
   FormControl: MarkdownFormControl,
   OptionCards: RecommendingOptionCards,
+  IconButton: TitledIconButton,
 });
 /** The page's component list, as the inbox reads it from src/adapters/openui-library.ts. */
 export const librarySchema = () => library.toJSONSchema();
@@ -224,8 +230,9 @@ function CardBody({ draftKey, response, broken, onAction }) {
     h('div', { className: broken ? 'body-source' : 'card-body' }, h(Renderer, { response, library, initialState, ...handlers })));
 }
 
-// A card the agent closed while you looked at it: it collapses to its outcome, and opens again on demand.
-export function ClosedCard({ closed, children, onNext, animate }) {
+// A card the agent closed while you looked at it, or one you dismissed: it collapses to its outcome, and opens again on
+// demand. A dismissal also shows the draft the person had on screen, which no agent reads.
+export function ClosedCard({ closed, card, children, onNext, animate }) {
   const ref = React.useRef(null);
   const [collapsed, setCollapsed] = React.useState(false);
   const [height, setHeight] = React.useState(null);
@@ -235,18 +242,57 @@ export function ClosedCard({ closed, children, onNext, animate }) {
     const t = setTimeout(() => setCollapsed(true), 900);
     return () => clearTimeout(t);
   }, []);
+  const draft = closed.draft;
+  const draftText = draft && card ? describe(card, { values: draft.values, comment: draft.comment }) : '';
   return h('div', null,
     h('div', { className: 'closed-line', style: { marginBottom: collapsed ? 0 : 10 } },
       h('span', { className: 'tag' }, CLOSED_LABEL[closed.kind] || 'Closed'),
       h('span', { className: 'o' }, closed.outcome),
       h('button', { className: 'btn', onClick: () => setCollapsed((c) => !c) }, collapsed ? 'Show card' : 'Hide card'),
       h('button', { className: 'btn', onClick: onNext }, 'Next card')),
+    draft && h('div', { className: 'dismiss-draft' },
+      h('div', { className: 'dismiss-draft-head' }, `Your unsent draft, at ${time(draft.at)}`),
+      h('div', { className: 'dismiss-draft-body' }, draftText && draftText !== 'Empty answer' ? draftText : 'Nothing typed yet.')),
     h('div', { ref, className: 'collapse', style: { maxHeight: collapsed ? 0 : (height || 4000), opacity: collapsed ? 0 : 1 } }, children));
+}
+
+// The icon button that dismisses the card on screen, for the rows the page draws itself: an HTML card's footer, a secret
+// card's buttons, a guidance proposal, and the follow-up a replied card offers.
+export function DismissButton({ onClick }) {
+  return h('button', { type: 'button', className: 'icon-btn dismiss', title: DISMISS, 'aria-label': DISMISS, onClick },
+    h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.dismissed.map((d) => h('path', { key: d, d }))));
+}
+
+// A card whose agent replied after the person answered: a comment box of its own sends a follow-up on the same card, with
+// the earlier answer kept as it was. The answer form folds away below it, behind Change your answer.
+export function FollowUp({ card, answer, onDone }) {
+  const draftKey = `draft:${card.id}:reply`;
+  const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
+  const [error, setError] = React.useState(null);
+  // The follow-up keeps the answer's values, less its approval toggles: those are typed into a pane once, with the answer.
+  const kept = Object.fromEntries(Object.entries(answer.values || {}).filter(([k]) => !k.startsWith('approval_')));
+  const send = async (route, payload) => {
+    setError(null);
+    try {
+      const res = await api(`${BASE}v1/cards/${card.id}/${route}`, payload);
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+      store.del(draftKey);
+      onDone();
+    } catch (e) {
+      setError(`It did not go: ${String(e.message || e)}`);
+    }
+  };
+  return h('div', { className: 'follow-up' },
+    h('label', null, 'Your reply', h('textarea', { rows: 2, value: comment, placeholder: 'Say more, without changing your answer', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
+    error && h('div', { className: 'note warn' }, error),
+    h('div', { className: 'follow-up-actions' },
+      h('button', { type: 'button', className: 'btn primary', onClick: () => send('answer', { values: kept, comment: comment.trim(), version: card.version }) }, 'Reply'),
+      h(DismissButton, { onClick: () => send('dismiss', { values: kept, comment: comment.trim() }) })));
 }
 
 // A secret request. The value is sealed in this browser with the agent's key,
 // so the inbox stores only ciphertext. Drafts are never saved for it.
-export function SecretForm({ card, onSent, onSkip }) {
+export function SecretForm({ card, onSent, onSkip, onDismiss }) {
   const [value, setValue] = React.useState('');
   const [comment, setComment] = React.useState('');
   const [error, setError] = React.useState(null);
@@ -279,7 +325,8 @@ export function SecretForm({ card, onSent, onSkip }) {
     h('div', { className: 'nav' },
       h('button', { className: 'btn primary', type: 'submit', disabled: !value }, 'Send sealed'),
       h('button', { className: 'btn', type: 'button', onClick: () => send(false) }, 'Decline'),
-      h('button', { className: 'btn', type: 'button', onClick: onSkip }, 'Skip for now')),
+      h('button', { className: 'btn', type: 'button', onClick: onSkip }, 'Skip for now'),
+      onDismiss && h(DismissButton, { onClick: () => onDismiss(comment.trim()) })),
     h('p', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the model sees a file path, never the value.'));
 }
 
@@ -491,7 +538,7 @@ export function Approvals({ card, answer, picks, onToggle }) {
 }
 
 // A card with the agent's own HTML. It shows only when the owner allows HTML cards, or asks to see this one.
-export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
+export function HtmlCard({ card, allowed, onAnswer, onSkip, onDismiss }) {
   const ref = React.useRef(null);
   // The comment draft belongs to the card, not its version, so a revision keeps what the person typed.
   const draftKey = `draft:${card.id}:comment`;
@@ -532,7 +579,8 @@ export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
     h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
     h('div', { className: 'html-answer-actions' },
       h('button', { type: 'button', className: 'btn primary', onClick: async () => { onAnswer(await collect(), comment.trim()); store.del(draftKey); } }, 'Send answer'),
-      h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now')));
+      h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now'),
+      onDismiss && h(DismissButton, { onClick: async () => onDismiss(await collect(), comment.trim()) })));
   if (!always && once !== card.id) {
     return h(React.Fragment, null, h('div', { className: 'note warn html-gate' },
       h('p', null, 'This card brings its own HTML and scripts. They run in a sandboxed frame that cannot reach the network or this page. A click in the card can open a page in a new tab, and the card chooses its address.'),
@@ -569,7 +617,7 @@ export function Changes({ card }) {
 
 // The system card for new guidance: the proposal as a diff against the current guidance, the agents to send it to,
 // all of them at first, and the comment, which goes with the answer to the agent that proposed the text.
-export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDone, onSkip }) {
+export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDone, onSkip, onDismiss }) {
   const b = card.broadcast;
   // The agents online now, from live presence, every one ticked until the person unticks it: an agent that comes
   // online while the card is open joins ticked, and one that leaves drops off the list.
@@ -627,7 +675,8 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
       h('div', { className: 'html-answer-actions' },
         h('button', { type: 'button', className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),
         h('button', { type: 'button', className: 'btn', onClick: () => send('reject') }, 'Reject'),
-        h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now')),
+        h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now'),
+        onDismiss && h(DismissButton, { onClick: () => onDismiss(comment.trim()) })),
       error && h('div', { className: 'note warn' }, error)));
 }
 

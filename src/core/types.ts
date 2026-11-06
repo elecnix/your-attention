@@ -5,7 +5,7 @@ export const PROTOCOL_VERSION = 1;
 /** The id of a priority level. The defaults are now, soon and later. */
 export type Priority = string;
 export type CardKind = 'ask' | 'blocked' | 'system' | 'secret';
-export type CloseKind = 'retracted' | 'self-answered' | 'answered-in-terminal' | 'resolved' | 'expired' | 'returned';
+export type CloseKind = 'retracted' | 'self-answered' | 'answered-in-terminal' | 'resolved' | 'expired' | 'returned' | 'dismissed';
 export type CardState = 'in-triage' | 'held' | 'open' | 'orphaned' | 'answered' | 'delivered' | 'read' | 'closed';
 export type Delivery = 'default' | 'steer' | 'followUp' | 'force';
 export type Role = 'owner' | 'agent' | 'extension';
@@ -50,6 +50,16 @@ export interface Reply {
 export interface Closure {
   kind: CloseKind;
   outcome: string;
+  at: number;
+  /** On a dismissal: what the person had entered on the card, recorded with the time, even when empty.
+   * The owner reads it; publicCard leaves it out for agents. */
+  draft?: Draft;
+}
+
+/** The form values and comment a person leaves on a card they dismiss. */
+export interface Draft {
+  values: Record<string, unknown>;
+  comment: string;
   at: number;
 }
 

@@ -2,6 +2,11 @@
 // this file, so both send the same values for the same card. It touches no browser API.
 const J = JSON.stringify;
 
+// Every row of buttons ends with Dismiss. It closes the card without the agent hearing anything, and the page keeps what
+// the person had typed. The button's name is also its tooltip and its accessible label.
+export const DISMISS = 'Dismiss without telling the agent';
+const dismissButton = (name) => `${name} = IconButton(${J(DISMISS)}, Icon("eye-off"), @ToAssistant("dismiss"), "secondary")`;
+
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
   // A body with forms of its own keeps them where the agent placed them, and gets the comment and buttons below.
@@ -16,19 +21,21 @@ export function cardSource(c) {
       'fcChoice = FormControl("Your answer", choice)',
       `choice = OptionCards("choice", "single", [${c.options.map((_, j) => `c${j}`).join(', ')}])`,
       ...c.options.map((o, j) => `c${j} = OptionCard(${J(optionValue(o))}, ${J(o.label)}, "")`),
-      'buttons = Buttons([save, go, skip], "row")',
+      'buttons = Buttons([save, go, skip, dismiss], "row")',
       'save = Button("Press it in the session", @ToAssistant("send answer"), "primary")',
       'go = Button("Open session", @ToAssistant("open session"), "secondary")',
       'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+      dismissButton('dismiss'),
     ].join('\n');
   }
   if (c.kind === 'blocked') {
     return [
       'root = Card([screen, buttons])',
       `screen = CodeBlock("text", ${J(c.screen || '(screen unavailable)')})`,
-      'buttons = Buttons([go, skip], "row")',
+      'buttons = Buttons([go, skip, dismiss], "row")',
       'go = Button("Open session", @ToAssistant("open session"), "primary")',
       'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+      dismissButton('dismiss'),
     ].join('\n');
   }
   // The page shows the title above the text and attachments, so a generated card has no header.
@@ -62,9 +69,10 @@ export function cardSource(c) {
   L.push('fcComment = FormControl("Comment", comment)', 'comment = TextArea("comment", "Anything to add?", 3)');
   parts.push('form');
   L.push(`form = Form(${J(c.id)}, buttons, [${controls.join(', ')}])`,
-    'buttons = Buttons([save, skip], "row")',
+    'buttons = Buttons([save, skip, dismiss], "row")',
     'save = Button("Send answer", @ToAssistant("send answer"), "primary")',
-    'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")');
+    'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+    dismissButton('dismiss'));
   return [`root = Card([${parts.join(', ')}])`, ...L].join('\n');
 }
 
@@ -77,9 +85,10 @@ function withAnswerFooter(body) {
     'yaAnswer = Form("yaAnswer", yaButtons, [yaFcComment])',
     'yaFcComment = FormControl("Comment", yaComment)',
     'yaComment = TextArea("comment", "Anything to add?", 3)',
-    'yaButtons = Buttons([yaSave, yaSkip], "row")',
+    'yaButtons = Buttons([yaSave, yaSkip, yaDismiss], "row")',
     'yaSave = Button("Send answer", @ToAssistant("send answer"), "primary")',
     'yaSkip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+    dismissButton('yaDismiss'),
   ].join('\n');
 }
 

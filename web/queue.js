@@ -1,7 +1,7 @@
 // The queue, built from the card summaries of GET /v1/state: each card's state, its priority level, the sections of the list, and the order Skip for now and Send
 // answer move through. The page and the terminal client share this file, so both show the same queue.
 
-export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back to its agent' };
+export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back to its agent', dismissed: 'Dismissed' };
 export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed', reply: 'new reply' };
 /** The ids of the sections that every Group by choice shows, so a collapsed one keeps its state across the choices. */
 export const SECTION_ID = { replied: 'section: replied', checking: 'section: checking', outbox: 'section: outbox', sent: 'section: sent' };
@@ -33,10 +33,11 @@ export function presenceOf(card, state) {
 export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   const answers = state.answers;
   const byId = Object.fromEntries(state.cards.map((c) => [c.id, c]));
-  // A reply newer than your answer brings the card back to your queue.
+  // A reply newer than your answer brings the card back to your queue, unless the person dismissed the card: the agent
+  // was never told it was closed, so its later reply is kept without asking for the card again.
   const st = (c) => {
     const s = state.states[c.id];
-    if (c.unseenReplies && (!answers[c.id] || lastReply(c) > answers[c.id].savedAt)) return 'reply';
+    if (c.unseenReplies && c.closed?.kind !== 'dismissed' && (!answers[c.id] || lastReply(c) > answers[c.id].savedAt)) return 'reply';
     return s;
   };
   const visible = state.cards;

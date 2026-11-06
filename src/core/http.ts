@@ -281,7 +281,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (gate.locked && !pinRoute && !fileRoute) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
     const me: Caller = { token: who.token.id, role: who.token.role };
     // A full inbox takes the writes that free space or answer cards, and refuses the rest.
-    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'answer' || c === 'file-ticket'));
+    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'dismiss' || c === 'answer' || c === 'file-ticket'));
     if (method !== 'GET' && !frees && inbox.storageFull()) return json({ error: 'this inbox is full: remove cards, templates or widgets to make room' }, 507);
     // A message that arrives over two links, or again after a retry, is applied once: the inbox
     // keeps the first result for each x-message-id, per client.
@@ -550,7 +550,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET' && !c) {
         const card = inbox.getCard(b);
         if (me.role !== 'owner' && card.token !== me.token) throw new InboxError(403, 'another client owns this card');
-        const detail = inbox.cardDetail(b);
+        const detail = inbox.cardDetail(b, me.role === 'owner');
         return json(me.role === 'owner' && servesFiles(card) ? { ...detail, card: { ...detail.card, localFiles: true } } : detail);
       }
       if (method === 'GET' && c === 'file') {
@@ -587,6 +587,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         }
         case 'close':
           return json(publicCard(inbox.close(me, b, body['kind'] as CloseKind, String(body['outcome'] ?? ''), body['ifUnanswered'] === true)));
+        case 'dismiss':
+          owner();
+          return json(publicCard(inbox.dismiss(me, b, { values: body['values'], comment: body['comment'] })));
         case 'reply':
           return json(publicCard(inbox.reply(me, b, String(body['text'] ?? ''))));
         case 'ack':

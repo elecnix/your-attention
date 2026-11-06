@@ -60,6 +60,14 @@ export const ClosedByAgent = {
   render: () => mount(h(ClosedCard, { closed: { kind: 'self-answered', outcome: 'Found it in the README.', at: Date.now() }, onNext: () => {}, animate: false }, view(card()))),
 };
 
+// A card the person dismissed: the agent was not told, and only the person reads the draft they had on screen.
+export const Dismissed = {
+  render: () => {
+    const c = card({ title: 'Store sessions in SQLite or Postgres?', options: [{ id: 'o1', label: 'SQLite' }, { id: 'o2', label: 'Postgres' }] });
+    return mount(h(ClosedCard, { closed: { kind: 'dismissed', outcome: 'Nothing was sent to the agent.', at: Date.now(), draft: { values: { choice: 'o2' }, comment: 'Not this release, ask me again after the migration.', at: Date.now() } }, card: c, onNext: () => {}, animate: false }, view(c)));
+  },
+};
+
 // A proposal that edits one word and adds one line: the unchanged lines collapse behind a control.
 const GUIDANCE = 'Lead with the goal.\nGive two options, with the one you recommend first.\nEnd with a recommendation.';
 // Live presence: two agents online, and one that connected once and left.

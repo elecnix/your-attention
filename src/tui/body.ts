@@ -682,7 +682,8 @@ export class BodyRenderer {
       ids.length = 0;
     };
     for (const b of list) {
-      const label = sanitize(str(b.props['label']));
+      // An icon button names itself with `name`, which is also the action it sends; a text button names itself with `label`.
+      const label = sanitize(str(b.props['label']) || str(b.props['name']));
       const variant = str(b.props['variant']) || 'primary';
       const action = buttonAction(b.props['action'], label);
       const id = this.nextId('button', label);

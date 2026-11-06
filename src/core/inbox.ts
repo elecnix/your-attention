@@ -13,7 +13,7 @@ import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import type {
-  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, PersonPresence, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
@@ -1367,11 +1367,11 @@ export class Inbox {
     return card;
   }
 
-  private closeAs(card: Card, kind: CloseKind, outcome: string): Card {
+  private closeAs(card: Card, kind: CloseKind, outcome: string, draft?: Draft): Card {
     const current = this.getCard(card.id);
     // A card closed while triage checks it needs no verdict any more.
     const triage = current.triage?.state === 'pending' ? { ...current.triage, state: 'skipped' as const, waiting: [], reason: 'The card closed before triage answered.' } : current.triage;
-    const closed: Card = { ...current, triage, closed: { kind, outcome, at: this.now() } };
+    const closed: Card = { ...current, triage, closed: { kind, outcome, at: this.now(), ...(draft ? { draft } : {}) } };
     this.store.put('cards', card.id, closed);
     this.emit({ type: 'change', card: card.id });
     return closed;
@@ -1384,6 +1384,19 @@ export class Inbox {
     const answer = this.store.get<Answer>('answers', id);
     if (ifUnanswered && answer) throw new InboxError(409, 'the person already answered this card');
     return this.closeAs(card, kind, String(outcome || '').slice(0, 2000) || 'No outcome given.');
+  }
+
+  /** The person dismisses a card: it closes without the agent hearing anything, and the form values and the comment on
+   * screen are recorded with the time, even when both are empty. No answer is stored, so no stream receives an event, and
+   * a revision or reply the agent sends later is saved but leaves the card in Sent. Only the owner reads the draft. */
+  dismiss(caller: Caller, id: string, input: { values?: unknown; comment?: unknown } = {}): Card {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner dismisses a card');
+    const card = this.getCard(id);
+    if (card.closed) throw new InboxError(409, 'this card is already closed');
+    const values = input.values && typeof input.values === 'object' && !Array.isArray(input.values) ? input.values as Record<string, unknown> : {};
+    // Dismissing is acting on the card, so its agent replies count as seen.
+    this.see(card);
+    return this.closeAs(card, 'dismissed', 'Nothing was sent to the agent.', { values, comment: String(input.comment ?? '').trim(), at: this.now() });
   }
 
   /** The agent replies on its card. The card returns to the person's queue. */
@@ -1399,11 +1412,17 @@ export class Inbox {
     return next;
   }
 
-  /** The person opened the card, so its replies are seen. */
-  seen(id: string): void {
-    const card = this.getCard(id);
+  /** Mark each agent reply on the card as seen, once the person acts on it: answers it, dismisses it, or sends a follow-up. */
+  private see(card: Card): void {
+    const current = this.getCard(card.id);
+    if (!current.replies.some((r) => !r.seenAt)) return;
     const now = this.now();
-    this.store.put('cards', id, { ...card, replies: card.replies.map((r) => ({ ...r, seenAt: r.seenAt ?? now })) });
+    this.store.put('cards', card.id, { ...current, replies: current.replies.map((r) => ({ ...r, seenAt: r.seenAt ?? now })) });
+  }
+
+  /** The person marked the card's replies seen without acting on it, as a front-end other than the page may offer. */
+  seen(id: string): void {
+    this.see(this.getCard(id));
     this.emit({ type: 'change', card: id });
   }
 
@@ -1474,6 +1493,8 @@ export class Inbox {
     this.store.put('answers', id, answer);
     this.store.index(id, `${searchText(card)}\n${answer.comment}`);
     this.usage.record('answers');
+    // An answer is acting on the card, so its agent replies count as seen.
+    this.see(card);
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
@@ -2015,15 +2036,17 @@ export class Inbox {
     return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance() };
   }
 
-  /** GET /v1/cards/<id>: the whole card, its answer, its state, and the rev of its summary. */
-  cardDetail(id: string): { card: Card; answer?: Answer; state: CardState; rev?: string } {
+  /** GET /v1/cards/<id>: the whole card, its answer, its state, and the rev of its summary. `owner` keeps what only the
+   * person reads, such as the draft they left on a card they dismissed. */
+  cardDetail(id: string, owner = false): { card: Card; answer?: Answer; state: CardState; rev?: string } {
     const card = this.getCard(id);
     const answer = this.store.get<Answer>('answers', id);
     // A body stored before the inbox checked bodies may not draw whole, so the client gets what it can draw.
     const fallback = card.body !== undefined ? this.fallbackBody?.(card.body) : undefined;
     const summary = this.store.get<CardSummary>('summaries', id);
+    const shown = owner && card.closed ? { ...publicCard(card), closed: card.closed } : publicCard(card);
     return {
-      card: fallback ? { ...publicCard(card), bodyFallback: fallback } : publicCard(card),
+      card: fallback ? { ...shown, bodyFallback: fallback } : shown,
       ...(answer ? { answer } : {}),
       state: this.shownState(card, this.store.get<Presence>('presence', card.agent), answer),
       ...(summary ? { rev: summary.rev } : {}),
@@ -2198,8 +2221,11 @@ function webhookHeaders(headers: unknown): Record<string, string> {
   return out;
 }
 
-/** A card without the id of the token that posted it. */
+/** A card without what only the person reads: the id of the token that posted it, and the draft they left on a card
+ * they dismissed. */
 export function publicCard(card: Card): Card {
   const { token: _token, ...rest } = card;
-  return rest;
+  if (!rest.closed?.draft) return rest;
+  const { kind, outcome, at } = rest.closed;
+  return { ...rest, closed: { kind, outcome, at } };
 }

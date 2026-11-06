@@ -239,8 +239,8 @@ export function drawFrame(m: Model): Frame {
   } else {
     const typing = m.zone === 'card' && m.view?.focused()?.text;
     const keys = m.zone === 'list'
-      ? ['↑↓ cards', 'Enter answer', 'Ctrl+N skip', 'g group', 'x fold', '? help']
-      : [typing ? 'Esc list' : 'Esc list', 'Tab next', 'Ctrl+S send', 'Ctrl+N skip', '? help'];
+      ? ['↑↓ cards', 'Enter answer', 'Ctrl+N skip', 'd dismiss', 'g group', 'x fold', '? help']
+      : [typing ? 'Esc list' : 'Esc list', 'Tab next', 'Ctrl+S send', 'Ctrl+N skip', 'd dismiss', '? help'];
     const text = (m.theme.caps.unicode ? keys : keys.map((k) => k.replace('↑↓', 'j/k'))).join('  ');
     grid.text(1, y, cut(m, text, W - 2), st.dim);
   }
@@ -266,6 +266,7 @@ const HELP: [string, string][] = [
   ['Anywhere', ''],
   ['Ctrl+Enter  Ctrl+S', 'send the answer'],
   ['Ctrl+N', 'skip for now'],
+  ['d', 'dismiss the card without telling the agent'],
   ['mouse', 'click cards, fields, buttons; wheel scrolls'],
   ['q  Ctrl+C', 'quit'],
 ];
