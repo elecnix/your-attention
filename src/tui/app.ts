@@ -355,16 +355,20 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     api.call('PUT', '/v1/settings', { groupBy: m.groupBy }).catch((e: Error) => status(`The inbox did not keep the grouping: ${e.message}`, 'warn'));
   };
   /** Pin the open card's value of the tag the queue groups by, or unpin it, as a heading's pin does on the page. */
-  const togglePin = () => {
+  const togglePin = async (): Promise<void> => {
     const key = m.groupBy.startsWith('tag:') ? m.groupBy.slice(4) : null;
     const value = key && m.current ? String((m.current.tags ?? {})[key] ?? '').trim() : '';
     if (!key || !m.current) { status('Group by a tag first (g), then p pins the open card’s value.', 'warn'); return; }
     if (!value) { status(`This card has no ${key} tag.`, 'warn'); return; }
+    // The inbox keeps one list of pins for every device, so the toggle applies to the freshest list it has, not to the
+    // one this terminal read when it last connected: another device may have pinned something since.
+    await refresh();
     const had = pins.some(([k, v]) => k === key && v === value);
-    pins = had ? pins.filter(([k, v]) => !(k === key && v === value)) : [...pins, [key, value]];
+    const next: [string, string][] = had ? pins.filter(([k, v]) => !(k === key && v === value)) : [...pins, [key, value]];
+    pins = next;
     if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins) as Queue;
     status(had ? `Unpinned ${key}: ${value}.` : `Pinned ${key}: ${value} to the top.`, 'ok');
-    api.call('PUT', '/v1/settings', { pins }).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
+    api.call('PUT', '/v1/settings', { pins: next }).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
   };
   const clearDealt = () => {
     const n = m.queue?.dealt.length ?? 0;
