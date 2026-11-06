@@ -102,7 +102,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
       const blocked = (await agents()).filter((a) => a.agent_status === 'blocked');
       // A pane whose AskUserQuestion already has a card needs no second card.
       const askPanes = new Set((await inbox.list())
-        .filter(({ card, state }) => card.questions && state === 'open' && card.origin?.herdrPane)
+        .filter(({ card, state }) => card.dialog && state === 'open' && card.origin?.herdrPane)
         .map(({ card }) => card.origin?.herdrPane));
       let labels: Record<string, string> | undefined;
       for (const a of blocked) {

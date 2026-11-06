@@ -18,11 +18,14 @@ export interface Option {
   recommended?: boolean;
 }
 
-/** The shape of one question in Claude Code's AskUserQuestion tool. */
+/** One question of a card that asks several, as card_post takes it and as Claude Code's AskUserQuestion tool sends it. */
 export interface AskQuestion {
   question: string;
   header?: string;
-  options?: { label: string; description?: string }[];
+  /** Markdown context for this question alone, drawn between the question and its options. */
+  text?: string;
+  /** The choices, each picked by its label. A question without options takes a free-text answer. */
+  options?: { label: string; description?: string; recommended?: boolean }[];
   multiSelect?: boolean;
 }
 
@@ -194,6 +197,8 @@ export interface Card {
   questions?: AskQuestion[];
   /** Sentences the inbox types into herdr panes when the person approves them. The answer carries approval_<i>. */
   approvals?: Approval[];
+  /** The questions are also open as a dialog in the agent's terminal, as Claude Code's AskUserQuestion is. An answer on the card closes that dialog. */
+  dialog?: boolean;
   /** The terminal screen of a blocked agent. */
   screen?: string;
   secret?: SecretRequest;
@@ -347,6 +352,8 @@ export interface NewCard {
   multiple?: boolean;
   questions?: AskQuestion[];
   approvals?: Approval[];
+  /** The questions are also open as a dialog in the agent's terminal, as Claude Code's AskUserQuestion is. An answer on the card closes that dialog. */
+  dialog?: boolean;
   screen?: string;
   secret?: SecretRequest;
   html?: string;

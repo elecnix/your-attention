@@ -87,13 +87,30 @@ describe('the card pane', () => {
   it('answers an options card with the option id, and questions by their labels', () => {
     const t = setup(card({ id: 'o', title: 'Pick', options: [{ id: 'o1', label: 'SQLite', description: 'One file' }, { id: 'o2', label: 'Postgres' }], questions: [{ question: 'Which test runner?', options: [{ label: 'node:test' }, { label: 'vitest' }] }] }));
     assert.ok(t.text().includes('One file'));
-    t.focus('field:o/q0'); t.key('down'); t.key('enter');
+    t.focus('field:o:q0/q0'); t.key('down'); t.key('enter');
     t.focus('field:o/choice'); t.key('2');
     assert.deepEqual(t.view.answer().values, { q0: 'vitest', choice: 'o2' });
     // A click on an option picks it too.
     const target = t.view.stops().find((x) => x === 'field:o/choice')!;
     t.view.click(`${target}#0`, 0, 0);
     assert.deepEqual(t.view.answer().values['choice'], 'o1');
+  });
+
+  it('draws the card text, then each question as a section with its heading, text, options and comment field, and answers each one', () => {
+    const t = setup(card({ id: 'qs', title: 'Release choices', text: 'This agent prepares the release.', questions: [
+      { question: 'Which database?', text: 'One table of jobs.', options: [{ label: 'SQLite', recommended: true }, { label: 'Postgres' }] },
+      { question: 'Which regions?', text: 'Each region adds a deploy step.', multiSelect: true, options: [{ label: 'us-east' }, { label: 'eu-west' }] },
+      { question: 'What must the note say?' },
+    ] }));
+    const text = t.text();
+    const order = ['This agent prepares the release.', 'Which database?', 'One table of jobs.', 'SQLite', 'Recommended', 'Postgres', 'Comment on this question',
+      'Which regions?', 'Each region adds a deploy step.', 'us-east', 'eu-west', 'Comment on this question', 'What must the note say?', 'Your answer', 'Anything to add?'];
+    let at = -1;
+    for (const s of order) { const next = text.indexOf(s, at + 1); assert.ok(next > at, `${s} after position ${at} in:\n${text}`); at = next; }
+    t.focus('field:qs:q0/q0'); t.key('down'); t.key('enter');
+    t.focus('field:qs:q0/q0_comment'); t.type('We run it already.');
+    t.focus('field:qs:q2/q2'); t.type('Say the API is unchanged.');
+    assert.deepEqual(t.view.answer().values, { q0: 'Postgres', q0_comment: 'We run it already.', q2: 'Say the API is unchanged.' });
   });
 
   it('keeps OptionCards defaults and toggles multiple picks, as OpenUI stores them', () => {

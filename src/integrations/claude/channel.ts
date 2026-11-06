@@ -250,9 +250,9 @@ void inbox.stream(agent, async (ev) => {
   }
   if (ev.type !== 'answer') return;
   const { card, answer } = ev;
-  const dismissed = card.questions ? await closeOwnDialog(card.origin?.herdrPane) : false;
+  const dismissed = card.dialog ? await closeOwnDialog(card.origin?.herdrPane) : false;
   const receipt = ev.id;
-  const head = card.questions
+  const head = card.dialog
     ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
     : `The person answered card "${card.title}":`;
   const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
