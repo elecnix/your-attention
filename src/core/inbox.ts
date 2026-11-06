@@ -225,7 +225,8 @@ export function mergeDefaultTags(defaults: Record<string, string>, own: Record<s
   const tags: Record<string, string> = {};
   const inherited: string[] = [];
   for (const [k, value] of Object.entries(defaults)) {
-    const mine = own?.[k];
+    // A plain object answers `toString` for every key, so the card's own tags are read by their own key only.
+    const mine = own !== undefined && Object.hasOwn(own, k) ? own[k] : undefined;
     if (mine === '') continue;
     if (mine !== undefined) { tags[k] = String(mine); continue; }
     tags[k] = value;

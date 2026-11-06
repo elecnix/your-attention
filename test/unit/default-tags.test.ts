@@ -218,6 +218,13 @@ describe('a tag named after an object method', () => {
   });
 });
 
+describe('a default tag named after an object method', () => {
+  it('gives the card its own value, not a function the object answered with', () => {
+    assert.deepEqual(mergeDefaultTags({ toString: 'default-value' }, { toString: 'card-value' }), { tags: { toString: 'card-value' }, inherited: [] });
+    assert.deepEqual(mergeDefaultTags({ toString: 'default-value' }, {}), { tags: { toString: 'default-value' }, inherited: ['toString'] });
+  });
+});
+
 describe('parseTagsFlag', () => {
   it('reads the pi launcher\'s --tags value', async () => {
     const { parseTagsFlag } = await import('../../src/integrations/tags.ts');

@@ -543,7 +543,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         if (!agent) return json({ error: 'agent is required' }, 400);
         return json(inbox.defaultTags(me, agent));
       }
-      if (method === 'PUT') return json(inbox.setDefaultTags(me, await readJson(req)));
+      if (method === 'PUT') return json(inbox.setDefaultTags(me, (await readJson(req)) ?? {}));
     }
 
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
