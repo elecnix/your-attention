@@ -31,6 +31,7 @@ g['Response'] = class extends NodeResponse {
 };
 
 const { InboxObject, uploadLimit } = await import('../../src/cloudflare/inbox-object.ts');
+const { PURGE_AFTER_MS } = await import('../../src/core/inbox.ts');
 
 function runtime(extra: Record<string, unknown> = {}) {
   const db = new DatabaseSync(':memory:');
@@ -57,7 +58,8 @@ function runtime(extra: Record<string, unknown> = {}) {
     FILES: {
       put: async (k: string, v: Uint8Array, o: { httpMetadata: { contentType: string } }) => { blobs.set(k, { bytes: v, type: o.httpMetadata.contentType }); },
       get: async (k: string) => { const b = blobs.get(k); return b ? { arrayBuffer: async () => b.bytes.slice().buffer, httpMetadata: { contentType: b.type } } : null; },
-      delete: async (k: string) => { blobs.delete(k); },
+      // R2 answers later, so a delete nobody awaits leaves the file in place when the caller returns.
+      delete: async (k: string) => { await new Promise((r) => setImmediate(r)); blobs.delete(k); },
     },
   };
   const make = () => new InboxObject(ctx as never, { ...env, ...extra } as never);
@@ -220,6 +222,21 @@ describe('the inbox Durable Object', () => {
     assert.ok([...rt.blobs.keys()][0]?.startsWith('object-1/'));
     const res = await call(obj, 'GET', `/v1/attachments/${card.attachments[0]!.id}`, owner);
     assert.equal(await res.text(), '# Hello');
+  });
+
+  it('wakes for the purge with no socket open, and deletes the files of the card from R2 before the alarm returns', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: 1_000_000_000 });
+    const rt = runtime();
+    const obj = rt.make();
+    const owner = await init(obj);
+    const src = `data:text/markdown;base64,${Buffer.from('# Hello').toString('base64')}`;
+    await call(obj, 'POST', '/v1/cards', owner, { id: 'f1', agent: 's1', title: 'q', attachments: [{ src, name: 'hello.md' }] });
+    assert.equal(rt.alarm(), Date.now() + PURGE_AFTER_MS);
+    assert.equal(rt.blobs.size, 1);
+    t.mock.timers.tick(PURGE_AFTER_MS);
+    await obj.alarm();
+    assert.equal(rt.blobs.size, 0);
+    assert.equal((await call(obj, 'GET', '/v1/cards/f1', owner)).status, 404);
   });
 });
 

@@ -15,9 +15,19 @@ export class DurableSqlStorage implements Storage {
   constructor(sql: SqlLike) {
     this.sql = sql;
     sql.exec('CREATE TABLE IF NOT EXISTS docs (collection TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (collection, id))');
+    // Each entry of an index on the collection ends with the rowid, so `first` reads a collection in write order and stops.
+    sql.exec('CREATE INDEX IF NOT EXISTS docs_order ON docs (collection)');
     let fts = true;
     try {
       sql.exec('CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(card UNINDEXED, text)');
+      // FTS5 finds a row fast only by its row id, so `search_rows` gives each card the row id of its entry. An inbox
+      // indexed before the map existed fills it once, the first time this table is created.
+      try {
+        sql.exec('CREATE TABLE search_rows (row INTEGER PRIMARY KEY, card TEXT NOT NULL UNIQUE)');
+        sql.exec('INSERT OR IGNORE INTO search_rows (row, card) SELECT rowid, card FROM search');
+      } catch {
+        // The map exists already.
+      }
     } catch {
       // Without FTS5, search falls back to a table matched with LIKE.
       fts = false;
@@ -61,11 +71,31 @@ export class DurableSqlStorage implements Storage {
     return this.sql.exec('SELECT value FROM docs WHERE collection = ? ORDER BY rowid', collection).toArray().map((r) => JSON.parse(String(r['value'])) as T);
   }
 
+  first<T>(collection: Collection, limit: number): T[] {
+    return this.sql.exec('SELECT value FROM docs WHERE collection = ? ORDER BY rowid LIMIT ?', collection, limit).toArray().map((r) => JSON.parse(String(r['value'])) as T);
+  }
+
   count(collection: Collection): number {
     return Number(this.sql.exec('SELECT COUNT(*) AS n FROM docs WHERE collection = ?', collection).toArray()[0]?.['n'] ?? 0);
   }
 
   index(card: string, text: string): void {
+    if (!this.fts) return this.indexPlain(card, text);
+    const row = this.sql.exec('SELECT row FROM search_rows WHERE card = ?', card).toArray()[0]?.['row'];
+    const indexed = (): number => Number(this.sql.exec('SELECT length(text) AS n FROM search WHERE rowid = (SELECT row FROM search_rows WHERE card = ?)', card).toArray()[0]?.['n'] ?? 0);
+    const old = this.used === undefined || row === undefined ? 0 : indexed();
+    if (row !== undefined) this.sql.exec('DELETE FROM search WHERE rowid = ?', row);
+    if (text) {
+      this.sql.exec('INSERT INTO search_rows (card) VALUES (?) ON CONFLICT (card) DO NOTHING', card);
+      this.sql.exec('INSERT INTO search (rowid, card, text) VALUES ((SELECT row FROM search_rows WHERE card = ?), ?, ?)', card, card, text);
+    } else if (row !== undefined) {
+      this.sql.exec('DELETE FROM search_rows WHERE card = ?', card);
+    }
+    if (this.used !== undefined) this.change((text ? indexed() : 0) - old);
+  }
+
+  /** The search table without FTS5 has the card as its key. */
+  private indexPlain(card: string, text: string): void {
     const indexed = (): number => Number(this.sql.exec('SELECT COALESCE(SUM(length(text)), 0) AS n FROM search WHERE card = ?', card).toArray()[0]?.['n'] ?? 0);
     const old = this.used === undefined ? 0 : indexed();
     this.sql.exec('DELETE FROM search WHERE card = ?', card);

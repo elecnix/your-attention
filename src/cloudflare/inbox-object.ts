@@ -238,9 +238,10 @@ export class InboxObject {
     await this.webSocketClose(ws);
   }
 
-  /** The platform alarm: sweep the inbox, and close sockets that did not sign in or stopped answering heartbeats. */
+  /** The platform alarm: sweep the inbox, purge old cards, and close sockets that did not sign in or stopped answering heartbeats. */
   async alarm(): Promise<void> {
     this.inbox.sweep();
+    await this.inbox.purge();
     const now = Date.now();
     for (const ws of this.ctx.getWebSockets()) {
       if (this.socketDeadline(ws, now) <= now) {
