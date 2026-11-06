@@ -116,7 +116,7 @@ You need to know whether the model has your answer yet, and a way to push it thr
 
 ### DP18: Each card shows if its agent is listening, busy or offline
 
-The card shows one of three states, updated in near real time: listening, busy (connected but working, with unread answers), or offline. You see the state before you start to write. For an offline agent, the card says what will happen to your answer: delivered when the session resumes, or kept in the dead-letter queue.
+The card shows one of three states, updated in near real time: listening, busy (connected but working, with unread answers), or offline. You see the state before you start to write. For an offline agent, the card says what will happen to your answer: delivered when the session resumes, or kept in the dead-letter queue. A session that cannot receive channel notifications shows **Channel off** with the reason, in place of listening or busy, because an answer pushed there never reaches the model.
 
 A fixed number of seconds cannot be guaranteed.
 
