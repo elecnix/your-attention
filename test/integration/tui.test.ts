@@ -399,8 +399,8 @@ describe('your-attention tui', () => {
 
         // A second run on the same device loads the collapsed group again.
         const u = run();
-        await u.waitFor('Billing one');
-        for (let i = 0; i < 3; i++) u.send('g');
+        // Group by is the inbox's setting, so the second run starts on the same grouping, and only the collapsed
+        // group comes from this device.
         await u.waitFor('▸ billing (2)');
         // The queue passes over the muted group's cards: Skip for now opens the card after them.
         u.send('\x0e');
