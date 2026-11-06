@@ -100,6 +100,18 @@ const PATHS: Path[] = [
     }
     return { run: () => h.call('GET', '/v1/state', h.owner) };
   } },
+  { name: `GET /v1/guidance, ${HOSTED_SHOWN_CARDS} tagged cards and ${PURGE_BATCH} cleared inside the window, the most it counts`, setup: async () => {
+    const h = await hosted();
+    const long = (n: number, i: number) => `${i} ${'w'.repeat(n)}`.slice(0, n);
+    const tags = (i: number) => Object.fromEntries(Array.from({ length: 10 }, (_, j) => [long(100, j), long(100, i)]));
+    for (let i = 0; i < HOSTED_SHOWN_CARDS; i++) h.inbox.postCard({ token: 'budget', role: 'agent' }, { id: `m${i}`, agent: 'budget', title: `Card ${i}`, tags: tags(i) });
+    for (let i = 0; i < PURGE_BATCH; i++) {
+      h.inbox.postCard({ token: 'budget', role: 'agent' }, { id: `c${i}`, agent: 'budget', title: `Card ${i}`, tags: tags(i) });
+      await h.inbox.answer(`c${i}`, {});
+      h.inbox.archive({ token: 'owner', role: 'owner' });
+    }
+    return { run: () => h.call('GET', '/v1/guidance', h.owner) };
+  } },
   { name: 'GET /v1/cards/<id>, a card at the 256 KB limit', setup: async () => {
     const h = await hosted();
     await h.inbox.postCardWithFiles({ token: 'budget', role: 'agent' }, maxCard('big'));

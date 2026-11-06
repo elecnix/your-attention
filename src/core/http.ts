@@ -464,7 +464,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       }
     }
     if (a === 'guidance') {
-      if (method === 'GET') return json({ ...inbox.guidance(), widgets: inbox.widgetCatalog() });
+      if (method === 'GET') return json({ ...inbox.guidance(), widgets: inbox.widgetCatalog(), tags: inbox.tagsInUse() });
       if (method === 'POST') {
         const g = await readJson<{ text?: string; agent?: string }>(req);
         return json(publicCard(inbox.proposeGuidance(String(g.text ?? ''), g.agent ? { caller: me, agent: String(g.agent) } : undefined)), 201);

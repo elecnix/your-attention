@@ -14,6 +14,20 @@ const MAX_LINKS = 20;
 const MAX_TAGS = 10;
 const MAX_TAG_CHARS = 100;
 
+/** A tag key or value as the inbox keeps it: one line, trimmed, and at most MAX_TAG_CHARS. A line break an agent wrote
+ * into a value would forge a line in another agent's card_guidance, which prints the tags in use, so each run of
+ * spaces, tabs and breaks becomes one space. */
+export function tagText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, MAX_TAG_CHARS);
+}
+
+/** A card's tags as the inbox stores them, at most MAX_TAGS, with an empty key dropped. */
+export function cleanTags(tags: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!tags) return undefined;
+  const entries = Object.entries(tags).map(([k, v]): [string, string] => [tagText(String(k)), tagText(String(v))]).filter(([k]) => k).slice(0, MAX_TAGS);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
 export interface AnswerSummary {
   version: number;
   savedAt: number;
@@ -65,7 +79,7 @@ export interface ClearedCard {
 export function summarize(card: Card, answer: Answer | undefined): CardSummary {
   const text = card.text ?? '';
   const links = [...new Set([...text.matchAll(/\[\[([\w.:-]{1,80})\]\]/g)].map((m) => m[1] as string))].slice(0, MAX_LINKS);
-  const tags = card.tags ? Object.fromEntries(Object.entries(card.tags).slice(0, MAX_TAGS).map(([k, v]) => [String(k).slice(0, MAX_TAG_CHARS), String(v).slice(0, MAX_TAG_CHARS)])) : undefined;
+  const tags = cleanTags(card.tags);
   const replyAt = card.replies.length ? Math.max(...card.replies.map((r) => r.at)) : undefined;
   const origin = card.origin?.name || card.origin?.harness ? { ...(card.origin.name ? { name: card.origin.name } : {}), ...(card.origin.harness ? { harness: card.origin.harness } : {}) } : undefined;
   return {

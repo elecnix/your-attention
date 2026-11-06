@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError } from './core/inbox.ts';
-import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, PublicSubscription, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, PublicSubscription, TagCount, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 
@@ -208,7 +208,7 @@ export class Client {
   saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
   /** The card guidance, and the catalog of widgets an agent can place. */
-  guidance(): Promise<Guidance & { widgets?: string }> { return this.call('GET', '/v1/guidance'); }
+  guidance(): Promise<Guidance & { widgets?: string; tags?: TagCount[] }> { return this.call('GET', '/v1/guidance'); }
   /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. */
   proposeGuidance(text: string, agent?: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text, ...(agent ? { agent } : {}) }); }
   reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }
