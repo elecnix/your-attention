@@ -239,6 +239,8 @@ describe('the inbox Durable Object', () => {
     await obj.alarm();
     assert.equal(rt.blobs.size, 0);
     assert.equal((await call(obj, 'GET', '/v1/cards/f1', owner)).status, 404);
+  });
+
   it('retries an answer webhook from its alarm, after hibernation', async () => {
     const realFetch = globalThis.fetch;
     const realNow = Date.now;
