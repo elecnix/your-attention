@@ -377,6 +377,12 @@ You need a Cloudflare account with R2 turned on once in the dashboard, a workers
 
 4. Run the `deploy-cloudflare` workflow from the Actions tab, and pick the mode. The Worker is named `app`, so it answers at `https://app.<subdomain>.workers.dev`.
 
+   The same run deploys the telemetry Worker first, which takes laptop inboxes' anonymous daily counts. It uses the same credentials as the inbox and answers at `https://telemetry.<subdomain>.workers.dev`. Deploy both with:
+
+   ```sh
+   gh workflow run deploy-cloudflare -f mode=hosted
+   ```
+
 5. In single mode, open `https://app.<subdomain>.workers.dev/#token=<owner token>`. In hosted mode, add an invite code. Codes need 20 characters or more, and the last number is how many inboxes the code creates:
 
    ```sh

@@ -1,5 +1,5 @@
 // The usage collector, a Worker apart from the inbox. Laptop inboxes post their daily report here.
-// Deploy it with `npx wrangler deploy -c wrangler.telemetry.jsonc`. See SPEC.md, "Usage counts".
+// The `deploy-cloudflare` workflow deploys it on every run, before the inbox. See SPEC.md, "Usage counts".
 {
   "name": "telemetry",
   "main": "src/cloudflare/collector.ts",
