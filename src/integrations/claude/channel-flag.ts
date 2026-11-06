@@ -61,6 +61,8 @@ export function devChannelEnabled(argv: readonly string[] | undefined): boolean 
     const word = argv[i] ?? '';
     const value = word === FLAG ? argv[i + 1] : word.startsWith(`${FLAG}=`) ? word.slice(FLAG.length + 1) : undefined;
     if (value?.split(',').includes(OURS)) return true;
+    // `-p` and `--print` take the prompt, and every later word of it belongs to the person.
+    if (word === '-p' || word === '--print') break;
   }
   return false;
 }

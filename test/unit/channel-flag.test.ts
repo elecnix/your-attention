@@ -27,6 +27,8 @@ describe('the development-channels flag of the parent', () => {
     // An exact argument vector keeps the prompt in one word.
     assert.equal(devChannelEnabled(claude(['-p', 'why does --dangerously-load-development-channels server:your-attention drop answers'])), false);
     assert.equal(devChannelEnabled(claude(['why does --dangerously-load-development-channels=server:your-attention drop answers'])), false);
+    // Words of a prompt that the shell split into separate arguments stay prompt text after -p.
+    assert.equal(devChannelEnabled(claude(['-p', 'why', 'does', '--dangerously-load-development-channels=server:your-attention', 'drop', 'answers'])), false);
     // ps loses the quotes, so the words of the prompt reach no option scan.
     assert.deepEqual(psOptions('claude -p why does --dangerously-load-development-channels server:your-attention drop answers'), ['-p']);
     assert.deepEqual(psOptions('claude why does --dangerously-load-development-channels=server:your-attention drop'), []);

@@ -202,7 +202,9 @@ async function typeIntoOwnPane(at: string, text: string): Promise<void> {
   const box = boxState(await runHerdr('pane', 'read', at, '--lines', '40', '--source', 'visible', '--format', 'ansi'));
   if (box.state === 'NO-BOX') throw new Error('the pane shows no input box');
   if (box.state === 'DRAFT') throw new Error('the pane holds a draft');
-  await runHerdr('agent', 'prompt', at, text);
+  // herdr reads an argument that opens with a dash as an option, as an approval refuses such text for the same reason.
+  // The answer opens with the card's line, and a leading space keeps herdr from reading it as an option if it ever does not.
+  await runHerdr('agent', 'prompt', at, text.startsWith('-') ? ` ${text}` : text);
 }
 
 async function markNotSeen(card: string, reason: string): Promise<void> {
