@@ -44,6 +44,27 @@ function hex(bytes: number): string {
 
 const tooMany = (): Response => json({ error: 'too many requests, try again in a minute' }, 429);
 
+/** The routes a hosted inbox never serves: it sends events over the WebSocket only. The Worker answers them itself, so a client that retries one does not wake the inbox object. */
+const SOCKET_ONLY = new Set(['/v1/events', '/v1/stream', '/v1/poll']);
+
+/** When each client that keeps asking for a stream was last named in the log, so a retry loop costs one line a minute. */
+const refusedAt = new Map<string, number>();
+
+/** Refuse a stream route, and name the client behind it once a minute: a client that ignores the refusal is the only way it is found. */
+function refuseStream(req: Request, url: URL, id: string): Response {
+  const agent = url.searchParams.get('agent') ?? '';
+  const instance = url.searchParams.get('instance') ?? '';
+  const key = `${id}:${url.pathname}:${agent}:${instance}`;
+  const now = Date.now();
+  const last = refusedAt.get(key);
+  if (last === undefined || now - last >= 60_000) {
+    if (refusedAt.size >= 1000) refusedAt.clear();
+    refusedAt.set(key, now);
+    console.log(JSON.stringify({ event: 'stream_refused', inbox: id.slice(0, 8), path: url.pathname, agent, instance, ip: clientAddress(req) }));
+  }
+  return json({ error: 'this inbox serves events over the WebSocket at /v1/ws only' }, 410);
+}
+
 /** Whether a request carries a token. The inbox checks the token; the Worker only picks the limiter. */
 const signedIn = (req: Request): boolean => /^Bearer /.test(req.headers.get('authorization') ?? '') || /(^|;\s*)ya_token=/.test(req.headers.get('cookie') ?? '');
 const clientAddress = (req: Request): string => req.headers.get('cf-connecting-ip') ?? 'unknown';
@@ -158,6 +179,7 @@ export default {
     if (!(await validAddress(secret, id))) return json({ error: 'no inbox at this address' }, 404);
     if (rest.startsWith('/v1/')) {
       if (!(await allowed(env, req, id))) return tooMany();
+      if (req.method === 'GET' && SOCKET_ONLY.has(rest)) return refuseStream(req, url, id);
       return toInbox(env, id, req, rest, url.search, `/i/${id}/`);
     }
     return asset(env, req, rest);
