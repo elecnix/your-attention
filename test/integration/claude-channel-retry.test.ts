@@ -115,6 +115,28 @@ describe('the channel while a session cannot receive an answer', () => {
     }
   });
 
+  it('delivers the answer the person saved last, not the one it replaced', async () => {
+    const SESSION = 'retry-session-3';
+    const herdr = fakeHerdr('');
+    const mcp = new McpClient({ name: 'test', version: '1' });
+    try {
+      await mcp.connect(new StdioClientTransport({
+        command: process.execPath,
+        args: CHANNEL_ARGS,
+        env: envFor({ CLAUDE_CODE_SESSION_ID: SESSION, HERDR_PANE_ID: 'w7:p1', HERDR_BIN_PATH: herdr.bin }),
+        stderr: 'ignore',
+      }));
+      await mcp.listTools();
+      await mcp.callTool({ name: 'card_post', arguments: { id: 'retry-3', title: 'Ship it?', options: ['Yes'] } });
+      await h.owner('POST', '/v1/cards/retry-3/answer', { comment: 'the first thought' });
+      await h.owner('POST', '/v1/cards/retry-3/answer', { comment: 'the second thought' });
+      await until(() => (/agent prompt w7:p1 [\s\S]*the second thought/.test(herdr.text()) ? true : undefined));
+      assert.doesNotMatch(herdr.text(), /the first thought/);
+    } finally {
+      await mcp.close();
+    }
+  });
+
   it('leaves the answer delivered and says on the card why the agent did not see it, when the pane holds a draft', async () => {
     const SESSION = 'retry-session-2';
     const herdr = fakeHerdr('my own half-written message');
