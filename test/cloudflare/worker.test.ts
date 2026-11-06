@@ -23,6 +23,8 @@ const freePort = (): Promise<number> => new Promise((r) => {
   const s = net.createServer().listen(0, '127.0.0.1', () => { const p = (s.address() as net.AddressInfo).port; s.close(() => r(p)); });
 });
 
+let devOut = '';
+
 before(async () => {
   // An invite code with two uses, as the operator would add with `wrangler kv key put`.
   // A .cmd file runs only through a shell on Windows.
@@ -31,14 +33,13 @@ before(async () => {
   assert.equal(seed.status, 0, seed.stderr);
   const port = await freePort();
   dev = spawn(WRANGLER, ['dev', '--local', '--ip', '127.0.0.1', '--port', String(port), '--var', 'MODE:hosted', '--var', 'UPLOAD_LIMIT_BYTES:150000', '--var', 'INBOX_ID_SECRET:test-address-key', '--persist-to', persist, '--show-interactive-dev-session=false'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], shell });
-  let out = '';
-  dev.stdout?.on('data', (d) => { out += String(d); });
-  dev.stderr?.on('data', (d) => { out += String(d); });
+  dev.stdout?.on('data', (d) => { devOut += String(d); });
+  dev.stderr?.on('data', (d) => { devOut += String(d); });
   base = `http://127.0.0.1:${port}`;
   const end = Date.now() + 90_000;
   for (;;) {
-    if (/Ready on/.test(out)) break;
-    if (Date.now() > end || dev.exitCode !== null) throw new Error(`wrangler dev did not start:\n${out}`);
+    if (/Ready on/.test(devOut)) break;
+    if (Date.now() > end || dev.exitCode !== null) throw new Error(`wrangler dev did not start:\n${devOut}`);
     await new Promise((r) => setTimeout(r, 300));
   }
 });
@@ -125,6 +126,14 @@ describe('the hosted Cloudflare build', () => {
     for (const path of ['/v1/events', '/v1/stream?agent=x', '/v1/poll?agent=x']) {
       assert.equal((await fetch(`${inbox}${path}`, { headers: { authorization: `Bearer ${owner}` } })).status, 410, path);
     }
+  });
+
+  it('refuses a stream route itself, and names a client that keeps asking once a minute', async () => {
+    const path = '/v1/stream?agent=pi:retry-loop&instance=one';
+    for (let i = 0; i < 3; i++) assert.equal((await fetch(`${inbox}${path}`, { headers: { authorization: `Bearer ${owner}` } })).status, 410);
+    await until(async () => (devOut.includes('"agent":"pi:retry-loop"') ? true : undefined));
+    assert.equal(devOut.split('"agent":"pi:retry-loop"').length - 1, 1, 'three retries within the minute are named once');
+    assert.match(devOut, /"event":"stream_refused"/);
   });
 
   it('scopes the sign-in cookie to the inbox address', async () => {
