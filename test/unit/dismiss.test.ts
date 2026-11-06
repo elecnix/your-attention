@@ -30,6 +30,15 @@ function refusal(call: () => unknown): number {
 const seenAt = (inbox: Inbox, i = 0): number | null => inbox.getCard('c1').replies[i]?.seenAt ?? null;
 
 describe('dismiss', () => {
+  it('keeps the draft when the agent closes the card later', () => {
+    const inbox = setup();
+    inbox.dismiss(owner, 'c1', { values: { choice: 'o2' }, comment: 'Not needed any more.' });
+    const closed = inbox.close(agent, 'c1', 'retracted', 'Withdrawn.');
+    assert.equal(closed.closed?.kind, 'retracted');
+    assert.deepEqual(closed.closed?.draft?.values, { choice: 'o2' }, 'the person\'s draft survives');
+    assert.equal(closed.closed?.draft?.comment, 'Not needed any more.');
+  });
+
   it('closes the card as dismissed, records the draft with its time, and the agent hears nothing', () => {
     const inbox = setup();
     const heard: AgentEvent[] = [];
