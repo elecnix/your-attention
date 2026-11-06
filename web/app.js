@@ -55,6 +55,8 @@ export function App() {
   const saveSettings = (patch) => api(`${BASE}v1/settings`, patch, 'PUT').catch(() => {});
   // A save in flight owns the list until it answers, so a state that arrives meanwhile cannot undo the click.
   const savingPins = React.useRef(0);
+  // The same guard for Group by: a state that arrives before the PUT commits must not put the old choice back.
+  const savingGroupBy = React.useRef(0);
   const togglePin = (tag) => setTagPins((pins) => {
     const next = pins.some((p) => samePin(p, tag)) ? pins.filter((p) => !samePin(p, tag)) : [...pins, tag];
     savingPins.current += 1;
@@ -111,7 +113,7 @@ export function App() {
   React.useEffect(() => {
     if (!state) return;
     const s = state.settings || {};
-    setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
+    if (!savingGroupBy.current) setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
     if (!savingPins.current) setTagPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
   }, [state]);
 
@@ -425,7 +427,7 @@ export function App() {
   const groupTags = groupBy.startsWith('tag:') && !tagKeys.includes(groupBy.slice(4)) ? [...tagKeys, groupBy.slice(4)] : tagKeys;
   const queue = h('nav', { className: 'queue' },
     h('label', { className: 'group-by' }, 'Group by ',
-      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); saveSettings({ groupBy: e.target.value }); } },
+      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); savingGroupBy.current += 1; const mine = savingGroupBy.current; api(`${BASE}v1/settings`, { groupBy: e.target.value }, 'PUT').catch(() => {}).finally(() => { if (savingGroupBy.current === mine) savingGroupBy.current = 0; }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
     pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
