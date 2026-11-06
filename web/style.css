@@ -191,7 +191,7 @@
   .file-chip svg { flex: none; width: .9em; height: .9em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .file-copy { display: inline-flex; align-items: center; padding: .15em; border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer; }
   .file-copy:hover, .file-copy:focus-visible { color: var(--ink); }
-  .file-copy[data-copied="Copied"] { color: var(--good); }
+  .file-copy[data-copied="Copied"] { color: var(--ok); }
   .dead-link { color: var(--muted); text-decoration: line-through; }
   .attachments { display: grid; gap: 12px; margin: 0 0 12px; }
   .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }

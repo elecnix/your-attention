@@ -37,6 +37,8 @@ test('a file link on a card from this machine is a chip with the file name, the 
   await expect(chip.locator('a.file-link')).toHaveAttribute('title', report);
   await chip.getByRole('button', { name: 'Copy path' }).click();
   await expect(chip.getByRole('button', { name: 'Copied' })).toBeVisible();
+  // The copied state shows the success colour, as the code-block copy button does.
+  await expect(chip.getByRole('button', { name: 'Copied' })).toHaveCSS('color', 'rgb(31, 122, 77)');
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(report);
 });
 
