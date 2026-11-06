@@ -34,7 +34,8 @@ test('a comment and a pick are recorded, then Dismiss moves the card to Sent and
   expect(stored.answer).toBeUndefined();
   // The agent's stream heard no answer, no event and no new turn.
   await page.waitForTimeout(1500);
-  expect(heard.events.filter((e) => e.type !== 'hello')).toEqual([]);
+  // A beat is the stream saying it is alive, so it is not the leak this test looks for.
+  expect(heard.events.filter((e) => e.type !== 'hello' && (e.type as string) !== 'beat')).toEqual([]);
 });
 
 test('dismissing a replied card keeps a later agent reply out of the queue, though it is saved', async ({ page }) => {
