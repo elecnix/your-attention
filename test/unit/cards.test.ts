@@ -1,7 +1,7 @@
 // Card features from the batch of principles about the card model.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
+import { DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PRESENCE_KEEP_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 
@@ -67,6 +67,20 @@ describe('card states', () => {
     assert.equal(inbox.state().states['c1'], 'open');
     clock.advance(ORPHAN_MS + 1);
     inbox.sweep();
+    assert.equal(inbox.state().states['c1'], 'orphaned');
+  });
+
+  it('keeps a card orphaned once the sweep has pruned its agent\'s presence row', () => {
+    const { inbox, agent, clock } = setup();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
+    inbox.connect(agent, 's1', () => {})();
+    clock.advance(ORPHAN_MS + 1);
+    inbox.sweep();
+    assert.equal(inbox.state().states['c1'], 'orphaned');
+    // The row goes a month after the agent left, and the card must not read open again.
+    clock.advance(PRESENCE_KEEP_MS);
+    inbox.sweep();
+    assert.equal(inbox.state().presence['s1'], undefined, 'the row is gone');
     assert.equal(inbox.state().states['c1'], 'orphaned');
   });
 });

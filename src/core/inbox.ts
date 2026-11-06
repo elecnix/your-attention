@@ -154,6 +154,8 @@ const PENDING_FILE_DELETES = 'pending-file-deletes';
 export const PURGE_BATCH = 100;
 /** The share of the storage limit the purge keeps free, by deleting the oldest of those cards sooner. */
 export const STORAGE_HEADROOM = 0.2;
+/** How long the sweep keeps the presence row of an agent after it went offline. */
+export const PRESENCE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 
 const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']);
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
@@ -274,7 +276,10 @@ export class Inbox {
   /** When the platform alarm must next call sweep(), or undefined when nothing waits. */
   nextDeadline(): number | undefined {
     const times: number[] = [];
-    for (const p of this.store.list<Presence>('presence')) if (p.online && p.leftAt !== undefined) times.push(p.leftAt + PRESENCE_GRACE_MS);
+    for (const p of this.store.list<Presence>('presence')) {
+      if (p.online && p.leftAt !== undefined) times.push(p.leftAt + PRESENCE_GRACE_MS);
+      else if (!p.online) times.push((p.leftAt ?? p.lastSeen) + PRESENCE_KEEP_MS);
+    }
     for (const p of this.store.list<Pairing>('pairings')) {
       times.push(p.status === 'pending' || p.secret ? p.createdAt + PAIRING_TTL_MS : p.createdAt + PAIRING_KEEP_MS);
     }
@@ -1793,6 +1798,9 @@ export class Inbox {
         // The agent was last seen when its connection closed, not when the alarm noticed.
         this.store.put<Presence>('presence', p.agent, { agent: p.agent, online: false, lastSeen: p.leftAt });
         this.emit({ type: 'presence', agent: p.agent, online: false });
+      } else if (!p.online && now - (p.leftAt ?? p.lastSeen) >= PRESENCE_KEEP_MS) {
+        // The row of an agent gone this long only makes GET /v1/state bigger. A reconnect writes a fresh one.
+        this.store.delete('presence', p.agent);
       }
     }
     // Download counts from earlier days go.
@@ -1967,10 +1975,17 @@ export class Inbox {
     };
   }
 
+  /** Whether an open card's agent has left long ago, so another session can claim it. A row the sweep pruned counts as gone,
+   * and so does a card whose agent never connected, once the card itself is old enough. */
+  private orphaned(c: Card | CardSummary, s: CardState, p: Presence | undefined, now: number): boolean {
+    if (s !== 'open' || c.deliver !== 'stream') return false;
+    if (p) return !p.online && now - p.lastSeen > ORPHAN_MS;
+    return now - (c.updatedAt ?? c.createdAt) > ORPHAN_MS;
+  }
+
   /** A card's state, with orphaned for an open card whose agent left long ago: another session can claim it. */
   private shownState(c: Card | CardSummary, p: Presence | undefined, answer: Pick<Answer, 'savedAt' | 'readAt' | 'deliveredAt'> | undefined): CardState {
-    const s = cardState(c, answer);
-    return s === 'open' && c.deliver === 'stream' && p && !p.online && this.now() - p.lastSeen > ORPHAN_MS ? 'orphaned' : s;
+    return this.orphaned(c, cardState(c, answer), p, this.now()) ? 'orphaned' : cardState(c, answer);
   }
 
   state(): {
@@ -1986,10 +2001,7 @@ export class Inbox {
     const now = this.now();
     const states = Object.fromEntries(cards.map((c) => {
       const s = cardState(c, answers[c.id]);
-      const p = presence[c.agent];
-      // An open card whose agent left long ago is orphaned: another session can claim it.
-      const orphaned = s === 'open' && c.deliver === 'stream' && p && !p.online && now - p.lastSeen > ORPHAN_MS;
-      return [c.id, orphaned ? 'orphaned' : s];
+      return [c.id, this.orphaned(c, s, presence[c.agent], now) ? 'orphaned' : s];
     }));
     const levels = this.priorities();
     // The answers are read already, so each card costs no storage read of its own.
