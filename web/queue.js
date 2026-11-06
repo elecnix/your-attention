@@ -17,6 +17,7 @@ export function presenceOf(card, state) {
   if (card.deliver === 'none') return null;
   const p = state.presence[card.agent];
   if (!p || !p.online) return ['off', 'Agent offline: your answer waits until its session resumes'];
+  if (p.channelOff) return ['off', 'Channel off: this session started without the development-channels flag, so answers cannot reach it'];
   const unread = state.cards.some((c) => c.agent === card.agent && state.states[c.id] === 'delivered');
   return unread ? ['busy', 'Agent busy: it has an answer it has not read yet'] : ['on', 'Agent listening'];
 }
