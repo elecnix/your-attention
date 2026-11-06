@@ -145,20 +145,11 @@ describe('delivery', () => {
     inbox.connect(agentA, 's1', () => {})();
     t += 500;
     inbox.connect(agentA, 's1', () => {});
+    // Nothing else waits, so only a closing time the reconnect left behind could set a deadline, and it must not.
+    assert.equal(inbox.nextDeadline(), undefined);
     t += PRESENCE_GRACE_MS * 2;
     inbox.sweep();
     assert.equal(inbox.isOnline('s1'), true);
-  });
-
-  it('clears the closing time when the agent reconnects, so no alarm is armed for the past', () => {
-    let t = 0;
-    const inbox = new Inbox(new MemoryStorage(), () => t);
-    const agentA: Caller = { token: 'ta', role: 'agent' };
-    inbox.connect(agentA, 's1', () => {})();
-    t += 500;
-    inbox.connect(agentA, 's1', () => {});
-    // Nothing else waits, so only a closing time the reconnect left behind could set a deadline.
-    assert.equal(inbox.nextDeadline(), undefined);
   });
 
   it('keeps Channel off on the presence across a disconnect and a reconnect', () => {

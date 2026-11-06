@@ -202,22 +202,8 @@ describe('the channel at startup', () => {
     }
   });
 
-  it('reports Channel off on the agent\'s presence when its session started without the flag', { skip: posixOnly }, async () => {
-    const SESSION = 'startup-session-2';
-    const agent = `claude:${SESSION}`;
-    const mcp = await connectChannel(SESSION, process.execPath, CHANNEL_ARGS);
-    try {
-      const presence = ((await h.stored()) as { presence: Record<string, { channelOff?: boolean }> }).presence[agent];
-      assert.equal(presence?.channelOff, true);
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  it('leaves the presence alone when the parent carries the flag', { skip: posixOnly }, async () => {
-    const SESSION = 'startup-session-3';
-    const agent = `claude:${SESSION}`;
-    // A parent process whose command line carries the flag, as Claude Code's does. ps reads the title.
+  it('reports Channel off only for a session whose parent lacks the flag', { skip: posixOnly }, async () => {
+    // A parent whose command line carries the flag, as Claude Code's does. ps reads the process title.
     const wrapper = path.join(h.home, 'claude-parent.mjs');
     fs.writeFileSync(wrapper, `import { spawn } from 'node:child_process';
 process.title = 'claude ${FLAG}';
@@ -225,12 +211,16 @@ const [script] = process.argv.slice(2);
 const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', script, 'claude-channel'], { stdio: 'inherit', env: process.env });
 child.on('exit', (code) => process.exit(code ?? 0));
 `);
-    const mcp = await connectChannel(SESSION, process.execPath, [wrapper, CLI]);
+    const presenceOf = async (session: string): Promise<{ channelOff?: boolean } | undefined> =>
+      ((await h.stored()) as { presence: Record<string, { channelOff?: boolean }> }).presence[`claude:${session}`];
+    const without = await connectChannel('startup-session-2', process.execPath, CHANNEL_ARGS);
+    const flagged = await connectChannel('startup-session-3', process.execPath, [wrapper, CLI]);
     try {
-      const presence = ((await h.stored()) as { presence: Record<string, { channelOff?: boolean }> }).presence[agent];
-      assert.equal(presence?.channelOff, undefined);
+      assert.equal((await presenceOf('startup-session-2'))?.channelOff, true);
+      assert.equal((await presenceOf('startup-session-3'))?.channelOff, undefined);
     } finally {
-      await mcp.close();
+      await without.close();
+      await flagged.close();
     }
   });
 });
