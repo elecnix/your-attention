@@ -376,7 +376,9 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     pins = next;
     if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
     status(had ? `Unpinned ${key}: ${value}.` : `Pinned ${key}: ${value} to the top.`, 'ok');
-    api.call('PUT', '/v1/settings', { pins: next }).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
+    // The change travels as one pin in or out, so a pin another device adds at the same moment survives.
+    const change = had ? { pinRemove: [[key, value]] } : { pinAdd: [[key, value]] };
+    api.call('PUT', '/v1/settings', change).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
   };
   const clearDealt = () => {
     const n = m.queue?.dealt.length ?? 0;

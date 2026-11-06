@@ -183,6 +183,12 @@ export interface Settings {
   pins?: [string, string][];
 }
 
+/** A change the owner makes to the pins: one value in or out, so another device's pin is never overwritten. */
+export interface PinChange {
+  pinAdd?: [string, string][];
+  pinRemove?: [string, string][];
+}
+
 /** A file on a card, such as an image, a PDF or a Markdown document.
  * The bytes are at GET /v1/attachments/<id>, or at an https URL. */
 export interface Attachment {

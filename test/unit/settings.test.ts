@@ -25,6 +25,16 @@ describe('settings', () => {
     assert.deepEqual(next, { allowHtml: true, groupBy: 'agent', pins: [] });
   });
 
+  it('adds and removes one pin at a time, so a pin another device sets survives', () => {
+    const inbox = setup();
+    inbox.setSettings({ pins: [['topic', 'billing']] });
+    // Two devices pin different values: each change names only its own.
+    assert.deepEqual(inbox.setSettings({ pinAdd: [['topic', 'search']] }).pins, [['topic', 'billing'], ['topic', 'search']]);
+    assert.deepEqual(inbox.setSettings({ pinAdd: [['repo', 'acme/api']] }).pins, [['topic', 'billing'], ['topic', 'search'], ['repo', 'acme/api']]);
+    assert.deepEqual(inbox.setSettings({ pinRemove: [['topic', 'billing']] }).pins, [['topic', 'search'], ['repo', 'acme/api']]);
+    assert.deepEqual(inbox.setSettings({ pinAdd: [['repo', 'acme/api']] }).pins, [['topic', 'search'], ['repo', 'acme/api']], 'a pin already there stays once');
+  });
+
   it('takes only a known grouping, with any tag key', () => {
     const inbox = setup();
     for (const groupBy of ['none', 'priority', 'agent', 'tag:repo']) assert.equal(inbox.setSettings({ groupBy }).groupBy, groupBy);

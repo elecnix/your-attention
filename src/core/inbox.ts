@@ -14,7 +14,7 @@ import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, typ
 import { Usage } from './telemetry.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PersonPresence, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -1181,21 +1181,32 @@ export class Inbox {
     return this.store.get<Settings>('meta', 'settings') ?? { allowHtml: false };
   }
 
-  setSettings(input: Partial<Settings>): Settings {
+  setSettings(input: Partial<Settings> & PinChange): Settings {
     const next: Settings = { ...this.settings(), ...(typeof input.allowHtml === 'boolean' ? { allowHtml: input.allowHtml } : {}) };
     if (input.groupBy !== undefined) next.groupBy = this.checkGroupBy(input.groupBy);
     if (input.pins !== undefined) next.pins = this.checkPins(input.pins);
+    // A pin or an unpin travels as its own change, so two devices that pin at the same moment both keep their value.
+    if (input.pinAdd !== undefined || input.pinRemove !== undefined) {
+      const same = (a: [string, string], b: [string, string]) => a[0] === b[0] && a[1] === b[1];
+      const add = input.pinAdd === undefined ? [] : this.checkPins(input.pinAdd);
+      const remove = input.pinRemove === undefined ? [] : this.checkPins(input.pinRemove);
+      const current = next.pins ?? [];
+      const kept = current.filter((p) => !remove.some((r) => same(r, p)));
+      next.pins = [...kept, ...add.filter((a) => !kept.some((k) => same(k, a)))].slice(0, MAX_PINS);
+    }
     this.store.put('meta', 'settings', next);
     this.emit({ type: 'change', card: '' });
     return next;
   }
 
   private checkGroupBy(groupBy: unknown): string {
-    const key = typeof groupBy === 'string' && groupBy.startsWith('tag:') ? groupBy.slice(4).trim() : '';
+    const raw = typeof groupBy === 'string' && groupBy.startsWith('tag:') ? groupBy.slice(4) : '';
+    const key = raw.trim();
     if (!(groupBy === 'none' || groupBy === 'priority' || groupBy === 'agent' || (key.length >= 1 && key.length <= MAX_TAG_CHARS))) {
       throw new InboxError(400, 'groupBy must be none, priority, agent or tag:<key>');
     }
-    return groupBy as string;
+    // The key is stored the way it is matched, so `tag: topic ` groups the cards tagged `topic`.
+    return key && groupBy !== 'none' ? `tag:${key}` : groupBy as string;
   }
 
   /** Pins reach the queue the page draws, so a pair that isn't a tag key and its value is refused rather than stored. */
