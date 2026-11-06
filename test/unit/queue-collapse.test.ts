@@ -59,6 +59,15 @@ describe('collapsed groups', () => {
     assert.equal(q.groupOf['r'], SECTION_ID.replied);
   });
 
+  it('names the section of every card, so the terminal key can collapse the group on screen', () => {
+    const done = card('s', {}, { closed: { kind: 'retracted', at: 9, outcome: 'No longer needed.' } });
+    const s = state([...cards, done]);
+    s.states['s'] = 'closed';
+    const q = buildQueue(s, 'none');
+    assert.equal(q.groupOf['s'], SECTION_ID.sent);
+    assert.equal(q.groupOf['a'], 'none: Waiting for you');
+  });
+
   it('leaves the queue as it was with no collapsed group', () => {
     const q = buildQueue(state(cards), 'none', pins);
     assert.deepEqual(ids(q.order), ['a', 'b', 'c', 'd', 'e']);

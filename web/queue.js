@@ -67,11 +67,15 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
     const id = tagKey !== null ? `${tagKey}: ${value || '(none)'}` : groupBy === 'priority' ? `priority: ${label(levelOf(items[0]))}` : `${groupBy}: ${title}`;
     return [title, items, tag, id];
   });
-  // The group each card sits in, so a card that arrives knows whether its group is collapsed.
+  // The group each card sits in, so a card that arrives knows whether its group is collapsed, and the terminal
+  // client's key can collapse the group of the card on screen.
   const groupOf = {};
   for (const p of pinned) for (const c of p.items) groupOf[c.id] = p.id;
   for (const c of replied) groupOf[c.id] = SECTION_ID.replied;
   for (const [, items, , id] of groups) for (const c of items) groupOf[c.id] = id;
+  for (const c of checking) groupOf[c.id] = SECTION_ID.checking;
+  for (const c of outbox) groupOf[c.id] = SECTION_ID.outbox;
+  for (const c of sent) groupOf[c.id] = SECTION_ID.sent;
   // A collapsed group keeps its heading and its cards, for the count, but its cards leave the queue order: Skip for
   // now and the card after an answer pass over them, while a card opened by a link still opens.
   const hidden = new Set(Object.keys(groupOf).filter((id) => collapsed.has(groupOf[id])));

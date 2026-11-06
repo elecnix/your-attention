@@ -39,7 +39,7 @@ export interface Queue {
   dealt: Card[];
   /** Each waiting group as [title, cards], with [key, value] third under a tag grouping when the group has a value, and its collapse id fourth. */
   groups: [string, Card[], [string, string] | undefined, string][];
-  /** The collapse id of the group each waiting or replied card sits in. */
+  /** The collapse id of the group each card sits in: a pinned group, a grouped group, or a section. */
   groupOf: Record<string, string>;
   /** The cards of a collapsed group: the heading and the count keep them, the queue order does not. */
   hidden: Set<string>;
