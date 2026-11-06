@@ -256,6 +256,11 @@ export class Inbox {
     return this.store.list<Token>('tokens').map(({ hash: _hash, ...t }) => t);
   }
 
+  /** Whether a token, by id, still exists: nobody signed it out or revoked it. */
+  hasToken(id: string): boolean {
+    return !!this.store.get<Token>('tokens', id);
+  }
+
   revokeToken(id: string): void {
     if (!this.store.get('tokens', id)) throw new InboxError(404, 'unknown token');
     this.store.delete('tokens', id);

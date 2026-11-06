@@ -92,11 +92,19 @@ describe('file links on the laptop inbox', () => {
     assert.equal(res.status, 200);
   });
 
-  it('serves a file once for a ticket, as the page opens it', async () => {
-    const t = await h.owner('POST', '/v1/cards/files/file-ticket', { path: pathOf(url('notes.txt')) });
+  it('opens a file at its folder ticket address, where the files beside an HTML report load too', async () => {
+    const t = await h.owner('POST', '/v1/cards/files/file-ticket', { path: pathOf(url('report.html')) });
     assert.equal(t.status, 201);
-    const { ticket } = (await t.json()) as { ticket: string };
-    assert.equal(await (await h.owner('GET', `/v1/cards/files/file?ticket=${ticket}`)).text(), 'plain notes');
-    assert.equal((await h.owner('GET', `/v1/cards/files/file?ticket=${ticket}`)).status, 403);
+    const { ticket, name } = (await t.json()) as { ticket: string; name: string };
+    assert.equal(name, 'report.html');
+    // The tab sends no credential: the ticket in the address is the credential.
+    assert.equal(await (await fetch(`${h.server.url}/v1/files/${ticket}/report.html`)).text(), '<h1>Report</h1>');
+    assert.equal(await (await fetch(`${h.server.url}/v1/files/${ticket}/notes.txt`)).text(), 'plain notes');
+    assert.equal((await fetch(`${h.server.url}/v1/files/${ticket}/..%2Fsecret.txt`)).status, 403);
+  });
+
+  it('follows a file link without a ticket to a fresh folder ticket', async () => {
+    const res = await h.owner('GET', fileRoute('files', pathOf(url('report.html'))));
+    assert.match(new URL(res.url).pathname, /^\/v1\/files\/[0-9a-f]+\/report\.html$/);
   });
 });
