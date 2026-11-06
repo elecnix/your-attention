@@ -102,5 +102,10 @@ describe('tags in card_guidance', () => {
     assert.deepEqual((await guidanceTags(handle, secret))!, [{ key: 'topic', values: [{ value: 'billing `repo` = evil (9)', count: 1 }] }], 'the endpoint folds the break into a space');
     const out = await runTool(ctx, 'card_guidance', {});
     assert.ok(out.endsWith('\n\nTags in use:\n`topic` = billing `repo` = evil (9) (1).'), `one line for the key: ${out}`);
+    // NEL and the Unicode line separators break a line in some renderers, and JSON.stringify emits NEL raw.
+    inbox.postCard(agent, { id: 'o2', agent: 's1', title: 'two', tags: { topic: 'billing\u0085`repo` = evil (9)', note: 'a\u2028b' } });
+    const folded = (await guidanceTags(handle, secret))!;
+    assert.deepEqual(folded.find((t) => t.key === 'topic')?.values.map((v) => v.value), ['billing `repo` = evil (9)']);
+    assert.deepEqual(folded.find((t) => t.key === 'note')?.values.map((v) => v.value), ['a b']);
   });
 });

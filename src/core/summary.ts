@@ -18,7 +18,8 @@ const MAX_TAG_CHARS = 100;
  * into a value would forge a line in another agent's card_guidance, which prints the tags in use, so each run of
  * spaces, tabs and breaks becomes one space. */
 export function tagText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().slice(0, MAX_TAG_CHARS);
+  // `\s` covers the line breaks a renderer honours except NEL, which JSON.stringify emits raw, so it goes too.
+  return text.replace(/[\s\u0085\u2028\u2029]+/g, ' ').trim().slice(0, MAX_TAG_CHARS);
 }
 
 /** A card's tags as the inbox stores them, at most MAX_TAGS, with an empty key dropped. */
