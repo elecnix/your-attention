@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, FollowUp, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails } from './details.js';
 
@@ -34,7 +34,6 @@ export function App() {
   const focusRef = React.useRef(null);
   React.useEffect(() => installPaste(() => focusRef.current), []);
   const knownRef = React.useRef(null);
-  const seenRef = React.useRef(null);
   const reportedFocus = React.useRef(undefined);
   // Escape clears the card pane; nothing takes the pane again until the person picks a card.
   const [cleared, setCleared] = React.useState(false);
@@ -305,11 +304,6 @@ export function App() {
     report({ focus: reportedFocus.current, active: true });
   }
   if (current && cardInAddress() !== current.id && !/(?:token|signin)=/.test(location.hash)) history.replaceState({ card: current.id }, '', cardAddress(current.id));
-  const seenKey = current ? `${current.id}:${shown.replyAt || 0}` : null;
-  if (current && shown.unseenReplies && seenRef.current !== seenKey) {
-    seenRef.current = seenKey;
-    setTimeout(() => api(`${BASE}v1/cards/${current.id}/seen`, {}), 1500);
-  }
 
   // Each card you open is a step in the browser's history, so back and forward move between them.
   const go = (id) => {
@@ -333,6 +327,15 @@ export function App() {
     }, 700);
   };
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
+  // Dismiss closes the card without telling the agent, and the inbox keeps what the person had on screen as a draft that
+  // only the owner reads. The card leaves the queue for Sent, as an answer does.
+  const dismiss = async (c, values, comment) => {
+    const res = await api(`${BASE}v1/cards/${c.id}/dismiss`, { values, comment });
+    if (!res.ok) return;
+    store.del(`draft:${c.id}:${c.version}`);
+    store.del(`draft:${c.id}:comment`);
+    answered(c.id);
+  };
   const picksOf = (c) => approvalPicks[`${c.id}:${c.version}`] || {};
   const toggleApproval = (c, i, on) => setApprovalPicks((all) => {
     const next = { ...all, [`${c.id}:${c.version}`]: { ...(all[`${c.id}:${c.version}`] || {}), [i]: on } };
@@ -342,8 +345,9 @@ export function App() {
 
   async function onAction(c, ev) {
     if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return skip();
-    if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
     const { values: picked, comment } = formValues(ev.formState);
+    if (ev.humanFriendlyMessage === 'dismiss') return dismiss(c, answerValues(c, picked), comment);
+    if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
     const values = { ...answerValues(c, picked), ...approvalValues(c, picksOf(c)) };
     const images = pastedImages.payload(c.id);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
@@ -410,6 +414,9 @@ export function App() {
   } else {
     const a = detail.answer;
     const s = st(current);
+    // A replied card whose answer is still there offers Reply and Dismiss, with the answer form folded away: a follow-up
+    // keeps the answer, so picking again is a change the person asks for.
+    const followedUp = !!a && !!shown && st(shown) === 'reply';
     const pres = presenceOf(current, state);
     const prevDetail = current.follows ? details.get(byId[current.follows]) : undefined;
     const prev = prevDetail && prevDetail.card;
@@ -442,8 +449,8 @@ export function App() {
         o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/open`, {}) }, 'Open session')),
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { text: r.text, byId, open, diagrams: false }))),
-      a && s !== 'reply' && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
-      a && s !== 'reply' && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
+      a && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
+      a && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
       h('h2', { className: 'card-title' }, current.title),
       !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined }),
       // The agent's recommendation, drawn by the page on every kind of card, so it reads as the conclusion and never gets lost.
@@ -453,11 +460,16 @@ export function App() {
       h(Changes, { card: current }),
       current.approvals && current.approvals.length > 0 && h(Approvals, { card: current, answer: a, picks: picksOf(current), onToggle: (i, on) => toggleApproval(current, i, on) }),
       current.broadcast && !current.closed
-        ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip })
+        ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip, onDismiss: (comment) => dismiss(current, {}, comment) })
         : current.html !== undefined
-        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); } })
+        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); }, onDismiss: (values, comment) => dismiss(current, values, comment) })
         : current.kind === 'secret'
-        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id) })
+        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id), onDismiss: (comment) => dismiss(current, {}, comment) })
+        : followedUp
+        ? h(React.Fragment, null,
+          h(FollowUp, { key: `reply:${a.savedAt}`, card: current, answer: a, onDone: () => answered(current.id) }),
+          h('details', { className: 'change-answer' }, h('summary', null, 'Change your answer'),
+            h(CardView, { key: `${current.id}:${a.savedAt}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) })))
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
@@ -474,7 +486,7 @@ export function App() {
     // A diagram or a body the page cannot draw goes back to the card's agent.
     main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
       // The summary has the closure as soon as the state does, before the whole card arrives again.
-      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, onNext: skip, animate: !!closing[current.id] }, card)
+      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id] }, card)
       : card);
   }
 

@@ -87,8 +87,9 @@ export function summarize(card: Card, answer: Answer | undefined): CardSummary {
     id: card.id, agent: card.agent, kind: card.kind, title: card.title, priority: card.priority, status: card.status, rating: card.rating, tags, origin,
     from: card.from, follows: card.follows, followedBy: card.followedBy, deliver: card.deliver, version: card.version,
     createdAt: card.createdAt, updatedAt: card.updatedAt, expiresAt: card.expiresAt,
-    // The whole outcome comes with the card. Triage or the page can write a long one.
-    closed: card.closed ? { ...card.closed, outcome: card.closed.outcome.slice(0, PREVIEW_CHARS) } : undefined,
+    // The whole outcome comes with the card. Triage or the page can write a long one. A dismissal's draft stays in the card:
+    // only the owner reads it, and a summary is a small row.
+    closed: card.closed ? { kind: card.closed.kind, outcome: card.closed.outcome.slice(0, PREVIEW_CHARS), at: card.closed.at } : undefined,
     triage: card.triage ? { state: card.triage.state } : undefined,
     replyAt, unseenReplies: card.replies.some((r) => !r.seenAt) || undefined,
     links: links.length ? links : undefined, preview: text ? text.slice(0, PREVIEW_CHARS) : undefined,

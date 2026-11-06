@@ -1,4 +1,6 @@
 import type { Answer, Card } from '../src/core/types.ts';
+/** The tooltip and accessible label of the icon button that dismisses a card, which sits at the end of its buttons row. */
+export const DISMISS: string;
 /** OpenUI Lang for a card: its own body with the page's answer footer, or a form built from its options and questions. */
 export function cardSource(card: Card): string;
 /** The statements of OpenUI Lang source, by name. */

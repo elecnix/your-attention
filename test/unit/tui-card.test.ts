@@ -124,7 +124,8 @@ describe('the card pane', () => {
     const t = setup(card({ id: 'forms', title: 'Two pull requests', body: FORMS }));
     const stops = t.view.stops();
     assert.deepEqual(stops.slice(0, 5), ['field:pr12/merge12', 'field:pr12/checks12', 'field:pr13/merge13', 'field:pr13/flags13', 'field:pr13/ticket']);
-    assert.equal(stops.at(-2), 'button:Send answer');
+    assert.equal(stops.at(-3), 'button:Send answer');
+    assert.equal(stops.at(-1), 'button:Dismiss without telling the agent');
     t.view.focus = undefined;
     assert.equal(t.view.move(1), true);
     assert.equal(t.view.focus, 'field:pr12/merge12');

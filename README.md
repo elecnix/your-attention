@@ -245,6 +245,7 @@ Like the other commands, the client reads `YOUR_ATTENTION_URL` and `YOUR_ATTENTI
 | PgUp, PgDn | ten cards up or down | scroll the card |
 | Ctrl+Enter, Ctrl+S | send the answer | send the answer |
 | Ctrl+N | skip for now | skip for now |
+| `d` | dismiss without telling the agent | dismiss without telling the agent |
 | `g` | group by nothing, priority, agent or a tag | |
 | `C` | clear the answered and closed cards | |
 | `o` | open the card in the browser | |
