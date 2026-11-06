@@ -1473,6 +1473,8 @@ export class Inbox {
     const next: Presence = { ...before, agent, online, lastSeen: this.now() };
     delete next.channelOff;
     if (off) next.channelOff = true;
+    // A live connection has no closing time, and one left from an earlier close would arm the alarm for a past moment.
+    if (online) delete next.leftAt;
     this.store.put<Presence>('presence', agent, next);
     this.emit({ type: 'presence', agent, online });
   }

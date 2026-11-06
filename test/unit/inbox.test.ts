@@ -150,6 +150,31 @@ describe('delivery', () => {
     assert.equal(inbox.isOnline('s1'), true);
   });
 
+  it('clears the closing time when the agent reconnects, so no alarm is armed for the past', () => {
+    let t = 0;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const agentA: Caller = { token: 'ta', role: 'agent' };
+    inbox.connect(agentA, 's1', () => {})();
+    t += 500;
+    inbox.connect(agentA, 's1', () => {});
+    // Nothing else waits, so only a closing time the reconnect left behind could set a deadline.
+    assert.equal(inbox.nextDeadline(), undefined);
+  });
+
+  it('keeps Channel off on the presence across a disconnect and a reconnect', () => {
+    let t = 0;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const agentA: Caller = { token: 'ta', role: 'agent' };
+    const close = inbox.connect(agentA, 's1', () => {}, undefined, { channelOff: true });
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
+    close();
+    t += PRESENCE_GRACE_MS * 2;
+    inbox.sweep();
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
+    inbox.connect(agentA, 's1', () => {});
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
+  });
+
   it('force-sends an unread answer again', async () => {
     const { inbox, agentA } = setup();
     inbox.postCard(agentA, { id: 'c1', agent: 's1', title: 'q' });
