@@ -399,7 +399,12 @@ export function App() {
 
   let main;
   if (!current) {
-    main = h('div', { className: 'focus-card done' }, cleared && pending.length ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.');
+    // Every waiting card can sit out of sight in a collapsed group, so the pane says that instead of reporting an empty inbox.
+    const allHidden = pending.length > 0 && pending.every((c) => hidden.has(c.id));
+    main = h('div', { className: 'focus-card done' },
+      cleared && pending.length ? 'No card selected. Pick a card from the list.'
+        : allHidden ? 'Every waiting card is in a collapsed group. Open the group in the list to see its cards.'
+          : 'Nothing needs you. New cards appear here on their own.');
   } else if (!detail || !detail.card) {
     main = h('div', { className: 'focus-card done', 'aria-busy': 'true' }, `Loading ${current.title}…`);
   } else {

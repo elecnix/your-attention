@@ -123,7 +123,7 @@ test('a collapsed group stays collapsed across a reload and a Group by round tri
   await fold(page, 'billing').click();
   await expect(card(page, 'Billing card')).toHaveCount(0);
   // The choice stays on this device, next to Group by and the pins.
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('collapsedGroups') || '[]'))).toEqual(['topic: billing']);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('collapsedGroups') || '[]'))).toEqual(['tag: topic: billing']);
 
   await page.reload();
   await page.locator('.bar .pill.on').waitFor();
@@ -137,4 +137,20 @@ test('a collapsed group stays collapsed across a reload and a Group by round tri
   await groupBy(page, 'tag:topic');
   await expect(fold(page, 'billing')).toHaveAttribute('aria-expanded', 'false');
   await expect(card(page, 'Billing card')).toHaveCount(0);
+});
+
+test('the pane says when every waiting card is in a collapsed group', async ({ page }) => {
+  await post('cg6-b1', 'Billing card', 'now', 'billing');
+  await post('cg6-s1', 'Search card', 'now', 'search');
+  await inbox.open(page);
+  await groupBy(page, 'tag:topic');
+  await fold(page, 'billing').click();
+  // Answer the only card in sight: no card is left to open, and the one that waits stays muted.
+  await card(page, 'Search card').click();
+  await expect(page.locator('.focus-card .card-title')).toHaveText('Search card');
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  await expect(page.locator('.focus-card.done')).toContainText('Every waiting card is in a collapsed group');
+  // Opening the group brings its card back.
+  await fold(page, 'billing').click();
+  await expect(page.locator('.focus-card .card-title')).toHaveText('Billing card');
 });
