@@ -282,6 +282,21 @@ export function SecretForm({ card, onSent, onSkip }) {
 }
 
 // How long ago the agent sent the card, roughly. It moves on at each turn of the clock's minute.
+/** The pin right after a tag value's label: dimmed while the value is not pinned, bright once it is. */
+export function TagPin({ tag: [key, value], on, onToggle }) {
+  const tip = on ? `Unpin ${key}: ${value}` : `Pin ${key}: ${value} to the top`;
+  return h('button', { type: 'button', className: `tag-pin${on ? ' on' : ''}`, title: tip, 'aria-label': tip, 'aria-pressed': on, onClick: (e) => { e.stopPropagation(); onToggle([key, value]); } },
+    h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.pin.map((d) => h('path', { key: d, d }))));
+}
+
+/** The card's tags as chips, `topic: billing`, each with its pin. */
+export function CardTags({ tags, isPinned, onToggle }) {
+  const entries = Object.entries(tags || {}).map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v);
+  if (!entries.length) return null;
+  return h('div', { className: 'tags' }, entries.map((tag) => h('span', { key: tag[0], className: 'tag' },
+    h('span', { className: 'tag-label' }, `${tag[0]}: ${tag[1]}`), h(TagPin, { tag, on: isPinned(tag), onToggle }))));
+}
+
 export function CardAge({ card }) {
   // The tick only re-renders: each render reads the clock, so a card opened between ticks shows its own age.
   const [, setTick] = React.useState(0);
