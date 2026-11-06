@@ -1192,7 +1192,10 @@ export class Inbox {
       const remove = input.pinRemove === undefined ? [] : this.checkPins(input.pinRemove);
       const current = next.pins ?? [];
       const kept = current.filter((p) => !remove.some((r) => same(r, p)));
-      next.pins = [...kept, ...add.filter((a) => !kept.some((k) => same(k, a)))].slice(0, MAX_PINS);
+      const merged = [...kept, ...add.filter((a) => !kept.some((k) => same(k, a)))];
+      // A pin the inbox cannot keep is refused, so the person hears it rather than losing the value quietly.
+      if (merged.length > MAX_PINS) throw new InboxError(400, `pins takes at most ${MAX_PINS}; unpin a value first`);
+      next.pins = merged;
     }
     this.store.put('meta', 'settings', next);
     this.emit({ type: 'change', card: '' });

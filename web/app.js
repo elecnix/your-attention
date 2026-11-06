@@ -53,9 +53,13 @@ export function App() {
   const samePin = (a, b) => a[0] === b[0] && a[1] === b[1];
   const isPinned = (tag) => tagPins.some((p) => samePin(p, tag));
   const saveSettings = (patch) => api(`${BASE}v1/settings`, patch, 'PUT').catch(() => {});
+  // A save in flight owns the list until it answers, so a state that arrives meanwhile cannot undo the click.
+  const savingPins = React.useRef(0);
   const togglePin = (tag) => setTagPins((pins) => {
     const next = pins.some((p) => samePin(p, tag)) ? pins.filter((p) => !samePin(p, tag)) : [...pins, tag];
-    saveSettings({ pins: next });
+    savingPins.current += 1;
+    const mine = savingPins.current;
+    api(`${BASE}v1/settings`, { pins: next }, 'PUT').catch(() => {}).finally(() => { if (savingPins.current === mine) savingPins.current = 0; });
     return next;
   });
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
@@ -108,7 +112,7 @@ export function App() {
     if (!state) return;
     const s = state.settings || {};
     setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
-    setTagPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
+    if (!savingPins.current) setTagPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
   }, [state]);
 
   // A page that finds Group by or the pins in this device's storage and none in the inbox copies them over once,

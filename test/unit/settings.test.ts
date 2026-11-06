@@ -35,6 +35,13 @@ describe('settings', () => {
     assert.deepEqual(inbox.setSettings({ pinAdd: [['repo', 'acme/api']] }).pins, [['topic', 'search'], ['repo', 'acme/api']], 'a pin already there stays once');
   });
 
+  it('refuses a pin past the limit, rather than dropping it quietly', () => {
+    const inbox = setup();
+    const full = Array.from({ length: 20 }, (_, i): [string, string] => ['topic', `t${i}`]);
+    inbox.setSettings({ pins: full });
+    assert.throws(() => inbox.setSettings({ pinAdd: [['topic', 'new']] }), /at most 20/);
+  });
+
   it('takes only a known grouping, with any tag key', () => {
     const inbox = setup();
     for (const groupBy of ['none', 'priority', 'agent', 'tag:repo']) assert.equal(inbox.setSettings({ groupBy }).groupBy, groupBy);
