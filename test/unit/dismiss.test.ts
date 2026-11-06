@@ -45,6 +45,14 @@ describe('dismiss', () => {
     assert.equal(inbox.state().answers['c1'], undefined, 'a dismiss stores no answer');
   });
 
+  it('keeps a secret card\'s field out of the record, since a dismissal does not seal it', () => {
+    const inbox = setup();
+    inbox.postCard(agent, { id: 's1', agent: 'agent-1', title: 'API key', kind: 'secret', secret: { name: 'OPENAI_API_KEY', publicKey: { kty: 'RSA', n: 'x', e: 'AQAB' } } } as never);
+    const card = inbox.dismiss(owner, 's1', { values: { secret: 'sk-live-1234' }, comment: 'Using the other key.' });
+    assert.deepEqual(card.closed?.draft?.values, {}, 'the secret value is not recorded');
+    assert.equal(card.closed?.draft?.comment, 'Using the other key.');
+  });
+
   it('leaves the delivery and read state of an earlier answer alone, and sends no event', async () => {
     const inbox = setup();
     const heard: AgentEvent[] = [];

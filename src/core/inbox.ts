@@ -1393,7 +1393,10 @@ export class Inbox {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner dismisses a card');
     const card = this.getCard(id);
     if (card.closed) throw new InboxError(409, 'this card is already closed');
-    const values = input.values && typeof input.values === 'object' && !Array.isArray(input.values) ? input.values as Record<string, unknown> : {};
+    // A secret card's field holds the secret itself, and a dismissal is not an answer to seal it, so its values stay out
+    // of the record. The comment is the person's own words about the card, so it stays.
+    const values = card.kind === 'secret' || !input.values || typeof input.values !== 'object' || Array.isArray(input.values)
+      ? {} : input.values as Record<string, unknown>;
     // Dismissing is acting on the card, so its agent replies count as seen.
     this.see(card);
     return this.closeAs(card, 'dismissed', 'Nothing was sent to the agent.', { values, comment: String(input.comment ?? '').trim(), at: this.now() });
