@@ -37,10 +37,28 @@ test('a collapsed group hides a card that arrives, raises its count, and keeps i
   // The heading keeps its place at the top of the queue.
   expect((await headings(page))[0]?.toLowerCase()).toContain('billing');
 
-  // Opening the group brings its cards back.
+  // Opening the group brings its cards back, and the keyboard reaches the same button.
   await billing.click();
   await expect(card(page, 'First billing card')).toBeVisible();
   await expect(card(page, 'Second billing card')).toBeVisible();
+  await billing.focus();
+  await page.keyboard.press('Enter');
+  await expect(billing).toHaveAttribute('aria-expanded', 'false');
+  await expect(card(page, 'First billing card')).toHaveCount(0);
+});
+
+test('the triangle turns between its two positions, and reduce motion turns the animation off', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await post('cg5-b1', 'Billing card', 'soon', 'billing');
+  await inbox.open(page);
+  await groupBy(page, 'tag:topic');
+  const billing = fold(page, 'billing');
+  const tri = billing.locator('.fold-tri');
+  expect(await tri.evaluate((el) => getComputedStyle(el).transitionDuration)).toBe('0s');
+  const open = await tri.evaluate((el) => getComputedStyle(el).transform);
+  await billing.click();
+  const shut = await tri.evaluate((el) => getComputedStyle(el).transform);
+  expect(open).not.toBe(shut);
 });
 
 test('Skip for now passes over a collapsed group, and a link still opens its card', async ({ page }) => {
