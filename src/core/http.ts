@@ -414,7 +414,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       const events: AgentEvent[] = [];
       let wake: () => void = () => {};
       const woken = new Promise<void>((r) => { wake = r; });
-      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } }, url.searchParams.get('instance') ?? undefined);
+      const channelOff = url.searchParams.get('channel') === 'off';
+      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } }, url.searchParams.get('instance') ?? undefined, { channelOff });
       let timer: ReturnType<typeof setTimeout> | undefined;
       // A client that drops its connection ends the wait at once, so the inbox lets go of its subscriber and its timer.
       const gone = req.signal.aborted ? Promise.resolve() : new Promise<void>((r) => req.signal.addEventListener('abort', () => r(), { once: true }));
@@ -431,7 +432,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'stream') {
       const agent = url.searchParams.get('agent');
       if (!agent) return json({ error: 'agent is required' }, 400);
-      return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined), heartbeatMs);
+      return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined, { channelOff: url.searchParams.get('channel') === 'off' }), heartbeatMs);
     }
     if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, 100), url.searchParams.get('answered') === '1'));
     if (method === 'GET' && a === 'unread') return json(inbox.unread(me, url.searchParams.get('agent') ?? undefined));

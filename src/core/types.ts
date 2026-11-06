@@ -355,6 +355,9 @@ export interface Presence {
   lastSeen: number;
   /** When the last connection closed. The agent goes offline after a short grace, so a reconnect or the next long-poll keeps it online. */
   leftAt?: number;
+  /** The agent's session discards channel notifications, because it started without the development-channels flag
+   * that turns them on, so an answer pushed there never reaches it. Set by a connection that knows. */
+  channelOff?: true;
 }
 
 /** What an agent stream receives for each answer. */

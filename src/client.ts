@@ -238,8 +238,10 @@ export class Client {
 
   /** Receive answers for one agent until `signal` aborts. Reconnects after a drop, over the next link when one fails.
    * `auto`, the default, uses a WebSocket and falls back to server-sent events on a link that cannot carry one.
-   * `poll` long-polls, for clients that cannot keep a connection. */
-  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto'): Promise<void> {
+   * `poll` long-polls, for clients that cannot keep a connection. `channelOff` tells the inbox that this session
+   * discards channel notifications, so the person sees why an answer does not arrive. */
+  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto', opts: { channelOff?: boolean } = {}): Promise<void> {
+    const channel = opts.channelOff ? '&channel=off' : '';
     let link = 0;
     const noSocket = new Set<string>();
     // A link that answered 410 for its event stream serves events over its socket only. Asking it again every
@@ -281,10 +283,10 @@ export class Client {
         // The event stream is a fallback for a link whose socket does not open, and only until it refuses.
         const overStream = transport === 'sse' || (transport === 'auto' && noSocket.has(url) && !noStream.has(url));
         let ran = true;
-        if (transport === 'poll') await this.overPoll(url, agent, deliver, signal);
-        else if (overStream) await this.overSse(url, agent, deliver, signal);
+        if (transport === 'poll') await this.overPoll(url, agent, deliver, signal, channel);
+        else if (overStream) await this.overSse(url, agent, deliver, signal, channel);
         else {
-          const opened = await this.overSocket(url, agent, deliver, signal);
+          const opened = await this.overSocket(url, agent, deliver, signal, channel);
           // A socket that never opened on a link that answers means the link cannot carry one. A link that does not answer is down: retry it.
           if (!opened && transport === 'auto') {
             if (!(await this.answers(url))) throw new Error('the link is down');
@@ -323,8 +325,8 @@ export class Client {
     try { return (await fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(5000) })).ok; } catch { return false; }
   }
 
-  private async overSse(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
-    const res = await fetch(`${url}/v1/stream?agent=${encodeURIComponent(agent)}&instance=${this.instance}`, {
+  private async overSse(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, channel: string): Promise<void> {
+    const res = await fetch(`${url}/v1/stream?agent=${encodeURIComponent(agent)}&instance=${this.instance}${channel}`, {
       headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
       signal,
     });
@@ -348,10 +350,10 @@ export class Client {
   }
 
   /** Resolves when the socket closes: true if it opened first, false if it never did. */
-  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<boolean> {
+  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, channel: string): Promise<boolean> {
     return new Promise((resolve) => {
       let opened = false;
-      const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}&instance=${this.instance}`);
+      const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}&instance=${this.instance}${channel}`);
       // An abort ends the stream now: a socket close waits for the far end's answer, and an idle inbox may not send
       // one for as long as the process lives, which would leave a stopped client unable to exit.
       const stop = (): void => { ws.close(); done(); };
@@ -386,9 +388,9 @@ export class Client {
     });
   }
 
-  private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
+  private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, channel: string): Promise<void> {
     while (!signal.aborted) {
-      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&instance=${this.instance}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
+      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&instance=${this.instance}${channel}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
       if (!res.ok) throw new TransportRefused('poll', res.status);
       for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }

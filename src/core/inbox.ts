@@ -1712,11 +1712,11 @@ export class Inbox {
     return this.store.get<Presence>('presence', agent)?.online ?? false;
   }
 
-  /** An agent opens its stream. `instance` names the agent process, and stays the same across its reconnects.
-   * Returns the function that closes it. */
-  /** An agent connects. `resumed` marks a connection the platform rebuilt for a socket that stayed open, such as a
-   * Durable Object waking from hibernation: the agent already got its `hello` on that socket, so it gets none again. */
-  connect(caller: Caller, agent: string, send: AgentSend, instance?: string, opts: { resumed?: boolean } = {}): () => void {
+  /** An agent connects. `instance` names the agent process, and stays the same across its reconnects. `resumed` marks a
+   * connection the platform rebuilt for a socket that stayed open, such as a Durable Object waking from hibernation:
+   * the agent already got its `hello` on that socket, so it gets none again. `channelOff` says the session discards
+   * channel notifications, and a connection that leaves it out keeps what the last one said. */
+  connect(caller: Caller, agent: string, send: AgentSend, instance?: string, opts: { resumed?: boolean; channelOff?: boolean } = {}): () => void {
     if (String(agent).length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     const k = this.key(caller.token, agent);
     let set = this.agents.get(k);
@@ -1726,7 +1726,7 @@ export class Inbox {
     this.usage.saw('agents', agent);
     if (instance) this.usage.saw('instances', instance);
     if (caller.token) this.usage.saw('tokens', caller.token);
-    this.setPresence(agent, true);
+    this.setPresence(agent, true, opts.channelOff);
     if (!opts.resumed) send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     this.flush(agent);
     if (instance) this.resend(caller.token, agent, send, instance);
@@ -1735,13 +1735,27 @@ export class Inbox {
       if (!s?.delete(send)) return;
       if (s.size === 0) this.agents.delete(k);
       const stillOpen = [...this.agents.keys()].some((x) => x.endsWith(`\n${agent}`));
-      if (!stillOpen) this.store.put<Presence>('presence', agent, { agent, online: true, lastSeen: this.now(), leftAt: this.now() });
+      if (!stillOpen) this.putPresence(agent, { online: true, lastSeen: this.now(), leftAt: this.now() });
     };
   }
 
-  private setPresence(agent: string, online: boolean): void {
-    this.store.put<Presence>('presence', agent, { agent, online, lastSeen: this.now() });
+  /** `channelOff` is undefined for a connection that says nothing about the channel, which keeps what is stored. */
+  private setPresence(agent: string, online: boolean, channelOff?: boolean): void {
+    const before = this.store.get<Presence>('presence', agent);
+    const off = channelOff ?? before?.channelOff;
+    const next: Presence = { ...before, agent, online, lastSeen: this.now() };
+    delete next.channelOff;
+    if (off) next.channelOff = true;
+    // A live connection has no closing time, and one left from an earlier close would arm the alarm for a past moment.
+    if (online) delete next.leftAt;
+    this.store.put<Presence>('presence', agent, next);
     this.emit({ type: 'presence', agent, online });
+  }
+
+  /** Write a presence change over what is stored, so the fields a change does not name stay. */
+  private putPresence(agent: string, change: Partial<Presence>): void {
+    const before = this.store.get<Presence>('presence', agent);
+    this.store.put<Presence>('presence', agent, { ...before, agent, online: false, lastSeen: this.now(), ...change });
   }
 
   /** Send a new agent process each answer an earlier process received but never read, such as one a session got before it restarted. */
@@ -1837,7 +1851,7 @@ export class Inbox {
       const open = [...this.agents.keys()].some((x) => x.endsWith(`\n${p.agent}`));
       if (p.online && p.leftAt !== undefined && now - p.leftAt >= PRESENCE_GRACE_MS && !open) {
         // The agent was last seen when its connection closed, not when the alarm noticed.
-        this.store.put<Presence>('presence', p.agent, { agent: p.agent, online: false, lastSeen: p.leftAt });
+        this.putPresence(p.agent, { online: false, lastSeen: p.leftAt });
         this.emit({ type: 'presence', agent: p.agent, online: false });
       } else if (!p.online && now - (p.leftAt ?? p.lastSeen) >= PRESENCE_KEEP_MS) {
         // The row of an agent gone this long only makes GET /v1/state bigger. A reconnect writes a fresh one.

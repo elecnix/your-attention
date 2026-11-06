@@ -23,6 +23,8 @@ interface SocketAttachment {
   instance?: string | undefined;
   token?: string;
   role?: Role;
+  /** The session discards channel notifications, so presence keeps saying so across a wake. */
+  channel?: 'off' | undefined;
   /** When the socket opened, the start of its heartbeat clock until its first ping. */
   connectedAt?: number;
 }
@@ -110,7 +112,7 @@ export class InboxObject {
       return conn;
     }
     const caller = a.token && a.role ? { token: a.token, role: a.role } : undefined;
-    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance, resumed);
+    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance, resumed, a.channel === 'off');
     this.sockets.set(ws, conn);
     return conn;
   }
@@ -205,7 +207,7 @@ export class InboxObject {
       const pair = new WebSocketPair();
       const server = pair[1];
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ agent, instance: url.searchParams.get('instance') ?? undefined, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
+      server.serializeAttachment({ agent, instance: url.searchParams.get('instance') ?? undefined, channel: url.searchParams.get('channel') === 'off' ? 'off' : undefined, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
       this.attach(server);
       await this.schedule();
       return new Response(null, { status: 101, webSocket: pair[0] });

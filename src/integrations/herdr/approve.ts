@@ -5,7 +5,8 @@ import { PANE_ID, type ApprovalSender } from '../../core/inbox.ts';
 import type { ApprovalPlace } from '../../core/types.ts';
 import type { Herdr } from './blocked.ts';
 
-const runHerdr: Herdr = (...args) => new Promise((resolve, reject) => {
+/** Run one herdr command, for the integrations that send into a pane. */
+export const runHerdr: Herdr = (...args) => new Promise((resolve, reject) => {
   execFile(process.env['HERDR_BIN_PATH'] ?? 'herdr', args, { timeout: 5000, maxBuffer: 8 << 20 }, (err, out) => (err ? reject(err) : resolve(out)));
 });
 

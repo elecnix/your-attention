@@ -145,9 +145,25 @@ describe('delivery', () => {
     inbox.connect(agentA, 's1', () => {})();
     t += 500;
     inbox.connect(agentA, 's1', () => {});
+    // Nothing else waits, so only a closing time the reconnect left behind could set a deadline, and it must not.
+    assert.equal(inbox.nextDeadline(), undefined);
     t += PRESENCE_GRACE_MS * 2;
     inbox.sweep();
     assert.equal(inbox.isOnline('s1'), true);
+  });
+
+  it('keeps Channel off on the presence across a disconnect and a reconnect', () => {
+    let t = 0;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const agentA: Caller = { token: 'ta', role: 'agent' };
+    const close = inbox.connect(agentA, 's1', () => {}, undefined, { channelOff: true });
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
+    close();
+    t += PRESENCE_GRACE_MS * 2;
+    inbox.sweep();
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
+    inbox.connect(agentA, 's1', () => {});
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
   });
 
   it('force-sends an unread answer again', async () => {
