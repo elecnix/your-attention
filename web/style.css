@@ -50,6 +50,12 @@
   .queue h3 { font-size: calc(12px * var(--text-scale)); text-transform: uppercase; letter-spacing: .06em; color: var(--ink); margin: 20px 8px 4px; }
   .queue h3.sent { border-top: 1px solid var(--line); padding-top: 12px; }
   .queue h3 { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid color-mix(in srgb, var(--muted) 60%, transparent); padding-bottom: 0; margin-bottom: 6px; }
+  /* The whole heading toggles a group, and the triangle at the left of its name turns from right to down. */
+  .queue h3 .fold { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 4px; }
+  .queue h3 .fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .queue h3 .fold-tri { font-size: calc(10px * var(--text-scale)); transform: rotate(90deg); transition: transform .18s ease; }
+  .queue h3 .fold[aria-expanded="false"] .fold-tri { transform: rotate(0deg); }
+  @media (prefers-reduced-motion: reduce) { .queue h3 .fold-tri { transition: none; } }
   .icon-btn { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
   .icon-btn:hover, .icon-btn:focus-visible { color: var(--ink); border-color: var(--line); }
   .icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -342,6 +348,7 @@
     /* iOS zooms the page into a field whose text is under 16px. */
     input, textarea, select { font-size: max(16px, 1em); }
     .queue select, .group-by select { min-height: 36px; font-size: 16px; }
+    .queue h3 .fold { min-height: 36px; }
     /* A terminal screen keeps its lines, so it scrolls sideways; smaller text and padding show more of each line. The highlighter sets both inline or as important. */
     .layout .openui-code-block-syntax-highlighter { padding: 12px !important; }
     .layout .openui-code-block-syntax-highlighter, .layout .openui-code-block-syntax-highlighter code { font-size: 11px !important; }

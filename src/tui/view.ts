@@ -1,6 +1,7 @@
 // One frame of the terminal client: the bar at the top, the card list on the left, the open card on the right, and
 // the keys at the bottom. A pane under 60 columns shows the list or the card, one at a time.
 import type { InboxState, Queue } from '../../web/queue.js';
+import { SECTION_ID } from '../../web/queue.js';
 // The list and the model hold the card summaries of GET /v1/state. The card on screen is whole, in its CardView.
 import type { CardSummary as Card } from '../core/summary.ts';
 import type { CardView } from './cardview.ts';
@@ -21,6 +22,8 @@ export interface Model {
   listScroll: number;
   cardScroll: number;
   groupBy: string;
+  /** The ids of the groups the person collapsed on this device. A collapsed group keeps its heading and hides its cards. */
+  collapsed: Set<string>;
   fresh: Set<string>;
   connected: boolean;
   /** No answer from the inbox yet. */
@@ -85,21 +88,28 @@ export function listRows(m: Model, width: number): Row[] {
   const rows: Row[] = [];
   const groupLabel = m.groupBy === 'none' ? 'nothing' : m.groupBy.startsWith('tag:') ? m.groupBy.slice(4) : m.groupBy;
   rows.push({ spans: [{ text: 'Group by ', style: st.dim }, { text: groupLabel, style: st.link }, { text: '  (g)', style: st.dim }], target: 'list:group' });
-  const section = (title: string, cards: Card[], empty: string, sent: boolean) => {
+  // A heading opens or collapses its group, and a collapsed group keeps its heading and its count while its cards hide.
+  const section = (title: string, cards: Card[], empty: string, sent: boolean, id?: string) => {
+    const shut = id !== undefined && m.collapsed.has(id);
     rows.push({ spans: [] });
-    rows.push({ spans: [{ text: cut(m, `${title}${cards.length ? ` (${cards.length})` : ''}`, width), style: st.header }] });
+    const head = `${title}${cards.length ? ` (${cards.length})` : ''}`;
+    rows.push({
+      spans: id === undefined ? [{ text: cut(m, head, width), style: st.header }] : [{ text: `${shut ? g.shut : g.open} `, style: st.accent }, { text: cut(m, head, width), style: st.header }],
+      target: id === undefined ? undefined : `list:collapse:${id}`,
+    });
     rows.push({ spans: [{ text: g.rule.repeat(width), style: st.dim }] });
+    if (shut) return;
     if (!cards.length && empty) rows.push({ spans: [{ text: `  ${empty}`, style: st.dim }] });
     for (const c of cards) rows.push(cardRow(m, c, width, sent));
   };
   const replied = q.replied;
   const waitingGroups = q.groups;
-  if (replied.length) section('Agent replied', replied, '', false);
-  if (waitingGroups.length) for (const [title, cards] of waitingGroups) section(title, cards, 'Nothing waiting', false);
+  if (replied.length) section('Agent replied', replied, '', false, SECTION_ID.replied);
+  if (waitingGroups.length) for (const [title, cards, , id] of waitingGroups) section(title, cards, 'Nothing waiting', false, id);
   else section('Waiting for you', [], 'Nothing waiting', false);
-  if (q.checking.length) section('Being checked by triage', q.checking, '', false);
-  section('Outbox: not read by the agent yet', q.outbox, 'Empty', true);
-  section('Sent, newest first', q.sent, 'Nothing sent yet', true);
+  if (q.checking.length) section('Being checked by triage', q.checking, '', false, SECTION_ID.checking);
+  section('Outbox: not read by the agent yet', q.outbox, 'Empty', true, SECTION_ID.outbox);
+  section('Sent, newest first', q.sent, 'Nothing sent yet', true, SECTION_ID.sent);
   if (q.dealt.length) {
     rows.push({ spans: [] });
     rows.push({ spans: [{ text: `Clear answered or closed: ${q.dealt.length}`, style: st.link }, { text: ' (C)', style: st.dim }], target: 'list:clear' });
@@ -229,7 +239,7 @@ export function drawFrame(m: Model): Frame {
   } else {
     const typing = m.zone === 'card' && m.view?.focused()?.text;
     const keys = m.zone === 'list'
-      ? ['↑↓ cards', 'Enter answer', 'Ctrl+N skip', 'g group', '? help']
+      ? ['↑↓ cards', 'Enter answer', 'Ctrl+N skip', 'g group', 'x fold', '? help']
       : [typing ? 'Esc list' : 'Esc list', 'Tab next', 'Ctrl+S send', 'Ctrl+N skip', '? help'];
     const text = (m.theme.caps.unicode ? keys : keys.map((k) => k.replace('↑↓', 'j/k'))).join('  ');
     grid.text(1, y, cut(m, text, W - 2), st.dim);
@@ -245,6 +255,7 @@ const HELP: [string, string][] = [
   ['↑ ↓  j k', 'open the card above or below'],
   ['Enter  →  Tab', 'move into the card to answer it'],
   ['g', 'group by priority, agent or tag'],
+  ['x', 'collapse or open the group of the open card'],
   ['C', 'clear answered and closed cards'],
   ['o', 'open the card in the browser'],
   ['In the card', ''],

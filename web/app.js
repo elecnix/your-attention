@@ -4,7 +4,7 @@ import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
 import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
-import { after, buildQueue } from './queue.js';
+import { after, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails } from './details.js';
 
 const { React, createRoot } = window.__OpenUI;
@@ -39,6 +39,14 @@ export function App() {
   // Escape clears the card pane; nothing takes the pane again until the person picks a card.
   const [cleared, setCleared] = React.useState(false);
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
+  // The groups the person muted, by the group's kind and value, kept on this device next to Group by and the pins.
+  const [collapsedGroups, setCollapsedGroups] = React.useState(() => storedCollapsedGroups());
+  const toggleGroup = (id) => setCollapsedGroups((groups) => {
+    const next = new Set(groups);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    store.set('collapsedGroups', [...next]);
+    return next;
+  });
   // The pinned tag values, oldest first, kept on this device next to Group by.
   const [tagPins, setTagPins] = React.useState(() => storedTagPins());
   const samePin = (a, b) => a[0] === b[0] && a[1] === b[1];
@@ -71,8 +79,17 @@ export function App() {
     const ids = new Set(s.cards.map((c) => c.id));
     if (knownRef.current) {
       const added = s.cards.filter((c) => !knownRef.current.has(c.id) && !c.closed);
-      if (added.length) setFresh((f) => ({ ...f, ...Object.fromEntries(added.map((c) => [c.id, true])) }));
-      added.forEach((c) => notify(c.kind === 'blocked' ? 'An agent is blocked' : 'An agent asked you something', c.title));
+      if (added.length) {
+        setFresh((f) => ({ ...f, ...Object.fromEntries(added.map((c) => [c.id, true])) }));
+        // A card that arrives in a collapsed group raises no notification, unless it is at the highest level:
+        // muting a group must never hide an urgent card.
+        const q = buildQueue(s, groupBy, tagPins, collapsedGroups);
+        const top = (s.levels || [])[0];
+        added.forEach((c) => {
+          if (q.hidden.has(c.id) && (!top || q.levelOf(c) !== top.id)) return;
+          notify(c.kind === 'blocked' ? 'An agent is blocked' : 'An agent asked you something', c.title);
+        });
+      }
       for (const c of s.cards) {
         if (c.closed && focusRef.current === c.id && !closing[c.id] && state && !state.cards.find((x) => x.id === c.id)?.closed) setClosing((x) => ({ ...x, [c.id]: true }));
       }
@@ -80,7 +97,7 @@ export function App() {
     knownRef.current = ids;
     details.keep(ids);
     setState(s);
-  }); }, [state, closing]);
+  }); }, [state, closing, groupBy, tagPins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
 
@@ -262,7 +279,7 @@ export function App() {
   if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
-  const { byId, st, levelOf, label, waiting, pending, checking, pinned: pinnedGroups, replied, outbox, sent, tagKeys, dealt, groups, order } = buildQueue(state, groupBy, tagPins);
+  const { byId, st, levelOf, label, waiting, pending, checking, pinned: pinnedGroups, replied, outbox, sent, tagKeys, dealt, groups, order, hidden } = buildQueue(state, groupBy, tagPins, collapsedGroups);
   const visible = state.cards;
   const levels = state.levels || [];
   // The tab icon gets a red dot while a card waits for you.
@@ -270,8 +287,10 @@ export function App() {
   const iconHref = pending.length ? 'favicon-waiting.svg' : 'favicon.svg';
   if (icon && icon.getAttribute('href') !== iconHref) icon.setAttribute('href', iconHref);
   const pinned = pending.find((c) => c.id === pinnedRef.current);
-  const lastVisit = pending.find((c) => c.id === lastVisitRef.current);
-  const shown = cleared ? null : byId[focus] || pinned || lastVisit || replied[0] || pending[0] || null;
+  // A card in a collapsed group stays out of sight until the person picks it, so the queue opens a group's first card only.
+  const firstInSight = (cards) => cards.find((c) => !hidden.has(c.id));
+  const lastVisit = firstInSight(pending.filter((c) => c.id === lastVisitRef.current));
+  const shown = cleared ? null : byId[focus] || pinned || lastVisit || firstInSight(replied) || firstInSight(pending) || null;
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
   details.want([shown, shown && byId[after(order, shown.id)], shown && shown.follows && byId[shown.follows]]);
   const detail = details.get(shown);
@@ -346,22 +365,33 @@ export function App() {
       h('span', { className: 't' }, c.title, fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio),
       h(Icon, { name: icon, tip, cls: `s ${s}`, color }));
   };
-  const group = (title, items, empty, cls, action, key = title) => h(React.Fragment, { key },
-    h('h3', { className: cls }, title, action),
-    // The cards you sent are done with: they read dimmer than the ones that wait for you.
-    items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty));
+  // A group heading is a button: a triangle at the left of its name opens or collapses the group, and a collapsed
+  // group keeps its heading and its count while its cards hide.
+  const group = (title, items, empty, cls, action, collapseId, key = title) => {
+    const shut = !!collapseId && collapsedGroups.has(collapseId);
+    return h(React.Fragment, { key },
+      h('h3', { className: cls },
+        collapseId
+          ? h('button', { type: 'button', className: 'fold', 'aria-expanded': !shut, onClick: () => toggleGroup(collapseId) },
+            h('span', { className: 'fold-tri', 'aria-hidden': 'true' }, '▸'),
+            h('span', { className: 'fold-name' }, title, shut && items.length > 0 && ` (${items.length})`))
+          : title,
+        action),
+      // The cards you sent are done with: they read dimmer than the ones that wait for you.
+      !shut && (items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty)));
+  };
 
   const queue = h('nav', { className: 'queue' },
     h('label', { className: 'group-by' }, 'Group by ',
       h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); store.set('groupBy', e.target.value); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         tagKeys.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
-    pinnedGroups.map(({ key, value, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), `pin:${key}\n${value}`)),
-    replied.length > 0 && group('Agent replied', replied, ''),
-    groups.length ? groups.map(([title, items, tag]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }))) : group('Waiting for you', [], 'Nothing waiting'),
-    checking.length > 0 && group('Being checked by triage', checking, ''),
-    group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent'),
-    group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length })),
+    pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
+    replied.length > 0 && group('Agent replied', replied, '', undefined, undefined, SECTION_ID.replied),
+    groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),
+    checking.length > 0 && group('Being checked by triage', checking, '', undefined, undefined, SECTION_ID.checking),
+    group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent', undefined, SECTION_ID.outbox),
+    group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length }), SECTION_ID.sent),
     dealt.length > 0 && h('button', { className: 'btn clear-dealt', onClick: () => api(`${BASE}v1/archive`, {}) },
       `Clear ${dealt.length} answered or closed card${dealt.length === 1 ? '' : 's'}`),
     h(UsageToggle, { telemetry, onChange: changeTelemetry }),
@@ -484,6 +514,12 @@ function reloadPage() {
 function storedTagPins() {
   const pins = store.get('tagPins');
   return Array.isArray(pins) ? pins.filter((p) => Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === 'string' && x)) : [];
+}
+
+// The groups this device collapsed, by the group's kind and value. Anything else in the store reads as none.
+function storedCollapsedGroups() {
+  const groups = store.get('collapsedGroups');
+  return new Set(Array.isArray(groups) ? groups.filter((x) => typeof x === 'string' && x) : []);
 }
 
 function ClearButton({ count }) {

@@ -3,11 +3,13 @@
 // opens, what Skip for now and Send answer do, and when a card counts as seen.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import { cardDetails } from '../../web/details.js';
 import { after, buildQueue, type InboxState, type Queue } from '../../web/queue.js';
 import type { CardSummary } from '../core/summary.ts';
 import type { Attachment } from '../core/types.ts';
 import { notOwnerAdvice } from '../client.ts';
+import { homeDir, writePrivate } from '../node/home.ts';
 import { ApiError, InboxApi, ownerConfig } from './api.ts';
 import { loadParser, parserReady, type Action } from './body.ts';
 import { CardView, onlineAgents, type CardViewHost } from './cardview.ts';
@@ -40,10 +42,13 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   const api = new InboxApi(config);
   const term = new Terminal(opts.io, opts.env['YOUR_ATTENTION_TUI_SIZE']);
   const remote = !!opts.env['SSH_CONNECTION'];
+  // The groups this device collapsed, kept in the home directory by inbox, as the page keeps them in its local storage.
+  const prefsFile = path.join(homeDir(), 'tui.json');
+  const collapsed = new Set<string>(readCollapsed(prefsFile, config.url));
 
   const m: Model = {
     theme, width: term.cols, height: term.rows, state: null, queue: null, current: null, view: null, zone: 'list',
-    listScroll: 0, cardScroll: 0, groupBy: 'none', fresh: new Set(), connected: false, connecting: true, blank: 'Loading the inbox…',
+    listScroll: 0, cardScroll: 0, groupBy: 'none', collapsed, fresh: new Set(), connected: false, connecting: true, blank: 'Loading the inbox…',
     help: false, cleared: false, now: Date.now(),
   };
   let focus: string | null = null;
@@ -72,6 +77,17 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     m.status = { text, kind };
     clearTimeout(statusTimer);
     statusTimer = setTimeout(() => { m.status = undefined; schedule(); }, ms);
+    schedule();
+  };
+
+  /** Collapse or open a group, and keep the choice on this device. Its cards then leave the queue order, so Skip
+   * for now and the card after an answer pass over them, as on the page. */
+  const toggleCollapse = (id: string) => {
+    if (m.collapsed.has(id)) m.collapsed.delete(id); else m.collapsed.add(id);
+    try { writeCollapsed(prefsFile, config.url, m.collapsed); } catch { /* the choice still holds for this run */ }
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, [], m.collapsed) as Queue;
+    status(m.collapsed.has(id) ? 'Group collapsed.' : 'Group opened.');
+    pick();
     schedule();
   };
 
@@ -186,7 +202,9 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const q = m.queue;
     if (!q || !m.state) { m.current = null; m.view = null; return; }
     const stillPinned = q.pending.find((c) => c.id === pinned);
-    const current = m.cleared ? null : (focus ? q.byId[focus] : undefined) ?? stillPinned ?? q.replied[0] ?? q.pending[0] ?? null;
+    // A card in a collapsed group stays out of sight until the person picks it, so the queue opens a group's first card only.
+    const inSight = (cards: CardSummary[]) => cards.find((c) => !q.hidden.has(c.id));
+    const current = m.cleared ? null : (focus ? q.byId[focus] : undefined) ?? stillPinned ?? inSight(q.replied) ?? inSight(q.pending) ?? null;
     if (focus && !q.byId[focus]) focus = null;
     pinned = current ? current.id : null;
     if (current?.id !== m.current?.id) { m.reveal = true; m.revealList = true; if (m.zone === 'card' && !current) m.zone = 'list'; }
@@ -268,7 +286,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     }
     known = new Set(s.cards.map((c) => c.id));
     m.state = s;
-    m.queue = buildQueue(s, m.groupBy) as Queue;
+    m.queue = buildQueue(s, m.groupBy, [], m.collapsed) as Queue;
     m.blank = undefined;
     m.pin = undefined;
     pinTyped = '';
@@ -311,7 +329,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   const cycleGroup = () => {
     const g = groups();
     m.groupBy = g[(g.indexOf(m.groupBy) + 1) % g.length] ?? 'none';
-    if (m.state) m.queue = buildQueue(m.state, m.groupBy) as Queue;
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, [], m.collapsed) as Queue;
     status(`Group by ${m.groupBy === 'none' ? 'nothing' : m.groupBy.replace(/^tag:/, '')}.`);
   };
   const clearDealt = () => {
@@ -438,6 +456,12 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     if (ev.name === 'q') { quit(0); return; }
     if (ev.name === '?') { m.help = true; return; }
     if (ev.name === 'g') { cycleGroup(); return; }
+    if (ev.name === 'x') {
+      const id = m.current ? m.queue?.groupOf[m.current.id] : undefined;
+      if (id) toggleCollapse(id);
+      else status('The open card is not in a group that collapses.');
+      return;
+    }
     if (ev.name === 'C') { clearDealt(); return; }
     if (ev.name === 'r') { void refresh(); status('Reloaded.'); return; }
     if (ev.name === 'o' && m.current) { open(address(m.current.id)); return; }
@@ -465,6 +489,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     }
     if (h.target === 'bar:help') { m.help = true; return; }
     if (h.target === 'list:group') { cycleGroup(); return; }
+    if (h.target.startsWith('list:collapse:')) { toggleCollapse(h.target.slice('list:collapse:'.length)); return; }
     if (h.target === 'list:clear') { clearDealt(); return; }
     if (h.target.startsWith('list:')) { m.zone = 'list'; go(h.target.slice(5)); return; }
     if (m.view) {
@@ -501,4 +526,24 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     if (!up && !m.state) void refresh();
   });
   return finished;
+}
+
+/** The ids of the groups this device collapsed for one inbox, from the file next to the pairing. */
+export function readCollapsed(file: string, url: string): string[] {
+  try {
+    const prefs = JSON.parse(fs.readFileSync(file, 'utf8')) as { collapsed?: Record<string, unknown> };
+    const list = prefs.collapsed?.[url];
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string' && x !== '') : [];
+  } catch { return []; }
+}
+
+/** Keep the collapsed group ids for one inbox, and every other inbox's. */
+export function writeCollapsed(file: string, url: string, ids: Iterable<string>): void {
+  let prefs: { collapsed?: Record<string, string[]> } = {};
+  try {
+    const read = JSON.parse(fs.readFileSync(file, 'utf8')) as typeof prefs;
+    if (read && typeof read === 'object' && !Array.isArray(read)) prefs = read;
+  } catch { /* a file cut short reads as none */ }
+  prefs.collapsed = { ...(prefs.collapsed || {}), [url]: [...ids] };
+  writePrivate(file, `${JSON.stringify(prefs, null, 2)}\n`);
 }
