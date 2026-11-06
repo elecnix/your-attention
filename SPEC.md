@@ -166,7 +166,7 @@ The answer route sends the approvals after it saves the owner's answer. For each
 2. Records `{sendingAt}` before the first send, so a second answer saved meanwhile sends that approval again only after a failure.
 3. Checks with `herdr pane get` that the pane exists.
 4. Reads the pane with `herdr pane read <pane> --lines 40 --source visible --format ansi`, and finds the input box: the last line with Claude Code's `❯` or Codex's `›`. Text in that box drawn faint, SGR 2, is a suggestion the harness shows, and the inbox types over it. Any other text is the person's draft, and the inbox doesn't send. It doesn't send to a pane with no input box either.
-5. Runs `herdr agent prompt <pane> <text>`, with `HERDR_BIN_PATH` or `herdr`.
+5. Runs `herdr agent prompt <pane> <text>`, with `HERDR_BIN_PATH` or `herdr`. An answer that starts with a dash is not typed, because herdr would read it as an option: the card says it was not seen, with that reason.
 
 The answer's `approvalResults[i]` records what happened: `{sentAt}`, `{error}`, or `{sendingAt}` while the send runs. An approval left off has `null`. The answer route replies with the answer after the sends, and the page then shows `Sent to w6P:p2 at 14:02`, or the error. A new answer to the same card version keeps each `sentAt` and `sendingAt`. The inbox then types a sentence once per version, and the page keeps its toggle on. An answer after an error sends again. A revision of the card starts over, with every toggle off. The agent token can't answer a card, so an agent never sends an approval.
 

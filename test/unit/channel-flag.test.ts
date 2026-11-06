@@ -19,6 +19,13 @@ describe('the development-channels flag of the parent', () => {
     assert.equal(devChannelEnabled(claude(['--dangerously-load-development-channels=plugin:x@y'])), false);
   });
 
+  it('stops at the prompt, so a prompt word cannot pass for the flag', () => {
+    assert.equal(devChannelEnabled(claude(['-p', 'why', '--dangerously-load-development-channels=server:your-attention'])), false);
+    assert.equal(devChannelEnabled(claude(['--print', 'explain', '--dangerously-load-development-channels', 'server:your-attention'])), false);
+    // The flag before the prompt still counts.
+    assert.equal(devChannelEnabled(claude(['--dangerously-load-development-channels=server:your-attention', '-p', 'go'])), true);
+  });
+
   it('says nothing when it cannot read a command line, so no page claims the channel is off', () => {
     assert.equal(devChannelEnabled(undefined), undefined);
   });

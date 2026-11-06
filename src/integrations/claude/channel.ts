@@ -196,6 +196,8 @@ async function fallback(receipt: string, push: Push): Promise<void> {
 /** Type the answer into this session's own pane, under the rule an approval follows: never over a draft the person
  * is typing, and never into a pane without an input box. The reason is short because a card's status is 60 characters. */
 async function typeIntoOwnPane(at: string, text: string): Promise<void> {
+  // herdr reads an argument that opens a dash as an option, and takes no `--` before the text, as an approval does.
+  if (text.startsWith('-')) throw new Error('the answer starts with a dash, so herdr would read it as an option');
   let exists = false;
   try { exists = Boolean((JSON.parse(await runHerdr('pane', 'get', at)) as { result?: { pane?: unknown } }).result?.pane); } catch { exists = false; }
   if (!exists) throw new Error(`herdr has no pane ${at}`);

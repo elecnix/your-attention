@@ -59,6 +59,8 @@ export function devChannelEnabled(argv: readonly string[] | undefined): boolean 
   if (argv === undefined) return undefined;
   for (let i = 1; i < argv.length; i++) {
     const word = argv[i] ?? '';
+    // `-p` and `--print` take the prompt, so every later word is prompt text, never a flag.
+    if (word === '-p' || word === '--print') return false;
     const value = word === FLAG ? argv[i + 1] : word.startsWith(`${FLAG}=`) ? word.slice(FLAG.length + 1) : undefined;
     if (value?.split(',').includes(OURS)) return true;
   }
