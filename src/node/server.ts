@@ -253,9 +253,14 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const serverInfo = JSON.stringify({ url, port, pid: process.pid });
   writePrivate(path.join(home, 'server.json'), serverInfo);
 
-  // The platform alarm for this build.
-  // The platform alarm for this build: presence grace and hook timeouts need about a second.
-  const alarm = setInterval(() => inbox.sweep(), 1000);
+  // The platform alarm for this build: presence grace and hook timeouts need about a second. While a purge still
+  // deletes files, the next tick starts no other, so purges never overlap, and close() waits for it.
+  let purging: Promise<unknown> | undefined;
+  const alarm = setInterval(() => {
+    inbox.sweep();
+    if (purging) return;
+    purging = inbox.purge().catch((e: unknown) => log(`purge failed: ${(e as Error).message}`)).finally(() => { purging = undefined; });
+  }, 1000);
   let ad: Advertisement | undefined;
   if (opts.mdns) ad = advertise({ port, inboxId: inbox.id() });
   let watcher: fs.FSWatcher | undefined;
@@ -290,6 +295,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
     sendUsage,
     async close() {
       clearInterval(alarm);
+      await purging;
       clearInterval(usageTimer);
       clearTimeout(firstSend);
       relay?.stop();

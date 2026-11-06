@@ -431,9 +431,18 @@ If all three hold, the sidecar sends the choice's number with `herdr agent send-
 
 ## Clearing the inbox
 
-`POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
+`POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer for 30 days, or until the inbox deletes the card to stay under its storage limit, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
 
 `POST /v1/reset {"confirm": "reset"}` removes every card, answer and attached file, and it cannot be undone. Tokens, templates, widgets, settings and guidance stay. Only the owner can reset, and `your-attention reset --yes` calls it.
+
+The inbox also deletes old cards by itself. `purge()` removes the same card, answer, search entry, files and answer images that `reset` removes for a card:
+
+- A cleared card goes 30 days after the person cleared it.
+- A card without an answer goes 30 days after its agent last revised it or replied on it. This includes an open card that still waits on the person, a `held` card the owner never released, and a closed card nobody answered.
+- An answered card that the person hasn't cleared stays.
+- An inbox built with `storageLimitBytes` deletes those cards sooner, oldest first, while it stores more than 80% of its limit.
+
+Each pass deletes at most 100 cards, oldest first, so no alarm does unbounded work. The pass deletes the records first, then waits for every file delete. A file delete that fails leaves the file: a laptop retries it on the next purge pass, and R2 deletes it 30 days after its upload. A pass reads the summaries and the first 100 `cleared` rows, then only the cards it deletes, so its time follows the cards on show, whatever the number of cleared cards. `npm run cpu-budget` measures one pass over 20 MB of cleared cards. `nextDeadline()` includes the earliest purge time, and returns the current time while more cards are due, so the alarm runs again at once. The laptop inbox runs `purge()` after `sweep()` every second, and doesn't start a purge while the last one still deletes files.
 
 ## Delivery
 
@@ -480,7 +489,7 @@ An owner watcher sees every card and every answer, and the agents' presence, as 
 
 `answers` has `{version, savedAt, deliveredAt, readAt, forcedAt}` for each answered card. The values and the comment come with the card. `GET /v1/cards/<id>` returns `{card, answer, state, rev}`, where `card` is the whole card and `rev` is its summary's. The page and the terminal client fetch it when a card opens, and fetch the card after it in queue order, and the card it follows, ahead of time. So moving to the next card draws at once. A copy whose `rev` differs from the summary's is out of date, and the client fetches it again, while it keeps the old copy on screen.
 
-The inbox writes each summary into a collection of its own, each time the card or its answer changes, and deletes it when the card is cleared. So `GET /v1/state` reads small rows of the shown cards only. An inbox stored before summaries writes them once when it starts. Both builds send summaries, so the page and the terminal client use one protocol.
+The inbox writes each summary into a collection of its own, each time the card or its answer changes, and deletes it when the card is cleared. So `GET /v1/state` reads small rows of the shown cards only. A cleared card gets a `cleared` row `{id, archivedAt}` instead, which the inbox writes when the person clears the card, so the oldest clearing comes first. An inbox stored before summaries or cleared rows writes them once when it starts. Both builds send summaries, so the page and the terminal client use one protocol.
 
 An inbox built with `shownCardLimit` shows at most that many cards. A new card past the limit answers 507 until the person clears answered or closed cards, and so does a pairing request, whose card would pass it. A revision of a shown card still goes in. The Cloudflare build sets the limit from `SHOWN_CARDS_LIMIT`, 500 in `wrangler.jsonc`, so its state fits 10 ms of CPU time. The laptop inbox has no CPU limit and shows every card. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`. On `code`, a hidden page reloads at once. A page someone looks at reloads once nothing has happened on it for 3 seconds and no field has focus, so it never takes a field away while the person types. Drafts and the scroll position come back after the reload. When the agent revises a card while the person answers it, the form stays in place with its text and focus, and shows the new version. A pick records the option's id and label, so a revision that drops or relabels the picked option drops that pick.
 
@@ -520,11 +529,11 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 
 ## The Cloudflare build
 
-`src/cloudflare/worker.ts` runs the same core on Workers. It doesn't bundle mermaid or the OpenUI parser, since the clients check diagrams and bodies, as [Checks on the client](#checks-on-the-client) describes. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. The object hibernates when idle:
+`src/cloudflare/worker.ts` runs the same core on Workers. It doesn't bundle mermaid or the OpenUI parser, since the clients check diagrams and bodies, as [Checks on the client](#checks-on-the-client) describes. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. FTS5 finds an entry fast only by its row id, so a `search_rows` table gives each card the row id of its entry, and replacing or removing a card's entry costs the same however many cards the inbox has. The object hibernates when idle:
 
 - Each agent WebSocket keeps its agent id and token in the socket attachment, so the object reconnects every socket to the inbox when it wakes, and presence stays as it was. The socket itself stayed open, so a wake doesn't send `hello` again: an agent gets `hello` once per socket it opens.
 - The object answers `{"type":"ping"}` with `{"type":"pong"}` through the runtime's auto-response, which does not wake it. So the object notices a silent socket only when its alarm wakes it. A socket closes when its last pong, or its opening when it has not ponged yet, is 5 minutes old. With one socket open, the object wakes about 300 times a day for heartbeats, and an agent whose client stops sending pings shows offline 5 minutes after its last pong.
-- The object sets its alarm for the earliest of three times: the next moment `sweep()` has work, from `nextDeadline()`, 5 minutes after the oldest last pong among the open sockets, and 10 seconds after each socket that has not signed in opened. It doesn't set an alarm for any other time.
+- The object sets its alarm for the earliest of three times: the next moment `sweep()` or `purge()` has work, from `nextDeadline()`, 5 minutes after the oldest last pong among the open sockets, and 10 seconds after each socket that has not signed in opened. It doesn't set an alarm for any other time. The alarm awaits `purge()`, so R2 has deleted a purged card's files before the alarm returns.
 
 With `MODE` set to `single`, the Worker serves one inbox, whose owner token is the `OWNER_TOKEN` secret. With `MODE` set to `hosted`, it serves many:
 

@@ -55,6 +55,13 @@ export interface CardSummary {
   rev: string;
 }
 
+/** A cleared card, by when the person cleared it, so the purge finds the cards it deletes without reading every card.
+ * The inbox writes the row when the person clears the card, so the rows come in the order the cards were cleared. */
+export interface ClearedCard {
+  id: string;
+  archivedAt: number;
+}
+
 export function summarize(card: Card, answer: Answer | undefined): CardSummary {
   const text = card.text ?? '';
   const links = [...new Set([...text.matchAll(/\[\[([\w.:-]{1,80})\]\]/g)].map((m) => m[1] as string))].slice(0, MAX_LINKS);
@@ -76,7 +83,8 @@ export function summarize(card: Card, answer: Answer | undefined): CardSummary {
 }
 
 /** Storage that keeps a summary of each card the state shows, beside the card: every write to a card or an answer rewrites
- * the summary, and a card cleared from the state has none. The inbox writes through it, so no code path forgets one. */
+ * the summary, and a card cleared from the state has a `cleared` row instead. The inbox writes through it, so no code
+ * path forgets one. */
 export class SummarizedStorage implements Storage {
   private readonly inner: Storage;
 
@@ -86,29 +94,45 @@ export class SummarizedStorage implements Storage {
   constructor(inner: Storage) {
     this.inner = inner;
     if (inner.bytes) this.bytes = () => inner.bytes?.() ?? 0;
-    // An inbox from before summaries writes them once.
-    if (!inner.get('meta', 'summaries')) {
-      for (const c of inner.list<Card>('cards')) this.sync(c.id, c);
-      inner.put('meta', 'summaries', { key: 'summaries', version: 1 });
+    // An inbox from before summaries, or before the cleared rows, writes them once.
+    if ((inner.get<{ version?: number }>('meta', 'summaries')?.version ?? 0) < 2) {
+      // Oldest cleared first, so the cleared rows come in the order the cards were cleared.
+      for (const c of inner.list<Card>('cards').sort((a, b) => (a.archivedAt ?? 0) - (b.archivedAt ?? 0))) this.sync(c.id, c);
+      inner.put('meta', 'summaries', { key: 'summaries', version: 2 });
     }
   }
 
-  private sync(id: string, card = this.inner.get<Card>('cards', id)): void {
-    if (!card || card.archivedAt) this.inner.delete('summaries', id);
-    else this.inner.put('summaries', id, summarize(card, this.inner.get<Answer>('answers', id)));
+  /** A change to a card rewrites its summary, or its cleared row once the person cleared it. */
+  private sync(id: string, card: Card | undefined): void {
+    if (card && !card.archivedAt) {
+      this.inner.put('summaries', id, summarize(card, this.inner.get<Answer>('answers', id)));
+      this.inner.delete('cleared', id);
+      return;
+    }
+    this.inner.delete('summaries', id);
+    if (card?.archivedAt) this.inner.put<ClearedCard>('cleared', id, { id, archivedAt: card.archivedAt });
+    else this.inner.delete('cleared', id);
+  }
+
+  /** A change to an answer rewrites the summary of its card when the card is on show. Other cards have no summary. */
+  private syncAnswer(id: string): void {
+    const card = this.inner.get<Card>('cards', id);
+    if (card && !card.archivedAt) this.inner.put('summaries', id, summarize(card, this.inner.get<Answer>('answers', id)));
   }
 
   get<T>(collection: Collection, id: string): T | undefined { return this.inner.get<T>(collection, id); }
   put<T>(collection: Collection, id: string, value: T): void {
     this.inner.put(collection, id, value);
     if (collection === 'cards') this.sync(id, value as Card);
-    else if (collection === 'answers') this.sync(id);
+    else if (collection === 'answers') this.syncAnswer(id);
   }
   delete(collection: Collection, id: string): void {
     this.inner.delete(collection, id);
-    if (collection === 'cards' || collection === 'answers') this.sync(id);
+    if (collection === 'cards') this.sync(id, undefined);
+    else if (collection === 'answers') this.syncAnswer(id);
   }
   list<T>(collection: Collection): T[] { return this.inner.list<T>(collection); }
+  first<T>(collection: Collection, limit: number): T[] { return this.inner.first<T>(collection, limit); }
   count(collection: Collection): number { return this.inner.count?.(collection) ?? this.inner.list(collection).length; }
   index(card: string, text: string): void { this.inner.index(card, text); }
   search(query: string, limit: number): SearchHit[] { return this.inner.search(query, limit); }

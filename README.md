@@ -209,13 +209,15 @@ An agent's recommendation shows inside the option it recommends, under a **Recom
 
 ```sh
 your-attention status           # the inbox on this machine, its files, and this machine's pairings
-your-attention clear            # clears the cards you answered or that closed; search still finds them
+your-attention clear            # clears the cards you answered or that closed; search finds them for 30 days
 your-attention reset --yes      # removes every card, answer and file; tokens and templates stay
 your-attention login-url        # prints a sign-in link that works once, within 5 minutes
 your-attention stop             # stops the inbox, or its launchd or systemd service
 ```
 
 A card can link a file on the agent's computer with a `file:` address, such as `file:///Users/me/report.html`. On the laptop inbox, a click opens the file in a new tab, when the card came from the same computer. The inbox serves only files that the card's text or recommendation contains, to the owner only, and a served HTML file can't run scripts. A cloud inbox, and a card from another computer, show the path as code.
+
+The inbox deletes a cleared card 30 days after you clear it. It also deletes a card nobody answered 30 days after its agent last changed it, even a card that still waits for you. Each deletion takes the answer and the files with the card. An answered card you haven't cleared stays.
 
 `clear`, `reset` and `stop` act on the inbox this machine runs. `login-url` and `open` sign in to that inbox, or, on a machine that runs none, to the inbox it paired with as owner, such as a cloud inbox: `your-attention pair <url> --role owner`.
 
@@ -369,7 +371,7 @@ In hosted mode, each inbox writes its daily usage counts to the `your_attention_
 The Cloudflare build sets these in `wrangler.jsonc`, so a free account stays within its quotas:
 
 - 100 MB of uploaded files over the inbox's life. Each file counts as at least 64 KB, and the count doesn't go down when a file is deleted.
-- 20 MB in the inbox's database. A full inbox takes only deletes, answers and closes until you make room.
+- 20 MB in the inbox's database. A full inbox takes only deletes, answers and closes until you make room. Past 16 MB, the inbox deletes cleared and unanswered cards before their 30 days, oldest first.
 - 2,000 file downloads a day for each client.
 - 300 requests a minute for each signed-in client address, per inbox, and 100 a minute for each address without a token.
 - R2 deletes each file 30 days after its upload. The card stays.

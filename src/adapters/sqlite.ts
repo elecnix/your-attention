@@ -16,6 +16,7 @@ export class SqliteStorage implements Storage {
         value TEXT NOT NULL,
         PRIMARY KEY (collection, id)
       );
+      CREATE INDEX IF NOT EXISTS docs_order ON docs (collection);
       CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(card UNINDEXED, text);
     `);
   }
@@ -36,6 +37,11 @@ export class SqliteStorage implements Storage {
 
   list<T>(collection: Collection): T[] {
     const rows = this.db.prepare('SELECT value FROM docs WHERE collection = ? ORDER BY rowid').all(collection) as { value: string }[];
+    return rows.map((r) => JSON.parse(r.value) as T);
+  }
+
+  first<T>(collection: Collection, limit: number): T[] {
+    const rows = this.db.prepare('SELECT value FROM docs WHERE collection = ? ORDER BY rowid LIMIT ?').all(collection, limit) as { value: string }[];
     return rows.map((r) => JSON.parse(r.value) as T);
   }
 
