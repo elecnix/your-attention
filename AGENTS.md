@@ -39,7 +39,7 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 - Storage calls are synchronous. A method on `Inbox` finishes its change before the next change starts, which is how one inbox has one writer without locks. Never put an `await` between a read and the write that depends on it.
 - Node runs the TypeScript sources directly, so write only syntax that Node can erase. Enums, namespaces and parameter properties fail at run time. Import local files with their `.ts` extension and types with `import type`.
 - Logs from the Claude Code channel go to stderr, because stdout carries the MCP protocol.
-- The herdr integration may send keys only to the pane of its own session. Never send keys to another pane.
+- The herdr integration may send keys only to the pane of its own session. Never send keys to another pane. The one exception is an approval: the laptop inbox types its sentence into the card's named pane, and only after the owner turns it on and sends the answer. The page shows that pane's agent and tab as herdr reports them, and the agent cannot supply them.
 - Each user-visible string names the thing it shows. The person may leave any answer field empty.
 
 ## Card states

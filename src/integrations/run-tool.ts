@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
 import { typeFromName } from '../core/inbox.ts';
-import type { CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
+import type { Approval, CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
 import { cardTools } from './tools.ts';
 
@@ -52,6 +52,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
           return { id: `o${i + 1}`, label, ...(description ? { description } : {}), ...(obj?.recommended === true ? { recommended: true } : {}) };
         }),
         multiple: args['multiple'] as boolean | undefined,
+        approvals: args['approvals'] as Approval[] | undefined,
         body: str(args['body']),
         html: str(args['html']),
         attachments: (args['attachments'] as { path?: string; url?: string; name?: string; alt?: string }[] | undefined)?.map(toAttachment),

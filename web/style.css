@@ -355,3 +355,16 @@
   .copy-toast { position: fixed; z-index: 30; transform: translate(-50%, calc(-100% - 6px)); padding: 2px 8px; border-radius: 6px; background: var(--ink); color: var(--panel); font-size: calc(12px * var(--text-scale)); line-height: 1.4; white-space: nowrap; pointer-events: none; }
   .copy-toast[data-tone="bad"] { background: var(--bad); }
   .copy-toast:not([data-show]) { opacity: 0; }
+  /* An approval: the sentence the inbox types into a pane, its toggle and its pane link beside it, then the pane it goes to. */
+  .approvals { margin: 0 0 12px; display: flex; flex-direction: column; gap: 12px; }
+  .approval-label { color: var(--ink); margin-bottom: 4px; }
+  .approval-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .approval-row > .code-block { flex: 1 1 260px; min-width: 0; }
+  .approval-row pre { margin: 0; padding: 10px 40px 10px 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .approval-actions { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .approval-toggle { min-width: 96px; }
+  .approval-toggle.on { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
+  .approval-toggle:disabled { opacity: 1; }
+  .approval-place, .approval-result { color: var(--muted); margin-top: 4px; }
+  .approval-result { color: var(--ok); }
+  .approval-result.failed { color: var(--bad); }

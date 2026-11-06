@@ -410,8 +410,18 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
       lines.push(`${q.question} ${v.length ? v.join(', ') : '(no option picked)'}`);
     });
   }
+  card.approvals?.forEach((a, i) => {
+    const r = answer.approvalResults?.[i];
+    // Only a recorded send reads as sent: an answer with no result entry says nothing about the pane.
+    const done = !answer.values[`approval_${i}`] ? 'not approved'
+      : r && 'sentAt' in r ? 'approved, and the inbox typed it into the pane as the person\'s message'
+      : r && 'error' in r ? `approved, but not sent: ${r.error}`
+      : 'approved, but the inbox recorded no send';
+    lines.push(`Approval ${i + 1} for pane ${a.pane}, "${a.text}": ${done}`);
+  });
   for (const [k, v] of Object.entries(answer.values)) {
     if (card.questions?.length && /^q\d+$/.test(k)) continue;
+    if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;
     // A check box or switch group answers with each item on or off, by the item names the agent gave.
     const on = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => (v as Record<string, unknown>)[x]) : undefined;
     const label = on ? on.join(', ') || '(none turned on)'

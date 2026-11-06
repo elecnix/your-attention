@@ -13,7 +13,7 @@ import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { SummarizedStorage, type AnswerSummary, type CardSummary } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import type {
-  AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  AgentEvent, Answer, Approval, ApprovalPlace, ApprovalResult, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, PersonPresence, PriorityLevel, Role, Settings, Template, Token,
 } from './types.ts';
 
@@ -29,6 +29,19 @@ export interface Caller {
   token: string;
   role: Role;
 }
+
+/** Types an approved sentence into a herdr pane as the person's message, and names a pane's agent and tab. */
+export interface ApprovalSender {
+  /** Rejects with the reason when it sends nothing, such as a draft in the pane's input box. */
+  send(pane: string, text: string): Promise<void>;
+  describe?(pane: string): Promise<ApprovalPlace>;
+}
+
+/** A herdr pane id, such as w6P:p2. It never starts with a dash, so herdr cannot read it as a flag. */
+export const PANE_ID = /^w[A-Za-z0-9]+:p[A-Za-z0-9]+$/;
+export const MAX_APPROVALS = 5;
+export const MAX_APPROVAL_CHARS = 1000;
+const MAX_APPROVAL_LABEL_CHARS = 120;
 
 export interface InboxOptions {
   keepPresence?: boolean;
@@ -51,6 +64,8 @@ export interface InboxOptions {
   shownCardLimit?: number | undefined;
   /** The inbox always counts usage and has no off switch, as on the hosted service. */
   usageAlwaysOn?: boolean;
+  /** Types approved sentences into herdr panes. Without it, as on the hosted inbox, the inbox takes no card with approvals. */
+  approvals?: ApprovalSender | undefined;
 }
 
 export const SYSTEM_AGENT = 'system';
@@ -84,6 +99,7 @@ export const DEFAULT_GUIDANCE = [
   'When a card asks several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
   'When a card is about another agent, link its session so the person can go there in one click: [label](https://herdr.invalid/v1/pane/<pane id>), from `herdr agent list`. Link another card with [[card-id]].',
   'Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click.',
+  'When an action needs the person\'s own words in a session, post the sentence as an approval on the card instead of asking the person to type it there.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
@@ -148,6 +164,7 @@ export class Inbox {
   private readonly clientChecks: boolean;
   private readonly shownCardLimit: number | undefined;
   private readonly now: () => number;
+  private readonly approvalSender: ApprovalSender | undefined;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
   private readonly pages = new Set<PageSend>();
@@ -180,6 +197,7 @@ export class Inbox {
     this.fallbackBody = opts.fallbackBody;
     this.clientChecks = opts.clientChecks === true;
     this.shownCardLimit = opts.shownCardLimit;
+    this.approvalSender = opts.approvals;
     this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
@@ -358,7 +376,7 @@ export class Inbox {
   // ---- cards ----
 
   /** `checked` holds what checkCard found for the card's diagrams. A card with a diagram it does not hold is refused. */
-  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams): Card {
+  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams, places?: (Approval['place'] | undefined)[]): Card {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
     const title = String(input.title ?? '').trim();
     if (!title) throw new InboxError(400, 'title is required');
@@ -383,10 +401,14 @@ export class Inbox {
       if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(String(s.name ?? ''))) throw new InboxError(400, 'secret.name must be a variable name, such as API_KEY');
       if (s.publicKey.kty !== 'RSA') throw new InboxError(400, 'secret.publicKey must be an RSA-OAEP key');
     }
-
     const now = this.now();
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
+    // A revision keeps what herdr answered about a pane it does not change, since only herdr sets a place.
+    const approvals = this.cleanApprovals(input.approvals, kind, places)?.map((a, i) => {
+      const kept = a.place ?? (before?.approvals?.[i]?.pane === a.pane ? before.approvals[i].place : undefined);
+      return kept ? { ...a, place: kept } : a;
+    });
     const { body, template, expanded } = this.cardBody(input);
     // The page drops what it cannot read of a body without a word, so the agent hears it here.
     const bodyProblems = body === undefined || !this.checkBody || this.clientChecks ? [] : this.checkBody(String(body));
@@ -432,6 +454,7 @@ export class Inbox {
       options: input.options,
       multiple: input.multiple,
       questions: input.questions,
+      approvals,
       screen: input.screen,
       secret: kind === 'secret' ? { name: String(input.secret?.name), publicKey: (input.secret?.publicKey ?? {}) as JsonWebKey } : undefined,
       html: input.html,
@@ -690,9 +713,13 @@ export class Inbox {
    * then the card commits in one synchronous step, and the files it replaced are deleted. */
   async postCardWithFiles(caller: Caller, input: NewCard): Promise<Card> {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
+    // Only herdr names a pane's agent and tab: a place the agent sent is dropped.
+    // Only herdr names a pane's agent and tab: the places go around postCard, so an agent cannot supply one.
+    const approvals = this.cleanApprovals(input.approvals, input.kind ?? 'ask');
+    const places = approvals ? await this.describePanes(approvals) : undefined;
     const checked = await this.checkCard(input);
     const files = input.attachments;
-    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input, undefined, checked);
+    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input, undefined, checked, places);
     if (files.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
     const id = input.id ? String(input.id) : randomId(8);
     // Check the id before it goes into a blob key.
@@ -733,7 +760,7 @@ export class Inbox {
     try {
       // Read the card again right before the commit, with no await between: another update may have landed meanwhile.
       prior = this.store.get<Card>('cards', id);
-      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')), checked);
+      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')), checked, places);
     } catch (e) {
       await refund();
       throw e;
@@ -1158,6 +1185,9 @@ export class Inbox {
     };
     const responses = (card.responses ?? []).map((r) => respond(r.template, values, r.values)).filter(Boolean);
     if (responses.length) answer.responses = responses;
+    // An approval sent for this version of the card stays sent, so a second answer never types it again.
+    const kept = before && before.version === answer.version ? (before.approvalResults ?? []).map((r) => (r && !('error' in r) ? r : null)) : [];
+    if (kept.some(Boolean)) answer.approvalResults = kept;
     for (const p of answer.previous) delete (p as Partial<Answer>).previous;
     this.store.put('answers', id, answer);
     this.store.index(id, `${searchText(card)}\n${answer.comment}`);
@@ -1169,6 +1199,83 @@ export class Inbox {
     else this.flush(card.agent);
     if (card.kind !== 'system' && card.kind !== 'secret') this.observeAnswer(card, this.store.get<Answer>('answers', id) ?? answer);
     return this.store.get<Answer>('answers', id) ?? answer;
+  }
+
+  /** Type each approval the owner turned on in the card's answer into its pane, once per card version, and record what
+   * happened on the answer. Only an owner's answer sends: an agent's call returns the answer unchanged. */
+  async sendApprovals(caller: Caller, id: string): Promise<Answer | undefined> {
+    const answer = this.store.get<Answer>('answers', id);
+    const sender = this.approvalSender;
+    const card = this.store.get<Card>('cards', id);
+    if (!sender || caller.role !== 'owner' || !answer || !card?.approvals?.length) return answer;
+    const approvals = card.approvals;
+    const results: ApprovalResult[] = approvals.map((_, i) => answer.approvalResults?.[i] ?? null);
+    const claimed: number[] = [];
+    approvals.forEach((_, i) => {
+      const r = results[i];
+      if (answer.values[`approval_${i}`] !== true || (r && !('error' in r))) return;
+      // The person read other sentences on the version they answered, so the inbox sends none of the new ones.
+      if (answer.version !== card.version) { results[i] = { error: 'the card changed after you answered it: answer it again to send this' }; return; }
+      results[i] = { sendingAt: this.now() };
+      claimed.push(i);
+    });
+    if (!results.some(Boolean)) return answer;
+    // The claim is written before the first await, so an answer saved meanwhile carries it and never sends again.
+    this.store.put('answers', id, { ...answer, approvalResults: results });
+    this.emit({ type: 'change', card: id });
+    for (const i of claimed) {
+      const a = approvals[i]!;
+      let result: ApprovalResult;
+      try {
+        await sender.send(a.pane, a.text);
+        result = { sentAt: this.now() };
+      } catch (e) {
+        result = { error: e instanceof Error ? e.message : String(e) };
+      }
+      this.recordApproval(id, answer.version, i, result);
+    }
+    return this.store.get<Answer>('answers', id);
+  }
+
+  /** Replace the claim on one approval with what the send did, on whichever answer to that card version is current. */
+  private recordApproval(id: string, version: number, i: number, result: ApprovalResult): void {
+    const answer = this.store.get<Answer>('answers', id);
+    const claim = answer?.approvalResults?.[i];
+    if (!answer || answer.version !== version || !claim || !('sendingAt' in claim)) return;
+    const results = [...(answer.approvalResults ?? [])];
+    results[i] = result;
+    this.store.put('answers', id, { ...answer, approvalResults: results });
+    this.emit({ type: 'change', card: id });
+  }
+
+  /** What herdr says about each approval's pane, one entry per approval, empty when herdr does not know the pane. */
+  private async describePanes(approvals: Approval[]): Promise<(Approval['place'] | undefined)[]> {
+    const describe = this.approvalSender?.describe?.bind(this.approvalSender);
+    if (!describe) return approvals.map(() => undefined);
+    return Promise.all(approvals.map((a) => describe(a.pane).catch(() => undefined)));
+  }
+
+  /** A card's approvals, checked. A place comes only from `places`, which herdr answered, so an agent cannot set one. */
+  private cleanApprovals(input: unknown, kind: string, places?: (Approval['place'] | undefined)[]): Approval[] | undefined {
+    if (input === undefined || input === null) return undefined;
+    if (!this.approvalSender) throw new InboxError(400, 'this inbox does not send approvals: only an inbox on the computer that runs herdr types into a pane');
+    if (kind !== 'ask') throw new InboxError(400, 'only an ask card takes approvals');
+    if (!Array.isArray(input)) throw new InboxError(400, 'approvals must be a list of {pane, text, label}');
+    if (input.length > MAX_APPROVALS) throw new InboxError(400, `a card takes at most ${MAX_APPROVALS} approvals`);
+    if (!input.length) return undefined;
+    return input.map((a: unknown, i): Approval => {
+      const at = `approval ${i + 1}`;
+      if (!a || typeof a !== 'object') throw new InboxError(400, `${at}: must be an object with pane and text`);
+      const { pane, text, label } = a as Record<string, unknown>;
+      if (typeof pane !== 'string' || !PANE_ID.test(pane)) throw new InboxError(400, `${at}: pane must be a herdr pane id, such as w6P:p2`);
+      if (typeof text !== 'string' || !text.trim()) throw new InboxError(400, `${at}: text must be the message to send`);
+      if (text.length > MAX_APPROVAL_CHARS) throw new InboxError(400, `${at}: text must be at most 1,000 characters`);
+      // herdr reads an argument that starts with a dash as an option, and takes no -- before the text.
+      if (text.startsWith('-')) throw new InboxError(400, `${at}: text must not start with a dash`);
+      if (label !== undefined && (typeof label !== 'string' || label.length > MAX_APPROVAL_LABEL_CHARS)) throw new InboxError(400, `${at}: label must be at most ${MAX_APPROVAL_LABEL_CHARS} characters`);
+      const kept = cleanPlace(places?.[i]);
+      return { pane, text, ...(label ? { label } : {}), ...(kept ? { place: kept } : {}) };
+    });
   }
 
   /** Delete files a caller wrote and give their bytes back to the lifetime upload limit, for a write that cannot stand. */
@@ -1616,6 +1723,17 @@ function cleanOrigin(origin: unknown): Origin | undefined {
   for (const k of ORIGIN_FIELDS) {
     const v = (origin as Record<string, unknown>)[k];
     if (v !== undefined && v !== null && v !== '') out[k] = String(v).slice(0, 200);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** What herdr said about a pane, as short strings, or undefined when it said nothing. */
+function cleanPlace(place: unknown): ApprovalPlace | undefined {
+  if (!place || typeof place !== 'object') return undefined;
+  const out: ApprovalPlace = {};
+  for (const k of ['agent', 'title', 'tab', 'workspace'] as const) {
+    const v = (place as Record<string, unknown>)[k];
+    if (typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, 120);
   }
   return Object.keys(out).length ? out : undefined;
 }

@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue } from './queue.js';
 import { cardDetails } from './details.js';
 
@@ -11,6 +11,9 @@ const { React, createRoot } = window.__OpenUI;
 
 export function App() {
   const [state, setState] = React.useState(null);
+  // The approvals the person turned on, by card version: a revision may change the sentences, so it starts with all off.
+  // They live in the device store, so an idle reload of the page for new code keeps them, as it keeps a comment draft.
+  const [approvalPicks, setApprovalPicks] = React.useState(() => { try { return JSON.parse(store.get('approvalPicks') || '{}'); } catch { return {}; } });
   // GET /v1/state sends card summaries. The whole card on screen, and the one after it, come from GET /v1/cards/<id>.
   const [, setLoaded] = React.useState(0);
   const detailsRef = React.useRef(null);
@@ -302,12 +305,18 @@ export function App() {
     }, 700);
   };
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
+  const picksOf = (c) => approvalPicks[`${c.id}:${c.version}`] || {};
+  const toggleApproval = (c, i, on) => setApprovalPicks((all) => {
+    const next = { ...all, [`${c.id}:${c.version}`]: { ...(all[`${c.id}:${c.version}`] || {}), [i]: on } };
+    store.set('approvalPicks', JSON.stringify(next));
+    return next;
+  });
 
   async function onAction(c, ev) {
     if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return skip();
     if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
     const { values: picked, comment } = formValues(ev.formState);
-    const values = answerValues(c, picked);
+    const values = { ...answerValues(c, picked), ...approvalValues(c, picksOf(c)) };
     const images = pastedImages.payload(c.id);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
     clearPasted(c.id);
@@ -396,10 +405,11 @@ export function App() {
       current.recommendation && !recommendedOptions(current).inside && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), recommendationText(current.recommendation)),
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
+      current.approvals && current.approvals.length > 0 && h(Approvals, { card: current, answer: a, picks: picksOf(current), onToggle: (i, on) => toggleApproval(current, i, on) }),
       current.broadcast && !current.closed
         ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip })
         : current.html !== undefined
-        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); } })
+        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); } })
         : current.kind === 'secret'
         ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id) })
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),

@@ -491,15 +491,18 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           tickets.set(ticket, { card: b, path, expiresAt: now + FILE_TICKET_MS });
           return json({ ticket, expiresAt: now + FILE_TICKET_MS }, 201);
         }
-        case 'answer':
+        case 'answer': {
           owner();
-          return json(await inbox.answer(b, {
+          const saved = await inbox.answer(b, {
             images: body['images'] as Parameters<Inbox['answer']>[1]['images'],
             values: body['values'] as Record<string, unknown> | undefined,
             comment: body['comment'] as string | undefined,
             delivery: body['delivery'] as Delivery | undefined,
             version: body['version'] as number | undefined,
-          }));
+          });
+          // The owner's answer types each approval it turned on into its pane, and the reply says how each went.
+          return json((await inbox.sendApprovals(me, b)) ?? saved);
+        }
         case 'close':
           return json(publicCard(inbox.close(me, b, body['kind'] as CloseKind, String(body['outcome'] ?? ''), body['ifUnanswered'] === true)));
         case 'reply':

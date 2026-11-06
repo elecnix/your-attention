@@ -111,6 +111,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `title`, `text`, `recommendation` | The question, its context, and what the agent would do. |
 | `options`, `multiple` | Answer options as `{id, label, description, recommended}`. The page shows each option as a box the person clicks, with its description inside, as inline Markdown. The person picks with the `choice` field. An agent marks its recommended option with `recommended: true`. A card without `multiple` takes one at most, and the inbox answers 400 to a second one. The `card_post` tool takes each option as `{label, description, recommended}` or as a plain label. |
 | `questions` | Claude Code `AskUserQuestion` questions. Field `q0` answers the first one. |
+| `approvals` | Up to 5 sentences, each `{pane, text, label}`, that the inbox types into a herdr pane as the person's own message once the person approves it. Field `approval_0` answers the first one. See [Approvals](#approvals). |
 | `body` | OpenUI Lang source for a card that brings its own widgets. A body with its own `Form` statements keeps each form where the agent placed it, between text and tables, and the page ignores `options` and `questions`. The page adds a comment box, **Send answer** and **Skip for now** below the body. When the body has a field of its own named `comment`, the answer joins its text and the comment box text, the body's first. One send carries the values of every form, by field name. **Your answer** shows each field's label and the labels of the choices picked. |
 | `html` | The agent's own HTML and scripts. The page shows it in a frame with `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"`. After the card's own CSS, the page adds the inbox's text styles: its font, weights, spacing, text size and background, the body text color with bright headings and bold words, and monospace for code. The card keeps its layout, and every HTML card reads like the rest of the inbox. The frame reports its content height, and the page sizes the frame to fit, up to 20,000 pixels, so the page is the only scroll. A link in the frame opens in a new tab, outside the sandbox and with no reference back to the inbox page. The card's warning says so, because a script in the card picks that address. `allowHtml` is off by default. Then the card offers **Show this card**, for this card only, and **Always show HTML cards**, which turns the setting on. A card in a frame offers to turn the setting off. The page adds a comment box, **Send answer** and **Skip for now** below the frame. **Send answer** asks the frame for every named `input`, `select` and `textarea`. Each radio group gives the picked value, and check boxes give the list of checked values. **Send answer** leaves empty fields out. A script in the frame can also send the answer with `yourAttention.answer(values, comment)`, and the comment box text joins that comment. |
 | `attachments` | Up to 10 files, each `{src, name, alt}`. `src` is an https URL or a base64 `data:` URL of at most 8 MB. |
@@ -143,6 +144,30 @@ A new answer replaces the old one and keeps it in `previous`.
 In the page, an image goes into the general comment box, a question's comment field or any text field of the card on screen by Command+V or by a drop from a window, and a thumbnail shows under that field. A × button removes it before the person sends, and a click on the thumbnail opens the full image in a new tab. An answered card shows its images the same way, as thumbnails that open the stored image. Text on the clipboard still pastes as text. The page refuses a pasted or dropped file that isn't one of the four image types, or that is over 8 MB, and says why under the field. It also refuses images that would take the answer past 10 MB in total. **Send answer** sends the images with the answer and clears them. A secret card's fields don't take images.
 
 An integration saves each image of an answer into `~/.your-attention/images/<agent>/<card>/`, readable by this user only (mode 0600 in a 0700 folder), and the event gives the file's path: `Image pasted in comment: <path>`, or `Image: <path>` when the image has no field. Claude Code, pi and OpenCode all do so before they tell the model.
+
+## Approvals
+
+Some actions need the person's own words in an agent's session, such as lifting a denial from Claude Code's auto-mode check. An agent puts that sentence on its card as an approval, and the person approves it on the card instead of typing it in the pane.
+
+Each approval is `{pane, text, label}`:
+
+- `pane` is a herdr pane id, `w` and letters or digits, a colon, then `p` and letters or digits, such as `w6P:p2`.
+- `text` is the exact message, from 1 to 1,000 characters. It may not start with a dash, because herdr would read it as an option.
+- `label` is optional, at most 120 characters, and says what the approval allows.
+
+The inbox answers 400 for more than 5 approvals, a malformed pane id, a text that breaks these rules, or approvals on a card that is not `ask`. Only the laptop inbox sends approvals, because it runs on the computer that runs herdr. The hosted inbox answers 400 to any card with approvals. When the laptop inbox takes the card, it asks herdr about each pane and stores `place: {agent, title, tab, workspace}` on the approval. The inbox sets `place` itself and drops one an agent sends.
+
+The page shows each `text` in a code block, with a toggle beside it that reads **Approve** when off and **Approved** when on. Each toggle starts off. An **Open pane** link beside the toggle goes to `https://herdr.invalid/v1/pane/<pane>`, and a line below it gives the pane id, plus its agent and tab when herdr knew them. Approvals work beside options, questions, a body or an HTML frame. The answer gives `approval_<i>` for each one, `true` or `false`.
+
+The answer route sends the approvals after it saves the owner's answer. For each `approval_<i>` that is `true`, the inbox:
+
+1. Checks that the answer is for the card's current version. When it isn't, the person read other sentences, so the inbox records an error and doesn't send.
+2. Records `{sendingAt}` before the first send, so a second answer saved meanwhile sends that approval again only after a failure.
+3. Checks with `herdr pane get` that the pane exists.
+4. Reads the pane with `herdr pane read <pane> --lines 40 --source visible --format ansi`, and finds the input box: the last line with Claude Code's `❯` or Codex's `›`. Text in that box drawn faint, SGR 2, is a suggestion the harness shows, and the inbox types over it. Any other text is the person's draft, and the inbox doesn't send. It doesn't send to a pane with no input box either.
+5. Runs `herdr agent prompt <pane> <text>`, with `HERDR_BIN_PATH` or `herdr`.
+
+The answer's `approvalResults[i]` records what happened: `{sentAt}`, `{error}`, or `{sendingAt}` while the send runs. An approval left off has `null`. The answer route replies with the answer after the sends, and the page then shows `Sent to w6P:p2 at 14:02`, or the error. A new answer to the same card version keeps each `sentAt` and `sendingAt`. The inbox then types a sentence once per version, and the page keeps its toggle on. An answer after an error sends again. A revision of the card starts over, with every toggle off. The agent token can't answer a card, so an agent never sends an approval.
 
 ## Secret cards
 

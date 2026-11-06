@@ -66,6 +66,28 @@ export interface SecretRequest {
   publicKey: JsonWebKey;
 }
 
+/** A sentence the inbox types into a herdr pane as the person's own message, once the person approves it on the card. */
+export interface Approval {
+  /** A herdr pane id, such as w6P:p2. */
+  pane: string;
+  /** The exact message to send. */
+  text: string;
+  label?: string;
+  /** Set by the inbox from herdr when the card is posted, never by the agent. */
+  place?: ApprovalPlace;
+}
+
+/** What herdr says about a pane: its agent, the session title, and the tab and workspace labels. */
+export interface ApprovalPlace {
+  agent?: string;
+  title?: string;
+  tab?: string;
+  workspace?: string;
+}
+
+/** What became of one approval: sent, refused with the reason, or on its way. null for an approval the person left off. */
+export type ApprovalResult = { sentAt: number } | { error: string } | { sendingAt: number } | null;
+
 /** An earlier version of a card, kept when the agent revises it. */
 export interface CardVersion {
   version: number;
@@ -170,6 +192,8 @@ export interface Card {
   options?: Option[];
   multiple?: boolean;
   questions?: AskQuestion[];
+  /** Sentences the inbox types into herdr panes when the person approves them. The answer carries approval_<i>. */
+  approvals?: Approval[];
   /** The terminal screen of a blocked agent. */
   screen?: string;
   secret?: SecretRequest;
@@ -229,6 +253,8 @@ export interface Answer {
   comment: string;
   /** Images the person pasted into the answer. The bytes are at GET /v1/attachments/<id>. */
   images?: Attachment[];
+  /** For each of the card's approvals, by index, what the inbox did with it. */
+  approvalResults?: ApprovalResult[];
   /** The card's widget responses, filled from this answer. */
   responses?: string[];
   delivery: Delivery;
@@ -317,6 +343,7 @@ export interface NewCard {
   options?: Option[];
   multiple?: boolean;
   questions?: AskQuestion[];
+  approvals?: Approval[];
   screen?: string;
   secret?: SecretRequest;
   html?: string;
