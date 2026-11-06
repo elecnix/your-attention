@@ -82,8 +82,10 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         origin: await origin(),
       };
       const posted = await inbox.post(card);
-      if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. Warning: ${posted.warning}`;
-      return `Posted card ${posted.id}. The answer arrives ${ctx.arrival}; keep working meanwhile.`;
+      const inherited = posted.inheritedTags ?? [];
+      const tags = inherited.length ? `It took the default tags ${inherited.join(', ')}.` : 'It took no default tags.';
+      if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. ${tags} Warning: ${posted.warning}`;
+      return `Posted card ${posted.id}. ${tags} The answer arrives ${ctx.arrival}; keep working meanwhile.`;
     }
     case 'card_patch': {
       const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']));
@@ -109,6 +111,19 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       // The tags other cards set go last, one line per key, so the agent reuses a value instead of inventing one.
       const tags = (g.tags ?? []).map((t) => `\`${t.key}\` = ${t.values.map((v) => `${v.value} (${v.count})`).join(', ')}.`);
       return `Card guidance, version ${g.version}:\n${g.text}${g.widgets ? `\n\n${g.widgets}` : ''}${tags.length ? `\n\nTags in use:\n${tags.join('\n')}` : ''}`;
+    }
+    case 'card_tags': {
+      // A call that sends nothing reads the defaults back, which is what an agent does after a compaction.
+      const tags = args['tags'] === undefined ? undefined : (args['tags'] as Record<string, string>);
+      const remove = Array.isArray(args['remove']) ? (args['remove'] as unknown[]).map(String) : undefined;
+      const clear = args['clear'] === true;
+      const held = tags !== undefined || remove !== undefined || clear
+        ? await inbox.setDefaultTags(agent, { ...(tags === undefined ? {} : { tags }), ...(remove === undefined ? {} : { remove }), ...(clear ? { clear } : {}) })
+        : await inbox.defaultTags(agent);
+      const lines = Object.entries(held.tags).map(([k, t]) => `- ${k}: ${t.value} (from ${t.from})`);
+      return lines.length
+        ? `The default tags of this session, which every card it posts inherits under its own tags:\n${lines.join('\n')}`
+        : 'This session has no default tags. Set them with card_tags, for example {"tags": {"repo": "acme/api", "topic": "billing"}}, and every card it posts inherits them under its own tags.';
     }
     case 'card_ask_secret': {
       const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await origin() });

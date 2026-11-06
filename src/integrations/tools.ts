@@ -89,6 +89,18 @@ export const cardTools: CardTool[] = [
     schema: { type: 'object', properties: { card_id: { type: 'string' }, status: { type: 'string' } }, required: ['card_id', 'status'] },
   },
   {
+    name: 'card_tags',
+    description: 'Set the default tags that every card this session posts inherits: repo, topic, or any other grouping key. The tool returns every default it holds, with what set it, so after a compaction this call shows the setting again. The inbox merges the defaults under the card\'s own tags when the session posts: a key on the card wins, and a key the card passes with an empty string drops that default for that card alone. The defaults stay in the inbox for this agent id, so a restart keeps them.',
+    schema: {
+      type: 'object',
+      properties: {
+        tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Tag keys and values to merge into the defaults, such as {repo: "acme/api", topic: "billing"}. At most 10 keys, and each key and value at most 100 characters.' },
+        remove: { type: 'array', items: { type: 'string' }, description: 'Tag keys to drop from the defaults.' },
+        clear: { type: 'boolean', description: 'true drops every default tag this session holds. The inbox clears first, then merges tags, then drops remove.' },
+      },
+    },
+  },
+  {
     name: 'card_template_save',
     description: 'Save a card format that works as a template, in OpenUI Lang with {{name}} placeholders. Saving the same name again makes a new version; give the feedback the new version answers.',
     schema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string' }, feedback: { type: 'string' } }, required: ['name', 'source'] },

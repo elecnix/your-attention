@@ -4,15 +4,13 @@
 // only those of the cards it shows. A hosted request gets 10 ms of CPU time, too little to read every whole card.
 import { randomId } from './crypto.ts';
 import type { Collection, SearchHit, Storage } from './storage.ts';
-import type { Answer, Card } from './types.ts';
+import { MAX_TAG_CHARS, MAX_TAGS, type Answer, type Card } from './types.ts';
 
 /** The most cards the hosted inbox's state shows, so its request fits 10 ms of CPU time. wrangler.jsonc sets it in SHOWN_CARDS_LIMIT. */
 export const HOSTED_SHOWN_CARDS = 500;
 /** How much of the text a link to a card previews on hover. */
 const PREVIEW_CHARS = 300;
 const MAX_LINKS = 20;
-const MAX_TAGS = 10;
-const MAX_TAG_CHARS = 100;
 
 /** A tag key or value as the inbox keeps it: one line, trimmed, and at most MAX_TAG_CHARS. A line break an agent wrote
  * into a value would forge a line in another agent's card_guidance, which prints the tags in use, so each run of

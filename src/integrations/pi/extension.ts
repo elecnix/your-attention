@@ -9,6 +9,7 @@ import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
+import { parseTagsFlag } from '../tags.ts';
 import { cardTools } from '../tools.ts';
 
 // stdout belongs to pi, so a stream that stops for good says why on stderr instead of vanishing.
@@ -57,6 +58,17 @@ export default function yourAttention(pi: PiApi): void {
     stop?.abort();
     stop = new AbortController();
     const client = inbox;
+    // The launcher's --tags value gives every card this session posts its default tags. The inbox keeps them, so a
+    // compaction or a restart leaves them in place.
+    const launched = process.env['YOUR_ATTENTION_TAGS'];
+    if (launched) {
+      try {
+        const tags = parseTagsFlag(launched);
+        if (tags) client.setDefaultTags(agent, { tags, from: 'YOUR_ATTENTION_TAGS' }).catch((e: Error) => log('could not set the default tags:', e.message));
+      } catch (e) {
+        log('ignoring YOUR_ATTENTION_TAGS:', (e as Error).message);
+      }
+    }
     void client.stream(agent, async (ev) => {
       if (ev.type === 'guidance' || ev.type === 'returned') {
         const note = ev.type === 'guidance'
