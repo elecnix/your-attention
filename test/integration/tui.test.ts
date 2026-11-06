@@ -266,9 +266,10 @@ describe('your-attention tui', () => {
   });
 
   it('reads Group by and the pins from the inbox, shows a pinned group at the top, and saves both back', async () => {
+    // The search card goes first, so an unpinned queue would show its group first: only the pin moves billing above it.
+    await post({ id: 'pin-c', agent: 's-pin', title: 'Search index', priority: 'now', tags: { topic: 'search' } });
     await post({ id: 'pin-a', agent: 's-pin', title: 'Invoice fix', priority: 'now', tags: { topic: 'billing' } });
     await post({ id: 'pin-b', agent: 's-pin', title: 'Refund charge', priority: 'soon', tags: { topic: 'billing' } });
-    await post({ id: 'pin-c', agent: 's-pin', title: 'Search index', priority: 'now', tags: { topic: 'search' } });
     // The settings a page saved: this client groups the same way, and shows the pinned value first.
     h.server.inbox.setSettings({ groupBy: 'tag:topic', pins: [['topic', 'billing']] });
     const t = tui();
