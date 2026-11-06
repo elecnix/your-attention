@@ -123,7 +123,7 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `priority` | The id of a priority level: `now`, `soon` (the default) or `later` unless the levels changed. |
 | `origin` | Where the session runs: `harness`, `session`, `name`, `host`, `cwd`, `herdrPane`, and the labels of the herdr workspace and tab, `herdrWorkspace` and `herdrTab`. The integration fills it in when the agent posts, and the inbox keeps each field to 200 characters. |
 | `from` | A label the agent picks for itself, such as `the release agent`, at most 80 characters. It changes nothing about access: only the token that posted a card can change that card. |
-| `tags` | String properties for grouping. |
+| `tags` | String properties for grouping. The card header shows each one as `key: value`, and the person can pin a value to the top of the queue. |
 | `follows` | The card this one follows up on. The inbox sets `followedBy` on that card. |
 | `deliver` | `stream` (the default) or `none` for a card that only shows state. |
 
@@ -234,6 +234,8 @@ A new tab signs in with the cookie and doesn't send an unlock header, so whether
 The hosted inbox has no file system, so the route answers 404 there.
 
 In any field of the card on screen, Command+Enter or Control+Enter sends the answer, as the card's Send answer button does. Enter and Shift+Enter add a line. In the queue, a card that waits for you shows a raised hand, and the card on screen shows it filled. **Skip for now** opens the next card in queue order, and wraps around at the end. Sending an answer also opens the card after the answered one, and a skipped card opens again only after the queue wraps around.
+
+Pinning a tag value, such as `topic: billing`, moves its cards to the top of the queue. The card header shows each tag after the meta row, with a pin right after its value. When the queue is grouped by a tag key, the heading of each value's group has a pin after its name too. An unpinned value's pin is dim, and a pinned value's pin is bright. Its tooltip reads **Pin topic: billing to the top** or **Unpin topic: billing**. Each pinned value gets its own group at the top of the queue, above **Agent replied**, oldest pin first, under every **Group by** choice. A card that matches a pin shows in that group only, and a card that matches two pins goes to the oldest pin's group. A pinned group with no waiting card keeps its heading, with **Nothing waiting**, so the person can still remove the pin. **Skip for now** and the card after an answer follow the queue as drawn, so pinned cards come first. The outbox and sent sections stay as they are. The page keeps the pins in this browser's local storage, next to **Group by**, so each device has its own.
 
 The card on screen shows its age at the top right, such as `15 min ago` or `4 h 30 min ago`. Under an hour, the age rounds to 5 minutes. Under a day, it rounds to 10 minutes, and after that to the hour. The page updates the age each minute by the browser's clock. Its tooltip gives the exact sending time and the time of the last revision.
 

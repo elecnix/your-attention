@@ -81,6 +81,15 @@
   .card-text :is(strong, b, h1, h2, h3, h4, h5, h6), .file .markdown :is(strong, b, h1, h2, h3, h4, h5, h6),
   .focus-card :is(.openui-header-top-left, .openui-label, .openui-callout-title) { color: var(--ink); }
   .meta .age { margin-left: auto; white-space: nowrap; }
+  /* A card's tags, under the meta row. The pin sits right after each label: dim until the value is pinned. */
+  .tags { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 8px; font-size: calc(13px * var(--text-scale)); color: var(--body-text); }
+  .tags .tag { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 0 2px 0 8px; }
+  .tag-pin { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); opacity: .45; cursor: pointer; }
+  .tag-pin.on { color: var(--ink); opacity: 1; }
+  .tag-pin:hover, .tag-pin:focus-visible { opacity: 1; border-color: var(--line); }
+  .tag-pin svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tag-pin.on svg { fill: currentColor; }
+  .queue h3 .tag-pin { margin: -4px 0; }
   .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .prio { font-weight: 700; white-space: nowrap; padding: 2px 8px; border-radius: 6px; font-size: calc(12px * var(--text-scale)); }
   .prio.now { color: var(--bad); background: var(--bad-bg); }
