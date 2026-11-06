@@ -232,11 +232,14 @@ export function mergeDefaultTags(defaults: Record<string, string>, own: Record<s
     inherited.push(k);
   }
   for (const [k, value] of Object.entries(own ?? {})) {
-    if (k in defaults || value === '') continue;
+    // `in` would see `constructor` and `toString` on any object, so a tag by those names would be dropped.
+    if (Object.hasOwn(defaults, k) || value === '') continue;
     tags[k] = String(value);
   }
-  // The card's own tags come last in insertion order, so the defaults give way at the limit.
+  // The card's own tags come last in insertion order, so the defaults give way at the limit, and a card that names
+  // more than the limit is refused rather than cut.
   while (Object.keys(tags).length > MAX_TAGS && inherited.length) delete tags[inherited.pop() as string];
+  if (Object.keys(tags).length > MAX_TAGS) throw new InboxError(400, `a card takes at most ${MAX_TAGS} tags, with its agent's defaults`);
   return { tags: Object.keys(tags).length ? tags : undefined, inherited };
 }
 

@@ -9,7 +9,8 @@ import { MAX_TAG_CHARS, MAX_TAGS } from '../core/types.ts';
 export function parseTagsFlag(value: string): Record<string, string> | undefined {
   const text = String(value ?? '').trim();
   if (!text) return undefined;
-  const tags: Record<string, string> = {};
+  // A bare object would report `constructor` and `toString` as taken, so the map owns no prototype.
+  const tags: Record<string, string> = Object.create(null);
   for (const part of text.split(',')) {
     const entry = part.trim();
     const at = entry.indexOf('=');
@@ -18,7 +19,7 @@ export function parseTagsFlag(value: string): Record<string, string> | undefined
     if (!key || !value) throw new Error(`--tags takes k=v pairs separated by commas, such as repo=acme/api,topic=billing, and "${entry}" is not one`);
     if (key.length > MAX_TAG_CHARS) throw new Error(`the tag key ${key.slice(0, 20)}… is longer than ${MAX_TAG_CHARS} characters`);
     if (value.length > MAX_TAG_CHARS) throw new Error(`the tag ${key} is longer than ${MAX_TAG_CHARS} characters`);
-    if (key in tags) throw new Error(`--tags names ${key} twice`);
+    if (Object.hasOwn(tags, key)) throw new Error(`--tags names ${key} twice`);
     tags[key] = value;
   }
   if (Object.keys(tags).length > MAX_TAGS) throw new Error(`--tags takes at most ${MAX_TAGS} tags`);

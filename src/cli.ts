@@ -703,8 +703,11 @@ switch (command) {
     }
     // pi draws in the terminal, so it inherits this one's input, output and errors, and it gets every argument after
     // -- unchanged.
-    const bin = process.platform === 'win32' ? 'pi.cmd' : 'pi';
-    const child = spawnSync(bin, piArgs, { stdio: 'inherit', env });
+    // Windows runs a `.cmd` only through the shell it belongs to.
+    const win = process.platform === 'win32';
+    const child = win
+      ? spawnSync(process.env['COMSPEC'] ?? 'cmd.exe', ['/d', '/s', '/c', 'pi', ...piArgs], { stdio: 'inherit', env })
+      : spawnSync('pi', piArgs, { stdio: 'inherit', env });
     if (child.error) fail(`Could not run pi: ${child.error.message}`);
     process.exit(child.status ?? 1);
   }

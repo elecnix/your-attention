@@ -210,10 +210,20 @@ describe('the card tools and default tags', () => {
   });
 });
 
+describe('a tag named after an object method', () => {
+  it('is kept on a card, and counts against the limit like any other', async () => {
+    const inbox = new Inbox(new MemoryStorage(), () => 1_000);
+    const card = inbox.postCard(caller, { id: 'proto', agent: 's1', title: 'q', tags: { toString: 'kept', constructor: 'kept too' } } as never);
+    assert.deepEqual(card.tags, { toString: 'kept', constructor: 'kept too' });
+  });
+});
+
 describe('parseTagsFlag', () => {
   it('reads the pi launcher\'s --tags value', async () => {
     const { parseTagsFlag } = await import('../../src/integrations/tags.ts');
-    assert.deepEqual(parseTagsFlag('repo=acme/api,topic=billing'), { repo: 'acme/api', topic: 'billing' });
+    // The map owns no prototype, so a tag may be named `constructor` or `toString`.
+    assert.deepEqual({ ...parseTagsFlag('repo=acme/api,topic=billing') }, { repo: 'acme/api', topic: 'billing' });
+    assert.deepEqual({ ...parseTagsFlag('constructor=x,toString=y') }, { constructor: 'x', toString: 'y' });
     assert.equal(parseTagsFlag(''), undefined);
     assert.equal(parseTagsFlag('  '), undefined);
   });
