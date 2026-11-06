@@ -1745,10 +1745,17 @@ export class Inbox {
     };
   }
 
+  /** Whether an open card's agent has left long ago, so another session can claim it. A row the sweep pruned counts as gone,
+   * and so does a card whose agent never connected, once the card itself is old enough. */
+  private orphaned(c: Card | CardSummary, s: CardState, p: Presence | undefined, now: number): boolean {
+    if (s !== 'open' || c.deliver !== 'stream') return false;
+    if (p) return !p.online && now - p.lastSeen > ORPHAN_MS;
+    return now - (c.updatedAt ?? c.createdAt) > ORPHAN_MS;
+  }
+
   /** A card's state, with orphaned for an open card whose agent left long ago: another session can claim it. */
   private shownState(c: Card | CardSummary, p: Presence | undefined, answer: Pick<Answer, 'savedAt' | 'readAt' | 'deliveredAt'> | undefined): CardState {
-    const s = cardState(c, answer);
-    return s === 'open' && c.deliver === 'stream' && p && !p.online && this.now() - p.lastSeen > ORPHAN_MS ? 'orphaned' : s;
+    return this.orphaned(c, cardState(c, answer), p, this.now()) ? 'orphaned' : cardState(c, answer);
   }
 
   state(): {
@@ -1764,10 +1771,7 @@ export class Inbox {
     const now = this.now();
     const states = Object.fromEntries(cards.map((c) => {
       const s = cardState(c, answers[c.id]);
-      const p = presence[c.agent];
-      // An open card whose agent left long ago is orphaned: another session can claim it.
-      const orphaned = s === 'open' && c.deliver === 'stream' && p && !p.online && now - p.lastSeen > ORPHAN_MS;
-      return [c.id, orphaned ? 'orphaned' : s];
+      return [c.id, this.orphaned(c, s, presence[c.agent], now) ? 'orphaned' : s];
     }));
     const levels = this.priorities();
     // The answers are read already, so each card costs no storage read of its own.
