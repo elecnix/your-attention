@@ -44,7 +44,7 @@ A hook call without a verdict by its deadline follows the policy: `fail-open` pa
 
 ## The triage extension
 
-`your-attention triage` checks that each card states a goal, the options that the agent weighed, evidence, and a recommendation. It also searches earlier answers, and returns a card that an earlier answer covers. By default it uses OpenRouter, with the key from `your-attention triage login`, an OAuth PKCE sign-in. `--judge-cmd "claude -p"` uses a coding harness in print mode instead, and `--judge-url` uses any OpenAI-compatible endpoint. A judge that fails or answers in an unreadable form passes the card. `your-attention service triage` writes a launchd or systemd unit for it.
+`your-attention triage` checks that each card states a goal, the options that the agent weighed, evidence, and a recommendation. The prompt includes the card's kind, title, text, recommendation, option labels, questions, secret name, HTML, body, attachment names and tags, so a guidance rule can check any of them. It also searches earlier answers, and returns a card that an earlier answer covers. By default it uses OpenRouter, with the key from `your-attention triage login`, an OAuth PKCE sign-in. `--judge-cmd "claude -p"` uses a coding harness in print mode instead, and `--judge-url` uses any OpenAI-compatible endpoint. A judge that fails or answers in an unreadable form passes the card. `your-attention service triage` writes a launchd or systemd unit for it.
 
 ## Person presence
 

@@ -22,6 +22,15 @@ describe('triage', () => {
     for (const part of ['goal', 'options the agent weighed', 'evidence', 'recommendation', 'Use Postgres?: No, SQLite', 'Be brief.']) assert.ok(p.includes(part), part);
   });
 
+  it('sends the judge the card\'s tags, each key and value', () => {
+    const p = triagePrompt({ ...card, tags: { repo: 'your-attention', topic: 'triage' } }, '', []);
+    for (const part of ['"repo"', '"your-attention"', '"topic"', '"triage"']) assert.ok(p.includes(part), part);
+  });
+
+  it('sends "tags": {} for a card with no tags', () => {
+    assert.ok(triagePrompt(card, '', []).includes('"tags": {}'));
+  });
+
   it('runs a harness in print mode as the judge', async () => {
     const judge = commandJudge(process.platform === 'win32' ? 'more' : 'cat');
     assert.match(await judge('{"verdict":"pass"}'), /"verdict":"pass"/);

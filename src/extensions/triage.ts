@@ -75,6 +75,7 @@ export function triagePrompt(card: Card, guidance: string, earlier: { title: str
     JSON.stringify({
       kind: card.kind, title: card.title, text: card.text, recommendation: card.recommendation, options: card.options?.map((o) => o.label),
       questions: card.questions, secret: card.secret?.name, html: card.html?.slice(0, 4000), body: card.body?.slice(0, 4000), attachments: card.attachments?.map((a) => a.name),
+      tags: card.tags ?? {},
     }, null, 2),
     '',
     earlier.length ? `Earlier answers:\n${earlier.map((e) => `- ${e.title}: ${e.answer}`).join('\n')}` : 'Earlier answers: none match.',
