@@ -336,4 +336,55 @@ describe('your-attention tui', () => {
     assert.ok(Number(frame['bytes']) < Number(paint['bytes']), `a keypress wrote ${frame['bytes']} bytes, the first paint ${paint['bytes']}`);
     await t.stop();
   });
+
+  it('collapses a group with a key or a click, skips over its cards, and keeps it collapsed on the next run', async () => {
+    const own = await start();
+    try {
+      const ownAgent = new Client({ url: own.server.url, token: own.agentToken });
+      await ownAgent.post({ id: 'fold-b1', agent: 's-fold', title: 'Billing one', priority: 'now', tags: { topic: 'billing' } });
+      await ownAgent.post({ id: 'fold-b2', agent: 's-fold', title: 'Billing two', priority: 'now', tags: { topic: 'billing' } });
+      await ownAgent.post({ id: 'fold-s1', agent: 's-fold', title: 'Search one', priority: 'later', tags: { topic: 'search' } });
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-tui-fold-'));
+      // The list pane is 34 columns wide at 100 columns, and the card pane starts after the border.
+      const list = (t: Tui) => t.vt.lines().map((l) => l.slice(0, 34)).join('\n');
+      const pane = (t: Tui) => t.vt.lines().map((l) => l.slice(35)).join('\n');
+      const run = () => { const t = startTui({ url: own.server.url, token: own.server.ownerToken, env: { YOUR_ATTENTION_HOME: home } }); running.push(t); return t; };
+      try {
+        const t = run();
+        await t.waitFor('Billing one');
+        // Group by nothing, priority, agent, then the topic tags.
+        for (let i = 0; i < 3; i++) t.send('g');
+        await t.waitFor('▾ billing (2)');
+        // x collapses the group of the open card, which is the first billing card.
+        t.send('x');
+        await t.waitFor('▸ billing (2)');
+        assert.equal(list(t).includes('Billing two'), false, 'the collapsed group hides its cards');
+        assert.ok(pane(t).includes('Billing one'), 'the card on screen stays on screen');
+        // Skip for now passes over the collapsed group's cards.
+        t.send('\x0e');
+        await until(() => (pane(t).includes('Search one') ? true : undefined));
+        assert.equal(list(t).includes('Billing two'), false);
+        await t.stop();
+
+        // A second run on the same device loads the collapsed group again.
+        const u = run();
+        await u.waitFor('Billing one');
+        for (let i = 0; i < 3; i++) u.send('g');
+        await u.waitFor('▸ billing (2)');
+        // The queue passes over the muted group's cards: Skip for now opens the card after them.
+        u.send('\x0e');
+        await until(() => (pane(u).includes('Search one') ? true : undefined));
+        // A click on the heading opens the group again.
+        const head = await u.waitFor('▸ billing (2)');
+        u.click(head.x + 2, head.y);
+        await u.waitFor('▾ billing (2)');
+        await until(() => (list(u).includes('Billing one') ? true : undefined));
+        await u.stop();
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    } finally {
+      await own.stop();
+    }
+  });
 });

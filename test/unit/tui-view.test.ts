@@ -27,7 +27,7 @@ function model(width: number, height: number, caps: Caps = { color: 3, unicode: 
   const queue = buildQueue(state, 'none');
   const current = queue.byId['a']!;
   const view = new CardView(cards[0]!, { theme, address: (id) => `http://x/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 10 });
-  return { theme, width, height, state, queue, current, view, zone: 'list', listScroll: 0, cardScroll: 0, groupBy: 'none', fresh: new Set(['b']), connected: true, help: false, cleared: false, now: 10 };
+  return { theme, width, height, state, queue, current, view, zone: 'list', listScroll: 0, cardScroll: 0, groupBy: 'none', collapsed: new Set(), fresh: new Set(['b']), connected: true, help: false, cleared: false, now: 10 };
 }
 
 before(async () => { await loadParser(); });
@@ -69,9 +69,9 @@ describe('the frame', () => {
   it('lists each section with a count, each card with a symbol and its level in words, and marks the open card', () => {
     const f = drawFrame(model(100, 30));
     const rows = Array.from({ length: 30 }, (_, y) => f.grid.row(y).slice(0, 34).trimEnd());
-    assert.ok(rows.includes('Agent replied (1)'), rows.join('\n'));
-    assert.ok(rows.includes('Waiting for you (2)'));
-    assert.ok(rows.some((r) => r.startsWith('Outbox: not read by the agent')));
+    assert.ok(rows.includes('▾ Agent replied (1)'), rows.join('\n'));
+    assert.ok(rows.includes('▾ Waiting for you (2)'));
+    assert.ok(rows.some((r) => r.startsWith('▾ Outbox: not read by the agent')));;
     assert.ok(rows.some((r) => r === '  ↩ now   Card d'));
     assert.ok(rows.some((r) => r === '▶ ◉ now   Card a'));
     assert.ok(rows.some((r) => r === '  ● later Card b new'));
@@ -79,6 +79,19 @@ describe('the frame', () => {
     assert.deepEqual(f.listCards, ['d', 'a', 'b', 'c']);
     const hit = f.hits.find((h) => h.target === 'list:b');
     assert.ok(hit && f.grid.row(hit.y).includes('Card b'));
+  });
+
+  it('hides a collapsed group\'s cards, keeps its count, and turns its heading into a click target', () => {
+    const m = model(100, 30);
+    m.collapsed = new Set(['none: Waiting for you']);
+    m.queue = buildQueue(m.state!, 'none', [], m.collapsed);
+    const f = drawFrame(m);
+    const rows = Array.from({ length: 30 }, (_, y) => f.grid.row(y).slice(0, 34).trimEnd());
+    assert.ok(rows.includes('▸ Waiting for you (2)'), rows.join('\n'));
+    assert.equal(f.listCards.includes('a'), false);
+    assert.equal(f.listCards.includes('b'), false);
+    assert.deepEqual(f.listCards, ['d', 'c']);
+    assert.ok(f.hits.some((h) => h.target === 'list:collapse:none: Waiting for you'));
   });
 
   it('keeps every symbol and label in ASCII, and the open card in inverse video without color', () => {

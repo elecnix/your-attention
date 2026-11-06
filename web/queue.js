@@ -3,6 +3,13 @@
 
 export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back to its agent' };
 export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed', reply: 'new reply' };
+/** The ids of the sections that every Group by choice shows, so a collapsed one keeps its state across the choices. */
+export const SECTION_ID = { replied: 'section: replied', checking: 'section: checking', outbox: 'section: outbox', sent: 'section: sent' };
+
+// A group's id is its kind and value, such as tag: topic: billing. The ':' and '%' of a part are escaped, because an
+// agent picks tag keys and values: without the escape, a tag named `section: outbox` would take the outbox's id.
+const idPart = (s) => String(s).replace(/[%:]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+const groupId = (kind, ...parts) => [kind, ...parts.map(idPart)].join(': ');
 
 const lastReply = (c) => c.replyAt || 0;
 
@@ -22,8 +29,8 @@ export function presenceOf(card, state) {
   return unread ? ['busy', 'Agent busy: it has an answer it has not read yet'] : ['on', 'Agent listening'];
 }
 
-/** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. `pins` lists the pinned tag values as [key, value], oldest first. */
-export function buildQueue(state, groupBy, pins = []) {
+/** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. `pins` lists the pinned tag values as [key, value], oldest first. `collapsed` holds the ids of the groups the person muted, each the group's kind and value. */
+export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   const answers = state.answers;
   const byId = Object.fromEntries(state.cards.map((c) => [c.id, c]));
   // A reply newer than your answer brings the card back to your queue.
@@ -44,7 +51,7 @@ export function buildQueue(state, groupBy, pins = []) {
   const tagOf = (c, key) => String((c.tags || {})[key] || '').trim();
   // Each pinned value is a group at the top, and a card that matches two pins goes to the oldest one.
   const pinOf = (c) => pins.findIndex(([key, value]) => tagOf(c, key) === value);
-  const pinned = pins.map(([key, value], i) => ({ key, value, items: pending.filter((c) => pinOf(c) === i) }));
+  const pinned = pins.map(([key, value], i) => ({ key, value, id: groupId('pin', key, value), items: pending.filter((c) => pinOf(c) === i) }));
   const unpinned = pending.filter((c) => pinOf(c) < 0);
   const replied = unpinned.filter((c) => st(c) === 'reply').sort((a, b) => lastReply(b) - lastReply(a));
   const sentAt = (c) => (c.closed ? c.closed.at : answers[c.id] ? answers[c.id].savedAt : 0);
@@ -58,10 +65,33 @@ export function buildQueue(state, groupBy, pins = []) {
   // The cards the inbox clears: answered or closed, with no agent reply you have not seen. Search still finds them.
   const dealt = visible.filter((c) => ['closed', 'answered', 'delivered', 'read'].includes(st(c)));
   const grouped = groupBy === 'none' ? [['Waiting for you', rest]] : [...rest.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];
-  // Under a tag grouping, a group of one value names its tag, so its heading can pin it.
-  const groups = grouped.map(([title, items]) => (tagKey !== null && tagOf(items[0], tagKey) ? [title, items, [tagKey, tagOf(items[0], tagKey)]] : [title, items]));
-  const order = [...pinned.flatMap((p) => p.items), ...replied, ...groups.flatMap(([, items]) => items)];
-  return { byId, st, levelOf, label, waiting, pending, checking, pinned, replied, outbox, sent, tagKeys, dealt, groups, order };
+  // A group is named by its kind and its value, so another Group by choice has its own collapsed groups and switching
+  // back restores them. Under a tag grouping, a group of one value names its tag, so its heading can pin it. A group of
+  // cards with no value has no value part, so it can't share the id of a group whose value reads `(none)`.
+  const groups = grouped.map(([title, items]) => {
+    const value = tagKey !== null ? tagOf(items[0], tagKey) : '';
+    const tag = tagKey !== null && value ? [tagKey, value] : undefined;
+    const id = tagKey !== null ? groupId('tag', tagKey, ...(value ? [value] : [])) : groupBy === 'priority' ? groupId('priority', label(levelOf(items[0]))) : groupId(groupBy, title);
+    return [title, items, tag, id];
+  });
+  // The group each card sits in, so a card that arrives knows whether its group is collapsed, and the terminal
+  // client's key can collapse the group of the card on screen.
+  const groupOf = {};
+  for (const p of pinned) for (const c of p.items) groupOf[c.id] = p.id;
+  for (const c of replied) groupOf[c.id] = SECTION_ID.replied;
+  for (const [, items, , id] of groups) for (const c of items) groupOf[c.id] = id;
+  for (const c of checking) groupOf[c.id] = SECTION_ID.checking;
+  for (const c of outbox) groupOf[c.id] = SECTION_ID.outbox;
+  for (const c of sent) groupOf[c.id] = SECTION_ID.sent;
+  // A collapsed group keeps its heading and its cards, for the count, but its cards leave the queue order: Skip for
+  // now and the card after an answer pass over them, while a card opened by a link still opens.
+  const hidden = new Set(Object.keys(groupOf).filter((id) => collapsed.has(groupOf[id])));
+  const order = [
+    ...pinned.flatMap((p) => (collapsed.has(p.id) ? [] : p.items)),
+    ...(collapsed.has(SECTION_ID.replied) ? [] : replied),
+    ...groups.flatMap(([, items, , id]) => (collapsed.has(id) ? [] : items)),
+  ];
+  return { byId, st, levelOf, label, waiting, pending, checking, pinned, replied, outbox, sent, tagKeys, dealt, groups, groupOf, hidden, order };
 }
 
 /** The card after `id` in queue order, wrapping around at the end. */

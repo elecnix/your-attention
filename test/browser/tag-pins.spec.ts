@@ -14,7 +14,8 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await inbox.close(); });
 
 const heading = (page: Page, name: string) => page.locator('.queue h3', { hasText: name });
-const headings = (page: Page) => page.locator('.queue h3').allInnerTexts();
+// The heading's name, without the triangle that opens and collapses its group.
+const headings = (page: Page) => page.locator('.queue h3 .fold-name').allInnerTexts();
 const groupOf = (page: Page, title: string) => page.locator('.queue .q', { hasText: title }).evaluate((el) => {
   let n = el.previousElementSibling;
   while (n && n.tagName !== 'H3') n = n.previousElementSibling;
@@ -71,7 +72,7 @@ test('under a tag grouping, a group heading pins its value, and a card that matc
   await pin.click();
   expect((await headings(page))[0]?.toLowerCase()).toBe('repo: acme/api');
   // The heading that has no value offers no pin.
-  await expect(heading(page, 'No repo').getByRole('button')).toHaveCount(0);
+  await expect(heading(page, 'No repo').getByRole('button', { name: /^Pin / })).toHaveCount(0);
   await page.locator('.group-by select').selectOption('tag:topic');
   await heading(page, 'billing').getByRole('button', { name: 'Pin topic: billing to the top' }).click();
   expect((await headings(page)).slice(0, 2).map((t) => t.toLowerCase())).toEqual(['repo: acme/api', 'topic: billing']);
