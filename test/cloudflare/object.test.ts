@@ -215,6 +215,89 @@ describe('the inbox Durable Object', () => {
     assert.equal(state.presence['s3']?.online, false);
   });
 
+  it('keeps a socket that pings on time while the object is awake, though the platform clock stands still', async () => {
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      const { rt, obj, server } = await oneSocket('agent=awake');
+      // No auto-response pong moves the platform clock, as when the object stays awake and answers each ping itself.
+      server.lastPong = new Date(now);
+      // Eighteen pings, twenty seconds apart, as the client sends them, and the object answers every one.
+      for (let i = 0; i < 18; i++) {
+        now += 20_000;
+        await obj.webSocketMessage(server as never, '{"type":"ping"}');
+        assert.equal(server.sent.at(-1), '{"type":"pong"}', 'the object answered the ping');
+      }
+      // The object's clock lives in the socket attachment, so it survives the hibernation the object goes back to.
+      await rt.make().alarm();
+      assert.equal(server.closed, undefined, 'five minutes after it opened, the pinging socket stays open');
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('closes a socket that went silent, five minutes after the ping the object answered itself', async () => {
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      const { obj, server } = await oneSocket('agent=then-silent');
+      server.lastPong = new Date(now);
+      now += 20_000;
+      await obj.webSocketMessage(server as never, '{"type":"ping"}');
+      now += 5 * MINUTE;
+      await obj.alarm();
+      assert.equal(server.closed, 1001);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('closes an unsigned socket at its 10-second limit, whatever either heartbeat clock reads', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    await init(obj);
+    await openSocket(obj, 'agent=lurker');
+    const server = rt.sockets[0]!;
+    // Both clocks read as if the socket had just proved it was alive.
+    server.lastPong = new Date();
+    server.serializeAttachment({ ...(server.attachment as object), lastPing: Date.now() });
+    await alarmAfter(obj, server, server.lastPong, 11_000);
+    assert.equal(server.closed, 1001);
+  });
+
+  it('logs the socket, the deadline, the time, the clock and both readings when it closes a silent socket', async () => {
+    const realNow = Date.now;
+    const realLog = console.log;
+    let now = realNow();
+    const logs: string[] = [];
+    console.log = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
+    Date.now = () => now;
+    try {
+      const { obj, server, owner } = await oneSocket('agent=gone');
+      server.lastPong = new Date(now);
+      now += 5 * MINUTE + 1_000;
+      await obj.alarm();
+      assert.equal(server.closed, 1001);
+      const entries = logs.flatMap((l) => {
+        try { return [JSON.parse(l) as Record<string, unknown>]; } catch { return []; }
+      });
+      const line = entries.find((e) => e['event'] === 'socket-close');
+      assert.ok(line, 'the close writes one structured line');
+      assert.equal(line['agent'], 'gone');
+      assert.equal(line['clock'], 'pong', 'the platform clock set the deadline');
+      assert.equal(line['deadline'], server.lastPong.getTime() + 5 * MINUTE);
+      assert.equal(line['now'], now);
+      assert.equal(line['pong'], server.lastPong.getTime());
+      assert.equal(line['ping'], null);
+      assert.ok(!JSON.stringify(line).includes(owner), 'no token in the log');
+    } finally {
+      console.log = realLog;
+      Date.now = realNow;
+    }
+  });
+
   it('keeps file bytes in R2 under the inbox prefix', async () => {
     const rt = runtime();
     const obj = rt.make();
