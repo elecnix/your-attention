@@ -137,6 +137,8 @@ const PENDING_FILE_DELETES = 'pending-file-deletes';
 export const PURGE_BATCH = 100;
 /** The share of the storage limit the purge keeps free, by deleting the oldest of those cards sooner. */
 export const STORAGE_HEADROOM = 0.2;
+/** How long the sweep keeps the presence row of an agent after it went offline. */
+export const PRESENCE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 
 const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']);
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
@@ -233,7 +235,10 @@ export class Inbox {
   /** When the platform alarm must next call sweep(), or undefined when nothing waits. */
   nextDeadline(): number | undefined {
     const times: number[] = [];
-    for (const p of this.store.list<Presence>('presence')) if (p.online && p.leftAt !== undefined) times.push(p.leftAt + PRESENCE_GRACE_MS);
+    for (const p of this.store.list<Presence>('presence')) {
+      if (p.online && p.leftAt !== undefined) times.push(p.leftAt + PRESENCE_GRACE_MS);
+      else if (!p.online) times.push((p.leftAt ?? p.lastSeen) + PRESENCE_KEEP_MS);
+    }
     for (const p of this.store.list<Pairing>('pairings')) {
       times.push(p.status === 'pending' || p.secret ? p.createdAt + PAIRING_TTL_MS : p.createdAt + PAIRING_KEEP_MS);
     }
@@ -1563,6 +1568,9 @@ export class Inbox {
         // The agent was last seen when its connection closed, not when the alarm noticed.
         this.store.put<Presence>('presence', p.agent, { agent: p.agent, online: false, lastSeen: p.leftAt });
         this.emit({ type: 'presence', agent: p.agent, online: false });
+      } else if (!p.online && now - (p.leftAt ?? p.lastSeen) >= PRESENCE_KEEP_MS) {
+        // The row of an agent gone this long only makes GET /v1/state bigger. A reconnect writes a fresh one.
+        this.store.delete('presence', p.agent);
       }
     }
     // Download counts from earlier days go.
