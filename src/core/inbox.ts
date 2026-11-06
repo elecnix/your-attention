@@ -86,6 +86,8 @@ export const DEFAULT_PRIORITIES: PriorityLevel[] = [
   { id: 'soon', label: 'Decide soon', definition: 'The agent needs the answer before it finishes.', color: '#c9a100' },
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
+/** The version of `DEFAULT_GUIDANCE`. It moves whenever that text changes, so a client reads the words it has not seen. */
+export const DEFAULT_GUIDANCE_VERSION = 2;
 export const DEFAULT_GUIDANCE = [
   'On a card, "you" is the person who reads it. Write about yourself in the third person, as "this agent" or the name in `from`, never "I" or "we", so the person always knows who acts.',
   'Write each card so the person can answer it without opening the session.',
@@ -100,6 +102,7 @@ export const DEFAULT_GUIDANCE = [
   'When a card is about another agent, link its session so the person can go there in one click: [label](https://herdr.invalid/v1/pane/<pane id>), from `herdr agent list`. Link another card with [[card-id]].',
   'Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click.',
   'When an action needs the person\'s own words in a session, post the sentence as an approval on the card instead of asking the person to type it there.',
+  'A card title is one line of plain text: no Markdown and no links. Name the thing there, as "PR #93 — an empty list no longer looks like a success". Put the link in `text`, or in a field label in the body: both read inline Markdown.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
@@ -1017,7 +1020,7 @@ export class Inbox {
   }
 
   guidance(): Guidance {
-    return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: 1, at: 0 };
+    return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: DEFAULT_GUIDANCE_VERSION, at: 0 };
   }
 
   /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. With `by`,
