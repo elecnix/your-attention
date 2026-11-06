@@ -10,11 +10,11 @@ import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findD
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
-import { SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
+import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PersonPresence, PriorityLevel, PublicSubscription, Role, Settings, Subscription, Template, Token,
+  Attachment, NewAttachment, PersonPresence, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -144,6 +144,9 @@ const RESERVED_HEADER = /^(content-type|content-length|host|transfer-encoding|co
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
+/** The most tag keys GET /v1/guidance lists, and the most values it lists for each key, so a busy inbox stays short. */
+export const MAX_TAG_KEYS = 20;
+export const MAX_TAG_VALUES = 15;
 /** How long a closed pairing request and its card stay before the sweep deletes them. */
 export const PAIRING_KEEP_MS = 24 * 60 * 60 * 1000;
 /** How long a cleared card, or a card nobody answered, stays after its last change before the purge deletes it. */
@@ -540,7 +543,7 @@ export class Inbox {
       broadcast: before?.broadcast,
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
-      tags: input.tags,
+      tags: cleanTags(input.tags),
       follows: input.follows ?? before?.follows,
       followedBy: before?.followedBy,
       deliver: input.deliver ?? 'stream',
@@ -1254,6 +1257,44 @@ export class Inbox {
 
   guidance(): Guidance {
     return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: DEFAULT_GUIDANCE_VERSION, at: 0 };
+  }
+
+  /** The tag keys in use with their values and counts, for GET /v1/guidance and card_guidance, so an agent reuses a
+   * value another card set instead of inventing a near miss. It counts the open cards and the cards cleared or closed
+   * in the last PURGE_AFTER_MS, and drops the rest, so a value nobody uses anymore leaves the list. Keys sort by their
+   * total count, then by key, and values by count, then by value, cut to MAX_TAG_KEYS keys and MAX_TAG_VALUES values
+   * each. It reads the summaries the state already reads, and a whole card only for one cleared inside the window. */
+  tagsInUse(): TagCount[] {
+    const cutoff = this.now() - PURGE_AFTER_MS;
+    const counts = new Map<string, Map<string, number>>();
+    const count = (tags: Record<string, string> | undefined): void => {
+      // A summary written before tags were cleaned still counts the way the print cleans them, so a stored line break
+      // can never forge a line in an agent's card_guidance.
+      for (const [key, value] of Object.entries(cleanTags(tags) ?? {})) {
+        const values = counts.get(key) ?? new Map<string, number>();
+        values.set(value, (values.get(value) ?? 0) + 1);
+        counts.set(key, values);
+      }
+    };
+    for (const s of this.store.list<CardSummary>('summaries')) {
+      // A card that closed before the window still shows until the person clears it, and its tags are no longer in use.
+      if (cardState(s, s.answer) === 'closed' && (s.closed?.at ?? 0) < cutoff) continue;
+      count(s.tags);
+    }
+    // A cleared card keeps no summary, so the list reads the card itself, and only while its clear is inside the window.
+    for (const c of this.store.list<ClearedCard>('cleared')) {
+      if (c.archivedAt < cutoff) continue;
+      count(this.store.get<Card>('cards', c.id)?.tags);
+    }
+    const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+    return [...counts.entries()]
+      .map(([key, values]) => {
+        const list = [...values.entries()].map(([value, n]) => ({ value, count: n })).sort((a, b) => b.count - a.count || byName(a.value, b.value));
+        return { key, total: list.reduce((n, v) => n + v.count, 0), values: list };
+      })
+      .sort((a, b) => b.total - a.total || byName(a.key, b.key))
+      .slice(0, MAX_TAG_KEYS)
+      .map(({ key, values }) => ({ key, values: values.slice(0, MAX_TAG_VALUES) }));
   }
 
   /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. With `by`,

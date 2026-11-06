@@ -152,6 +152,18 @@ export interface Guidance {
   at: number;
 }
 
+/** A tag value and how many cards carry it, as GET /v1/guidance counts them. */
+export interface TagValueCount {
+  value: string;
+  count: number;
+}
+
+/** A tag key in use with its values, as card_guidance lists them so an agent reuses a value another card set. */
+export interface TagCount {
+  key: string;
+  values: TagValueCount[];
+}
+
 export interface Settings {
   /** Lets cards carry their own HTML and scripts, in a sandboxed frame. */
   allowHtml: boolean;

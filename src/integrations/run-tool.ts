@@ -106,7 +106,9 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         return `Proposed the guidance on card ${card.id}. It changes only if the person approves it. The answer and the person's comment arrive ${ctx.arrival}.`;
       }
       const g = await inbox.guidance();
-      return `Card guidance, version ${g.version}:\n${g.text}${g.widgets ? `\n\n${g.widgets}` : ''}`;
+      // The tags other cards set go last, one line per key, so the agent reuses a value instead of inventing one.
+      const tags = (g.tags ?? []).map((t) => `\`${t.key}\` = ${t.values.map((v) => `${v.value} (${v.count})`).join(', ')}.`);
+      return `Card guidance, version ${g.version}:\n${g.text}${g.widgets ? `\n\n${g.widgets}` : ''}${tags.length ? `\n\nTags in use:\n${tags.join('\n')}` : ''}`;
     }
     case 'card_ask_secret': {
       const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await origin() });

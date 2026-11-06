@@ -52,7 +52,7 @@ export const cardTools: CardTool[] = [
           'Mermaid(source) draws a diagram from Mermaid source given as a string: flow = Mermaid("flowchart TD\\n  A --> B"). The built-in widget places the same: flow = widget mermaid {"source": "flowchart TD\\n  A --> B"}. The inbox parses each diagram when you post or patch, and answers 400 with mermaid\'s error for one that does not parse.',
           'Example:\nroot = Card([intro, risks, pr12])\nintro = TextContent("#12 adds retries to the uploader.")\nrisks = Table([Col("Risk", ["Duplicate uploads"]), Col("Likelihood", ["low"])])\npr12 = Form("pr12", none, [merge, note12])\nnone = Buttons([])\nmerge = FormControl("Merge #12?", RadioGroup("merge12", [RadioItem("Merge it", "", "yes"), RadioItem("Wait", "", "no")]))\nnote12 = FormControl("Comment on #12", Input("note12", "Optional"))',
         ].join(' ') },
-        tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Properties for grouping, such as topic.' },
+        tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Properties for grouping, such as topic. Reuse a value that card_guidance lists when one fits, so the inbox groups your card with the ones that already set it.' },
         id: { type: 'string', description: 'Reuse an id to revise your own card.' },
         from: { type: 'string', description: 'Optional. The name you give yourself, such as "the release agent", shown on the card. The card already shows your session name and where you run.' },
         attachments: {
