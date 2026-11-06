@@ -37,7 +37,7 @@ const pi = {
 const defaults = async (agent: string) => ((await (await callAt(h.server.url, h.agentToken, 'GET', `/v1/tags?agent=${encodeURIComponent(agent)}`)).json()) as { tags: Record<string, { value: string; from: string }> }).tags;
 const card = async (id: string) => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === id);
 
-describe('a pi session launched with --tags', () => {
+describe('a pi session launched with --tags', { skip: process.platform === 'win32' ? 'the fake pi is a shell script, and Windows has none' : false }, () => {
   it('holds the tags as its defaults, and a card it posts inherits them', async () => {
     yourAttention(pi as never);
     await handlers.get('session_start')?.({}, ctx);

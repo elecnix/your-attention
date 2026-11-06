@@ -38,7 +38,7 @@ function run(args: string[]): { status: number | null; stderr: string; capture?:
   return { status: res.status, stderr: res.stderr, ...(fs.existsSync(capture) ? { capture: fs.readFileSync(capture, 'utf8') } : {}) };
 }
 
-describe('the pi launcher', () => {
+describe('the pi launcher', { skip: process.platform === 'win32' ? 'the fake pi is a shell script, and Windows has none' : false }, () => {
   it('gives pi its arguments unchanged, and its default tags in the environment', () => {
     const r = run(['--tags', 'repo=acme/store,topic=billing', '--', '--version', '--model', 'a model']);
     assert.equal(r.status, 3, 'the launcher exits with the status pi gave');
