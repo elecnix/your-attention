@@ -53,6 +53,8 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   };
   let focus: string | null = null;
   let pinned: string | null = null;
+  /** The pinned tag values the inbox holds, oldest first, as [key, value] pairs. */
+  let pins: [string, string][] = [];
   let known: Set<string> | null = null;
   const views = new Map<string, CardView>();
   // GET /v1/state sends summaries. The card on screen, the one after it and the one it follows load whole, ahead of time.
@@ -84,7 +86,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   const toggleCollapse = (id: string) => {
     if (m.collapsed.has(id)) m.collapsed.delete(id); else m.collapsed.add(id);
     try { writeCollapsed(prefsFile, config.url, m.collapsed); } catch { /* the choice still holds for this run */ }
-    if (m.state) m.queue = buildQueue(m.state, m.groupBy, [], m.collapsed) as Queue;
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
     status(m.collapsed.has(id) ? 'Group collapsed.' : 'Group opened.');
     pick();
     schedule();
@@ -299,7 +301,12 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     }
     known = new Set(s.cards.map((c) => c.id));
     m.state = s;
-    m.queue = buildQueue(s, m.groupBy, [], m.collapsed) as Queue;
+    // Group by and the pins are the inbox's settings, as on the page, so a change on any page reaches this one.
+    if (s.settings) {
+      if (typeof s.settings.groupBy === 'string') m.groupBy = s.settings.groupBy;
+      pins = Array.isArray(s.settings.pins) ? s.settings.pins : [];
+    }
+    m.queue = buildQueue(s, m.groupBy, pins, m.collapsed) as Queue;
     m.blank = undefined;
     m.pin = undefined;
     pinTyped = '';
@@ -339,11 +346,39 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   // ---- input ----
   const quit = (code = 0) => { stop(); done(code); };
   const groups = (): string[] => ['none', 'priority', 'agent', ...(m.queue?.tagKeys ?? []).map((k) => `tag:${k}`)];
+  /** The inbox keeps Group by, so the page and the terminal client group the same way. */
   const cycleGroup = () => {
     const g = groups();
     m.groupBy = g[(g.indexOf(m.groupBy) + 1) % g.length] ?? 'none';
-    if (m.state) m.queue = buildQueue(m.state, m.groupBy, [], m.collapsed) as Queue;
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
     status(`Group by ${m.groupBy === 'none' ? 'nothing' : m.groupBy.replace(/^tag:/, '')}.`);
+    api.call('PUT', '/v1/settings', { groupBy: m.groupBy }).catch((e: Error) => status(`The inbox did not keep the grouping: ${e.message}`, 'warn'));
+  };
+  /** Pin the open card's value of the tag the queue groups by, or unpin it, as a heading's pin does on the page. */
+  const togglePin = async (): Promise<void> => {
+    const key = m.groupBy.startsWith('tag:') ? m.groupBy.slice(4) : null;
+    const value = key && m.current ? String((m.current.tags ?? {})[key] ?? '').trim() : '';
+    if (!key || !m.current) { status('Group by a tag first (g), then p pins the open card’s value.', 'warn'); return; }
+    if (!value) { status(`This card has no ${key} tag.`, 'warn'); return; }
+    // The inbox keeps one list of pins for every device, so the toggle applies to the freshest list it has, not to the
+    // one this terminal read when it last connected: another device may have pinned something since. A read that fails
+    // leaves nothing to base the write on, so nothing is written.
+    let fresh: [string, string][];
+    try {
+      const s = await api.state();
+      fresh = Array.isArray(s.settings?.pins) ? (s.settings.pins as [string, string][]) : [];
+    } catch (e) {
+      status(`The inbox did not answer, so nothing was pinned: ${(e as Error).message}`, 'warn');
+      return;
+    }
+    const had = fresh.some(([k, v]) => k === key && v === value);
+    const next: [string, string][] = had ? fresh.filter(([k, v]) => !(k === key && v === value)) : [...fresh, [key, value]];
+    pins = next;
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
+    status(had ? `Unpinned ${key}: ${value}.` : `Pinned ${key}: ${value} to the top.`, 'ok');
+    // The change travels as one pin in or out, so a pin another device adds at the same moment survives.
+    const change = had ? { pinRemove: [[key, value]] } : { pinAdd: [[key, value]] };
+    api.call('PUT', '/v1/settings', change).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
   };
   const clearDealt = () => {
     const n = m.queue?.dealt.length ?? 0;
@@ -476,6 +511,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       else status('The open card is not in a group that collapses.');
       return;
     }
+    if (ev.name === 'p') { void togglePin(); return; }
     if (ev.name === 'C') { clearDealt(); return; }
     if (ev.name === 'r') { void refresh(); status('Reloaded.'); return; }
     if (ev.name === 'o' && m.current) { open(address(m.current.id)); return; }

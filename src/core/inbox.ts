@@ -14,7 +14,7 @@ import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, typ
 import { Usage } from './telemetry.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PersonPresence, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -141,6 +141,9 @@ const RETRY_MAX_MS = 60 * 60 * 1000;
 export const RETRY_GIVE_UP_MS = 24 * 60 * 60 * 1000;
 /** Headers the inbox sets on each webhook call itself, or that the platform sets. */
 const RESERVED_HEADER = /^(content-type|content-length|host|transfer-encoding|connection|x-your-attention-.*)$/i;
+/** The pinned tag values one inbox keeps. A tag key or value is cut to 100 characters, as in the card's summary. */
+export const MAX_PINS = 20;
+export const MAX_TAG_CHARS = 100;
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
@@ -1178,11 +1181,47 @@ export class Inbox {
     return this.store.get<Settings>('meta', 'settings') ?? { allowHtml: false };
   }
 
-  setSettings(input: Partial<Settings>): Settings {
+  setSettings(input: Partial<Settings> & PinChange): Settings {
     const next: Settings = { ...this.settings(), ...(typeof input.allowHtml === 'boolean' ? { allowHtml: input.allowHtml } : {}) };
+    if (input.groupBy !== undefined) next.groupBy = this.checkGroupBy(input.groupBy);
+    if (input.pins !== undefined) next.pins = this.checkPins(input.pins);
+    // A pin or an unpin travels as its own change, so two devices that pin at the same moment both keep their value.
+    if (input.pinAdd !== undefined || input.pinRemove !== undefined) {
+      const same = (a: [string, string], b: [string, string]) => a[0] === b[0] && a[1] === b[1];
+      const add = input.pinAdd === undefined ? [] : this.checkPins(input.pinAdd);
+      const remove = input.pinRemove === undefined ? [] : this.checkPins(input.pinRemove);
+      const current = next.pins ?? [];
+      const kept = current.filter((p) => !remove.some((r) => same(r, p)));
+      const merged = [...kept, ...add.filter((a) => !kept.some((k) => same(k, a)))];
+      // A pin the inbox cannot keep is refused, so the person hears it rather than losing the value quietly.
+      if (merged.length > MAX_PINS) throw new InboxError(400, `pins takes at most ${MAX_PINS}; unpin a value first`);
+      next.pins = merged;
+    }
     this.store.put('meta', 'settings', next);
     this.emit({ type: 'change', card: '' });
     return next;
+  }
+
+  private checkGroupBy(groupBy: unknown): string {
+    const raw = typeof groupBy === 'string' && groupBy.startsWith('tag:') ? groupBy.slice(4) : '';
+    const key = raw.trim();
+    if (!(groupBy === 'none' || groupBy === 'priority' || groupBy === 'agent' || (key.length >= 1 && key.length <= MAX_TAG_CHARS))) {
+      throw new InboxError(400, 'groupBy must be none, priority, agent or tag:<key>');
+    }
+    // The key is stored the way it is matched, so `tag: topic ` groups the cards tagged `topic`.
+    return key && groupBy !== 'none' ? `tag:${key}` : groupBy as string;
+  }
+
+  /** Pins reach the queue the page draws, so a pair that isn't a tag key and its value is refused rather than stored. */
+  private checkPins(pins: unknown): [string, string][] {
+    if (!Array.isArray(pins) || pins.length > MAX_PINS) throw new InboxError(400, `pins must be a list of at most ${MAX_PINS} [key, value] pairs`);
+    return pins.map((pair, i) => {
+      if (!Array.isArray(pair) || pair.length !== 2) throw new InboxError(400, `pin ${i + 1}: give a tag key and its value`);
+      const [key, value] = pair.map((side) => (typeof side === 'string' ? side.trim() : ''));
+      if (!key || !value) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are both required`);
+      if (key.length > MAX_TAG_CHARS || value.length > MAX_TAG_CHARS) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are at most ${MAX_TAG_CHARS} characters`);
+      return [key, value];
+    });
   }
 
   priorities(): PriorityLevel[] {

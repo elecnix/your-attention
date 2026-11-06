@@ -177,6 +177,12 @@ describe('http routes for the card model', () => {
     assert.equal(broadcast.token, undefined);
     assert.equal((await call('PUT', '/v1/settings', { token: agent, body: { allowHtml: true } })).status, 403);
     assert.equal(((await (await call('PUT', '/v1/settings', { token: owner, body: { allowHtml: true } })).json()) as { allowHtml: boolean }).allowHtml, true);
+    // Group by and the pins are the owner's settings too: the state is the owner's route, and an agent changes neither.
+    assert.equal((await call('PUT', '/v1/settings', { token: agent, body: { groupBy: 'agent', pins: [['topic', 'billing']] } })).status, 403);
+    const saved = (await (await call('PUT', '/v1/settings', { token: owner, body: { groupBy: 'tag:topic', pins: [['topic', 'billing']] } })).json()) as { groupBy: string; pins: [string, string][] };
+    assert.deepEqual([saved.groupBy, saved.pins], ['tag:topic', [['topic', 'billing']]]);
+    assert.deepEqual(((await (await call('GET', '/v1/state', { token: owner })).json()) as { settings: { groupBy?: string; pins?: [string, string][] } }).settings, { allowHtml: true, groupBy: 'tag:topic', pins: [['topic', 'billing']] });
+    assert.equal((await call('PUT', '/v1/settings', { token: owner, body: { groupBy: 'week' } })).status, 400);
   });
 });
 

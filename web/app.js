@@ -37,8 +37,12 @@ export function App() {
   const reportedFocus = React.useRef(undefined);
   // Escape clears the card pane; nothing takes the pane again until the person picks a card.
   const [cleared, setCleared] = React.useState(false);
-  const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
-  // The groups the person muted, by the group's kind and value, kept on this device next to Group by and the pins.
+  // Group by and the pinned tag values are the inbox's settings, so every page and the terminal client share them.
+  // This page reads them from GET /v1/state and changes them with PUT /v1/settings.
+  const [groupBy, setGroupBy] = React.useState('none');
+  // The pinned tag values, oldest first.
+  const [tagPins, setTagPins] = React.useState([]);
+  // The groups the person muted, by the group's kind and value, kept on this device next to the pins.
   const [collapsedGroups, setCollapsedGroups] = React.useState(() => storedCollapsedGroups());
   const toggleGroup = (id) => setCollapsedGroups((groups) => {
     const next = new Set(groups);
@@ -46,13 +50,18 @@ export function App() {
     store.set('collapsedGroups', [...next]);
     return next;
   });
-  // The pinned tag values, oldest first, kept on this device next to Group by.
-  const [tagPins, setTagPins] = React.useState(() => storedTagPins());
   const samePin = (a, b) => a[0] === b[0] && a[1] === b[1];
   const isPinned = (tag) => tagPins.some((p) => samePin(p, tag));
+  const saveSettings = (patch) => api(`${BASE}v1/settings`, patch, 'PUT').catch(() => {});
+  // A save in flight owns the list until it answers, so a state that arrives meanwhile cannot undo the click.
+  const savingPins = React.useRef(0);
+  // The same guard for Group by: a state that arrives before the PUT commits must not put the old choice back.
+  const savingGroupBy = React.useRef(0);
   const togglePin = (tag) => setTagPins((pins) => {
     const next = pins.some((p) => samePin(p, tag)) ? pins.filter((p) => !samePin(p, tag)) : [...pins, tag];
-    store.set('tagPins', next);
+    savingPins.current += 1;
+    const mine = savingPins.current;
+    api(`${BASE}v1/settings`, { pins: next }, 'PUT').catch(() => {}).finally(() => { if (savingPins.current === mine) savingPins.current = 0; });
     return next;
   });
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
@@ -99,6 +108,35 @@ export function App() {
   }); }, [state, closing, groupBy, tagPins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
+
+  // Each state carries the inbox's Group by and pins, so a change on another page reaches this one without a reload.
+  React.useEffect(() => {
+    if (!state) return;
+    const s = state.settings || {};
+    if (!savingGroupBy.current) setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
+    if (!savingPins.current) setTagPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
+  }, [state]);
+
+  // A page that finds Group by or the pins in this device's storage and none in the inbox copies them over once,
+  // then reads the inbox. A value the inbox already has is never overwritten, and each device copies once.
+  const copiedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!state || copiedRef.current) return;
+    copiedRef.current = true;
+    const s = state.settings || {};
+    const copy = {};
+    if (typeof s.groupBy !== 'string' && store.get('groupBy:copied') !== true) {
+      store.set('groupBy:copied', true);
+      const device = store.get('groupBy');
+      if (typeof device === 'string' && (['none', 'priority', 'agent'].includes(device) || (device.startsWith('tag:') && device.length > 4 && device.length <= 104))) copy.groupBy = device;
+    }
+    if (!Array.isArray(s.pins) && store.get('tagPins:copied') !== true) {
+      store.set('tagPins:copied', true);
+      const device = storedTagPins();
+      if (device.length) copy.pins = device;
+    }
+    if (Object.keys(copy).length) saveSettings(copy);
+  }, [state]);
 
   // New page code loads at once in a hidden tab. In a tab the person looks at, it loads once they have
   // done nothing for a moment and no field has focus. A send in flight finishes within that moment.
@@ -385,11 +423,13 @@ export function App() {
       !shut && (items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty)));
   };
 
+  // A tag key saved as Group by stays on offer after its last card leaves, so the choice still reads.
+  const groupTags = groupBy.startsWith('tag:') && !tagKeys.includes(groupBy.slice(4)) ? [...tagKeys, groupBy.slice(4)] : tagKeys;
   const queue = h('nav', { className: 'queue' },
     h('label', { className: 'group-by' }, 'Group by ',
-      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); store.set('groupBy', e.target.value); } },
+      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); savingGroupBy.current += 1; const mine = savingGroupBy.current; api(`${BASE}v1/settings`, { groupBy: e.target.value }, 'PUT').catch(() => {}).finally(() => { if (savingGroupBy.current === mine) savingGroupBy.current = 0; }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
-        tagKeys.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
+        groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
     pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
     replied.length > 0 && group('Agent replied', replied, '', undefined, undefined, SECTION_ID.replied),
     groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),
@@ -526,8 +566,8 @@ function reloadPage() {
   location.reload();
 }
 
-// A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.
-// The pins this device keeps, as [key, value] pairs. Anything else in the store reads as no pins.
+// The pins an older page kept on this device, as [key, value] pairs. A page that finds them here and none in the inbox
+// copies them into the inbox once. Anything else in the store reads as no pins.
 function storedTagPins() {
   const pins = store.get('tagPins');
   return Array.isArray(pins) ? pins.filter((p) => Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === 'string' && x)) : [];
@@ -539,6 +579,7 @@ function storedCollapsedGroups() {
   return new Set(Array.isArray(groups) ? groups.filter((x) => typeof x === 'string' && x) : []);
 }
 
+// A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.
 function ClearButton({ count }) {
   const tip = `Clear ${count} answered or closed card${count === 1 ? '' : 's'}`;
   return h('button', { type: 'button', className: 'icon-btn clear-sent', title: tip, 'aria-label': tip, onClick: () => api(`${BASE}v1/archive`, {}) },

@@ -177,6 +177,16 @@ export interface TagCount {
 export interface Settings {
   /** Lets cards carry their own HTML and scripts, in a sandboxed frame. */
   allowHtml: boolean;
+  /** The queue's grouping: none, priority, agent or tag:<key>. Absent until the owner picks one. */
+  groupBy?: string;
+  /** The pinned tag values, oldest first, as [key, value] pairs. Absent until the owner pins one. */
+  pins?: [string, string][];
+}
+
+/** A change the owner makes to the pins: one value in or out, so another device's pin is never overwritten. */
+export interface PinChange {
+  pinAdd?: [string, string][];
+  pinRemove?: [string, string][];
 }
 
 /** A file on a card, such as an image, a PDF or a Markdown document.

@@ -92,7 +92,8 @@ export function listRows(m: Model, width: number): Row[] {
   const section = (title: string, cards: Card[], empty: string, sent: boolean, id?: string) => {
     const shut = id !== undefined && m.collapsed.has(id);
     rows.push({ spans: [] });
-    const head = `${title}${cards.length ? ` (${cards.length})` : ''}`;
+    // A heading can carry a tag key or value, which the agent wrote, so it reads through the same cleaner as a card's text.
+    const head = sanitize(`${title}${cards.length ? ` (${cards.length})` : ''}`);
     rows.push({
       spans: id === undefined ? [{ text: cut(m, head, width), style: st.header }] : [{ text: `${shut ? g.shut : g.open} `, style: st.accent }, { text: cut(m, head, width), style: st.header }],
       target: id === undefined ? undefined : `list:collapse:${id}`,
@@ -104,6 +105,8 @@ export function listRows(m: Model, width: number): Row[] {
   };
   const replied = q.replied;
   const waitingGroups = q.groups;
+  // Each pinned tag value gets its own group at the top, under every Group by choice, as on the page.
+  for (const p of q.pinned) section(`${p.key}: ${p.value}`, p.items, 'Nothing waiting', false);
   if (replied.length) section('Agent replied', replied, '', false, SECTION_ID.replied);
   if (waitingGroups.length) for (const [title, cards, , id] of waitingGroups) section(title, cards, 'Nothing waiting', false, id);
   else section('Waiting for you', [], 'Nothing waiting', false);
@@ -239,7 +242,7 @@ export function drawFrame(m: Model): Frame {
   } else {
     const typing = m.zone === 'card' && m.view?.focused()?.text;
     const keys = m.zone === 'list'
-      ? ['↑↓ cards', 'Enter answer', 'Ctrl+N skip', 'd dismiss', 'g group', 'x fold', '? help']
+      ? ['↑↓ cards', 'Enter answer', 'Ctrl+N skip', 'd dismiss', 'g group', 'x fold', 'p pin', '? help']
       : [typing ? 'Esc list' : 'Esc list', 'Tab next', 'Ctrl+S send', 'Ctrl+N skip', 'd dismiss', '? help'];
     const text = (m.theme.caps.unicode ? keys : keys.map((k) => k.replace('↑↓', 'j/k'))).join('  ');
     grid.text(1, y, cut(m, text, W - 2), st.dim);
@@ -256,6 +259,7 @@ const HELP: [string, string][] = [
   ['Enter  →  Tab', 'move into the card to answer it'],
   ['g', 'group by priority, agent or tag'],
   ['x', 'collapse or open the group of the open card'],
+  ['p', 'pin the open card’s value of the tag you group by'],
   ['C', 'clear answered and closed cards'],
   ['o', 'open the card in the browser'],
   ['In the card', ''],

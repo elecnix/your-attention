@@ -1,5 +1,5 @@
 // A pinned tag value gets its own group at the top of the queue. The person pins from a tag on the card, or from a group heading
-// under a tag grouping, and the pins stay on this device next to Group by.
+// under a tag grouping, and the pins live in the inbox's settings, beside Group by.
 import { expect, test, type Page } from '@playwright/test';
 import { startInbox, type TestInbox } from './inbox.ts';
 
@@ -50,8 +50,8 @@ test('pinning from the card puts the value in its own group at the top, and the 
   expect(await groupOf(page, 'Refund the duplicate charge?')).toMatch(/topic: billing/i);
   // Each card shows once.
   await expect(page.locator('.queue .q', { hasText: 'Ship the invoice fix?' })).toHaveCount(1);
-  // The pins stay on this device, next to Group by.
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('tagPins') || 'null'))).toEqual([['topic', 'billing']]);
+  // The pins are the inbox's settings, so every page and the terminal client share them.
+  expect(inbox.server.inbox.settings().pins).toEqual([['topic', 'billing']]);
   await page.reload();
   await page.locator('.bar .pill.on').waitFor();
   expect((await headings(page))[0]?.toLowerCase()).toBe('topic: billing');
@@ -61,7 +61,7 @@ test('pinning from the card puts the value in its own group at the top, and the 
   await expect(page.locator('.card-title')).toHaveText('Refund the duplicate charge?');
   await heading(page, 'topic: billing').getByRole('button', { name: 'Unpin topic: billing' }).click();
   await expect(heading(page, 'topic: billing')).toHaveCount(0);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('tagPins') || 'null'))).toEqual([]);
+  expect(inbox.server.inbox.settings().pins).toEqual([]);
 });
 
 test('under a tag grouping, a group heading pins its value, and a card that matches two pins goes to the oldest', async ({ page }) => {
@@ -81,14 +81,12 @@ test('under a tag grouping, a group heading pins its value, and a card that matc
   // The pinned groups stay in place under every Group by choice.
   await page.locator('.group-by select').selectOption('priority');
   expect((await headings(page)).slice(0, 2).map((t) => t.toLowerCase())).toEqual(['repo: acme/api', 'topic: billing']);
-  await page.evaluate(() => localStorage.removeItem('tagPins'));
+  await inbox.server.inbox.setSettings({ pins: [] });
 });
 
 test('a pinned group with nothing waiting keeps its heading, so the person can remove the pin', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ pins: [['topic', 'payroll']] });
   await inbox.open(page);
-  await page.evaluate(() => localStorage.setItem('tagPins', JSON.stringify([['topic', 'payroll']])));
-  await page.reload();
-  await page.locator('.bar .pill.on').waitFor();
   await expect(heading(page, 'topic: payroll')).toBeVisible();
   expect(await page.locator('.queue h3').first().evaluate((el) => el.nextElementSibling?.textContent)).toBe('Nothing waiting');
   await heading(page, 'topic: payroll').getByRole('button', { name: 'Unpin topic: payroll' }).click();

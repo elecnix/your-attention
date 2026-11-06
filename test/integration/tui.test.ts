@@ -265,6 +265,37 @@ describe('your-attention tui', () => {
     await t.stop();
   });
 
+  it('reads Group by and the pins from the inbox, shows a pinned group at the top, and saves both back', async () => {
+    // The search card goes first, so an unpinned queue would show its group first: only the pin moves billing above it.
+    await post({ id: 'pin-c', agent: 's-pin', title: 'Search index', priority: 'now', tags: { topic: 'search' } });
+    await post({ id: 'pin-a', agent: 's-pin', title: 'Invoice fix', priority: 'now', tags: { topic: 'billing' } });
+    await post({ id: 'pin-b', agent: 's-pin', title: 'Refund charge', priority: 'soon', tags: { topic: 'billing' } });
+    // The settings a page saved: this client groups the same way, and shows the pinned value first.
+    h.server.inbox.setSettings({ groupBy: 'tag:topic', pins: [['topic', 'billing']] });
+    const t = tui();
+    await t.waitFor('topic: billing (2)');
+    const text = t.vt.text();
+    assert.ok(text.indexOf('topic: billing (2)') < text.indexOf('search (1)'), 'the pinned group comes first');
+    // Open a pinned card, so p has a value to unpin. The title then shows in the list and in the card pane.
+    const row = await t.waitFor('Invoice fix');
+    t.click(row.x + 2, row.y);
+    await until(() => (t.vt.text().split('Invoice fix').length > 2 ? true : undefined));
+    // p unpins the open card's value of the tag the queue groups by, and the inbox keeps it.
+    t.send('p');
+    await t.waitFor('Unpinned topic: billing.');
+    await until(() => (h.server.inbox.settings().pins?.length === 0 ? true : undefined));
+    // g saves the next grouping in the inbox, which is how the page and this client stay together.
+    t.send('g');
+    await t.waitFor('Group by nothing.');
+    await until(() => (h.server.inbox.settings().groupBy === 'none' ? true : undefined));
+    t.send('g');
+    await t.waitFor('Group by priority.');
+    await until(() => (h.server.inbox.settings().groupBy === 'priority' ? true : undefined));
+    h.server.inbox.setSettings({ groupBy: 'none' });
+    for (const id of ['pin-a', 'pin-b', 'pin-c']) await agent.close(id, 'retracted', 'test over');
+    await t.stop();
+  });
+
   // The stand-in for herdr is a shell script, which Windows does not run.
   it('opens a herdr session link through the inbox, which focuses that tab', { skip: process.platform === 'win32' }, async () => {
     await post({ id: 'link', agent: 's-link', title: 'Look at the release agent', priority: 'now', text: 'See [the release agent](https://herdr.invalid/v1/tab/w7:t3).' });
@@ -368,8 +399,8 @@ describe('your-attention tui', () => {
 
         // A second run on the same device loads the collapsed group again.
         const u = run();
-        await u.waitFor('Billing one');
-        for (let i = 0; i < 3; i++) u.send('g');
+        // Group by is the inbox's setting, so the second run starts on the same grouping, and only the collapsed
+        // group comes from this device.
         await u.waitFor('▸ billing (2)');
         // The queue passes over the muted group's cards: Skip for now opens the card after them.
         u.send('\x0e');
