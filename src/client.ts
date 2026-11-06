@@ -8,6 +8,7 @@ import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagram
 import { InboxError } from './core/inbox.ts';
 import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
+import { questionLines } from '../web/answers.js';
 
 export interface ClientConfig {
   url: string;
@@ -404,12 +405,7 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
   // A sealed secret is never written out: the integration opens it.
   if (card.kind === 'secret') return answer.comment ? `(a sealed secret)\nComment: ${answer.comment}` : '(a sealed secret)';
   const lines: string[] = [];
-  if (card.questions?.length) {
-    card.questions.forEach((q, i) => {
-      const v = [answer.values[`q${i}`] ?? []].flat();
-      lines.push(`${q.question} ${v.length ? v.join(', ') : '(no option picked)'}`);
-    });
-  }
+  if (card.questions?.length) lines.push(...questionLines(card, answer.values));
   card.approvals?.forEach((a, i) => {
     const r = answer.approvalResults?.[i];
     // Only a recorded send reads as sent: an answer with no result entry says nothing about the pane.
@@ -420,7 +416,7 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
     lines.push(`Approval ${i + 1} for pane ${a.pane}, "${a.text}": ${done}`);
   });
   for (const [k, v] of Object.entries(answer.values)) {
-    if (card.questions?.length && /^q\d+$/.test(k)) continue;
+    if (card.questions?.length && /^q\d+(_comment)?$/.test(k)) continue;
     if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;
     // A check box or switch group answers with each item on or off, by the item names the agent gave.
     const on = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => (v as Record<string, unknown>)[x]) : undefined;
