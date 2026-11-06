@@ -35,7 +35,7 @@ export const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
-export const api = (path, body) => fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J(body) });
+export const api = (path, body, method = 'POST') => fetch(path, body === undefined ? {} : { method, headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J(body) });
 export const time = (t) => new Date(t).toLocaleTimeString();
 
 // This tab's id for presence reports. Two tabs, or two people, count as two pages.

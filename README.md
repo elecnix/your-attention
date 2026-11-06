@@ -247,6 +247,7 @@ Like the other commands, the client reads `YOUR_ATTENTION_URL` and `YOUR_ATTENTI
 | Ctrl+N | skip for now | skip for now |
 | `d` | dismiss without telling the agent | dismiss without telling the agent |
 | `g` | group by nothing, priority, agent or a tag | |
+| `p` | pin the open card's value of the tag you group by | |
 | `C` | clear the answered and closed cards | |
 | `o` | open the card in the browser | |
 | `?`, `q`, Ctrl+C | help, quit, quit | Ctrl+C quits |

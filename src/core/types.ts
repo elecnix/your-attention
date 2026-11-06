@@ -177,6 +177,10 @@ export interface TagCount {
 export interface Settings {
   /** Lets cards carry their own HTML and scripts, in a sandboxed frame. */
   allowHtml: boolean;
+  /** The queue's grouping: none, priority, agent or tag:<key>. Absent until the owner picks one. */
+  groupBy?: string;
+  /** The pinned tag values, oldest first, as [key, value] pairs. Absent until the owner pins one. */
+  pins?: [string, string][];
 }
 
 /** A file on a card, such as an image, a PDF or a Markdown document.

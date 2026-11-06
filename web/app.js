@@ -37,6 +37,7 @@ export function App() {
   const reportedFocus = React.useRef(undefined);
   // Escape clears the card pane; nothing takes the pane again until the person picks a card.
   const [cleared, setCleared] = React.useState(false);
+<<<<<<< HEAD
   const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
   // The groups the person muted, by the group's kind and value, kept on this device next to Group by and the pins.
   const [collapsedGroups, setCollapsedGroups] = React.useState(() => storedCollapsedGroups());
@@ -48,11 +49,19 @@ export function App() {
   });
   // The pinned tag values, oldest first, kept on this device next to Group by.
   const [tagPins, setTagPins] = React.useState(() => storedTagPins());
+=======
+  // Group by and the pinned tag values are the inbox's settings, so every page and the terminal client share them.
+  // This page reads them from GET /v1/state and changes them with PUT /v1/settings.
+  const [groupBy, setGroupBy] = React.useState('none');
+  // The pinned tag values, oldest first.
+  const [tagPins, setTagPins] = React.useState([]);
+>>>>>>> 93f5615 (Keep Group by and the pinned tags in the inbox settings)
   const samePin = (a, b) => a[0] === b[0] && a[1] === b[1];
   const isPinned = (tag) => tagPins.some((p) => samePin(p, tag));
+  const saveSettings = (patch) => api(`${BASE}v1/settings`, patch, 'PUT').catch(() => {});
   const togglePin = (tag) => setTagPins((pins) => {
     const next = pins.some((p) => samePin(p, tag)) ? pins.filter((p) => !samePin(p, tag)) : [...pins, tag];
-    store.set('tagPins', next);
+    saveSettings({ pins: next });
     return next;
   });
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
@@ -99,6 +108,35 @@ export function App() {
   }); }, [state, closing, groupBy, tagPins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
+
+  // Each state carries the inbox's Group by and pins, so a change on another page reaches this one without a reload.
+  React.useEffect(() => {
+    if (!state) return;
+    const s = state.settings || {};
+    setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
+    setTagPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
+  }, [state]);
+
+  // A page that finds Group by or the pins in this device's storage and none in the inbox copies them over once,
+  // then reads the inbox. A value the inbox already has is never overwritten, and each device copies once.
+  const copiedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!state || copiedRef.current) return;
+    copiedRef.current = true;
+    const s = state.settings || {};
+    const copy = {};
+    if (typeof s.groupBy !== 'string' && store.get('groupBy:copied') !== true) {
+      store.set('groupBy:copied', true);
+      const device = store.get('groupBy');
+      if (typeof device === 'string' && (['none', 'priority', 'agent'].includes(device) || (device.startsWith('tag:') && device.length > 4 && device.length <= 104))) copy.groupBy = device;
+    }
+    if (!Array.isArray(s.pins) && store.get('tagPins:copied') !== true) {
+      store.set('tagPins:copied', true);
+      const device = storedTagPins();
+      if (device.length) copy.pins = device;
+    }
+    if (Object.keys(copy).length) saveSettings(copy);
+  }, [state]);
 
   // New page code loads at once in a hidden tab. In a tab the person looks at, it loads once they have
   // done nothing for a moment and no field has focus. A send in flight finishes within that moment.
@@ -385,10 +423,13 @@ export function App() {
       !shut && (items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty)));
   };
 
+  // A tag key saved as Group by stays on offer after its last card leaves, so the choice still reads.
+  const groupTags = groupBy.startsWith('tag:') && !tagKeys.includes(groupBy.slice(4)) ? [...tagKeys, groupBy.slice(4)] : tagKeys;
   const queue = h('nav', { className: 'queue' },
     h('label', { className: 'group-by' }, 'Group by ',
-      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); store.set('groupBy', e.target.value); } },
+      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); saveSettings({ groupBy: e.target.value }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
+<<<<<<< HEAD
         tagKeys.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
     pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
     replied.length > 0 && group('Agent replied', replied, '', undefined, undefined, SECTION_ID.replied),
@@ -396,6 +437,15 @@ export function App() {
     checking.length > 0 && group('Being checked by triage', checking, '', undefined, undefined, SECTION_ID.checking),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent', undefined, SECTION_ID.outbox),
     group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length }), SECTION_ID.sent),
+=======
+        groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
+    pinnedGroups.map(({ key, value, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), `pin:${key}\n${value}`)),
+    replied.length > 0 && group('Agent replied', replied, ''),
+    groups.length ? groups.map(([title, items, tag]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }))) : group('Waiting for you', [], 'Nothing waiting'),
+    checking.length > 0 && group('Being checked by triage', checking, ''),
+    group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent'),
+    group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length })),
+>>>>>>> 93f5615 (Keep Group by and the pinned tags in the inbox settings)
     dealt.length > 0 && h('button', { className: 'btn clear-dealt', onClick: () => api(`${BASE}v1/archive`, {}) },
       `Clear ${dealt.length} answered or closed card${dealt.length === 1 ? '' : 's'}`),
     h(UsageToggle, { telemetry, onChange: changeTelemetry }),
@@ -526,19 +576,23 @@ function reloadPage() {
   location.reload();
 }
 
-// A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.
-// The pins this device keeps, as [key, value] pairs. Anything else in the store reads as no pins.
+// The pins an older page kept on this device, as [key, value] pairs. A page that finds them here and none in the inbox
+// copies them into the inbox once. Anything else in the store reads as no pins.
 function storedTagPins() {
   const pins = store.get('tagPins');
   return Array.isArray(pins) ? pins.filter((p) => Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === 'string' && x)) : [];
 }
 
+<<<<<<< HEAD
 // The groups this device collapsed, by the group's kind and value. Anything else in the store reads as none.
 function storedCollapsedGroups() {
   const groups = store.get('collapsedGroups');
   return new Set(Array.isArray(groups) ? groups.filter((x) => typeof x === 'string' && x) : []);
 }
 
+=======
+// A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.
+>>>>>>> 93f5615 (Keep Group by and the pinned tags in the inbox settings)
 function ClearButton({ count }) {
   const tip = `Clear ${count} answered or closed card${count === 1 ? '' : 's'}`;
   return h('button', { type: 'button', className: 'icon-btn clear-sent', title: tip, 'aria-label': tip, onClick: () => api(`${BASE}v1/archive`, {}) },

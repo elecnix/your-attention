@@ -141,6 +141,9 @@ const RETRY_MAX_MS = 60 * 60 * 1000;
 export const RETRY_GIVE_UP_MS = 24 * 60 * 60 * 1000;
 /** Headers the inbox sets on each webhook call itself, or that the platform sets. */
 const RESERVED_HEADER = /^(content-type|content-length|host|transfer-encoding|connection|x-your-attention-.*)$/i;
+/** The pinned tag values one inbox keeps. A tag key or value is cut to 100 characters, as in the card's summary. */
+export const MAX_PINS = 20;
+export const MAX_TAG_CHARS = 100;
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
@@ -1180,9 +1183,31 @@ export class Inbox {
 
   setSettings(input: Partial<Settings>): Settings {
     const next: Settings = { ...this.settings(), ...(typeof input.allowHtml === 'boolean' ? { allowHtml: input.allowHtml } : {}) };
+    if (input.groupBy !== undefined) next.groupBy = this.checkGroupBy(input.groupBy);
+    if (input.pins !== undefined) next.pins = this.checkPins(input.pins);
     this.store.put('meta', 'settings', next);
     this.emit({ type: 'change', card: '' });
     return next;
+  }
+
+  private checkGroupBy(groupBy: unknown): string {
+    const key = typeof groupBy === 'string' && groupBy.startsWith('tag:') ? groupBy.slice(4) : '';
+    if (!(groupBy === 'none' || groupBy === 'priority' || groupBy === 'agent' || (key.length >= 1 && key.length <= MAX_TAG_CHARS))) {
+      throw new InboxError(400, 'groupBy must be none, priority, agent or tag:<key>');
+    }
+    return groupBy as string;
+  }
+
+  /** Pins reach the queue the page draws, so a pair that isn't a tag key and its value is refused rather than stored. */
+  private checkPins(pins: unknown): [string, string][] {
+    if (!Array.isArray(pins) || pins.length > MAX_PINS) throw new InboxError(400, `pins must be a list of at most ${MAX_PINS} [key, value] pairs`);
+    return pins.map((pair, i) => {
+      if (!Array.isArray(pair) || pair.length !== 2) throw new InboxError(400, `pin ${i + 1}: give a tag key and its value`);
+      const [key, value] = pair.map((side) => (typeof side === 'string' ? side.trim() : ''));
+      if (!key || !value) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are both required`);
+      if (key.length > MAX_TAG_CHARS || value.length > MAX_TAG_CHARS) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are at most ${MAX_TAG_CHARS} characters`);
+      return [key, value];
+    });
   }
 
   priorities(): PriorityLevel[] {
