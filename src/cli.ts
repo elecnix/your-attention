@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerPairing } from './client.ts';
-import type { Option, Priority } from './core/types.ts';
+import type { Option, Priority, PublicSubscription } from './core/types.ts';
 import { homeDir, readHome, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
@@ -33,6 +33,9 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
                                                       read, and without it the card waits in the outbox as unread
   watch --role owner [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...]
                                                       print each change to every card, or to that agent's, as the owner
+  subscribe --agent ID (--webhook URL | --webhook-file FILE) [--header 'NAME: VALUE']... [--header-file FILE|-]
+                                                      send each answer to that agent's cards to an https webhook, once you approve it
+  unsubscribe --agent ID                              stop sending that agent's answers to its webhook
   claude-channel                                      the MCP channel server for Claude Code
   claude-hook ask-pre|ask-post|ask-cancel             the AskUserQuestion hooks for Claude Code
   herdr-blocked                                       post a card for each herdr agent that is blocked
@@ -132,6 +135,29 @@ function section(title: string, rows: [string, string][]): string {
   const width = Math.max(...rows.map(([label]) => label.length));
   const indent = ' '.repeat(width + 4);
   return [title, ...rows.map(([label, value]) => `  ${label.padEnd(width)}  ${value.split('\n').join(`\n${indent}`)}`)].join('\n');
+}
+
+/** The inbox and token agents on this machine use, for `status`, which reports a pairing file it cannot read rather than failing on it. */
+function agentPairing(): { url: string; token: string } | undefined {
+  try {
+    const c = loadConfig();
+    return typeof c?.url === 'string' && typeof c.token === 'string' ? { url: c.url, token: c.token } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** One answer webhook, for `status`. */
+function describeHook(h: PublicSubscription): string {
+  // The paired address may answer with anything, and the report still prints.
+  let host: string;
+  try { host = new URL(h.url).host; } catch { return 'an entry this report cannot read'; }
+  if (!Array.isArray(h.headers) || !h.headers.every((n) => typeof n === 'string')) return 'an entry this report cannot read';
+  const parts = [h.status === 'approved' ? `approved, ${h.delivered} sent` : 'waiting for your approval on its card'];
+  if (h.headers.length) parts.push(`headers ${h.headers.join(', ')}`);
+  if (h.waiting) parts.push(`${h.waiting} waiting to send`);
+  if (h.lastError) parts.push(`last failure: ${h.lastError.reason}`);
+  return `${host} (${parts.join('; ')})`;
 }
 
 /** A file size in a short unit, for `status`. */
@@ -350,10 +376,19 @@ switch (command) {
         : 'none';
       console.log(`${section('Answers this machine has not read', [['not read', line]])}\n`);
     }
+    // The answer webhooks: every one with the owner token of the inbox here, or the agent pairing's own.
+    const hookTarget = info && here && ownerToken ? { url: here.url, token: ownerToken } : agentPairing();
+    const hooks = hookTarget
+      ? await fetch(`${hookTarget.url.replace(/\/$/, '')}/v1/subscriptions`, { headers: { authorization: `Bearer ${hookTarget.token}` }, signal: AbortSignal.timeout(2000) })
+        .then(async (r) => (r.ok ? (await r.json()) as unknown : undefined)).catch(() => undefined)
+        .then((list) => (Array.isArray(list) ? (list as unknown[]).filter((h): h is PublicSubscription => typeof h === 'object' && h !== null) : undefined))
+      : undefined;
 
     console.log(section('Inbox on this machine', inbox));
     console.log(`\n${section('Files on this machine', files)}`);
     console.log(`\n${section('Paired inboxes', pairings)}`);
+    // The host only, since a webhook address can carry a secret in its path, as the header values do.
+    if (hooks) console.log(`\n${section('Answer webhooks', hooks.length ? hooks.map((h) => [String(h.agent ?? 'unknown agent'), describeHook(h)]) : [['none', 'add one with `your-attention subscribe --agent ID --webhook URL`']])}`);
     // Environment variables win over the files, so an agent uses them before its pairing.
     const url = process.env['YOUR_ATTENTION_URL'];
     const token = process.env['YOUR_ATTENTION_TOKEN'];
@@ -564,6 +599,37 @@ switch (command) {
     // that arrived while nothing was listening, which is the case this line exists for.
     const left = await c.unread(agent).catch(() => undefined);
     if (left && left.unread > 0) console.error(`The inbox holds ${left.unread} unread answer${left.unread === 1 ? '' : 's'} for ${agent}: your-attention ack ${left.cards.join(' ')}${left.unread > left.cards.length ? ` (and ${left.unread - left.cards.length} more)` : ''}`);
+    break;
+  }
+  case 'subscribe': {
+    const { values } = parseArgs({ args: rest, options: { agent: { type: 'string' }, webhook: { type: 'string' }, 'webhook-file': { type: 'string' }, header: { type: 'string', multiple: true }, 'header-file': { type: 'string' } } });
+    const usage = "Usage: your-attention subscribe --agent ID (--webhook URL | --webhook-file FILE) [--header 'NAME: VALUE']... [--header-file FILE|-]";
+    if (!values.agent || (values.webhook === undefined) === (values['webhook-file'] === undefined)) fail(usage);
+    // A secret goes in a file or on stdin: an argument shows in `ps` to every user of this machine, and in the shell history.
+    const readText = (file: string, what: string): string => {
+      try { return file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8'); } catch (e) { return fail(`Could not read the ${what} in ${file === '-' ? 'stdin' : file}: ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}.`); }
+    };
+    const webhook = values.webhook ?? readText(values['webhook-file'] ?? '', 'webhook address').trim();
+    const file = values['header-file'];
+    const lines = file === undefined ? [] : readText(file, 'headers').split(/\r?\n/).filter((l) => l.trim());
+    const headers: Record<string, string> = {};
+    for (const [i, h] of [...(values.header ?? []), ...lines].entries()) {
+      const at = h.indexOf(':');
+      // The line may be a bare token, so the message never quotes it.
+      if (at < 0 || !h.slice(0, at).trim()) fail(`Header ${i + 1} has no name: each --header, and each line of --header-file, takes 'NAME: VALUE', such as 'Authorization: Bearer <token>'.`);
+      headers[h.slice(0, at).trim()] = h.slice(at + 1).trim();
+    }
+    const r = await client().subscribe(values.agent, { url: webhook, headers }).catch((e: Error) => fail(`The inbox refused the webhook: ${e.message}`));
+    console.error(`Asked the inbox to send the answers for ${values.agent} to ${new URL(r.subscription.url).host}. Nothing goes out until you approve the card "${r.card.title}" in the inbox.`);
+    console.error('Each call carries x-your-attention-signature, an HMAC-SHA256 of the body keyed with the secret below. The inbox shows it only this once.');
+    console.log(JSON.stringify({ id: r.subscription.id, status: r.subscription.status, card: r.card.id, secret: r.secret }));
+    break;
+  }
+  case 'unsubscribe': {
+    const { values } = parseArgs({ args: rest, options: { agent: { type: 'string' } } });
+    if (!values.agent) fail('Usage: your-attention unsubscribe --agent ID');
+    const { removed } = await client().unsubscribe(values.agent).catch((e: Error) => fail(`The inbox refused: ${e.message}`));
+    console.log(removed ? `Stopped sending the answers for ${values.agent} to its webhook.` : `${values.agent} had no webhook for this token.`);
     break;
   }
   case 'triage': {

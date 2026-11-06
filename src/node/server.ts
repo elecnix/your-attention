@@ -58,6 +58,8 @@ export interface ServeOptions {
   ask?: (question: string) => Promise<boolean>;
   /** Types approved sentences into panes. The default runs herdr. */
   approvals?: ApprovalSender;
+  /** How the inbox calls webhooks. Tests take the calls here, since a webhook is https only. */
+  fetch?: typeof fetch;
 }
 
 export interface RunningServer {
@@ -104,7 +106,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals() });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');
@@ -253,11 +255,13 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const serverInfo = JSON.stringify({ url, port, pid: process.pid });
   writePrivate(path.join(home, 'server.json'), serverInfo);
 
-  // The platform alarm for this build: presence grace and hook timeouts need about a second. While a purge still
-  // deletes files, the next tick starts no other, so purges never overlap, and close() waits for it.
+  // The platform alarm for this build: presence grace, hook timeouts and webhook retries need about a second. While a
+  // purge still deletes files, the next tick starts no other, so purges never overlap, and close() waits for it.
+  // Store calls fail once the inbox has closed, so a webhook call still running at shutdown is dropped, and sent again at the next start.
   let purging: Promise<unknown> | undefined;
   const alarm = setInterval(() => {
     inbox.sweep();
+    void inbox.deliverAnswers().catch(() => {});
     if (purging) return;
     purging = inbox.purge().catch((e: unknown) => log(`purge failed: ${(e as Error).message}`)).finally(() => { purging = undefined; });
   }, 1000);

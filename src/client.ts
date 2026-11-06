@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError } from './core/inbox.ts';
-import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, PublicSubscription, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 
@@ -226,6 +226,15 @@ export class Client {
     const unread = typeof reply?.unread === 'number' && Number.isFinite(reply.unread) ? reply.unread : cards.length;
     return { unread, cards };
   }
+  /** Ask the inbox to send the answers to this agent's cards to a webhook. The owner approves it on a system card, and the
+   * secret that signs each call comes back here once. */
+  subscribe(agent: string, webhook: { url: string; headers?: Record<string, string> }): Promise<{ subscription: PublicSubscription; card: Card; secret: string }> {
+    return this.call('POST', '/v1/cards', { agent, kind: 'system', title: `Send the answers for ${agent} to a webhook`, system: { type: 'subscribe', webhook, events: ['answer'] } });
+  }
+  unsubscribe(agent: string): Promise<{ removed: number }> {
+    return this.call('POST', '/v1/cards', { agent, kind: 'system', title: `Stop sending the answers for ${agent} to a webhook`, system: { type: 'unsubscribe' } });
+  }
+  subscriptions(): Promise<PublicSubscription[]> { return this.call('GET', '/v1/subscriptions'); }
 
   /** Receive answers for one agent until `signal` aborts. Reconnects after a drop, over the next link when one fails.
    * `auto`, the default, uses a WebSocket and falls back to server-sent events on a link that cannot carry one.

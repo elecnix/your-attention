@@ -4,7 +4,7 @@
 // returns, and memory holds only the open connections.
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
-import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
+import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
@@ -13,8 +13,8 @@ import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import type {
-  AgentEvent, Answer, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PersonPresence, PriorityLevel, Role, Settings, Template, Token,
+  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  Attachment, NewAttachment, PersonPresence, PriorityLevel, PublicSubscription, Role, Settings, Subscription, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -66,9 +66,13 @@ export interface InboxOptions {
   usageAlwaysOn?: boolean;
   /** Types approved sentences into herdr panes. Without it, as on the hosted inbox, the inbox takes no card with approvals. */
   approvals?: ApprovalSender | undefined;
+  /** How the inbox calls answer webhooks. The default is the platform's fetch. */
+  fetch?: typeof fetch | undefined;
 }
 
 export const SYSTEM_AGENT = 'system';
+/** The inbox itself, as the caller of the system cards it posts. */
+const INBOX: Caller = { token: '', role: 'owner' };
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_PAIRINGS = 5;
 const CLOSE_KINDS = new Set<CloseKind>(['retracted', 'self-answered', 'answered-in-terminal', 'resolved']);
@@ -124,6 +128,19 @@ export const MAX_VERSIONS = 50;
 export const MAX_REPLY_BYTES = 4096;
 export const MAX_REPLIES = 200;
 export const MAX_WEBHOOKS = 5;
+export const MAX_SUBSCRIPTIONS = 20;
+const MAX_WEBHOOK_HEADERS = 10;
+/** How long one call to an answer webhook may take. */
+export const ANSWER_WEBHOOK_TIMEOUT_MS = 10_000;
+/** A call that started this long ago and never finished, such as one a crash cut off, goes again. */
+const DELIVERY_LEASE_MS = ANSWER_WEBHOOK_TIMEOUT_MS + 5_000;
+/** The first retry of an answer webhook waits this long, and each later one twice as long, up to an hour. */
+export const RETRY_FIRST_MS = 5_000;
+const RETRY_MAX_MS = 60 * 60 * 1000;
+/** After this long the inbox stops calling a webhook for one answer. The answer still waits for the agent stream. */
+export const RETRY_GIVE_UP_MS = 24 * 60 * 60 * 1000;
+/** Headers the inbox sets on each webhook call itself, or that the platform sets. */
+const RESERVED_HEADER = /^(content-type|content-length|host|transfer-encoding|connection|x-your-attention-.*)$/i;
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
@@ -160,6 +177,26 @@ function recipient(card: Card, answer: Answer): string | null {
   return card.deliver === 'stream' && cardState(card, answer) !== 'closed' ? card.agent : null;
 }
 
+/** One answer waiting for its webhook call, keyed by subscription and card, so a new answer replaces one still waiting. */
+interface OutboxItem {
+  key: string;
+  sub: string;
+  card: string;
+  /** The answer this call carries, by its savedAt. */
+  savedAt: number;
+  attempts: number;
+  firstAt: number;
+  /** When the next call is due. While a call runs, the end of its lease. */
+  nextAt: number;
+  /** A call is running, or a crash cut it off before its lease ended. */
+  calling?: true;
+}
+
+/** The id of an answer: the same on every webhook call that carries it, and new when the person changes the answer. */
+export function answerId(card: string, savedAt: number): string {
+  return `${card}@${savedAt}`;
+}
+
 type AgentSend = (ev: AgentEvent) => void;
 type PageSend = (ev: PageEvent) => void;
 
@@ -185,7 +222,8 @@ export class Inbox {
   private readonly viewers = new Map<string, { visible: boolean; activeAt: number | null; focus: string | null }>();
   private readonly extensions = new Map<string, { reg: ExtensionRegistration; token: string; send: (ev: HookEvent) => void }>();
   /** Webhook deliveries still running, so tests and shutdown can wait for them. */
-  readonly deliveries = new Set<Promise<boolean>>();
+  readonly deliveries = new Set<Promise<unknown>>();
+  private readonly fetcher: typeof fetch;
   /** The usage counts the platform sends once a day, when the person left them on. */
   readonly usage: Usage;
   /** The PIN a browser tab types before it acts as the owner. */
@@ -209,6 +247,8 @@ export class Inbox {
     this.clientChecks = opts.clientChecks === true;
     this.shownCardLimit = opts.shownCardLimit;
     this.approvalSender = opts.approvals;
+    // Workers refuse a fetch called as a method of another object, so the default calls it bare.
+    this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
     this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
@@ -244,6 +284,7 @@ export class Inbox {
     }
     const oldest = this.purgeQueue()[0];
     if (oldest) times.push(this.needsRoom() ? this.now() : oldest.since + PURGE_AFTER_MS);
+    for (const d of this.store.list<OutboxItem>('outbox')) times.push(d.nextAt);
     return times.length ? Math.min(...times) : undefined;
   }
 
@@ -279,6 +320,7 @@ export class Inbox {
     if (!this.store.get('tokens', id)) throw new InboxError(404, 'unknown token');
     this.store.delete('tokens', id);
     this.pin.dropUnlocks(id);
+    this.removeSubscriptions((s) => s.token === id, 'The token that asked for this webhook was revoked.');
   }
 
   /** Let an owner token act without the PIN, such as the laptop's owner-token file, which only this machine's user reads. */
@@ -415,6 +457,7 @@ export class Inbox {
     if (!/^[\w.:-]{1,80}$/.test(id)) throw new InboxError(400, 'id must be 1 to 80 letters, digits, dots, colons, dashes or underscores');
 
     const kind = input.kind ?? 'ask';
+    if (kind === 'system' && caller.token !== '') throw new InboxError(400, 'a system card from a client asks the inbox for something: send system.type subscribe or unsubscribe');
     if (kind === 'secret') {
       const s = input.secret;
       if (!s || typeof s !== 'object' || !s.publicKey || typeof s.publicKey !== 'object') throw new InboxError(400, 'a secret card needs secret.name and secret.publicKey');
@@ -717,11 +760,183 @@ export class Inbox {
   private observeAnswer(card: Card, answer: Answer): void {
     const event: HookEvent = { type: 'hook', version: HOOK_VERSION, id: randomId(8), hook: 'answer.saved', card: publicCard(card), answer };
     for (const e of this.extensions.values()) if (e.reg.hooks.includes('answer.saved')) e.send(event);
-    for (const w of this.webhooks().filter((x) => x.hook === 'answer.saved')) {
-      const p = deliverWebhook(w, event);
-      this.deliveries.add(p);
-      void p.then(() => this.deliveries.delete(p), () => this.deliveries.delete(p));
+    for (const w of this.webhooks().filter((x) => x.hook === 'answer.saved')) this.track(deliverWebhook(w, event, this.fetcher));
+  }
+
+  private track(p: Promise<unknown>): void {
+    this.deliveries.add(p);
+    void p.then(() => this.deliveries.delete(p), () => this.deliveries.delete(p));
+  }
+
+  // ---- answer webhooks ----
+
+  /** A client's system card: a request to send the answers to its cards to a webhook, or to stop. The owner approves each
+   * webhook on a system card the inbox posts, and nothing goes out before that. */
+  systemRequest(caller: Caller, input: NewCard): ReturnType<Inbox['subscribe']> | { removed: number } {
+    const type = input?.system?.type;
+    if (type === 'subscribe') return this.subscribe(caller, input);
+    if (type !== 'unsubscribe') throw new InboxError(400, 'a system card from a client carries system.type subscribe or unsubscribe');
+    const agent = this.requestingAgent(caller, input);
+    return { removed: this.removeSubscriptions((s) => s.token === caller.token && s.agent === agent, `The agent ${agent} unsubscribed.`) };
+  }
+
+  /** The agent a client's system card speaks for. */
+  private requestingAgent(caller: Caller, input: NewCard): string {
+    if (caller.role === 'extension') throw new InboxError(403, 'an extension posts no cards');
+    const agent = String(input?.agent ?? '').trim();
+    if (!agent || agent.length > 80) throw new InboxError(400, 'agent is required, at most 80 characters');
+    if (agent === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
+    return agent;
+  }
+
+  /** A subscribe request: the webhook waits, pending, for the owner to approve it on its card. The secret is returned once. */
+  subscribe(caller: Caller, input: NewCard): { subscription: PublicSubscription; card: Card; secret: string } {
+    const agent = this.requestingAgent(caller, input);
+    const req = input.system;
+    if (req?.type !== 'subscribe') throw new InboxError(400, 'a subscribe request carries system.type subscribe');
+    const mine = (s: Subscription): boolean => s.token === caller.token && s.agent === agent;
+    const url = webhookUrl(req.webhook?.url);
+    const headers = webhookHeaders(req.webhook?.headers);
+    const events = req.events ?? ['answer'];
+    if (!Array.isArray(events) || !events.length || events.some((e) => e !== 'answer')) throw new InboxError(400, 'events takes answer, the only event a webhook receives');
+    if (this.store.list<Subscription>('subscriptions').filter((s) => !mine(s)).length >= MAX_SUBSCRIPTIONS) {
+      throw new InboxError(429, `an inbox takes at most ${MAX_SUBSCRIPTIONS} answer webhooks`);
     }
+    const id = randomId(8);
+    const cardId = `subscribe-${id}`;
+    this.makeRoom(cardId);
+    // One webhook for each agent and token: a new request replaces the one before.
+    this.removeSubscriptions(mine, 'The agent sent a new request, which replaces this one.');
+    const sub: Subscription = { id, agent, token: caller.token, url, headers, events: ['answer'], secret: randomId(24), status: 'pending', createdAt: this.now(), delivered: 0 };
+    this.store.put('subscriptions', id, sub);
+    const host = new URL(url).host;
+    // The card is Markdown, so the agent's words go in code spans, which show them as typed.
+    const code = (text: string): string => `\`${text.replace(/`/g, "'")}\``;
+    const names = Object.keys(headers).map(code);
+    this.postCard(INBOX, {
+      id: cardId, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
+      title: `Send the answers for ${agent} to a webhook?`,
+      text: `The agent ${code(agent)} asks the inbox to send each answer you give to its cards to ${code(url)}${names.length ? `, with the header${names.length === 1 ? '' : 's'} ${names.join(', ')}` : ''}. Whoever runs ${host} then reads those answers. Approve only if you know that address.`,
+      options: [
+        { id: 'approve', label: 'Approve', description: `The inbox sends each answer to the cards of ${code(agent)} to ${host}.` },
+        { id: 'deny', label: 'Deny', description: 'Nothing goes out. To stop a webhook you approved, change your answer to this.' },
+      ],
+    });
+    const card = { ...this.getCard(cardId), subscription: id };
+    this.store.put('cards', cardId, card);
+    return { subscription: this.publicSubscription(sub), card: publicCard(card), secret: sub.secret };
+  }
+
+  private resolveSubscription(card: Card, answer: Answer): void {
+    const sub = this.store.get<Subscription>('subscriptions', card.subscription ?? '');
+    // The webhook went before this answer, so the card keeps the outcome it closed with.
+    if (!sub) { this.closeAs(card, 'resolved', card.closed?.outcome ?? 'This webhook is gone.'); return; }
+    const host = new URL(sub.url).host;
+    if ([answer.values['choice']].flat()[0] === 'approve') {
+      this.store.put<Subscription>('subscriptions', sub.id, { ...sub, status: 'approved', approvedAt: sub.approvedAt ?? this.now() });
+      this.closeAs(card, 'resolved', `Sending the answers for ${sub.agent} to ${host}. To stop, change your answer to Deny.`);
+      return;
+    }
+    this.removeSubscriptions((s) => s.id === sub.id, sub.status === 'approved' ? `Stopped: no more answers for ${sub.agent} go to ${host}.` : `Denied: nothing goes to ${host}.`);
+  }
+
+  /** Remove the webhooks that match, with the calls still waiting, and close the card of each with the outcome. */
+  private removeSubscriptions(match: (s: Subscription) => boolean, outcome: string): number {
+    const gone = this.store.list<Subscription>('subscriptions').filter(match);
+    for (const s of gone) {
+      this.store.delete('subscriptions', s.id);
+      for (const d of this.store.list<OutboxItem>('outbox')) if (d.sub === s.id) this.store.delete('outbox', d.key);
+      const card = this.store.get<Card>('cards', `subscribe-${s.id}`);
+      if (card) this.closeAs(card, 'resolved', outcome);
+    }
+    return gone.length;
+  }
+
+  /** The owner removes any webhook, and a client the ones it asked for. */
+  deleteSubscription(caller: Caller, id: string): void {
+    const sub = this.store.get<Subscription>('subscriptions', id);
+    if (!sub) throw new InboxError(404, 'unknown subscription');
+    if (caller.role !== 'owner' && sub.token !== caller.token) throw new InboxError(403, 'another client owns this subscription');
+    this.removeSubscriptions((s) => s.id === id, sub.token === caller.token ? `The agent ${sub.agent} unsubscribed.` : 'You removed this webhook.');
+  }
+
+  /** Every webhook for the owner, and its own for any other client. */
+  listSubscriptions(caller: Caller): PublicSubscription[] {
+    if (caller.role === 'extension') throw new InboxError(403, 'an extension reads no webhooks');
+    return this.store.list<Subscription>('subscriptions').filter((s) => caller.role === 'owner' || s.token === caller.token).map((s) => this.publicSubscription(s));
+  }
+
+  private publicSubscription(s: Subscription): PublicSubscription {
+    const { token: _t, secret: _s, headers, ...rest } = s;
+    return { ...rest, headers: Object.keys(headers), waiting: this.store.list<OutboxItem>('outbox').filter((d) => d.sub === s.id).length };
+  }
+
+  /** Queue the answer for the webhook of its card's agent and token, and call it now. */
+  private queueAnswer(card: Card, answer: Answer): void {
+    if (card.deliver !== 'stream') return;
+    const sub = this.store.list<Subscription>('subscriptions').find((s) => s.status === 'approved' && s.token === (card.token ?? '') && s.agent === card.agent);
+    if (!sub) return;
+    const now = this.now();
+    const key = `${sub.id}:${card.id}`;
+    this.store.put<OutboxItem>('outbox', key, { key, sub: sub.id, card: card.id, savedAt: answer.savedAt, attempts: 0, firstAt: now, nextAt: now });
+    this.track(this.deliverAnswers());
+  }
+
+  /** Call the webhook of each answer that is due. An answer calls it at once, and the platform alarm calls it after sweep()
+   * for each retry. Each call carries the agent stream's answer event, with the answer's id. */
+  async deliverAnswers(): Promise<void> {
+    const now = this.now();
+    const calls: Promise<void>[] = [];
+    for (const item of this.store.list<OutboxItem>('outbox')) {
+      if (item.nextAt > now) continue;
+      const sub = this.store.get<Subscription>('subscriptions', item.sub);
+      const card = this.store.get<Card>('cards', item.card);
+      const answer = this.store.get<Answer>('answers', item.card);
+      // The card went to another agent, the person changed the answer, or the agent read it already.
+      if (!sub || sub.status !== 'approved' || !card || card.agent !== sub.agent || (card.token ?? '') !== sub.token || !answer || answer.savedAt !== item.savedAt || answer.readAt) {
+        this.store.delete('outbox', item.key);
+        continue;
+      }
+      // Hold the call before the await, so a second run does not make it again. A call that a crash cut off goes after the lease.
+      this.store.put<OutboxItem>('outbox', item.key, { ...item, nextAt: now + DELIVERY_LEASE_MS, calling: true });
+      const id = answerId(card.id, answer.savedAt);
+      const ev: AnswerEvent = { type: 'answer', id, card: publicCard(card), answer };
+      const headers = { ...sub.headers, 'x-your-attention-event': 'answer', 'x-your-attention-delivery': id };
+      calls.push(postSigned(sub.url, sub.secret, headers, ev, ANSWER_WEBHOOK_TIMEOUT_MS, this.fetcher).then((r) => this.called(item, r)));
+    }
+    // A call that fails to record its result, such as on a store that closed, must not stop the alarm's other work.
+    await Promise.allSettled(calls);
+  }
+
+  /** Record how a webhook call went: a 2xx marks the answer read, and anything else waits for the next retry. */
+  private called(item: OutboxItem, r: { ok: boolean; reason?: string }): void {
+    const now = this.now();
+    const current = this.store.get<OutboxItem>('outbox', item.key);
+    const sub = this.store.get<Subscription>('subscriptions', item.sub);
+    // The webhook went, or a newer answer took this call's place while it ran and has its own schedule.
+    if (!sub || !current || current.savedAt !== item.savedAt) return;
+    if (r.ok) {
+      this.store.delete('outbox', item.key);
+      const { lastError: _e, ...rest } = sub;
+      this.store.put<Subscription>('subscriptions', sub.id, { ...rest, delivered: sub.delivered + 1 });
+      const answer = this.store.get<Answer>('answers', item.card);
+      // The webhook has the answer, as an agent that acknowledges it on its stream.
+      if (answer && answer.savedAt === item.savedAt && !answer.readAt) {
+        this.store.put<Answer>('answers', item.card, { ...answer, deliveredAt: answer.deliveredAt ?? now, readAt: now });
+        this.emit({ type: 'change', card: item.card });
+      }
+      return;
+    }
+    const reason = r.reason ?? 'the webhook failed';
+    if (now - item.firstAt >= RETRY_GIVE_UP_MS) {
+      this.store.delete('outbox', item.key);
+      this.store.put<Subscription>('subscriptions', sub.id, { ...sub, lastError: { at: now, reason: `${reason}; the inbox stopped trying after 24 hours` } });
+      return;
+    }
+    const attempts = item.attempts + 1;
+    this.store.put<Subscription>('subscriptions', sub.id, { ...sub, lastError: { at: now, reason } });
+    const { calling: _c, ...waiting } = current;
+    this.store.put<OutboxItem>('outbox', item.key, { ...waiting, attempts, nextAt: now + Math.min(RETRY_FIRST_MS * 2 ** (attempts - 1), RETRY_MAX_MS) });
   }
 
   getCard(id: string): Card {
@@ -1217,8 +1432,14 @@ export class Inbox {
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
     else if (card.kind === 'system' && card.id.startsWith('priorities-')) this.resolvePriorityProposal(card, answer);
+    else if (card.kind === 'system' && card.subscription) this.resolveSubscription(card, answer);
     else this.flush(card.agent);
-    if (card.kind !== 'system' && card.kind !== 'secret') this.observeAnswer(card, this.store.get<Answer>('answers', id) ?? answer);
+    // A secret card's answer opens only with the key in its session's memory, so no webhook gets it.
+    if (card.kind !== 'system' && card.kind !== 'secret') {
+      const saved = this.store.get<Answer>('answers', id) ?? answer;
+      this.observeAnswer(card, saved);
+      this.queueAnswer(card, saved);
+    }
     return this.store.get<Answer>('answers', id) ?? answer;
   }
 
@@ -1365,6 +1586,12 @@ export class Inbox {
     this.emit({ type: 'change', card: id });
     const card = this.getCard(id);
     this.flush(recipient(card, next) ?? card.agent);
+    // A webhook call that waits for its retry goes now. A call still running keeps its lease, so it never goes twice at once.
+    const now = this.now();
+    for (const d of this.store.list<OutboxItem>('outbox')) {
+      if (d.card === id && !(d.calling && d.nextAt > now)) this.store.put<OutboxItem>('outbox', d.key, { ...d, nextAt: Math.min(d.nextAt, now) });
+    }
+    this.track(this.deliverAnswers());
     return this.store.get<Answer>('answers', id) ?? next;
   }
 
@@ -1871,6 +2098,37 @@ export function typeFromName(name: string): string {
 /** A file's type, or the type its name gives when an agent sent it as application/octet-stream. */
 export function attachmentType(file: { name: string; type?: string }): string {
   return !file.type || file.type === 'application/octet-stream' ? typeFromName(file.name) : file.type;
+}
+
+/** A webhook address the inbox calls: https only, as for the owner's webhooks. */
+function webhookUrl(url: unknown): string {
+  const text = String(url ?? '');
+  let parsed: URL;
+  try { parsed = new URL(text); } catch { throw new InboxError(400, 'webhook.url must be an https URL'); }
+  if (parsed.protocol !== 'https:') throw new InboxError(400, 'webhook.url must be https');
+  if (text.length > 2000) throw new InboxError(400, 'webhook.url must be at most 2,000 characters');
+  // A backtick is the one URL character that ends a code span on the card, and %60 is the same address.
+  return parsed.href.replace(/`/g, '%60');
+}
+
+/** The headers a client sends with each call: names a header can have, values on one line, and none the inbox sets itself. */
+function webhookHeaders(headers: unknown): Record<string, string> {
+  if (headers === undefined || headers === null) return {};
+  if (typeof headers !== 'object' || Array.isArray(headers)) throw new InboxError(400, 'webhook.headers must be an object of header names and values');
+  const entries = Object.entries(headers as Record<string, unknown>);
+  if (entries.length > MAX_WEBHOOK_HEADERS) throw new InboxError(400, `webhook.headers takes at most ${MAX_WEBHOOK_HEADERS} headers`);
+  const out: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const [name, value] of entries) {
+    if (seen.has(name.toLowerCase())) throw new InboxError(400, `webhook header ${name}: given twice, in two cases`);
+    seen.add(name.toLowerCase());
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(name)) throw new InboxError(400, `webhook header ${JSON.stringify(name.slice(0, 64))}: not a header name`);
+    if (RESERVED_HEADER.test(name)) throw new InboxError(400, `webhook header ${name}: the inbox sets it itself`);
+    const v = String(value ?? '');
+    if (/[\r\n\0]/.test(v) || v.length > 2000) throw new InboxError(400, `webhook header ${name}: the value must be one line of at most 2,000 characters`);
+    out[name] = v;
+  }
+  return out;
 }
 
 /** A card without the id of the token that posted it. */

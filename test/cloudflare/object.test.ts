@@ -38,7 +38,9 @@ function runtime(extra: Record<string, unknown> = {}) {
   const sockets: FakeSocket[] = [];
   const blobs = new Map<string, { bytes: Uint8Array; type: string }>();
   let alarm: number | undefined;
+  const waits: Promise<unknown>[] = [];
   const ctx = {
+    waitUntil: (p: Promise<unknown>) => { waits.push(p); },
     id: { toString: () => 'object-1' },
     storage: {
       // Like SqlStorage.exec: the statement runs at once, and the cursor holds its rows.
@@ -63,7 +65,7 @@ function runtime(extra: Record<string, unknown> = {}) {
     },
   };
   const make = () => new InboxObject(ctx as never, { ...env, ...extra } as never);
-  return { make, sockets, blobs, alarm: () => alarm };
+  return { make, sockets, blobs, alarm: () => alarm, waits };
 }
 
 async function call(obj: InstanceType<typeof InboxObject>, method: string, path: string, token?: string, body?: unknown) {
@@ -237,6 +239,42 @@ describe('the inbox Durable Object', () => {
     await obj.alarm();
     assert.equal(rt.blobs.size, 0);
     assert.equal((await call(obj, 'GET', '/v1/cards/f1', owner)).status, 404);
+  });
+
+  it('retries an answer webhook from its alarm, after hibernation', async () => {
+    const realFetch = globalThis.fetch;
+    const realNow = Date.now;
+    const sent: string[] = [];
+    let status = 503;
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => { sent.push(String(init?.body)); return new NodeResponse(null, { status }); }) as typeof fetch;
+    try {
+      const rt = runtime();
+      let obj = rt.make();
+      const owner = await init(obj);
+      const created = (await (await call(obj, 'POST', '/v1/cards', owner, {
+        agent: 'bot', kind: 'system', title: 'Subscribe', system: { type: 'subscribe', webhook: { url: 'https://example.com/hook' } },
+      })).json()) as { card: { id: string } };
+      await call(obj, 'POST', `/v1/cards/${created.card.id}/answer`, owner, { values: { choice: 'approve' } });
+      await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 'bot', title: 'Ship it?' });
+      await call(obj, 'POST', '/v1/cards/c1/answer', owner, { comment: 'yes' });
+      await Promise.all(rt.waits);
+      assert.equal(sent.length, 1);
+      // The failed call moved the alarm to its first retry, five seconds on.
+      const retry = rt.alarm();
+      assert.ok(retry !== undefined && retry - Date.now() <= 5000 && retry - Date.now() > 4000, `alarm in ${retry === undefined ? 'never' : retry - Date.now()} ms`);
+      status = 200;
+      // Hibernation: the waiting call is in storage. The object reads the clock it wakes with.
+      Date.now = () => retry + 1;
+      obj = rt.make();
+      await obj.alarm();
+      assert.equal(sent.length, 2);
+      assert.equal((JSON.parse(sent[1]!) as { id: string }).id, (JSON.parse(sent[0]!) as { id: string }).id);
+      const state = (await (await call(obj, 'GET', '/v1/state', owner)).json()) as { states: Record<string, string> };
+      assert.equal(state.states['c1'], 'read');
+    } finally {
+      globalThis.fetch = realFetch;
+      Date.now = realNow;
+    }
   });
 });
 

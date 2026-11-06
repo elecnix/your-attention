@@ -53,16 +53,22 @@ export interface Webhook {
 
 /** Send a signed observe-only hook call to an external service over HTTPS. A failure never reaches the caller. */
 export async function deliverWebhook(hook: Webhook, payload: unknown, fetcher: typeof fetch = fetch): Promise<boolean> {
+  return (await postSigned(hook.url, hook.secret, { 'x-your-attention-hook': hook.hook }, payload, HOOKS[hook.hook].defaultTimeoutMs, fetcher)).ok;
+}
+
+/** POST a JSON body with its HMAC signature. The caller's headers go first, so they never replace the inbox's own.
+ * Returns whether the service answered 2xx, and why not. A failure never throws. */
+export async function postSigned(url: string, secret: string, headers: Record<string, string>, payload: unknown, timeoutMs: number, fetcher: typeof fetch = fetch): Promise<{ ok: boolean; reason?: string }> {
   const body = JSON.stringify(payload);
   try {
-    const res = await fetcher(hook.url, {
+    const res = await fetcher(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-your-attention-hook': hook.hook, 'x-your-attention-signature': await sign(hook.secret, body) },
+      headers: { ...headers, 'content-type': 'application/json', 'x-your-attention-signature': await sign(secret, body) },
       body,
-      signal: AbortSignal.timeout(HOOKS[hook.hook].defaultTimeoutMs),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    return res.ok;
-  } catch {
-    return false;
+    return res.ok ? { ok: true } : { ok: false, reason: `the webhook answered ${res.status}` };
+  } catch (e) {
+    return { ok: false, reason: `the webhook did not answer: ${(e as Error).name === 'TimeoutError' ? `no answer in ${timeoutMs / 1000} seconds` : (e as Error).message}`.slice(0, 300) };
   }
 }
