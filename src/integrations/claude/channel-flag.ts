@@ -28,13 +28,21 @@ export function psOptions(commandLine: string): string[] {
   return options;
 }
 
+/** The argument vector of what Linux keeps in /proc/<pid>/cmdline. A process that rewrote its title,
+ * as process.title does, leaves one word that holds the whole command line. */
+export function procArgs(raw: string): string[] {
+  const argv = raw.split('\0').filter((a) => a !== '');
+  if (argv.length > 1) return argv;
+  const line = argv[0];
+  return line ? [line.split(/\s+/)[0] ?? '', ...psOptions(line)] : [];
+}
+
 /** The argument vector of a process, the program first. Linux keeps it byte exact, separated by
  * NUL, and elsewhere ps prints the command line it joined with spaces, widened so a long one keeps
  * its last word. Undefined when the platform offers no way to read one. */
 export function parentArgs(pid: number): string[] | undefined {
   try {
-    const argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter((a) => a !== '');
-    if (argv.length) return argv;
+    return procArgs(fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8'));
   } catch { /* no /proc, as on macOS and Windows */ }
   try {
     const line = execFileSync('ps', ['-ww', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).trim();

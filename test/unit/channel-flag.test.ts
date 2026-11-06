@@ -1,7 +1,7 @@
 // Whether the Claude Code session that started this channel turned channel notifications on.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { devChannelEnabled, psOptions } from '../../src/integrations/claude/channel-flag.ts';
+import { devChannelEnabled, procArgs, psOptions } from '../../src/integrations/claude/channel-flag.ts';
 
 const claude = (words: string[]): string[] => ['/usr/local/bin/claude', ...words];
 
@@ -30,6 +30,13 @@ describe('the development-channels flag of the parent', () => {
     // ps loses the quotes, so the words of the prompt reach no option scan.
     assert.deepEqual(psOptions('claude -p why does --dangerously-load-development-channels server:your-attention drop answers'), ['-p']);
     assert.deepEqual(psOptions('claude why does --dangerously-load-development-channels=server:your-attention drop'), []);
+  });
+
+  it('reads the flag from the byte exact argument vector, and from one a process rewrote its title in', () => {
+    assert.deepEqual(procArgs('node\0script.mjs\0--flag\0'), ['node', 'script.mjs', '--flag']);
+    assert.deepEqual(procArgs('claude --dangerously-load-development-channels=server:your-attention\0'), ['claude', '--dangerously-load-development-channels=server:your-attention']);
+    assert.equal(devChannelEnabled(procArgs('claude --dangerously-load-development-channels=server:your-attention\0')), true);
+    assert.deepEqual(procArgs(''), []);
   });
 
   it('keeps scanning options a prompt has not started yet, whatever their values', () => {
