@@ -18,6 +18,8 @@ const CHANNEL_ARGS = ['--disable-warning=ExperimentalWarning', CLI, 'claude-chan
 const FLAG = '--dangerously-load-development-channels=server:your-attention';
 // A 60 second wait does not fit a test, so the channel reads its retry window from the environment.
 const RETRY_MS = 300;
+// herdr and ps are POSIX tools, and the fake herdr below is a shell script. Windows runs neither path.
+const posixOnly = process.platform === 'win32' ? 'herdr and ps are POSIX tools' : false;
 
 let h: Harness;
 before(async () => { h = await start(); });
@@ -80,7 +82,7 @@ function rawChannel(env: Record<string, string>) {
 }
 
 describe('the channel while a session cannot receive an answer', () => {
-  it('pushes again after a quiet retry window, then types the answer into the session pane', async () => {
+  it('pushes again after a quiet retry window, then types the answer into the session pane', { skip: posixOnly }, async () => {
     const SESSION = 'retry-session-1';
     const herdr = fakeHerdr('');
     const mcp = new McpClient({ name: 'test', version: '1' });
@@ -115,7 +117,7 @@ describe('the channel while a session cannot receive an answer', () => {
     }
   });
 
-  it('delivers the answer the person saved last, not the one it replaced', async () => {
+  it('delivers the answer the person saved last, not the one it replaced', { skip: posixOnly }, async () => {
     const SESSION = 'retry-session-3';
     const herdr = fakeHerdr('');
     const mcp = new McpClient({ name: 'test', version: '1' });
@@ -137,7 +139,7 @@ describe('the channel while a session cannot receive an answer', () => {
     }
   });
 
-  it('leaves the answer delivered and says on the card why the agent did not see it, when the pane holds a draft', async () => {
+  it('leaves the answer delivered and says on the card why the agent did not see it, when the pane holds a draft', { skip: posixOnly }, async () => {
     const SESSION = 'retry-session-2';
     const herdr = fakeHerdr('my own half-written message');
     const mcp = new McpClient({ name: 'test', version: '1' });
@@ -192,7 +194,7 @@ describe('the channel at startup', () => {
     }
   });
 
-  it('reports Channel off on the agent\'s presence when its session started without the flag', async () => {
+  it('reports Channel off on the agent\'s presence when its session started without the flag', { skip: posixOnly }, async () => {
     const SESSION = 'startup-session-2';
     const agent = `claude:${SESSION}`;
     const mcp = new McpClient({ name: 'test', version: '1' });
@@ -206,7 +208,7 @@ describe('the channel at startup', () => {
     }
   });
 
-  it('leaves the presence alone when the parent carries the flag', async () => {
+  it('leaves the presence alone when the parent carries the flag', { skip: posixOnly }, async () => {
     const SESSION = 'startup-session-3';
     const agent = `claude:${SESSION}`;
     // A parent process whose command line carries the flag, as Claude Code's does.
