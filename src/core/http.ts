@@ -549,20 +549,15 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
     if (a === 'cards') {
       if (method === 'POST' && !b) {
-<<<<<<< HEAD
         const input = await readJson<NewCard>(req, BODY_LIMIT.card);
         // A system card from a client asks the inbox for something, and the answer says what the inbox did.
         if (input?.kind === 'system') {
           const done = inbox.systemRequest(me, input);
           return 'secret' in done ? json(done, 201, { [ONCE_HEADER]: '1' }) : json(done, 200);
         }
-        return json(withWarning(publicCard(await inbox.postCardWithFiles(me, input))), 201);
-=======
-        const sent = await readJson<NewCard>(req, BODY_LIMIT.card);
-        const card = await inbox.postCardWithFiles(me, sent);
+        const card = await inbox.postCardWithFiles(me, input);
         // The reply names the tags the card took from the agent's defaults, so the agent knows what it inherited.
-        return json({ ...withWarning(publicCard(card)), inheritedTags: inbox.inheritedTags(me, sent) }, 201);
->>>>>>> 73ccf26 (Add card_tags, so every card an agent posts inherits its default tags)
+        return json({ ...withWarning(publicCard(card)), inheritedTags: inbox.inheritedTags(me, input) }, 201);
       }
       if (method === 'GET' && !b) return json(inbox.listCards(me));
       if (!b) return json({ error: 'not found' }, 404);

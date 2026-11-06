@@ -12,15 +12,10 @@ import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
-import { MAX_TAG_CHARS, MAX_TAGS } from './types.ts';
+import { MAX_TAGS } from './types.ts';
 import type {
-<<<<<<< HEAD
-  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
-=======
-  AgentEvent, Answer, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PersonPresence, PriorityLevel, Role, Settings, Template, Token,
->>>>>>> 73ccf26 (Add card_tags, so every card an agent posts inherits its default tags)
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -588,11 +583,7 @@ export class Inbox {
       broadcast: before?.broadcast,
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
-<<<<<<< HEAD
-      tags: cleanTags(input.tags),
-=======
       tags: mergedTags.tags,
->>>>>>> 73ccf26 (Add card_tags, so every card an agent posts inherits its default tags)
       follows: input.follows ?? before?.follows,
       followedBy: before?.followedBy,
       deliver: input.deliver ?? 'stream',

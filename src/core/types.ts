@@ -166,7 +166,6 @@ export interface Guidance {
   at: number;
 }
 
-<<<<<<< HEAD
 /** A tag value and how many cards carry it, as GET /v1/guidance counts them. */
 export interface TagValueCount {
   value: string;
@@ -177,7 +176,8 @@ export interface TagValueCount {
 export interface TagCount {
   key: string;
   values: TagValueCount[];
-=======
+}
+
 /** A default tag an agent keeps in the inbox: its value, and what set it, such as card_tags or YOUR_ATTENTION_TAGS. */
 export interface DefaultTag {
   value: string;
@@ -199,7 +199,6 @@ export interface DefaultTagsWrite {
   clear?: boolean;
   /** What sets these tags: card_tags by default, or YOUR_ATTENTION_TAGS from the pi launcher. */
   from?: string;
->>>>>>> 73ccf26 (Add card_tags, so every card an agent posts inherits its default tags)
 }
 
 export interface Settings {
