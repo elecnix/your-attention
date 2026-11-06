@@ -1191,7 +1191,7 @@ export class Inbox {
   }
 
   private checkGroupBy(groupBy: unknown): string {
-    const key = typeof groupBy === 'string' && groupBy.startsWith('tag:') ? groupBy.slice(4) : '';
+    const key = typeof groupBy === 'string' && groupBy.startsWith('tag:') ? groupBy.slice(4).trim() : '';
     if (!(groupBy === 'none' || groupBy === 'priority' || groupBy === 'agent' || (key.length >= 1 && key.length <= MAX_TAG_CHARS))) {
       throw new InboxError(400, 'groupBy must be none, priority, agent or tag:<key>');
     }

@@ -423,7 +423,7 @@ export function App() {
     h('label', { className: 'group-by' }, 'Group by ',
       h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); saveSettings({ groupBy: e.target.value }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
-        tagKeys.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
+        groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
     pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
     replied.length > 0 && group('Agent replied', replied, '', undefined, undefined, SECTION_ID.replied),
     groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),

@@ -86,7 +86,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   const toggleCollapse = (id: string) => {
     if (m.collapsed.has(id)) m.collapsed.delete(id); else m.collapsed.add(id);
     try { writeCollapsed(prefsFile, config.url, m.collapsed); } catch { /* the choice still holds for this run */ }
-    if (m.state) m.queue = buildQueue(m.state, m.groupBy, [], m.collapsed) as Queue;
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
     status(m.collapsed.has(id) ? 'Group collapsed.' : 'Group opened.');
     pick();
     schedule();
@@ -374,7 +374,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const had = fresh.some(([k, v]) => k === key && v === value);
     const next: [string, string][] = had ? fresh.filter(([k, v]) => !(k === key && v === value)) : [...fresh, [key, value]];
     pins = next;
-    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins) as Queue;
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
     status(had ? `Unpinned ${key}: ${value}.` : `Pinned ${key}: ${value} to the top.`, 'ok');
     api.call('PUT', '/v1/settings', { pins: next }).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
   };

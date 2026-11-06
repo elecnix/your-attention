@@ -92,7 +92,8 @@ export function listRows(m: Model, width: number): Row[] {
   const section = (title: string, cards: Card[], empty: string, sent: boolean, id?: string) => {
     const shut = id !== undefined && m.collapsed.has(id);
     rows.push({ spans: [] });
-    const head = `${title}${cards.length ? ` (${cards.length})` : ''}`;
+    // A heading can carry a tag key or value, which the agent wrote, so it reads through the same cleaner as a card's text.
+    const head = sanitize(`${title}${cards.length ? ` (${cards.length})` : ''}`);
     rows.push({
       spans: id === undefined ? [{ text: cut(m, head, width), style: st.header }] : [{ text: `${shut ? g.shut : g.open} `, style: st.accent }, { text: cut(m, head, width), style: st.header }],
       target: id === undefined ? undefined : `list:collapse:${id}`,
