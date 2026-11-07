@@ -47,6 +47,15 @@ describe('the development-channels flag of the parent', () => {
     assert.equal(devChannelEnabled(['claude', ...psOptions(line)]), true);
   });
 
+  it('reads a brace inside a settings string as text, so the flag after it still counts', () => {
+    const line = ['claude', '--settings', '{"a":"{"}', '--dangerously-load-development-channels', 'server:your-attention'].join(' ');
+    assert.equal(devChannelEnabled(['claude', ...psOptions(line)]), true);
+    const closing = ['claude', '--settings', '{"a":"}"}', '--dangerously-load-development-channels', 'server:your-attention'].join(' ');
+    assert.equal(devChannelEnabled(['claude', ...psOptions(closing)]), true);
+    const escaped = ['claude', '--settings', '{"a":"\\"} {","b":1}', '--dangerously-load-development-channels', 'server:your-attention'].join(' ');
+    assert.equal(devChannelEnabled(['claude', ...psOptions(escaped)]), true);
+  });
+
   it('keeps scanning options a prompt has not started yet, whatever their values', () => {
     assert.deepEqual(psOptions('claude --model opus --dangerously-load-development-channels=server:your-attention'), ['--model', 'opus', '--dangerously-load-development-channels=server:your-attention']);
     assert.deepEqual(psOptions('claude --dangerously-load-development-channels server:your-attention -p hi'), ['--dangerously-load-development-channels', 'server:your-attention', '-p']);
