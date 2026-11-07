@@ -11,6 +11,18 @@ const OURS = 'server:your-attention';
  * ps joins the arguments with spaces and loses their quoting, so a prompt reads as a run of words.
  * Claude Code takes its options first, and its prompt after `-p` or as the first word that opens no
  * dash, so the scan reaches no word of a prompt. */
+/** The index of the word that closes the JSON value opened at `from`, or the last word when it never closes. */
+function jsonEnd(words: readonly string[], from: number): number {
+  let depth = 0;
+  for (let i = from; i < words.length; i++) {
+    for (const ch of words[i] ?? '') {
+      if (ch === '{') depth++;
+      else if (ch === '}' && --depth <= 0) return i;
+    }
+  }
+  return words.length - 1;
+}
+
 export function psOptions(commandLine: string): string[] {
   const words = commandLine.trim().split(/\s+/);
   const options: string[] = [];
@@ -23,7 +35,18 @@ export function psOptions(commandLine: string): string[] {
     // An option's value is the next word when it opens no dash. The development-channels flag
     // reads its own value here too, so `--flag server:your-attention` counts.
     const next = words[i + 1];
-    if (next !== undefined && !next.startsWith('-')) { options.push(next); i++; }
+    if (next !== undefined && !next.startsWith('-')) {
+      // `ps` joins the arguments with spaces and loses their quoting, so a value that opens a brace is a JSON
+      // argument that splits into several words. It ends where its braces close.
+      if (next.startsWith('{')) {
+        const end = jsonEnd(words, i + 1);
+        options.push(words.slice(i + 1, end + 1).join(' '));
+        i = end;
+      } else {
+        options.push(next);
+        i++;
+      }
+    }
   }
   return options;
 }
