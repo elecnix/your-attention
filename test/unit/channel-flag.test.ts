@@ -41,6 +41,12 @@ describe('the development-channels flag of the parent', () => {
     assert.deepEqual(procArgs(''), []);
   });
 
+  it('reads the flag after a settings value that ps split at a space', () => {
+    // `ps` joins the arguments with spaces, so a settings JSON that holds a quoted command splits into several words.
+    const line = ['claude', '--settings', '{"apiKeyHelper":"\"/Users/me/prizmal\" auth token","model":"core[1m]"}', '--resume', '8d935d18', '--allow-dangerously-skip-permissions', '--dangerously-load-development-channels', 'server:your-attention'].join(' ');
+    assert.equal(devChannelEnabled(['claude', ...psOptions(line)]), true);
+  });
+
   it('keeps scanning options a prompt has not started yet, whatever their values', () => {
     assert.deepEqual(psOptions('claude --model opus --dangerously-load-development-channels=server:your-attention'), ['--model', 'opus', '--dangerously-load-development-channels=server:your-attention']);
     assert.deepEqual(psOptions('claude --dangerously-load-development-channels server:your-attention -p hi'), ['--dangerously-load-development-channels', 'server:your-attention', '-p']);
