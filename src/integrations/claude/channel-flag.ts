@@ -11,12 +11,22 @@ const OURS = 'server:your-attention';
  * ps joins the arguments with spaces and loses their quoting, so a prompt reads as a run of words.
  * Claude Code takes its options first, and its prompt after `-p` or as the first word that opens no
  * dash, so the scan reaches no word of a prompt. */
-/** The index of the word that closes the JSON value opened at `from`, or the last word when it never closes. */
+/** The index of the word that closes the JSON value opened at `from`, or the last word when it never closes.
+ * A brace inside a string is text, not nesting, so the scan skips the quoted runs of the value. */
 function jsonEnd(words: readonly string[], from: number): number {
   let depth = 0;
+  let inString = false;
+  let escaped = false;
   for (let i = from; i < words.length; i++) {
     for (const ch of words[i] ?? '') {
-      if (ch === '{') depth++;
+      if (escaped) { escaped = false; continue; }
+      if (inString) {
+        if (ch === '\\') escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === '{') depth++;
       else if (ch === '}' && --depth <= 0) return i;
     }
   }
