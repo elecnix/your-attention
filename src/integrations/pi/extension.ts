@@ -15,6 +15,9 @@ import { cardTools } from '../tools.ts';
 // stdout belongs to pi, so a stream that stops for good says why on stderr instead of vanishing.
 const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
 
+/** What a session is asked when a run settles with no open card, once the person opts in with YOUR_ATTENTION_REQUIRE_CARD=1. */
+const NO_CARD = '[your-attention] This session has no open card. Post one with card_post that says what you are working on and what you need from the person.';
+
 // The parts of pi's ExtensionAPI this extension uses.
 interface PiContext {
   isIdle(): boolean;
@@ -27,6 +30,7 @@ interface ToolResult {
 interface PiApi {
   on(event: 'session_start' | 'session_shutdown', handler: (event: unknown, ctx: PiContext) => void | Promise<void>): void;
   on(event: 'context', handler: (event: { messages: unknown[] }, ctx: PiContext) => void | Promise<void>): void;
+  on(event: 'agent_settled', handler: (event: { aborted?: boolean }, ctx: PiContext) => void | Promise<void>): void;
   registerTool(tool: {
     name: string;
     label: string;
@@ -92,6 +96,28 @@ export default function yourAttention(pi: PiApi): void {
   pi.on('session_shutdown', () => {
     stop?.abort();
     stop = undefined;
+  });
+
+  // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
+  // card. The run the request itself starts settles too, so the request skips the next settle rather than looping.
+  let asked = false;
+  pi.on('agent_settled', async (_event, ctx) => {
+    if (!inbox || process.env['YOUR_ATTENTION_REQUIRE_CARD'] !== '1') return;
+    if (asked) {
+      asked = false;
+      return;
+    }
+    if (!ctx.isIdle()) return;
+    let open = false;
+    try {
+      open = (await inbox.list()).some((c) => c.card.agent === agent && c.state === 'open');
+    } catch (e) {
+      log('could not read the session cards:', (e as Error).message);
+      return;
+    }
+    if (open) return;
+    asked = true;
+    pi.sendUserMessage(NO_CARD);
   });
 
   pi.on('context', (event) => {
