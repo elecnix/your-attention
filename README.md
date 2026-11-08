@@ -132,6 +132,14 @@ claude() {
 } }
 ```
 
+**A card from a session that stops without one (optional).** With `YOUR_ATTENTION_REQUIRE_CARD=1` in the session's environment, this hook gives the model one request to post a card when it stops with none open, and names the `card_post` call to make. Claude Code marks the stop that request causes with `stop_hook_active`, so the hook does nothing then. A session that ignores the request gets another one at its next stop. Leave the variable out for a background agent that should run without a card.
+
+```json
+{ "hooks": {
+  "Stop": [{ "hooks": [{ "type": "command", "command": "your-attention claude-hook turn-end", "timeout": 10 }] }]
+} }
+```
+
 #### pi
 
 ```sh
@@ -145,6 +153,8 @@ your-attention pi --tags repo=acme/api,topic=billing -- [pi args]
 ```
 
 Every card the session posts inherits them, under the tags on the card itself. The agent reads or changes them with the `card_tags` tool, so a compaction loses nothing.
+
+With `YOUR_ATTENTION_REQUIRE_CARD=1` in its environment, a session gets one request for a card when a run settles and none of its cards is open. The extension sends the request as a user message and skips the run that request starts, so an agent that ignores it is not asked twice in a row. Leave the variable out for a background agent that should run without a card.
 
 #### OpenCode
 
