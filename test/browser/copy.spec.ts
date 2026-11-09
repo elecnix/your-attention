@@ -81,14 +81,13 @@ test('a drawn diagram has no Copy button, and its source view does', async ({ pa
   await expect(page.locator('.card-text').getByRole('button', { name: 'Copy', exact: true })).toHaveCount(0);
 });
 
-test('inline code copies on a click in the text, the recommendation, a reply, TextContent and a field label', async ({ page, context }) => {
+test('inline code copies on a click in the text, the recommendation, TextContent and a field label', async ({ page, context }) => {
   await permit(context);
   await inbox.agent.post({ id: 'inline', agent: 's-inline', title: 'Inline code', priority: 'now',
     text: 'Type `approve the merge` in my pane.', recommendation: 'Run `npm ci` first.',
     body: 'root = Card([t, f])\nt = TextContent("Or run `your-attention open`.")\nf = Form("f", none, [fc])\nnone = Buttons([])\nfc = FormControl("Name for `--branch`", Input("branch", "Branch"))' });
-  await inbox.agent.reply('inline', 'Use `git fetch` then.');
   await openCard(page, 'Inline code');
-  for (const [where, text] of [['.card-text', 'approve the merge'], ['.focus-card', 'npm ci'], ['.reply-msg', 'git fetch'], ['.card-body', 'your-attention open'], ['.card-body', '--branch']] as const) {
+  for (const [where, text] of [['.card-text', 'approve the merge'], ['.focus-card', 'npm ci'], ['.card-body', 'your-attention open'], ['.card-body', '--branch']] as const) {
     const code = page.locator(where).locator('code', { hasText: text }).first();
     await code.hover();
     await expect(code).toHaveAttribute('title', 'Click to copy');

@@ -9,7 +9,7 @@ export interface CardTool {
 export const cardTools: CardTool[] = [
   {
     name: 'card_post',
-    description: 'Ask the person for a decision on a card in their inbox. Returns at once: the answer arrives later, so keep working. State the goal, the options you weighed, the evidence, and your recommendation. Put each question next to the field that answers it, so the person answers while the question is in mind: never list questions in the text with the answers at the bottom. One question uses options. Two or more use questions, each with its own text and options.',
+    description: 'Ask the person for a decision on a card in their inbox. Returns at once: the answer arrives later, so keep working. State the goal, the options you weighed, the evidence, and your recommendation. Put each question next to the field that answers it, so the person answers while the question is in mind: never list questions in the text with the answers at the bottom. One question uses options. Two or more use questions, each with its own text and options. To follow up on an earlier card, post a new card with follows set to the id of the earlier card: there is no reply to a card.',
     schema: {
       type: 'object',
       properties: {
@@ -43,7 +43,7 @@ export const cardTools: CardTool[] = [
           }, required: ['pane', 'text'] },
         },
         priority: { type: 'string', enum: ['now', 'soon', 'later'], description: 'now: blocks your work. soon: needed before you finish. later: can wait.' },
-        follows: { type: 'string', description: 'The id of the card this one follows up on.' },
+        follows: { type: 'string', description: 'The id of the card this one follows up on. A follow-up is always a new card with this field, and the inbox links the two cards both ways.' },
         body: { type: 'string', description: [
           'Optional OpenUI Lang source for a card that needs other components. Place a saved widget with a line of its own: `pr = widget pull-request {"title": "Add stop"}`, or `widget pull-request@2` for one version.',
           'Questions with options and text need no body: use questions. When a question needs a table or a widget beside it, give the body its own forms, between TextContent and Table statements. Give each form `Buttons([])`. The page adds a comment box, Send answer and Skip below every card, and one send carries every form, so add no general comment field or send button of your own. When you ask several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
@@ -132,11 +132,6 @@ export const cardTools: CardTool[] = [
       },
       required: ['name', 'title'],
     },
-  },
-  {
-    name: 'card_reply',
-    description: 'Reply to the person on one of your cards. Use it only when they asked you a question there.',
-    schema: { type: 'object', properties: { card_id: { type: 'string' }, text: { type: 'string' } }, required: ['card_id', 'text'] },
   },
   {
     name: 'card_close',

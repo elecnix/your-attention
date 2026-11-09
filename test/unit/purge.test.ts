@@ -45,23 +45,20 @@ describe('the purge of old cards', () => {
     assert.equal(inbox.search('narwhal', 20, true).length, 1);
   });
 
-  it('deletes an unanswered card 30 days after its last revision or reply, and never an answered card on show', async () => {
+  it('deletes an unanswered card 30 days after its last revision, and never an answered card on show', async () => {
     const { inbox, clock } = setup();
     inbox.postCard(agent, { id: 'waiting', agent: 's1', title: 'q' });
     inbox.postCard(agent, { id: 'revised', agent: 's1', title: 'q' });
-    inbox.postCard(agent, { id: 'replied', agent: 's1', title: 'q' });
     inbox.postCard(agent, { id: 'answered', agent: 's1', title: 'q' });
     await inbox.answer('answered', {});
     clock.advance(20 * DAY);
     inbox.postCard(agent, { id: 'revised', agent: 's1', title: 'q, again' });
-    inbox.reply(agent, 'replied', 'still waiting');
     clock.advance(PURGE_AFTER_MS - 20 * DAY);
     assert.deepEqual(await inbox.purge(), { removed: 1 });
     assert.equal(exists(inbox, 'waiting'), false);
     assert.equal(exists(inbox, 'revised'), true);
-    assert.equal(exists(inbox, 'replied'), true);
     clock.advance(20 * DAY);
-    assert.deepEqual(await inbox.purge(), { removed: 2 });
+    assert.deepEqual(await inbox.purge(), { removed: 1 });
     clock.advance(365 * DAY);
     assert.deepEqual(await inbox.purge(), { removed: 0 });
     assert.equal(exists(inbox, 'answered'), true, 'the person has not cleared it');

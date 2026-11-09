@@ -28,7 +28,6 @@ describe('the state sends card summaries', () => {
   it('sends what the queue needs and none of the card\'s content', async () => {
     const { call, agent, owner, state } = await setup();
     await call('POST', '/v1/cards', agent, { id: 'c1', agent: 's', title: 'Merge?', text: `See [[c0]] first. ${'x'.repeat(2000)}`, body: 'root = Card([a])\na = TextContent("secret plan")', html: '<p>big</p>', tags: { topic: 'release' }, origin: { name: 'release agent', harness: 'pi', cwd: '/home/me/repo' } });
-    await call('POST', '/v1/cards/c1/reply', agent, { text: 'One more thing.' });
     await call('POST', '/v1/cards/c1/answer', owner, { values: { choice: 'yes' }, comment: 'go ahead' });
     const s = await state();
     const c = s.cards[0]!;
@@ -37,11 +36,8 @@ describe('the state sends card summaries', () => {
     assert.equal(c.preview?.length, 300);
     assert.deepEqual(c.tags, { topic: 'release' });
     assert.deepEqual(c.origin, { name: 'release agent', harness: 'pi' });
-    // The answer counts as seeing the reply, and the summary keeps the time so the page can still show it.
-    assert.equal(c.unseenReplies, undefined);
-    assert.ok(c.replyAt);
     const sent = JSON.stringify(s);
-    for (const content of ['secret plan', '<p>big</p>', 'One more thing.', 'go ahead', '/home/me/repo', '"yes"']) assert.equal(sent.includes(content), false, content);
+    for (const content of ['secret plan', '<p>big</p>', 'go ahead', '/home/me/repo', '"yes"']) assert.equal(sent.includes(content), false, content);
     assert.equal(s.states['c1'], 'answered');
     assert.ok(s.answers['c1']?.savedAt);
   });

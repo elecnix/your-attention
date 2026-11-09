@@ -43,11 +43,4 @@ describe('pinned tag values', () => {
     assert.deepEqual(ids(q.pinned[0]?.items ?? []), ['a', 'b']);
     assert.deepEqual(q.groups.map(([title, items, tag]) => [title, ids(items), tag]), [['search', ['c'], ['topic', 'search']], ['No topic', ['d', 'e'], undefined]]);
   });
-
-  it('moves a card with an agent reply into its pinned group', () => {
-    const replied = card('r', { topic: 'billing' }, { replies: [{ text: 'more', at: 5, seenAt: null }] });
-    const q = buildQueue(state([...cards, replied]), 'none', [['topic', 'billing']]);
-    assert.ok(ids(q.pinned[0]?.items ?? []).includes('r'));
-    assert.deepEqual(ids(q.replied), []);
-  });
 });

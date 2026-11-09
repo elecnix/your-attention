@@ -210,7 +210,7 @@ export class CardView {
       return open;
     };
 
-    // The queue reads the card's summary, which has its reply and answer states.
+    // The queue reads the card's summary, which has its state.
     const sum = q.byId[card.id];
     const state = sum ? q.st(sum) : card.closed ? 'closed' : 'open';
     const a = this.saved;
@@ -253,13 +253,18 @@ export class CardView {
     }
     const followed = card.followedBy ? q.byId[card.followedBy] : undefined;
     if (followed) { const t = `card:${followed.id}`; md.onLink?.(t); doc.para([{ text: 'Followed by ', style: st.dim }, { text: sanitize(followed.title), style: { ...st.link, ...(this.focus === t ? { inverse: true } : {}) }, target: t }]); linkStops(); }
-    for (const r of card.replies.slice().reverse()) {
+    // Replies agents sent before linked follow-ups stay readable in a fold. No new reply can appear.
+    if (card.replies.length) {
       doc.gap();
-      doc.para([{ text: `${g.reply} Agent reply · ${time(r.at)}`, style: st.bold }]);
-      markdown(doc, r.text, md);
-      linkStops();
+      if (toggle('meta:replies', 'Replies from before linked follow-ups')) {
+        for (const r of card.replies.slice().reverse()) {
+          doc.para([{ text: `Agent reply · ${time(r.at)}`, style: st.bold }]);
+          markdown(doc, r.text, md);
+          linkStops();
+        }
+      }
     }
-    if (a && state !== 'reply') { doc.gap(); doc.para([{ text: 'Your answer: ', style: { ...st.ok, bold: true } }, { text: sanitize(describe(card, a)), style: st.ok }]); }
+    if (a) { doc.gap(); doc.para([{ text: 'Your answer: ', style: { ...st.ok, bold: true } }, { text: sanitize(describe(card, a)), style: st.ok }]); }
     if (this.notice) { doc.gap(); doc.para([{ text: sanitize(this.notice.text), style: this.notice.style === 'warn' ? st.error : st.ok }]); }
 
     doc.gap();

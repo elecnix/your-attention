@@ -644,14 +644,21 @@ test('the card shows its rough age at the top right, and the age moves on with t
   expect(meta - right).toBeLessThan(2);
 });
 
-test('an agent reply draws its Markdown: bold, links and lists', async ({ page }) => {
+test('a reply stored before linked follow-ups draws its Markdown inside a fold that starts closed', async ({ page }) => {
   await inbox.agent.post({ id: 'reply-md', agent: 's-reply-md', title: 'Reply with Markdown', priority: 'now' });
-  await inbox.agent.reply('reply-md', '**Deployed.** See [the run](https://example.com/run).\n\n- one\n- two');
+  inbox.seedReplies('reply-md', ['**Deployed.** See [the run](https://example.com/run).\n\n- one\n- two']);
   await inbox.open(page);
   await page.locator('.q', { hasText: 'Reply with Markdown' }).click();
-  const reply = page.locator('.focus-card .reply-msg');
+  const fold = page.locator('.focus-card details.earlier-replies');
+  await expect(fold.locator('summary')).toHaveText('Replies from before linked follow-ups');
+  await expect(fold).not.toHaveAttribute('open', '');
+  await fold.locator('summary').click();
+  const reply = fold.locator('.reply-msg');
   await expect(reply.locator('strong', { hasText: 'Deployed.' })).toBeVisible();
   await expect(reply.locator('a[href="https://example.com/run"]')).toHaveText('the run');
   await expect(reply.locator('li')).toHaveCount(2);
   await expect(reply).not.toContainText('**');
+  // Nothing in the queue or on the card offers an answer to a reply.
+  await expect(page.locator('nav.queue h3', { hasText: 'Agent replied' })).toHaveCount(0);
+  await expect(page.locator('.follow-up')).toHaveCount(0);
 });

@@ -51,14 +51,6 @@ describe('collapsed groups', () => {
     assert.equal(q.groupOf['a'], 'pin: topic: billing');
   });
 
-  it('passes over Agent replied when that section is collapsed', () => {
-    const replied = card('r', {}, { replies: [{ text: 'more', at: 5, seenAt: null }] });
-    const q = buildQueue(state([...cards, replied]), 'none', [], new Set([SECTION_ID.replied]));
-    assert.deepEqual(ids(q.order), ids(cards));
-    assert.deepEqual([...q.hidden], ['r']);
-    assert.equal(q.groupOf['r'], SECTION_ID.replied);
-  });
-
   it('names the section of every card, so the terminal key can collapse the group on screen', () => {
     const done = card('s', {}, { closed: { kind: 'retracted', at: 9, outcome: 'No longer needed.' } });
     const s = state([...cards, done]);

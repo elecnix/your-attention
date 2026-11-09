@@ -253,15 +253,15 @@ describe('your-attention tui', () => {
     }
   });
 
-  it('shows a new card and an agent reply live, without a restart', async () => {
+  it('shows a new card and a card that follows it live, without a restart', async () => {
     const t = tui();
     await t.waitFor('Your attention');
     await t.waitFor('Inbox connected');
     await post({ id: 'live', agent: 's-live', title: 'Arrived while open', priority: 'now', text: 'Posted after the client started.' });
     await t.waitFor('Arrived while open');
     await t.waitFor('new');
-    await agent.reply('live', 'One more detail from the agent.');
-    await t.waitFor('Agent replied');
+    await post({ id: 'live-next', agent: 's-live', title: 'The follow-up card', priority: 'now', follows: 'live' });
+    await t.waitFor('The follow-up card');
     await t.stop();
   });
 

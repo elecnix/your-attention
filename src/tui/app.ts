@@ -227,7 +227,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const stillPinned = q.pending.find((c) => c.id === pinned);
     // A card in a collapsed group stays out of sight until the person picks it, so the queue opens a group's first card only.
     const inSight = (cards: CardSummary[]) => cards.find((c) => !q.hidden.has(c.id));
-    const current = m.cleared ? null : (focus ? q.byId[focus] : undefined) ?? stillPinned ?? inSight(q.replied) ?? inSight(q.pending) ?? null;
+    const current = m.cleared ? null : (focus ? q.byId[focus] : undefined) ?? stillPinned ?? inSight(q.pending) ?? null;
     if (focus && !q.byId[focus]) focus = null;
     pinned = current ? current.id : null;
     if (current?.id !== m.current?.id) { m.reveal = true; m.revealList = true; if (m.zone === 'card' && !current) m.zone = 'list'; }
@@ -253,8 +253,6 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     view.earlier = earlier ? { card: earlier.card, answer: earlier.answer } : undefined;
     m.view = view;
     if (m.entering) settle();
-    // A reply counts as seen when the person acts on the card, not when the card is on screen: a reply they scrolled past
-    // stays under "Agent replied" until they dismiss the card, reply to it, or change their answer.
   }
 
   /** Act on a waiting Enter, once the card on screen has changed or loaded. */

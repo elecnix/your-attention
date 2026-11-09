@@ -222,7 +222,6 @@ export class Client {
   guidance(): Promise<Guidance & { widgets?: string; tags?: TagCount[] }> { return this.call('GET', '/v1/guidance'); }
   /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. */
   proposeGuidance(text: string, agent?: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text, ...(agent ? { agent } : {}) }); }
-  reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
   search(q: string, opts: { answered?: boolean; limit?: number } = {}): Promise<{ card: Card; answer?: Answer }[]> {

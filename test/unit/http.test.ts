@@ -62,7 +62,6 @@ describe('http', () => {
       await call('POST', '/v1/cards', { token: agent, body: { id: 'c1', agent: 's1', title: 'q' } }),
       await call('GET', '/v1/cards/c1', { token: agent }),
       await call('GET', '/v1/cards', { token: agent }),
-      await call('POST', '/v1/cards/c1/reply', { token: agent, body: { text: 'more' } }),
       await call('POST', '/v1/cards/c1/claim', { token: agent, body: { agent: 's2' } }),
       await call('POST', '/v1/cards/c1/close', { token: agent, body: { kind: 'retracted', outcome: 'x' } }),
     ];

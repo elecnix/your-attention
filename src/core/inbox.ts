@@ -92,7 +92,7 @@ export const DEFAULT_PRIORITIES: PriorityLevel[] = [
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
 /** The version of `DEFAULT_GUIDANCE`. It moves whenever that text changes, so a client reads the words it has not seen. */
-export const DEFAULT_GUIDANCE_VERSION = 3;
+export const DEFAULT_GUIDANCE_VERSION = 4;
 export const DEFAULT_GUIDANCE = [
   'On a card, "you" is the person who reads it. Write about yourself in the third person, as "this agent" or the name in `from`, never "I" or "we", so the person always knows who acts.',
   'Write each card so the person can answer it without opening the session.',
@@ -108,6 +108,7 @@ export const DEFAULT_GUIDANCE = [
   'Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click.',
   'When an action needs the person\'s own words in a session, post the sentence as an approval on the card instead of asking the person to type it there.',
   'A card title is one line of plain text: no Markdown and no links. Name the thing there, as "PR #93 — an empty list no longer looks like a success". Put the link in `text`, or in a field label in the body: both read inline Markdown.',
+  'To follow up on a card, post a new card with `follows: "<card id>"`. The inbox links the two cards both ways, and there is no reply to a card.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
@@ -126,8 +127,6 @@ export const MAX_CARD_BYTES = 256 * 1024;
 export const MAX_SOURCE_BYTES = 64 * 1024;
 export const MAX_FROM_CHARS = 80;
 export const MAX_VERSIONS = 50;
-export const MAX_REPLY_BYTES = 4096;
-export const MAX_REPLIES = 200;
 export const MAX_WEBHOOKS = 5;
 export const MAX_SUBSCRIPTIONS = 20;
 const MAX_WEBHOOK_HEADERS = 10;
@@ -600,7 +599,7 @@ export class Inbox {
     };
     // The inbox's own system cards quote an agent's words, such as proposed guidance, and the page shows a diagram there as its source.
     if (!this.clientChecks && (kind !== 'system' || caller.token !== '')) requireChecked(findDiagrams(card), checked);
-    // Replies and history have their own caps, so a card with many replies can still be revised.
+    // History has its own cap, and the replies of older cards are stored data the card cap leaves out.
     const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined })).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
     this.store.put('cards', id, card);
@@ -1470,7 +1469,7 @@ export class Inbox {
 
   /** The person dismisses a card: it closes without the agent hearing anything, and the form values and the comment on
    * screen are recorded with the time, even when both are empty. No answer is stored, so no stream receives an event, and
-   * a revision or reply the agent sends later is saved but leaves the card in Sent. Only the owner reads the draft. */
+   * a revision the agent sends later is saved but leaves the card in Sent. Only the owner reads the draft. */
   dismiss(caller: Caller, id: string, input: { values?: unknown; comment?: unknown } = {}): Card {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner dismisses a card');
     const card = this.getCard(id);
@@ -1479,36 +1478,7 @@ export class Inbox {
     // of the record. The comment is the person's own words about the card, so it stays.
     const values = card.kind === 'secret' || !input.values || typeof input.values !== 'object' || Array.isArray(input.values)
       ? {} : input.values as Record<string, unknown>;
-    // Dismissing is acting on the card, so its agent replies count as seen.
-    this.see(card);
     return this.closeAs(card, 'dismissed', 'Nothing was sent to the agent.', { values, comment: String(input.comment ?? '').trim(), at: this.now() });
-  }
-
-  /** The agent replies on its card. The card returns to the person's queue. */
-  reply(caller: Caller, id: string, text: string): Card {
-    const card = this.owned(caller, id);
-    const clean = String(text || '').trim();
-    if (!clean) throw new InboxError(400, 'text is required');
-    if (clean.length > MAX_REPLY_BYTES) throw new InboxError(413, `a reply must be at most ${MAX_REPLY_BYTES} characters`);
-    if (card.replies.length >= MAX_REPLIES) throw new InboxError(400, `a card takes at most ${MAX_REPLIES} replies`);
-    const next: Card = { ...card, archivedAt: undefined, replies: [...card.replies, { text: clean, at: this.now(), seenAt: null }] };
-    this.store.put('cards', id, next);
-    this.emit({ type: 'change', card: id });
-    return next;
-  }
-
-  /** Mark each agent reply on the card as seen, once the person acts on it: answers it, dismisses it, or sends a follow-up. */
-  private see(card: Card): void {
-    const current = this.getCard(card.id);
-    if (!current.replies.some((r) => !r.seenAt)) return;
-    const now = this.now();
-    this.store.put('cards', card.id, { ...current, replies: current.replies.map((r) => ({ ...r, seenAt: r.seenAt ?? now })) });
-  }
-
-  /** The person marked the card's replies seen without acting on it, as a front-end other than the page may offer. */
-  seen(id: string): void {
-    this.see(this.getCard(id));
-    this.emit({ type: 'change', card: id });
   }
 
   /** A successor agent takes over a card, and with it any answer not yet delivered. */
@@ -1578,8 +1548,6 @@ export class Inbox {
     this.store.put('answers', id, answer);
     this.store.index(id, `${searchText(card)}\n${answer.comment}`);
     this.usage.record('answers');
-    // An answer is acting on the card, so its agent replies count as seen.
-    this.see(card);
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
@@ -2094,7 +2062,7 @@ export class Inbox {
   }
 
   /** Everything a page needs to draw the inbox. */
-  /** Clear the cards you dealt with: answered, retracted or closed, with no reply you have not seen. Search still finds them. */
+  /** Clear the cards you dealt with: answered, retracted or closed. Search still finds them. */
   archive(caller: Caller): { archived: number } {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner clears the inbox');
     const now = this.now();
@@ -2104,7 +2072,6 @@ export class Inbox {
       const answer = this.store.get<Answer>('answers', card.id);
       const s = cardState(card, answer);
       if (!['closed', 'answered', 'delivered', 'read'].includes(s)) continue;
-      if (card.replies.some((r) => !r.seenAt && (!answer || r.at > answer.savedAt))) continue;
       this.store.put('cards', card.id, { ...card, archivedAt: now });
       archived++;
     }
@@ -2152,13 +2119,13 @@ export class Inbox {
   }
 
   /** The cards the purge may delete, oldest first, each with the time its 30 days start: a cleared card from when the
-   * person cleared it, and a card nobody answered from its last revision or agent reply. An answered card on show stays.
+   * person cleared it, and a card nobody answered from its last revision. An answered card on show stays.
    * It reads the summaries and the oldest PURGE_BATCH cleared rows: a pass deletes no more, and the later rows are newer.
    * So its time follows the cards on show, never the cleared ones or the size of their text. */
   private purgeQueue(): { id: string; since: number }[] {
     const queue = this.store.first<ClearedCard>('cleared', PURGE_BATCH).map((c) => ({ id: c.id, since: c.archivedAt }));
     for (const s of this.store.list<CardSummary>('summaries')) {
-      if (!s.answer) queue.push({ id: s.id, since: Math.max(s.updatedAt, s.replyAt ?? 0) });
+      if (!s.answer) queue.push({ id: s.id, since: s.updatedAt });
     }
     return queue.sort((a, b) => a.since - b.since);
   }

@@ -605,7 +605,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           owner();
           return json(publicCard(inbox.dismiss(me, b, { values: body['values'], comment: body['comment'] })));
         case 'reply':
-          return json(publicCard(inbox.reply(me, b, String(body['text'] ?? ''))));
+          // Agents no longer reply on a card: a follow-up is a new card that follows this one.
+          return json({ error: `agent replies are gone: post a new card with card_post and follows: "${b}"` }, 410);
         case 'ack':
           return json(inbox.ack(me, b));
         case 'patch':
@@ -614,8 +615,6 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(publicCard(inbox.setStatus(me, b, String(body['status'] ?? ''))));
         case 'claim':
           return json(publicCard(inbox.claim(me, b, String(body['agent'] ?? ''))));
-        case 'seen':
-          owner(); inbox.seen(b); return json({ ok: true });
         case 'draw-fault':
           return json(publicCard(inbox.drawFault(me, b, body)));
         case 'force':

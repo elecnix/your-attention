@@ -13,7 +13,7 @@ import { drawFrame, listWidth, settleEnter, type Model } from '../../src/tui/vie
 const card = (id: string, extra: Partial<Card> = {}): Card => ({ id, agent: `a-${id}`, kind: 'ask', title: `Card ${id}`, priority: 'now', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, replies: [], ...extra });
 
 function model(width: number, height: number, caps: Caps = { color: 3, unicode: true, hyperlinks: true }): Model {
-  const cards = [card('a'), card('b', { priority: 'later' }), card('c'), card('d', { replies: [{ text: 'more', at: 5, seenAt: null }] })];
+  const cards = [card('a'), card('b', { priority: 'later' }), card('c'), card('d')];
   const answer = { card: 'c', version: 1, values: {}, comment: '', delivery: 'default' as const, savedAt: 3, deliveredAt: 4, readAt: null, forcedAt: null, previous: [] };
   // The state has the summaries, and the card on screen is whole.
   const state: InboxState = {
@@ -69,14 +69,14 @@ describe('the frame', () => {
   it('lists each section with a count, each card with a symbol and its level in words, and marks the open card', () => {
     const f = drawFrame(model(100, 30));
     const rows = Array.from({ length: 30 }, (_, y) => f.grid.row(y).slice(0, 34).trimEnd());
-    assert.ok(rows.includes('▾ Agent replied (1)'), rows.join('\n'));
-    assert.ok(rows.includes('▾ Waiting for you (2)'));
+    assert.ok(rows.includes('▾ Waiting for you (3)'), rows.join('\n'));
+    assert.ok(!rows.some((r) => r.includes('Agent replied')));
     assert.ok(rows.some((r) => r.startsWith('▾ Outbox: not read by the agent')));;
-    assert.ok(rows.some((r) => r === '  ↩ now   Card d'));
+    assert.ok(rows.some((r) => r === '  ● now   Card d'));
     assert.ok(rows.some((r) => r === '▶ ◉ now   Card a'));
     assert.ok(rows.some((r) => r === '  ● later Card b new'));
     assert.ok(rows.some((r) => r === '  ◑ Card c'));
-    assert.deepEqual(f.listCards, ['d', 'a', 'b', 'c']);
+    assert.deepEqual(f.listCards, ['a', 'd', 'b', 'c']);
     const hit = f.hits.find((h) => h.target === 'list:b');
     assert.ok(hit && f.grid.row(hit.y).includes('Card b'));
   });
@@ -87,10 +87,11 @@ describe('the frame', () => {
     m.queue = buildQueue(m.state!, 'none', [], m.collapsed);
     const f = drawFrame(m);
     const rows = Array.from({ length: 30 }, (_, y) => f.grid.row(y).slice(0, 34).trimEnd());
-    assert.ok(rows.includes('▸ Waiting for you (2)'), rows.join('\n'));
+    assert.ok(rows.includes('▸ Waiting for you (3)'), rows.join('\n'));
     assert.equal(f.listCards.includes('a'), false);
     assert.equal(f.listCards.includes('b'), false);
-    assert.deepEqual(f.listCards, ['d', 'c']);
+    assert.equal(f.listCards.includes('d'), false);
+    assert.deepEqual(f.listCards, ['c']);
     assert.ok(f.hits.some((h) => h.target === 'list:collapse:none: Waiting for you'));
   });
 

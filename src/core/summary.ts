@@ -56,9 +56,6 @@ export interface CardSummary {
   expiresAt?: number;
   closed?: Card['closed'];
   triage?: { state: NonNullable<Card['triage']>['state'] };
-  /** The time of the newest agent reply, and whether any reply waits to be seen. */
-  replyAt?: number;
-  unseenReplies?: boolean;
   /** The cards its text links to with [[card-id]], for the cards that link to the one on screen. */
   links?: string[];
   /** The start of its text, for a link's hover preview. */
@@ -79,7 +76,6 @@ export function summarize(card: Card, answer: Answer | undefined): CardSummary {
   const text = card.text ?? '';
   const links = [...new Set([...text.matchAll(/\[\[([\w.:-]{1,80})\]\]/g)].map((m) => m[1] as string))].slice(0, MAX_LINKS);
   const tags = cleanTags(card.tags);
-  const replyAt = card.replies.length ? Math.max(...card.replies.map((r) => r.at)) : undefined;
   const origin = card.origin?.name || card.origin?.harness ? { ...(card.origin.name ? { name: card.origin.name } : {}), ...(card.origin.harness ? { harness: card.origin.harness } : {}) } : undefined;
   return {
     id: card.id, agent: card.agent, kind: card.kind, title: card.title, priority: card.priority, status: card.status, rating: card.rating, tags, origin,
@@ -89,7 +85,6 @@ export function summarize(card: Card, answer: Answer | undefined): CardSummary {
     // only the owner reads it, and a summary is a small row.
     closed: card.closed ? { kind: card.closed.kind, outcome: card.closed.outcome.slice(0, PREVIEW_CHARS), at: card.closed.at } : undefined,
     triage: card.triage ? { state: card.triage.state } : undefined,
-    replyAt, unseenReplies: card.replies.some((r) => !r.seenAt) || undefined,
     links: links.length ? links : undefined, preview: text ? text.slice(0, PREVIEW_CHARS) : undefined,
     answer: answer ? { version: answer.version, savedAt: answer.savedAt, deliveredAt: answer.deliveredAt, readAt: answer.readAt, forcedAt: answer.forcedAt } : undefined,
     rev: randomId(6),

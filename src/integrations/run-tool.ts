@@ -129,9 +129,6 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await origin() });
       return `Asked for the secret on card ${id}. The answer arrives ${ctx.arrival} with the path of a file, never the value.`;
     }
-    case 'card_reply':
-      await inbox.reply(String(args['card_id']), String(args['text'] ?? ''));
-      return 'Replied.';
     case 'card_close':
       await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));
       return 'Closed.';
