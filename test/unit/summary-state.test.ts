@@ -54,7 +54,6 @@ describe('the state sends card summaries', () => {
     assert.equal(d.answer.comment, 'done');
     assert.equal(d.state, 'answered');
     assert.equal(d.rev, after);
-    await call('POST', '/v1/cards/c1/seen', owner, {});
     await call('POST', '/v1/cards/c1/close', agent, { kind: 'resolved', outcome: 'ok' });
     assert.notEqual((await state()).cards[0]!.rev, after, 'a close changes the rev');
   });

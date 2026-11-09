@@ -1,6 +1,6 @@
 // `your-attention tui`: the inbox page, full screen in a terminal. It reads the inbox as the owner, follows it live,
 // and answers cards with the values the page would send. web/app.js is the model for each behavior here: which card
-// opens, what Skip for now and Send answer do, and when a card counts as seen.
+// opens, and what Skip for now and Send answer do.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
