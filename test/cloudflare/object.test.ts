@@ -36,6 +36,7 @@ const { PURGE_AFTER_MS } = await import('../../src/core/inbox.ts');
 function runtime(extra: Record<string, unknown> = {}) {
   const db = new DatabaseSync(':memory:');
   const sockets: FakeSocket[] = [];
+  const socketTags = new Map<FakeSocket, string[]>();
   const blobs = new Map<string, { bytes: Uint8Array; type: string }>();
   let alarm: number | undefined;
   const waits: Promise<unknown>[] = [];
@@ -51,7 +52,8 @@ function runtime(extra: Record<string, unknown> = {}) {
       } },
       setAlarm: async (t: number) => { alarm = t; },
     },
-    acceptWebSocket: (ws: FakeSocket) => { sockets.push(ws); },
+    acceptWebSocket: (ws: FakeSocket, tags: string[] = []) => { sockets.push(ws); socketTags.set(ws, tags); },
+    getTags: (ws: FakeSocket) => socketTags.get(ws) ?? [],
     getWebSockets: () => sockets.filter((s) => s.closed === undefined),
     setWebSocketAutoResponse: () => {},
     getWebSocketAutoResponseTimestamp: (ws: FakeSocket) => ws.lastPong,
@@ -436,6 +438,29 @@ describe('sockets that cost the inbox', () => {
     assert.ok(rt.sockets[0]!.sent.some((t: string) => JSON.parse(t).type === 'change' && JSON.parse(t).card === 'c1'));
     const person = (await (await call(obj, 'GET', '/v1/person', owner)).json()) as { pages: number };
     assert.equal(person.pages, 0);
+  });
+
+  it('refuses a newcomer over the agents budget and closes nothing that was open', async () => {
+    // Eviction was the first attempt, and it is a denial of service: closing an active socket takes the link away
+    // from a session that did nothing wrong. A refused newcomer only retries, and what it missed is in storage.
+    const rt = runtime();
+    const obj = rt.make();
+    const owner = await init(obj);
+    for (let i = 0; i < 512; i++) await openSocket(obj, `agent=a${i}`, owner);
+    const res = await openSocket(obj, 'agent=late', owner);
+    assert.equal(res.status, 503, 'the newcomer is refused');
+    assert.equal(rt.sockets.filter((s) => s.closed !== undefined).length, 0, 'no open socket was closed');
+    assert.equal(rt.sockets.filter((s) => s.closed === undefined).length, 512, 'every open socket is still open');
+  });
+
+  it('keeps a socket for the page however many agents are open', async () => {
+    const rt = runtime();
+    const obj = rt.make();
+    const owner = await init(obj);
+    for (let i = 0; i < 512; i++) await openSocket(obj, `agent=a${i}`, owner);
+    const res = await openSocket(obj, 'page=1&viewer=v-test', owner);
+    assert.equal(res.status, 200, 'the page has a budget of its own');
+    assert.equal(rt.sockets.filter((s) => s.closed === undefined).length, 513);
   });
 
   it('serves no event stream, since an open request keeps the object awake', async () => {

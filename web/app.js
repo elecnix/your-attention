@@ -240,11 +240,13 @@ export function App() {
       for (const type of ['beat', 'change', 'presence', 'code']) es.addEventListener(type, () => onEvent(type));
     };
     // A WebSocket lets a cloud inbox sleep between events: its pings get their answer without waking it.
+    let refusals = 0;
     const overSocket = () => {
       let opened = false;
       ws = new WebSocket(new URL(withUnlock(`${BASE}v1/ws?page=1&viewer=${encodeURIComponent(VIEWER)}`), location.href).href.replace(/^http/, 'ws'));
       ws.onopen = () => {
         opened = true;
+        refusals = 0;
         refreshRef.current();
         const beat = () => { if (ws.readyState === 1) ws.send('{"type":"ping"}'); };
         beat();
@@ -255,8 +257,12 @@ export function App() {
         clearInterval(ping);
         if (closed) return;
         refreshRef.current();
-        if (!opened) return overStream();
-        retry = setTimeout(overSocket, 1000);
+        if (opened) { retry = setTimeout(overSocket, 1000); return; }
+        // A socket that never opened is worth retrying: a cloud inbox refuses a newcomer when a budget is full,
+        // and the hosted build answers the event stream with 410, so a single refusal used to leave the page
+        // unreachable until a reload. Only an inbox that serves no page socket at all falls back to the stream.
+        refusals++;
+        retry = setTimeout(refusals >= 3 ? overStream : overSocket, Math.min(500 * 2 ** refusals, 15000));
       };
     };
     const connect = () => signIn().then(() => {

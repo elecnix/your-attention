@@ -46,8 +46,12 @@ type Conn = AgentSocket | ReturnType<typeof pageSocket>;
 
 /** A socket that has not signed in this long after it opened closes. */
 const AUTH_LIMIT_MS = 10_000;
-/** The most sockets one inbox keeps open. */
-const MAX_SOCKETS = 64;
+/** The most agent sockets one inbox serves at once. The platform's own ceiling is 32,768 hibernating sockets per
+ * object, so this is headroom we choose, not a limit we inherit. */
+const MAX_AGENT_SOCKETS = 512;
+/** The most page sockets. They are counted apart from the agents' budget, so no fleet of agents can take the slot the
+ * owner's page needs. */
+const MAX_PAGE_SOCKETS = 16;
 /** A stamp of the object's own ping clock re-writes the socket's attachment at most this often. A page
  * pings every 2 seconds and the deadline is minutes away, so a finer stamp buys nothing. */
 const PING_STAMP_MS = 10_000;
@@ -173,6 +177,12 @@ export class InboxObject {
     if (at !== Infinity) await this.ctx.storage.setAlarm(Math.max(at, now + 50));
   }
 
+  /** The open sockets of one kind. A page socket carries its tag from the day it was accepted; one accepted before the
+   * tags existed is an agent's, which is what it was. */
+  private socketsOf(kind: 'page' | 'agent'): WebSocket[] {
+    return this.ctx.getWebSockets().filter((ws) => (this.ctx.getTags(ws).includes('page') ? 'page' : 'agent') === kind);
+  }
+
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === '/_init') {
@@ -200,7 +210,6 @@ export class InboxObject {
       return Response.json({ owner: secret, unlock: await this.inbox.pin.issue(token.id) });
     }
     if (url.pathname === '/v1/ws' && req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
-      if (this.ctx.getWebSockets().length >= MAX_SOCKETS) return new Response('too many open sockets', { status: 503 });
       if (url.searchParams.get('page') === '1') {
         // The page signs in with its cookie, which the browser sends with the upgrade.
         const auth = req.headers.get('authorization');
@@ -210,9 +219,12 @@ export class InboxObject {
         // A browser cannot set headers on a WebSocket, so the page sends its unlock token in the address.
         const gate = await this.inbox.pinGate(token, !auth?.startsWith('Bearer '), url.searchParams.get('unlock'));
         if (gate.locked) return new Response('this inbox is locked: type its PIN to open it', { status: 423 });
+        // A page is never refused for an agent's sake: the two budgets are counted apart, and nothing active is
+        // killed to admit a newcomer.
+        if (this.socketsOf('page').length >= MAX_PAGE_SOCKETS) return new Response('too many open page sockets', { status: 503 });
         const pair = new WebSocketPair();
         const server = pair[1];
-        this.ctx.acceptWebSocket(server);
+        this.ctx.acceptWebSocket(server, ['page']);
         const viewer = url.searchParams.get('viewer') ?? undefined;
         server.serializeAttachment({ page: true, viewer: viewer && /^[\w-]{4,64}$/.test(viewer) ? viewer : undefined, gated: gate.gated, unlock: gate.unlock, agent: '', token: token.id, role: token.role, connectedAt: Date.now() } satisfies SocketAttachment);
         this.attach(server);
@@ -224,9 +236,13 @@ export class InboxObject {
       const auth = req.headers.get('authorization');
       const token = auth?.startsWith('Bearer ') ? await this.inbox.authenticate(auth.slice(7).trim()) : undefined;
       if (auth && !token) return new Response('unknown token', { status: 401 });
+      // Over budget, the newcomer is refused and its client retries; no working session is disconnected to admit it.
+      // Closing an active socket is a denial of service on the agent that holds it, and what it would lose is only
+      // a link: the answers it missed are in storage.
+      if (this.socketsOf('agent').length >= MAX_AGENT_SOCKETS) return new Response('too many open sockets', { status: 503 });
       const pair = new WebSocketPair();
       const server = pair[1];
-      this.ctx.acceptWebSocket(server);
+      this.ctx.acceptWebSocket(server, ['agent']);
       server.serializeAttachment({ agent, instance: url.searchParams.get('instance') ?? undefined, channel: url.searchParams.get('channel') === 'off' ? 'off' : undefined, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
       this.attach(server);
       await this.schedule();
@@ -274,13 +290,16 @@ export class InboxObject {
   /** The platform alarm: sweep the inbox, purge old cards, call the answer webhooks that are due, and close sockets that did
    * not sign in or stopped answering heartbeats. */
   async alarm(): Promise<void> {
-    this.inbox.sweep();
-    await this.inbox.purge();
-    await this.inbox.deliverAnswers();
-    const now = Date.now();
-    for (const ws of this.ctx.getWebSockets()) {
-      const clock = this.socketClock(ws, now);
-      if (clock.deadline <= now) {
+    // Everything runs inside try/finally: a throw in the sweep used to skip the rescheduling below, and once the
+    // platform's six retries ran out nothing swept again, so a socket it had stopped tracking stayed counted for good.
+    try {
+      this.inbox.sweep();
+      await this.inbox.purge();
+      await this.inbox.deliverAnswers();
+      const now = Date.now();
+      for (const ws of this.ctx.getWebSockets()) {
+        const clock = this.socketClock(ws, now);
+        if (clock.deadline > now) continue;
         const a = ws.deserializeAttachment() as SocketAttachment;
         // One structured line per close. It records both clocks, so a production close shows whether the platform's
         // pong timestamp moves while the object is awake, which the WebSocket hibernation docs leave open.
@@ -297,8 +316,9 @@ export class InboxObject {
         this.sockets.delete(ws);
         ws.close(1001, 'missed heartbeats');
       }
+    } finally {
+      await this.schedule();
     }
-    await this.schedule();
   }
 }
 
