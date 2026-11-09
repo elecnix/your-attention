@@ -33,14 +33,15 @@ export interface AgentSocket {
 }
 
 /** `resumed` marks a socket that was already open and signed in before the platform rebuilt it, as a Durable Object does
- * when it wakes: the client keeps the same connection, so it gets no second `hello`. */
-export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller, instance?: string, resumed = false): AgentSocket {
+ * when it wakes: the client keeps the same connection, so it gets no second `hello`. `channelOff` says the session
+ * discards channel notifications. */
+export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller, instance?: string, resumed = false, channelOff = false): AgentSocket {
   let me = caller;
   let disconnect: (() => void) | undefined;
   const allow = frameBudget();
   const start = (c: Caller, quiet: boolean): void => {
     me = c;
-    disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)), instance, { resumed: quiet });
+    disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)), instance, { resumed: quiet, channelOff });
   };
   if (me) start(me, resumed);
   return {

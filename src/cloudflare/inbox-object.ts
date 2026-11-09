@@ -23,8 +23,13 @@ interface SocketAttachment {
   instance?: string | undefined;
   token?: string;
   role?: Role;
+  /** The session discards channel notifications, so presence keeps saying so across a wake. */
+  channel?: 'off' | undefined;
   /** When the socket opened, the start of its heartbeat clock until its first ping. */
   connectedAt?: number;
+  /** The last ping the object answered itself, in epoch milliseconds. The platform's pong timestamp may
+   * not move while the object runs, so the object keeps this clock of its own. It survives hibernation. */
+  lastPing?: number;
 }
 
 /** An unset limit means none. A value that is not a byte count blocks every upload, so a typo never lifts the cap. */
@@ -45,6 +50,9 @@ const AUTH_LIMIT_MS = 10_000;
 const MAX_AGENT_SOCKETS = 64;
 /** The most page sockets, counted apart from the agents' budget so the owner's page always has a place. */
 const MAX_PAGE_SOCKETS = 8;
+/** A stamp of the object's own ping clock re-writes the socket's attachment at most this often. A page
+ * pings every 2 seconds and the deadline is minutes away, so a finer stamp buys nothing. */
+const PING_STAMP_MS = 10_000;
 
 /** Read a numeric limit from the environment. */
 function limit(value: string | undefined): number | undefined {
@@ -112,7 +120,7 @@ export class InboxObject {
       return conn;
     }
     const caller = a.token && a.role ? { token: a.token, role: a.role } : undefined;
-    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance, resumed);
+    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance, resumed, a.channel === 'off');
     this.sockets.set(ws, conn);
     return conn;
   }
@@ -136,13 +144,27 @@ export class InboxObject {
     }
   }
 
-  /** When this socket closes unless it signs in or answers a heartbeat first. */
-  private socketDeadline(ws: WebSocket, now: number): number {
+  /** When this socket closes unless it signs in or answers a heartbeat first, and the clock that set that moment.
+   * Two clocks track a socket: the platform's timestamp of the last auto-response pong, and the object's stamp of
+   * the last ping it answered itself. Each covers the time the other may not see, so the later one counts. */
+  private socketClock(ws: WebSocket, now: number): { deadline: number; source: 'ping' | 'pong' | 'open' | 'auth'; ping: number | null; pong: number | null } {
     const a = ws.deserializeAttachment() as SocketAttachment;
     const opened = a.connectedAt ?? now;
-    const last = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? opened;
+    const ping = a.lastPing ?? null;
+    const pong = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null;
+    let seen = opened;
+    let source: 'ping' | 'pong' | 'open' = 'open';
+    if (pong !== null) { seen = pong; source = 'pong'; }
+    if (ping !== null && ping >= seen) { seen = ping; source = 'ping'; }
     // A socket that answers pings but never signed in would stay open for free, so it gets a deadline.
-    return Math.min(last + HEARTBEAT_LIMIT_MS, a.token ? Infinity : opened + AUTH_LIMIT_MS);
+    const auth = a.token ? Infinity : opened + AUTH_LIMIT_MS;
+    if (auth < seen + HEARTBEAT_LIMIT_MS) return { deadline: auth, source: 'auth', ping, pong };
+    return { deadline: seen + HEARTBEAT_LIMIT_MS, source, ping, pong };
+  }
+
+  /** When this socket closes unless it signs in or answers a heartbeat first. */
+  private socketDeadline(ws: WebSocket, now: number): number {
+    return this.socketClock(ws, now).deadline;
   }
 
   /** Set the alarm for the next moment `sweep()` has work or a socket reaches its deadline. */
@@ -153,10 +175,11 @@ export class InboxObject {
     if (at !== Infinity) await this.ctx.storage.setAlarm(Math.max(at, now + 50));
   }
 
-  /** The last moment this socket proved it was alive, which the runtime records without waking the object. */
+  /** The last moment this socket proved it was alive: the object's own ping stamp, or the runtime's pong, whichever is later. */
   private lastSeen(ws: WebSocket): number {
-    const opened = (ws.deserializeAttachment() as SocketAttachment).connectedAt ?? 0;
-    return this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? opened;
+    const a = ws.deserializeAttachment() as SocketAttachment;
+    const pong = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
+    return Math.max(a.connectedAt ?? 0, pong, a.lastPing ?? 0);
   }
 
   /**
@@ -239,13 +262,16 @@ export class InboxObject {
       const pair = new WebSocketPair();
       const server = pair[1];
       this.ctx.acceptWebSocket(server, ['agent']);
-      server.serializeAttachment({ agent, instance: url.searchParams.get('instance') ?? undefined, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
+      server.serializeAttachment({ agent, instance: url.searchParams.get('instance') ?? undefined, channel: url.searchParams.get('channel') === 'off' ? 'off' : undefined, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
       this.attach(server);
       await this.schedule();
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
     const res = await this.handle(req);
     await this.schedule();
+    // An answer calls its webhook at once. When the call fails, the alarm moves to its retry.
+    const calls = [...this.inbox.deliveries];
+    if (calls.length) this.ctx.waitUntil?.(Promise.allSettled(calls).then(() => this.schedule()));
     return res;
   }
 
@@ -253,7 +279,15 @@ export class InboxObject {
     const conn = this.sockets.get(ws) ?? this.attach(ws, true);
     const agent = 'caller' in conn ? conn : undefined;
     const before = agent?.authenticated ?? true;
-    await conn.message(typeof message === 'string' ? message : new TextDecoder().decode(message));
+    const text = typeof message === 'string' ? message : new TextDecoder().decode(message);
+    // An awake object answers the ping itself, and the platform may not move its auto-response clock then,
+    // so the object stamps its own clock on the socket before it answers.
+    if (text.includes('"ping"')) {
+      const a = ws.deserializeAttachment() as SocketAttachment;
+      const now = Date.now();
+      if (now - (a.lastPing ?? 0) >= PING_STAMP_MS) ws.serializeAttachment({ ...a, lastPing: now } satisfies SocketAttachment);
+    }
+    await conn.message(text);
     // A client that authenticated in its first frame keeps that across hibernation.
     if (!before && agent?.caller) {
       const a = ws.deserializeAttachment() as SocketAttachment;
@@ -272,19 +306,34 @@ export class InboxObject {
     await this.webSocketClose(ws);
   }
 
-  /** The platform alarm: sweep the inbox, and close sockets that did not sign in or stopped answering heartbeats. */
+  /** The platform alarm: sweep the inbox, purge old cards, call the answer webhooks that are due, and close sockets that did
+   * not sign in or stopped answering heartbeats. */
   async alarm(): Promise<void> {
-    // The sweep runs inside try/finally: a throw in it used to skip the rescheduling below, and once the
-    // platform's retries ran out nothing swept again, so a socket it stopped tracking stayed counted forever.
+    // Everything runs inside try/finally: a throw in the sweep used to skip the rescheduling below, and once the
+    // platform's six retries ran out nothing swept again, so a socket it had stopped tracking stayed counted for good.
     try {
       this.inbox.sweep();
+      await this.inbox.purge();
+      await this.inbox.deliverAnswers();
       const now = Date.now();
       for (const ws of this.ctx.getWebSockets()) {
-        if (this.socketDeadline(ws, now) <= now) {
-          this.sockets.get(ws)?.close();
-          this.sockets.delete(ws);
-          ws.close(1001, 'missed heartbeats');
-        }
+        const clock = this.socketClock(ws, now);
+        if (clock.deadline > now) continue;
+        const a = ws.deserializeAttachment() as SocketAttachment;
+        // One structured line per close. It records both clocks, so a production close shows whether the platform's
+        // pong timestamp moves while the object is awake, which the WebSocket hibernation docs leave open.
+        console.log(JSON.stringify({
+          event: 'socket-close',
+          ...(a.page ? { page: true } : { agent: a.agent, instance: a.instance }),
+          deadline: clock.deadline,
+          now,
+          clock: clock.source,
+          ping: clock.ping,
+          pong: clock.pong,
+        }));
+        this.sockets.get(ws)?.close();
+        this.sockets.delete(ws);
+        ws.close(1001, 'missed heartbeats');
       }
     } finally {
       await this.schedule();

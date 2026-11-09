@@ -265,6 +265,37 @@ describe('your-attention tui', () => {
     await t.stop();
   });
 
+  it('reads Group by and the pins from the inbox, shows a pinned group at the top, and saves both back', async () => {
+    // The search card goes first, so an unpinned queue would show its group first: only the pin moves billing above it.
+    await post({ id: 'pin-c', agent: 's-pin', title: 'Search index', priority: 'now', tags: { topic: 'search' } });
+    await post({ id: 'pin-a', agent: 's-pin', title: 'Invoice fix', priority: 'now', tags: { topic: 'billing' } });
+    await post({ id: 'pin-b', agent: 's-pin', title: 'Refund charge', priority: 'soon', tags: { topic: 'billing' } });
+    // The settings a page saved: this client groups the same way, and shows the pinned value first.
+    h.server.inbox.setSettings({ groupBy: 'tag:topic', pins: [['topic', 'billing']] });
+    const t = tui();
+    await t.waitFor('topic: billing (2)');
+    const text = t.vt.text();
+    assert.ok(text.indexOf('topic: billing (2)') < text.indexOf('search (1)'), 'the pinned group comes first');
+    // Open a pinned card, so p has a value to unpin. The title then shows in the list and in the card pane.
+    const row = await t.waitFor('Invoice fix');
+    t.click(row.x + 2, row.y);
+    await until(() => (t.vt.text().split('Invoice fix').length > 2 ? true : undefined));
+    // p unpins the open card's value of the tag the queue groups by, and the inbox keeps it.
+    t.send('p');
+    await t.waitFor('Unpinned topic: billing.');
+    await until(() => (h.server.inbox.settings().pins?.length === 0 ? true : undefined));
+    // g saves the next grouping in the inbox, which is how the page and this client stay together.
+    t.send('g');
+    await t.waitFor('Group by nothing.');
+    await until(() => (h.server.inbox.settings().groupBy === 'none' ? true : undefined));
+    t.send('g');
+    await t.waitFor('Group by priority.');
+    await until(() => (h.server.inbox.settings().groupBy === 'priority' ? true : undefined));
+    h.server.inbox.setSettings({ groupBy: 'none' });
+    for (const id of ['pin-a', 'pin-b', 'pin-c']) await agent.close(id, 'retracted', 'test over');
+    await t.stop();
+  });
+
   // The stand-in for herdr is a shell script, which Windows does not run.
   it('opens a herdr session link through the inbox, which focuses that tab', { skip: process.platform === 'win32' }, async () => {
     await post({ id: 'link', agent: 's-link', title: 'Look at the release agent', priority: 'now', text: 'See [the release agent](https://herdr.invalid/v1/tab/w7:t3).' });
@@ -335,5 +366,56 @@ describe('your-attention tui', () => {
     const frame = t.events().filter((e) => e.event === 'frame').at(-1)!;
     assert.ok(Number(frame['bytes']) < Number(paint['bytes']), `a keypress wrote ${frame['bytes']} bytes, the first paint ${paint['bytes']}`);
     await t.stop();
+  });
+
+  it('collapses a group with a key or a click, skips over its cards, and keeps it collapsed on the next run', async () => {
+    const own = await start();
+    try {
+      const ownAgent = new Client({ url: own.server.url, token: own.agentToken });
+      await ownAgent.post({ id: 'fold-b1', agent: 's-fold', title: 'Billing one', priority: 'now', tags: { topic: 'billing' } });
+      await ownAgent.post({ id: 'fold-b2', agent: 's-fold', title: 'Billing two', priority: 'now', tags: { topic: 'billing' } });
+      await ownAgent.post({ id: 'fold-s1', agent: 's-fold', title: 'Search one', priority: 'later', tags: { topic: 'search' } });
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-tui-fold-'));
+      // The list pane is 34 columns wide at 100 columns, and the card pane starts after the border.
+      const list = (t: Tui) => t.vt.lines().map((l) => l.slice(0, 34)).join('\n');
+      const pane = (t: Tui) => t.vt.lines().map((l) => l.slice(35)).join('\n');
+      const run = () => { const t = startTui({ url: own.server.url, token: own.server.ownerToken, env: { YOUR_ATTENTION_HOME: home } }); running.push(t); return t; };
+      try {
+        const t = run();
+        await t.waitFor('Billing one');
+        // Group by nothing, priority, agent, then the topic tags.
+        for (let i = 0; i < 3; i++) t.send('g');
+        await t.waitFor('▾ billing (2)');
+        // x collapses the group of the open card, which is the first billing card.
+        t.send('x');
+        await t.waitFor('▸ billing (2)');
+        assert.equal(list(t).includes('Billing two'), false, 'the collapsed group hides its cards');
+        assert.ok(pane(t).includes('Billing one'), 'the card on screen stays on screen');
+        // Skip for now passes over the collapsed group's cards.
+        t.send('\x0e');
+        await until(() => (pane(t).includes('Search one') ? true : undefined));
+        assert.equal(list(t).includes('Billing two'), false);
+        await t.stop();
+
+        // A second run on the same device loads the collapsed group again.
+        const u = run();
+        // Group by is the inbox's setting, so the second run starts on the same grouping, and only the collapsed
+        // group comes from this device.
+        await u.waitFor('▸ billing (2)');
+        // The queue passes over the muted group's cards: Skip for now opens the card after them.
+        u.send('\x0e');
+        await until(() => (pane(u).includes('Search one') ? true : undefined));
+        // A click on the heading opens the group again.
+        const head = await u.waitFor('▸ billing (2)');
+        u.click(head.x + 2, head.y);
+        await u.waitFor('▾ billing (2)');
+        await until(() => (list(u).includes('Billing one') ? true : undefined));
+        await u.stop();
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    } finally {
+      await own.stop();
+    }
   });
 });

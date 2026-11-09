@@ -4,17 +4,18 @@
 // returns, and memory holds only the open connections.
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
-import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
+import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed } from './sealed.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
-import { SummarizedStorage, type AnswerSummary, type CardSummary } from './summary.ts';
+import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
+import { MAX_TAGS } from './types.ts';
 import type {
-  AgentEvent, Answer, Card, CardState, CardVersion, CloseKind, Delivery, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PersonPresence, PriorityLevel, Role, Settings, Template, Token,
+  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  Attachment, NewAttachment, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -29,6 +30,19 @@ export interface Caller {
   token: string;
   role: Role;
 }
+
+/** Types an approved sentence into a herdr pane as the person's message, and names a pane's agent and tab. */
+export interface ApprovalSender {
+  /** Rejects with the reason when it sends nothing, such as a draft in the pane's input box. */
+  send(pane: string, text: string): Promise<void>;
+  describe?(pane: string): Promise<ApprovalPlace>;
+}
+
+/** A herdr pane id, such as w6P:p2. It never starts with a dash, so herdr cannot read it as a flag. */
+export const PANE_ID = /^w[A-Za-z0-9]+:p[A-Za-z0-9]+$/;
+export const MAX_APPROVALS = 5;
+export const MAX_APPROVAL_CHARS = 1000;
+const MAX_APPROVAL_LABEL_CHARS = 120;
 
 export interface InboxOptions {
   keepPresence?: boolean;
@@ -51,9 +65,15 @@ export interface InboxOptions {
   shownCardLimit?: number | undefined;
   /** The inbox always counts usage and has no off switch, as on the hosted service. */
   usageAlwaysOn?: boolean;
+  /** Types approved sentences into herdr panes. Without it, as on the hosted inbox, the inbox takes no card with approvals. */
+  approvals?: ApprovalSender | undefined;
+  /** How the inbox calls answer webhooks. The default is the platform's fetch. */
+  fetch?: typeof fetch | undefined;
 }
 
 export const SYSTEM_AGENT = 'system';
+/** The inbox itself, as the caller of the system cards it posts. */
+const INBOX: Caller = { token: '', role: 'owner' };
 const PAIRING_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_PAIRINGS = 5;
 const CLOSE_KINDS = new Set<CloseKind>(['retracted', 'self-answered', 'answered-in-terminal', 'resolved']);
@@ -71,19 +91,23 @@ export const DEFAULT_PRIORITIES: PriorityLevel[] = [
   { id: 'soon', label: 'Decide soon', definition: 'The agent needs the answer before it finishes.', color: '#c9a100' },
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
+/** The version of `DEFAULT_GUIDANCE`. It moves whenever that text changes, so a client reads the words it has not seen. */
+export const DEFAULT_GUIDANCE_VERSION = 3;
 export const DEFAULT_GUIDANCE = [
   'On a card, "you" is the person who reads it. Write about yourself in the third person, as "this agent" or the name in `from`, never "I" or "we", so the person always knows who acts.',
   'Write each card so the person can answer it without opening the session.',
   'State the goal, the options you weighed, the evidence, and your recommendation.',
   'Shape the answer options to the question. The person may leave any field empty.',
-  'Put each question next to the field that answers it. One question uses options. Several questions use forms in the body, each beside the text or table it is about.',
+  'Put each question next to the field that answers it. One question uses options. Two or more questions use questions, each with its own text and options, and never one options list after all the text. The page draws each question as its own section with a comment field. A question that needs a table or a widget beside it uses a form in the body.',
   'Explain each option inside it, in its description: what this agent does if the person picks it, such as "This agent reruns the deploy." Never list the options with their explanations in the text.',
   'Mark the option this agent recommends with recommended: true, and put only the reasons in the recommendation. The page shows them inside that option, so the person reads the pick once.',
   'Never list questions in the text with the answers at the bottom. Write what you will check yourself as statements, not questions.',
   'The page adds a comment box, Send answer and Skip at the bottom of every card. Add no general comment box or send button of your own.',
-  'When a card asks several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
+  'When a card body or HTML asks several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
   'When a card is about another agent, link its session so the person can go there in one click: [label](https://herdr.invalid/v1/pane/<pane id>), from `herdr agent list`. Link another card with [[card-id]].',
   'Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click.',
+  'When an action needs the person\'s own words in a session, post the sentence as an approval on the card instead of asking the person to type it there.',
+  'A card title is one line of plain text: no Markdown and no links. Name the thing there, as "PR #93 — an empty list no longer looks like a success". Put the link in `text`, or in a field label in the body: both read inline Markdown.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
@@ -105,11 +129,40 @@ export const MAX_VERSIONS = 50;
 export const MAX_REPLY_BYTES = 4096;
 export const MAX_REPLIES = 200;
 export const MAX_WEBHOOKS = 5;
+export const MAX_SUBSCRIPTIONS = 20;
+const MAX_WEBHOOK_HEADERS = 10;
+/** How long one call to an answer webhook may take. */
+export const ANSWER_WEBHOOK_TIMEOUT_MS = 10_000;
+/** A call that started this long ago and never finished, such as one a crash cut off, goes again. */
+const DELIVERY_LEASE_MS = ANSWER_WEBHOOK_TIMEOUT_MS + 5_000;
+/** The first retry of an answer webhook waits this long, and each later one twice as long, up to an hour. */
+export const RETRY_FIRST_MS = 5_000;
+const RETRY_MAX_MS = 60 * 60 * 1000;
+/** After this long the inbox stops calling a webhook for one answer. The answer still waits for the agent stream. */
+export const RETRY_GIVE_UP_MS = 24 * 60 * 60 * 1000;
+/** Headers the inbox sets on each webhook call itself, or that the platform sets. */
+const RESERVED_HEADER = /^(content-type|content-length|host|transfer-encoding|connection|x-your-attention-.*)$/i;
+/** The pinned tag values one inbox keeps. A tag key or value is cut to 100 characters, as in the card's summary. */
+export const MAX_PINS = 20;
+export const MAX_TAG_CHARS = 100;
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
+/** The most tag keys GET /v1/guidance lists, and the most values it lists for each key, so a busy inbox stays short. */
+export const MAX_TAG_KEYS = 20;
+export const MAX_TAG_VALUES = 15;
 /** How long a closed pairing request and its card stay before the sweep deletes them. */
 export const PAIRING_KEEP_MS = 24 * 60 * 60 * 1000;
+/** How long a cleared card, or a card nobody answered, stays after its last change before the purge deletes it. */
+export const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+/** Where the purge keeps the files a delete could not remove, so a laptop retries them on its next pass. */
+const PENDING_FILE_DELETES = 'pending-file-deletes';
+/** The most cards one purge pass deletes, so no alarm does unbounded work. */
+export const PURGE_BATCH = 100;
+/** The share of the storage limit the purge keeps free, by deleting the oldest of those cards sooner. */
+export const STORAGE_HEADROOM = 0.2;
+/** How long the sweep keeps the presence row of an agent after it went offline. */
+export const PRESENCE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 
 const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']);
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
@@ -126,8 +179,70 @@ export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, a
   return 'answered';
 }
 
+/** The agent an answer goes to, or null for none. A guidance card closes as the person answers it, and its answer
+ * still goes to the agent that proposed the text. */
+function recipient(card: Card, answer: Answer): string | null {
+  if (card.kind === 'system' && card.broadcast) return card.broadcast.from && card.token ? card.broadcast.from : null;
+  return card.deliver === 'stream' && cardState(card, answer) !== 'closed' ? card.agent : null;
+}
+
+/** One answer waiting for its webhook call, keyed by subscription and card, so a new answer replaces one still waiting. */
+interface OutboxItem {
+  key: string;
+  sub: string;
+  card: string;
+  /** The answer this call carries, by its savedAt. */
+  savedAt: number;
+  attempts: number;
+  firstAt: number;
+  /** When the next call is due. While a call runs, the end of its lease. */
+  nextAt: number;
+  /** A call is running, or a crash cut it off before its lease ended. */
+  calling?: true;
+}
+
+/** The id of an answer: the same on every webhook call that carries it, and new when the person changes the answer. */
+export function answerId(card: string, savedAt: number): string {
+  return `${card}@${savedAt}`;
+}
+
 type AgentSend = (ev: AgentEvent) => void;
 type PageSend = (ev: PageEvent) => void;
+
+/** A token's default tags, by agent id, as the inbox stores them under one `meta` key. */
+interface DefaultTagRow {
+  token: string;
+  agents: Record<string, Record<string, DefaultTag>>;
+  at: number;
+}
+
+/**
+ * The tags a card stores: the agent's default tags under the card's own. A key on the card wins, and a key the card
+ * passes with an empty string drops that default for that card alone. Defaults past the tag limit lose, so the card's
+ * own tags always fit. Returns the merged tags, and the keys the card took from the defaults.
+ */
+export function mergeDefaultTags(defaults: Record<string, string>, own: Record<string, string> | undefined): { tags: Record<string, string> | undefined; inherited: string[] } {
+  const tags: Record<string, string> = {};
+  const inherited: string[] = [];
+  for (const [k, value] of Object.entries(defaults)) {
+    // A plain object answers `toString` for every key, so the card's own tags are read by their own key only.
+    const mine = own !== undefined && Object.hasOwn(own, k) ? own[k] : undefined;
+    if (mine === '') continue;
+    if (mine !== undefined) { tags[k] = String(mine); continue; }
+    tags[k] = value;
+    inherited.push(k);
+  }
+  for (const [k, value] of Object.entries(own ?? {})) {
+    // `in` would see `constructor` and `toString` on any object, so a tag by those names would be dropped.
+    if (Object.hasOwn(defaults, k) || value === '') continue;
+    tags[k] = String(value);
+  }
+  // The card's own tags come last in insertion order, so the defaults give way at the limit, and a card that names
+  // more than the limit is refused rather than cut.
+  while (Object.keys(tags).length > MAX_TAGS && inherited.length) delete tags[inherited.pop() as string];
+  if (Object.keys(tags).length > MAX_TAGS) throw new InboxError(400, `a card takes at most ${MAX_TAGS} tags, with its agent's defaults`);
+  return { tags: Object.keys(tags).length ? tags : undefined, inherited };
+}
 
 export class Inbox {
   private readonly store: Storage;
@@ -141,6 +256,7 @@ export class Inbox {
   private readonly clientChecks: boolean;
   private readonly shownCardLimit: number | undefined;
   private readonly now: () => number;
+  private readonly approvalSender: ApprovalSender | undefined;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
   private readonly pages = new Set<PageSend>();
@@ -150,7 +266,8 @@ export class Inbox {
   private readonly viewers = new Map<string, { visible: boolean; activeAt: number | null; focus: string | null }>();
   private readonly extensions = new Map<string, { reg: ExtensionRegistration; token: string; send: (ev: HookEvent) => void }>();
   /** Webhook deliveries still running, so tests and shutdown can wait for them. */
-  readonly deliveries = new Set<Promise<boolean>>();
+  readonly deliveries = new Set<Promise<unknown>>();
+  private readonly fetcher: typeof fetch;
   /** The usage counts the platform sends once a day, when the person left them on. */
   readonly usage: Usage;
   /** The PIN a browser tab types before it acts as the owner. */
@@ -173,10 +290,14 @@ export class Inbox {
     this.fallbackBody = opts.fallbackBody;
     this.clientChecks = opts.clientChecks === true;
     this.shownCardLimit = opts.shownCardLimit;
+    this.approvalSender = opts.approvals;
+    // Workers refuse a fetch called as a method of another object, so the default calls it bare.
+    this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
     this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
     this.pin.onChange(() => this.closeLockedPages());
+    markDialogCards(this.store);
     // On a laptop, connections do not survive a restart, so nobody is online at start.
     if (!opts.keepPresence) {
       for (const p of store.list<Presence>('presence')) {
@@ -197,7 +318,10 @@ export class Inbox {
   /** When the platform alarm must next call sweep(), or undefined when nothing waits. */
   nextDeadline(): number | undefined {
     const times: number[] = [];
-    for (const p of this.store.list<Presence>('presence')) if (p.online && p.leftAt !== undefined) times.push(p.leftAt + PRESENCE_GRACE_MS);
+    for (const p of this.store.list<Presence>('presence')) {
+      if (p.online && p.leftAt !== undefined) times.push(p.leftAt + PRESENCE_GRACE_MS);
+      else if (!p.online) times.push((p.leftAt ?? p.lastSeen) + PRESENCE_KEEP_MS);
+    }
     for (const p of this.store.list<Pairing>('pairings')) {
       times.push(p.status === 'pending' || p.secret ? p.createdAt + PAIRING_TTL_MS : p.createdAt + PAIRING_KEEP_MS);
     }
@@ -205,6 +329,9 @@ export class Inbox {
       if (c.triage?.state === 'pending' && c.triage.deadline) times.push(c.triage.deadline);
       if (c.expiresAt && !c.closed && !this.store.get('answers', c.id)) times.push(c.expiresAt);
     }
+    const oldest = this.purgeQueue()[0];
+    if (oldest) times.push(this.needsRoom() ? this.now() : oldest.since + PURGE_AFTER_MS);
+    for (const d of this.store.list<OutboxItem>('outbox')) times.push(d.nextAt);
     return times.length ? Math.min(...times) : undefined;
   }
 
@@ -231,10 +358,16 @@ export class Inbox {
     return this.store.list<Token>('tokens').map(({ hash: _hash, ...t }) => t);
   }
 
+  /** Whether a token, by id, still exists: nobody signed it out or revoked it. */
+  hasToken(id: string): boolean {
+    return !!this.store.get<Token>('tokens', id);
+  }
+
   revokeToken(id: string): void {
     if (!this.store.get('tokens', id)) throw new InboxError(404, 'unknown token');
     this.store.delete('tokens', id);
     this.pin.dropUnlocks(id);
+    this.removeSubscriptions((s) => s.token === id, 'The token that asked for this webhook was revoked.');
   }
 
   /** Let an owner token act without the PIN, such as the laptop's owner-token file, which only this machine's user reads. */
@@ -350,8 +483,9 @@ export class Inbox {
 
   // ---- cards ----
 
-  /** `checked` holds what checkCard found for the card's diagrams. A card with a diagram it does not hold is refused. */
-  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams): Card {
+  /** `checked` holds what checkCard found for the card's diagrams. A card with a diagram it does not hold is refused.
+   * `opts.revise` marks a patch, which edits one field and keeps the tags the card already carries. */
+  postCard(caller: Caller, input: NewCard, storedFiles?: Set<string>, checked?: CheckedDiagrams, places?: (Approval['place'] | undefined)[], opts: { revise?: boolean } = {}): Card {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
     const title = String(input.title ?? '').trim();
     if (!title) throw new InboxError(400, 'title is required');
@@ -366,20 +500,26 @@ export class Inbox {
     if (!levels.some((l) => l.id === priority)) throw new InboxError(400, `priority must be one of ${levels.map((l) => l.id).join(', ')}`);
     if (input.rating !== undefined && !(Number.isInteger(input.rating) && input.rating >= 1 && input.rating <= 5)) throw new InboxError(400, 'rating must be 1 to 5');
     if (!input.multiple && Array.isArray(input.options) && input.options.filter((o) => o?.recommended === true).length > 1) throw new InboxError(400, 'a card without multiple takes at most one recommended option');
+    checkQuestions(input.questions);
     const id = input.id ? String(input.id) : randomId(8);
     if (!/^[\w.:-]{1,80}$/.test(id)) throw new InboxError(400, 'id must be 1 to 80 letters, digits, dots, colons, dashes or underscores');
 
     const kind = input.kind ?? 'ask';
+    if (kind === 'system' && caller.token !== '') throw new InboxError(400, 'a system card from a client asks the inbox for something: send system.type subscribe or unsubscribe');
     if (kind === 'secret') {
       const s = input.secret;
       if (!s || typeof s !== 'object' || !s.publicKey || typeof s.publicKey !== 'object') throw new InboxError(400, 'a secret card needs secret.name and secret.publicKey');
       if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(String(s.name ?? ''))) throw new InboxError(400, 'secret.name must be a variable name, such as API_KEY');
       if (s.publicKey.kty !== 'RSA') throw new InboxError(400, 'secret.publicKey must be an RSA-OAEP key');
     }
-
     const now = this.now();
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
+    // A revision keeps what herdr answered about a pane it does not change, since only herdr sets a place.
+    const approvals = this.cleanApprovals(input.approvals, kind, places)?.map((a, i) => {
+      const kept = a.place ?? (before?.approvals?.[i]?.pane === a.pane ? before.approvals[i].place : undefined);
+      return kept ? { ...a, place: kept } : a;
+    });
     const { body, template, expanded } = this.cardBody(input);
     // The page drops what it cannot read of a body without a word, so the agent hears it here.
     const bodyProblems = body === undefined || !this.checkBody || this.clientChecks ? [] : this.checkBody(String(body));
@@ -413,6 +553,10 @@ export class Inbox {
     const history: CardVersion[] = before
       ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, recommendation: before.recommendation, body: before.body, html: before.html, at: before.updatedAt }].slice(-HISTORY_LIMIT)
       : [];
+    // Every card an agent posts inherits its default tags, under the card's own. The inbox's own system cards keep none.
+    const mergedTags = caller.token === '' || kind === 'system' || opts.revise === true
+      ? { tags: input.tags }
+      : mergeDefaultTags(this.tagValues(caller.token, agent), ownTags(input.tags));
     const card: Card = {
       id,
       agent,
@@ -425,6 +569,8 @@ export class Inbox {
       options: input.options,
       multiple: input.multiple,
       questions: input.questions,
+      approvals,
+      dialog: input.dialog === true ? true : undefined,
       screen: input.screen,
       secret: kind === 'secret' ? { name: String(input.secret?.name), publicKey: (input.secret?.publicKey ?? {}) as JsonWebKey } : undefined,
       html: input.html,
@@ -441,7 +587,7 @@ export class Inbox {
       broadcast: before?.broadcast,
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
-      tags: input.tags,
+      tags: mergedTags.tags,
       follows: input.follows ?? before?.follows,
       followedBy: before?.followedBy,
       deliver: input.deliver ?? 'stream',
@@ -666,11 +812,183 @@ export class Inbox {
   private observeAnswer(card: Card, answer: Answer): void {
     const event: HookEvent = { type: 'hook', version: HOOK_VERSION, id: randomId(8), hook: 'answer.saved', card: publicCard(card), answer };
     for (const e of this.extensions.values()) if (e.reg.hooks.includes('answer.saved')) e.send(event);
-    for (const w of this.webhooks().filter((x) => x.hook === 'answer.saved')) {
-      const p = deliverWebhook(w, event);
-      this.deliveries.add(p);
-      void p.then(() => this.deliveries.delete(p), () => this.deliveries.delete(p));
+    for (const w of this.webhooks().filter((x) => x.hook === 'answer.saved')) this.track(deliverWebhook(w, event, this.fetcher));
+  }
+
+  private track(p: Promise<unknown>): void {
+    this.deliveries.add(p);
+    void p.then(() => this.deliveries.delete(p), () => this.deliveries.delete(p));
+  }
+
+  // ---- answer webhooks ----
+
+  /** A client's system card: a request to send the answers to its cards to a webhook, or to stop. The owner approves each
+   * webhook on a system card the inbox posts, and nothing goes out before that. */
+  systemRequest(caller: Caller, input: NewCard): ReturnType<Inbox['subscribe']> | { removed: number } {
+    const type = input?.system?.type;
+    if (type === 'subscribe') return this.subscribe(caller, input);
+    if (type !== 'unsubscribe') throw new InboxError(400, 'a system card from a client carries system.type subscribe or unsubscribe');
+    const agent = this.requestingAgent(caller, input);
+    return { removed: this.removeSubscriptions((s) => s.token === caller.token && s.agent === agent, `The agent ${agent} unsubscribed.`) };
+  }
+
+  /** The agent a client's system card speaks for. */
+  private requestingAgent(caller: Caller, input: NewCard): string {
+    if (caller.role === 'extension') throw new InboxError(403, 'an extension posts no cards');
+    const agent = String(input?.agent ?? '').trim();
+    if (!agent || agent.length > 80) throw new InboxError(400, 'agent is required, at most 80 characters');
+    if (agent === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
+    return agent;
+  }
+
+  /** A subscribe request: the webhook waits, pending, for the owner to approve it on its card. The secret is returned once. */
+  subscribe(caller: Caller, input: NewCard): { subscription: PublicSubscription; card: Card; secret: string } {
+    const agent = this.requestingAgent(caller, input);
+    const req = input.system;
+    if (req?.type !== 'subscribe') throw new InboxError(400, 'a subscribe request carries system.type subscribe');
+    const mine = (s: Subscription): boolean => s.token === caller.token && s.agent === agent;
+    const url = webhookUrl(req.webhook?.url);
+    const headers = webhookHeaders(req.webhook?.headers);
+    const events = req.events ?? ['answer'];
+    if (!Array.isArray(events) || !events.length || events.some((e) => e !== 'answer')) throw new InboxError(400, 'events takes answer, the only event a webhook receives');
+    if (this.store.list<Subscription>('subscriptions').filter((s) => !mine(s)).length >= MAX_SUBSCRIPTIONS) {
+      throw new InboxError(429, `an inbox takes at most ${MAX_SUBSCRIPTIONS} answer webhooks`);
     }
+    const id = randomId(8);
+    const cardId = `subscribe-${id}`;
+    this.makeRoom(cardId);
+    // One webhook for each agent and token: a new request replaces the one before.
+    this.removeSubscriptions(mine, 'The agent sent a new request, which replaces this one.');
+    const sub: Subscription = { id, agent, token: caller.token, url, headers, events: ['answer'], secret: randomId(24), status: 'pending', createdAt: this.now(), delivered: 0 };
+    this.store.put('subscriptions', id, sub);
+    const host = new URL(url).host;
+    // The card is Markdown, so the agent's words go in code spans, which show them as typed.
+    const code = (text: string): string => `\`${text.replace(/`/g, "'")}\``;
+    const names = Object.keys(headers).map(code);
+    this.postCard(INBOX, {
+      id: cardId, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
+      title: `Send the answers for ${agent} to a webhook?`,
+      text: `The agent ${code(agent)} asks the inbox to send each answer you give to its cards to ${code(url)}${names.length ? `, with the header${names.length === 1 ? '' : 's'} ${names.join(', ')}` : ''}. Whoever runs ${host} then reads those answers. Approve only if you know that address.`,
+      options: [
+        { id: 'approve', label: 'Approve', description: `The inbox sends each answer to the cards of ${code(agent)} to ${host}.` },
+        { id: 'deny', label: 'Deny', description: 'Nothing goes out. To stop a webhook you approved, change your answer to this.' },
+      ],
+    });
+    const card = { ...this.getCard(cardId), subscription: id };
+    this.store.put('cards', cardId, card);
+    return { subscription: this.publicSubscription(sub), card: publicCard(card), secret: sub.secret };
+  }
+
+  private resolveSubscription(card: Card, answer: Answer): void {
+    const sub = this.store.get<Subscription>('subscriptions', card.subscription ?? '');
+    // The webhook went before this answer, so the card keeps the outcome it closed with.
+    if (!sub) { this.closeAs(card, 'resolved', card.closed?.outcome ?? 'This webhook is gone.'); return; }
+    const host = new URL(sub.url).host;
+    if ([answer.values['choice']].flat()[0] === 'approve') {
+      this.store.put<Subscription>('subscriptions', sub.id, { ...sub, status: 'approved', approvedAt: sub.approvedAt ?? this.now() });
+      this.closeAs(card, 'resolved', `Sending the answers for ${sub.agent} to ${host}. To stop, change your answer to Deny.`);
+      return;
+    }
+    this.removeSubscriptions((s) => s.id === sub.id, sub.status === 'approved' ? `Stopped: no more answers for ${sub.agent} go to ${host}.` : `Denied: nothing goes to ${host}.`);
+  }
+
+  /** Remove the webhooks that match, with the calls still waiting, and close the card of each with the outcome. */
+  private removeSubscriptions(match: (s: Subscription) => boolean, outcome: string): number {
+    const gone = this.store.list<Subscription>('subscriptions').filter(match);
+    for (const s of gone) {
+      this.store.delete('subscriptions', s.id);
+      for (const d of this.store.list<OutboxItem>('outbox')) if (d.sub === s.id) this.store.delete('outbox', d.key);
+      const card = this.store.get<Card>('cards', `subscribe-${s.id}`);
+      if (card) this.closeAs(card, 'resolved', outcome);
+    }
+    return gone.length;
+  }
+
+  /** The owner removes any webhook, and a client the ones it asked for. */
+  deleteSubscription(caller: Caller, id: string): void {
+    const sub = this.store.get<Subscription>('subscriptions', id);
+    if (!sub) throw new InboxError(404, 'unknown subscription');
+    if (caller.role !== 'owner' && sub.token !== caller.token) throw new InboxError(403, 'another client owns this subscription');
+    this.removeSubscriptions((s) => s.id === id, sub.token === caller.token ? `The agent ${sub.agent} unsubscribed.` : 'You removed this webhook.');
+  }
+
+  /** Every webhook for the owner, and its own for any other client. */
+  listSubscriptions(caller: Caller): PublicSubscription[] {
+    if (caller.role === 'extension') throw new InboxError(403, 'an extension reads no webhooks');
+    return this.store.list<Subscription>('subscriptions').filter((s) => caller.role === 'owner' || s.token === caller.token).map((s) => this.publicSubscription(s));
+  }
+
+  private publicSubscription(s: Subscription): PublicSubscription {
+    const { token: _t, secret: _s, headers, ...rest } = s;
+    return { ...rest, headers: Object.keys(headers), waiting: this.store.list<OutboxItem>('outbox').filter((d) => d.sub === s.id).length };
+  }
+
+  /** Queue the answer for the webhook of its card's agent and token, and call it now. */
+  private queueAnswer(card: Card, answer: Answer): void {
+    if (card.deliver !== 'stream') return;
+    const sub = this.store.list<Subscription>('subscriptions').find((s) => s.status === 'approved' && s.token === (card.token ?? '') && s.agent === card.agent);
+    if (!sub) return;
+    const now = this.now();
+    const key = `${sub.id}:${card.id}`;
+    this.store.put<OutboxItem>('outbox', key, { key, sub: sub.id, card: card.id, savedAt: answer.savedAt, attempts: 0, firstAt: now, nextAt: now });
+    this.track(this.deliverAnswers());
+  }
+
+  /** Call the webhook of each answer that is due. An answer calls it at once, and the platform alarm calls it after sweep()
+   * for each retry. Each call carries the agent stream's answer event, with the answer's id. */
+  async deliverAnswers(): Promise<void> {
+    const now = this.now();
+    const calls: Promise<void>[] = [];
+    for (const item of this.store.list<OutboxItem>('outbox')) {
+      if (item.nextAt > now) continue;
+      const sub = this.store.get<Subscription>('subscriptions', item.sub);
+      const card = this.store.get<Card>('cards', item.card);
+      const answer = this.store.get<Answer>('answers', item.card);
+      // The card went to another agent, the person changed the answer, or the agent read it already.
+      if (!sub || sub.status !== 'approved' || !card || card.agent !== sub.agent || (card.token ?? '') !== sub.token || !answer || answer.savedAt !== item.savedAt || answer.readAt) {
+        this.store.delete('outbox', item.key);
+        continue;
+      }
+      // Hold the call before the await, so a second run does not make it again. A call that a crash cut off goes after the lease.
+      this.store.put<OutboxItem>('outbox', item.key, { ...item, nextAt: now + DELIVERY_LEASE_MS, calling: true });
+      const id = answerId(card.id, answer.savedAt);
+      const ev: AnswerEvent = { type: 'answer', id, card: publicCard(card), answer };
+      const headers = { ...sub.headers, 'x-your-attention-event': 'answer', 'x-your-attention-delivery': id };
+      calls.push(postSigned(sub.url, sub.secret, headers, ev, ANSWER_WEBHOOK_TIMEOUT_MS, this.fetcher).then((r) => this.called(item, r)));
+    }
+    // A call that fails to record its result, such as on a store that closed, must not stop the alarm's other work.
+    await Promise.allSettled(calls);
+  }
+
+  /** Record how a webhook call went: a 2xx marks the answer read, and anything else waits for the next retry. */
+  private called(item: OutboxItem, r: { ok: boolean; reason?: string }): void {
+    const now = this.now();
+    const current = this.store.get<OutboxItem>('outbox', item.key);
+    const sub = this.store.get<Subscription>('subscriptions', item.sub);
+    // The webhook went, or a newer answer took this call's place while it ran and has its own schedule.
+    if (!sub || !current || current.savedAt !== item.savedAt) return;
+    if (r.ok) {
+      this.store.delete('outbox', item.key);
+      const { lastError: _e, ...rest } = sub;
+      this.store.put<Subscription>('subscriptions', sub.id, { ...rest, delivered: sub.delivered + 1 });
+      const answer = this.store.get<Answer>('answers', item.card);
+      // The webhook has the answer, as an agent that acknowledges it on its stream.
+      if (answer && answer.savedAt === item.savedAt && !answer.readAt) {
+        this.store.put<Answer>('answers', item.card, { ...answer, deliveredAt: answer.deliveredAt ?? now, readAt: now });
+        this.emit({ type: 'change', card: item.card });
+      }
+      return;
+    }
+    const reason = r.reason ?? 'the webhook failed';
+    if (now - item.firstAt >= RETRY_GIVE_UP_MS) {
+      this.store.delete('outbox', item.key);
+      this.store.put<Subscription>('subscriptions', sub.id, { ...sub, lastError: { at: now, reason: `${reason}; the inbox stopped trying after 24 hours` } });
+      return;
+    }
+    const attempts = item.attempts + 1;
+    this.store.put<Subscription>('subscriptions', sub.id, { ...sub, lastError: { at: now, reason } });
+    const { calling: _c, ...waiting } = current;
+    this.store.put<OutboxItem>('outbox', item.key, { ...waiting, attempts, nextAt: now + Math.min(RETRY_FIRST_MS * 2 ** (attempts - 1), RETRY_MAX_MS) });
   }
 
   getCard(id: string): Card {
@@ -683,9 +1001,13 @@ export class Inbox {
    * then the card commits in one synchronous step, and the files it replaced are deleted. */
   async postCardWithFiles(caller: Caller, input: NewCard): Promise<Card> {
     if (!input || typeof input !== 'object') throw new InboxError(400, 'card must be an object');
+    // Only herdr names a pane's agent and tab: a place the agent sent is dropped.
+    // Only herdr names a pane's agent and tab: the places go around postCard, so an agent cannot supply one.
+    const approvals = this.cleanApprovals(input.approvals, input.kind ?? 'ask');
+    const places = approvals ? await this.describePanes(approvals) : undefined;
     const checked = await this.checkCard(input);
     const files = input.attachments;
-    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input, undefined, checked);
+    if (!Array.isArray(files) || !files.some((f) => /^data:/.test(String(f?.src ?? '')))) return this.postCard(caller, input, undefined, checked, places);
     if (files.length > MAX_ATTACHMENTS) throw new InboxError(400, `a card takes at most ${MAX_ATTACHMENTS} attachments`);
     const id = input.id ? String(input.id) : randomId(8);
     // Check the id before it goes into a blob key.
@@ -726,7 +1048,7 @@ export class Inbox {
     try {
       // Read the card again right before the commit, with no await between: another update may have landed meanwhile.
       prior = this.store.get<Card>('cards', id);
-      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')), checked);
+      card = this.postCard(caller, { ...input, id, attachments: resolved }, new Set(stored.map((f) => f.id ?? '')), checked, places);
     } catch (e) {
       await refund();
       throw e;
@@ -781,7 +1103,7 @@ export class Inbox {
   /** Edit a card the way a coding agent edits a file: each edit replaces text that occurs exactly once. */
   patchCard(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string, checked?: CheckedDiagrams): Card {
     const { card, input } = this.patched(caller, id, edits, field);
-    const next = this.postCard(caller, input, undefined, checked);
+    const next = this.postCard(caller, input, undefined, checked, undefined, { revise: true });
     // A patch edits the body the widgets already filled, so the card still shows them and keeps their responses, and any the patch placed.
     if (!card.widgets) return next;
     const responses = [...(card.responses ?? []), ...(next.responses ?? [])];
@@ -900,11 +1222,47 @@ export class Inbox {
     return this.store.get<Settings>('meta', 'settings') ?? { allowHtml: false };
   }
 
-  setSettings(input: Partial<Settings>): Settings {
+  setSettings(input: Partial<Settings> & PinChange): Settings {
     const next: Settings = { ...this.settings(), ...(typeof input.allowHtml === 'boolean' ? { allowHtml: input.allowHtml } : {}) };
+    if (input.groupBy !== undefined) next.groupBy = this.checkGroupBy(input.groupBy);
+    if (input.pins !== undefined) next.pins = this.checkPins(input.pins);
+    // A pin or an unpin travels as its own change, so two devices that pin at the same moment both keep their value.
+    if (input.pinAdd !== undefined || input.pinRemove !== undefined) {
+      const same = (a: [string, string], b: [string, string]) => a[0] === b[0] && a[1] === b[1];
+      const add = input.pinAdd === undefined ? [] : this.checkPins(input.pinAdd);
+      const remove = input.pinRemove === undefined ? [] : this.checkPins(input.pinRemove);
+      const current = next.pins ?? [];
+      const kept = current.filter((p) => !remove.some((r) => same(r, p)));
+      const merged = [...kept, ...add.filter((a) => !kept.some((k) => same(k, a)))];
+      // A pin the inbox cannot keep is refused, so the person hears it rather than losing the value quietly.
+      if (merged.length > MAX_PINS) throw new InboxError(400, `pins takes at most ${MAX_PINS}; unpin a value first`);
+      next.pins = merged;
+    }
     this.store.put('meta', 'settings', next);
     this.emit({ type: 'change', card: '' });
     return next;
+  }
+
+  private checkGroupBy(groupBy: unknown): string {
+    const raw = typeof groupBy === 'string' && groupBy.startsWith('tag:') ? groupBy.slice(4) : '';
+    const key = raw.trim();
+    if (!(groupBy === 'none' || groupBy === 'priority' || groupBy === 'agent' || (key.length >= 1 && key.length <= MAX_TAG_CHARS))) {
+      throw new InboxError(400, 'groupBy must be none, priority, agent or tag:<key>');
+    }
+    // The key is stored the way it is matched, so `tag: topic ` groups the cards tagged `topic`.
+    return key && groupBy !== 'none' ? `tag:${key}` : groupBy as string;
+  }
+
+  /** Pins reach the queue the page draws, so a pair that isn't a tag key and its value is refused rather than stored. */
+  private checkPins(pins: unknown): [string, string][] {
+    if (!Array.isArray(pins) || pins.length > MAX_PINS) throw new InboxError(400, `pins must be a list of at most ${MAX_PINS} [key, value] pairs`);
+    return pins.map((pair, i) => {
+      if (!Array.isArray(pair) || pair.length !== 2) throw new InboxError(400, `pin ${i + 1}: give a tag key and its value`);
+      const [key, value] = pair.map((side) => (typeof side === 'string' ? side.trim() : ''));
+      if (!key || !value) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are both required`);
+      if (key.length > MAX_TAG_CHARS || value.length > MAX_TAG_CHARS) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are at most ${MAX_TAG_CHARS} characters`);
+      return [key, value];
+    });
   }
 
   priorities(): PriorityLevel[] {
@@ -978,41 +1336,102 @@ export class Inbox {
   }
 
   guidance(): Guidance {
-    return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: 1, at: 0 };
+    return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: DEFAULT_GUIDANCE_VERSION, at: 0 };
   }
 
-  /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. */
-  proposeGuidance(text: string): Card {
+  /** The tag keys in use with their values and counts, for GET /v1/guidance and card_guidance, so an agent reuses a
+   * value another card set instead of inventing a near miss. It counts the open cards and the cards cleared or closed
+   * in the last PURGE_AFTER_MS, and drops the rest, so a value nobody uses anymore leaves the list. Keys sort by their
+   * total count, then by key, and values by count, then by value, cut to MAX_TAG_KEYS keys and MAX_TAG_VALUES values
+   * each. It reads the summaries the state already reads, and a whole card only for one cleared inside the window. */
+  tagsInUse(): TagCount[] {
+    const cutoff = this.now() - PURGE_AFTER_MS;
+    const counts = new Map<string, Map<string, number>>();
+    const count = (tags: Record<string, string> | undefined): void => {
+      // A summary written before tags were cleaned still counts the way the print cleans them, so a stored line break
+      // can never forge a line in an agent's card_guidance.
+      for (const [key, value] of Object.entries(cleanTags(tags) ?? {})) {
+        const values = counts.get(key) ?? new Map<string, number>();
+        values.set(value, (values.get(value) ?? 0) + 1);
+        counts.set(key, values);
+      }
+    };
+    for (const s of this.store.list<CardSummary>('summaries')) {
+      // A card that closed before the window still shows until the person clears it, and its tags are no longer in use.
+      if (cardState(s, s.answer) === 'closed' && (s.closed?.at ?? 0) < cutoff) continue;
+      count(s.tags);
+    }
+    // A cleared card keeps no summary, so the list reads the card itself, and only while its clear is inside the window.
+    for (const c of this.store.list<ClearedCard>('cleared')) {
+      if (c.archivedAt < cutoff) continue;
+      count(this.store.get<Card>('cards', c.id)?.tags);
+    }
+    const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+    return [...counts.entries()]
+      .map(([key, values]) => {
+        const list = [...values.entries()].map(([value, n]) => ({ value, count: n })).sort((a, b) => b.count - a.count || byName(a.value, b.value));
+        return { key, total: list.reduce((n, v) => n + v.count, 0), values: list };
+      })
+      .sort((a, b) => b.total - a.total || byName(a.key, b.key))
+      .slice(0, MAX_TAG_KEYS)
+      .map(({ key, values }) => ({ key, values: values.slice(0, MAX_TAG_VALUES) }));
+  }
+
+  /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. With `by`,
+   * the answer and its comment go to the agent that proposed the text, which may acknowledge it or retract the card. */
+  proposeGuidance(text: string, by?: { caller: Caller; agent: string }): Card {
     const clean = String(text ?? '').trim();
     if (!clean) throw new InboxError(400, 'text is required');
-    const agents = this.store.list<Presence>('presence').map((p) => p.agent).filter((a) => a !== SYSTEM_AGENT);
+    const from = by ? String(by.agent ?? '').trim() : '';
+    if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
+    const base = this.guidance();
     const id = `guidance-${randomId(4)}`;
+    const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`;
+    // The card keeps no list of agents: the page lists the online ones from live presence when it draws the card, and
+    // an offline agent reads the new version when it reconnects or calls card_guidance.
+    const broadcast = { text: clean, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
+    // The stored card has the proposal in its text and in broadcast, and the guidance it starts from, so it is measured
+    // whole before anything is stored. The margin covers the card's other fields, which stay under a kilobyte.
+    const size = new TextEncoder().encode(JSON.stringify({ text: cardText, broadcast })).length + 2048;
+    if (size > MAX_CARD_BYTES) throw new InboxError(413, `the guidance card would be ${size} bytes, over the limit of ${MAX_CARD_BYTES}: propose a shorter text`);
     this.postCard({ token: '', role: 'owner' }, {
       id, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
       title: 'Send new card guidance to agents?',
-      text: `An agent proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`,
+      text: cardText,
       options: [{ id: 'approve', label: 'Approve and send' }, { id: 'reject', label: 'Reject' }],
     });
-    const card = { ...this.getCard(id), broadcast: { text: clean, agents } };
+    const card: Card = {
+      ...this.getCard(id),
+      ...(from && by?.caller.token ? { token: by.caller.token } : {}),
+      broadcast,
+    };
     this.store.put('cards', id, card);
     this.emit({ type: 'change', card: id });
     return card;
   }
 
+  /** Apply or drop the proposed guidance, close the card, and send the answer to the agent that proposed the text. */
   private resolveBroadcast(card: Card, answer: Answer): void {
     if (!card.broadcast) return;
-    if ([answer.values['choice']].flat()[0] !== 'approve') { this.closeAs(card, 'resolved', 'Rejected: the guidance did not change.'); return; }
-    const picked = Array.isArray(answer.values['agents']) ? (answer.values['agents'] as unknown[]).map(String) : card.broadcast.agents;
-    const guidance: Guidance = { text: card.broadcast.text, version: this.guidance().version + 1, at: this.now() };
+    this.closeAs(card, 'resolved', this.applyBroadcast(card.broadcast, answer));
+    if (card.broadcast.from) this.flush(card.broadcast.from);
+  }
+
+  private applyBroadcast(broadcast: NonNullable<Card['broadcast']>, answer: Answer): string {
+    if ([answer.values['choice']].flat()[0] !== 'approve') return 'Rejected: the guidance did not change.';
+    // The ticked agents, or every connected one when the answer names none. Only connected agents get the event.
+    const picked = Array.isArray(answer.values['agents']) ? new Set((answer.values['agents'] as unknown[]).map(String)) : undefined;
+    const guidance: Guidance = { text: broadcast.text, version: this.guidance().version + 1, at: this.now() };
     this.store.put('meta', 'guidance', guidance);
     let sent = 0;
     for (const [k, subs] of this.agents) {
       const agent = k.slice(k.indexOf('\n') + 1);
-      if (!picked.includes(agent)) continue;
+      if (picked && !picked.has(agent)) continue;
       for (const send of subs) send({ type: 'guidance', id: randomId(6), guidance });
       sent++;
     }
-    this.closeAs(card, 'resolved', `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`);
+    return `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`;
   }
 
   /** The cards a client may read, with their states: all of them for the owner. */
@@ -1028,11 +1447,13 @@ export class Inbox {
     return card;
   }
 
-  private closeAs(card: Card, kind: CloseKind, outcome: string): Card {
+  private closeAs(card: Card, kind: CloseKind, outcome: string, draft?: Draft): Card {
     const current = this.getCard(card.id);
     // A card closed while triage checks it needs no verdict any more.
     const triage = current.triage?.state === 'pending' ? { ...current.triage, state: 'skipped' as const, waiting: [], reason: 'The card closed before triage answered.' } : current.triage;
-    const closed: Card = { ...current, triage, closed: { kind, outcome, at: this.now() } };
+    // A draft the person recorded stays with the card, whoever closes it next, so their words are never lost.
+    const kept = draft ?? current.closed?.draft;
+    const closed: Card = { ...current, triage, closed: { kind, outcome, at: this.now(), ...(kept ? { draft: kept } : {}) } };
     this.store.put('cards', card.id, closed);
     this.emit({ type: 'change', card: card.id });
     return closed;
@@ -1045,6 +1466,22 @@ export class Inbox {
     const answer = this.store.get<Answer>('answers', id);
     if (ifUnanswered && answer) throw new InboxError(409, 'the person already answered this card');
     return this.closeAs(card, kind, String(outcome || '').slice(0, 2000) || 'No outcome given.');
+  }
+
+  /** The person dismisses a card: it closes without the agent hearing anything, and the form values and the comment on
+   * screen are recorded with the time, even when both are empty. No answer is stored, so no stream receives an event, and
+   * a revision or reply the agent sends later is saved but leaves the card in Sent. Only the owner reads the draft. */
+  dismiss(caller: Caller, id: string, input: { values?: unknown; comment?: unknown } = {}): Card {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner dismisses a card');
+    const card = this.getCard(id);
+    if (card.closed) throw new InboxError(409, 'this card is already closed');
+    // A secret card's field holds the secret itself, and a dismissal is not an answer to seal it, so its values stay out
+    // of the record. The comment is the person's own words about the card, so it stays.
+    const values = card.kind === 'secret' || !input.values || typeof input.values !== 'object' || Array.isArray(input.values)
+      ? {} : input.values as Record<string, unknown>;
+    // Dismissing is acting on the card, so its agent replies count as seen.
+    this.see(card);
+    return this.closeAs(card, 'dismissed', 'Nothing was sent to the agent.', { values, comment: String(input.comment ?? '').trim(), at: this.now() });
   }
 
   /** The agent replies on its card. The card returns to the person's queue. */
@@ -1060,11 +1497,17 @@ export class Inbox {
     return next;
   }
 
-  /** The person opened the card, so its replies are seen. */
-  seen(id: string): void {
-    const card = this.getCard(id);
+  /** Mark each agent reply on the card as seen, once the person acts on it: answers it, dismisses it, or sends a follow-up. */
+  private see(card: Card): void {
+    const current = this.getCard(card.id);
+    if (!current.replies.some((r) => !r.seenAt)) return;
     const now = this.now();
-    this.store.put('cards', id, { ...card, replies: card.replies.map((r) => ({ ...r, seenAt: r.seenAt ?? now })) });
+    this.store.put('cards', card.id, { ...current, replies: current.replies.map((r) => ({ ...r, seenAt: r.seenAt ?? now })) });
+  }
+
+  /** The person marked the card's replies seen without acting on it, as a front-end other than the page may offer. */
+  seen(id: string): void {
+    this.see(this.getCard(id));
     this.emit({ type: 'change', card: id });
   }
 
@@ -1072,10 +1515,14 @@ export class Inbox {
   claim(caller: Caller, id: string, agent: string): Card {
     const card = this.getCard(id);
     if (caller.role !== 'owner' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
-    const next = { ...card, agent: String(agent), token: caller.role === 'owner' ? card.token : caller.token };
+    const token = caller.role === 'owner' ? card.token : caller.token;
+    // A guidance card stays the inbox's system card: the successor takes over as the agent that proposed the text.
+    const next = card.kind === 'system' && card.broadcast
+      ? { ...card, token, broadcast: { ...card.broadcast, from: String(agent) } }
+      : { ...card, agent: String(agent), token };
     this.store.put('cards', id, next);
     this.emit({ type: 'change', card: id });
-    this.flush(next.agent);
+    this.flush(String(agent));
     return next;
   }
 
@@ -1124,17 +1571,105 @@ export class Inbox {
     };
     const responses = (card.responses ?? []).map((r) => respond(r.template, values, r.values)).filter(Boolean);
     if (responses.length) answer.responses = responses;
+    // An approval sent for this version of the card stays sent, so a second answer never types it again.
+    const kept = before && before.version === answer.version ? (before.approvalResults ?? []).map((r) => (r && !('error' in r) ? r : null)) : [];
+    if (kept.some(Boolean)) answer.approvalResults = kept;
     for (const p of answer.previous) delete (p as Partial<Answer>).previous;
     this.store.put('answers', id, answer);
     this.store.index(id, `${searchText(card)}\n${answer.comment}`);
     this.usage.record('answers');
+    // An answer is acting on the card, so its agent replies count as seen.
+    this.see(card);
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
     else if (card.kind === 'system' && card.id.startsWith('priorities-')) this.resolvePriorityProposal(card, answer);
+    else if (card.kind === 'system' && card.subscription) this.resolveSubscription(card, answer);
     else this.flush(card.agent);
-    if (card.kind !== 'system' && card.kind !== 'secret') this.observeAnswer(card, this.store.get<Answer>('answers', id) ?? answer);
+    // A secret card's answer opens only with the key in its session's memory, so no webhook gets it.
+    if (card.kind !== 'system' && card.kind !== 'secret') {
+      const saved = this.store.get<Answer>('answers', id) ?? answer;
+      this.observeAnswer(card, saved);
+      this.queueAnswer(card, saved);
+    }
     return this.store.get<Answer>('answers', id) ?? answer;
+  }
+
+  /** Type each approval the owner turned on in the card's answer into its pane, once per card version, and record what
+   * happened on the answer. Only an owner's answer sends: an agent's call returns the answer unchanged. */
+  async sendApprovals(caller: Caller, id: string): Promise<Answer | undefined> {
+    const answer = this.store.get<Answer>('answers', id);
+    const sender = this.approvalSender;
+    const card = this.store.get<Card>('cards', id);
+    if (!sender || caller.role !== 'owner' || !answer || !card?.approvals?.length) return answer;
+    const approvals = card.approvals;
+    const results: ApprovalResult[] = approvals.map((_, i) => answer.approvalResults?.[i] ?? null);
+    const claimed: number[] = [];
+    approvals.forEach((_, i) => {
+      const r = results[i];
+      if (answer.values[`approval_${i}`] !== true || (r && !('error' in r))) return;
+      // The person read other sentences on the version they answered, so the inbox sends none of the new ones.
+      if (answer.version !== card.version) { results[i] = { error: 'the card changed after you answered it: answer it again to send this' }; return; }
+      results[i] = { sendingAt: this.now() };
+      claimed.push(i);
+    });
+    if (!results.some(Boolean)) return answer;
+    // The claim is written before the first await, so an answer saved meanwhile carries it and never sends again.
+    this.store.put('answers', id, { ...answer, approvalResults: results });
+    this.emit({ type: 'change', card: id });
+    for (const i of claimed) {
+      const a = approvals[i]!;
+      let result: ApprovalResult;
+      try {
+        await sender.send(a.pane, a.text);
+        result = { sentAt: this.now() };
+      } catch (e) {
+        result = { error: e instanceof Error ? e.message : String(e) };
+      }
+      this.recordApproval(id, answer.version, i, result);
+    }
+    return this.store.get<Answer>('answers', id);
+  }
+
+  /** Replace the claim on one approval with what the send did, on whichever answer to that card version is current. */
+  private recordApproval(id: string, version: number, i: number, result: ApprovalResult): void {
+    const answer = this.store.get<Answer>('answers', id);
+    const claim = answer?.approvalResults?.[i];
+    if (!answer || answer.version !== version || !claim || !('sendingAt' in claim)) return;
+    const results = [...(answer.approvalResults ?? [])];
+    results[i] = result;
+    this.store.put('answers', id, { ...answer, approvalResults: results });
+    this.emit({ type: 'change', card: id });
+  }
+
+  /** What herdr says about each approval's pane, one entry per approval, empty when herdr does not know the pane. */
+  private async describePanes(approvals: Approval[]): Promise<(Approval['place'] | undefined)[]> {
+    const describe = this.approvalSender?.describe?.bind(this.approvalSender);
+    if (!describe) return approvals.map(() => undefined);
+    return Promise.all(approvals.map((a) => describe(a.pane).catch(() => undefined)));
+  }
+
+  /** A card's approvals, checked. A place comes only from `places`, which herdr answered, so an agent cannot set one. */
+  private cleanApprovals(input: unknown, kind: string, places?: (Approval['place'] | undefined)[]): Approval[] | undefined {
+    if (input === undefined || input === null) return undefined;
+    if (!this.approvalSender) throw new InboxError(400, 'this inbox does not send approvals: only an inbox on the computer that runs herdr types into a pane');
+    if (kind !== 'ask') throw new InboxError(400, 'only an ask card takes approvals');
+    if (!Array.isArray(input)) throw new InboxError(400, 'approvals must be a list of {pane, text, label}');
+    if (input.length > MAX_APPROVALS) throw new InboxError(400, `a card takes at most ${MAX_APPROVALS} approvals`);
+    if (!input.length) return undefined;
+    return input.map((a: unknown, i): Approval => {
+      const at = `approval ${i + 1}`;
+      if (!a || typeof a !== 'object') throw new InboxError(400, `${at}: must be an object with pane and text`);
+      const { pane, text, label } = a as Record<string, unknown>;
+      if (typeof pane !== 'string' || !PANE_ID.test(pane)) throw new InboxError(400, `${at}: pane must be a herdr pane id, such as w6P:p2`);
+      if (typeof text !== 'string' || !text.trim()) throw new InboxError(400, `${at}: text must be the message to send`);
+      if (text.length > MAX_APPROVAL_CHARS) throw new InboxError(400, `${at}: text must be at most 1,000 characters`);
+      // herdr reads an argument that starts with a dash as an option, and takes no -- before the text.
+      if (text.startsWith('-')) throw new InboxError(400, `${at}: text must not start with a dash`);
+      if (label !== undefined && (typeof label !== 'string' || label.length > MAX_APPROVAL_LABEL_CHARS)) throw new InboxError(400, `${at}: label must be at most ${MAX_APPROVAL_LABEL_CHARS} characters`);
+      const kept = cleanPlace(places?.[i]);
+      return { pane, text, ...(label ? { label } : {}), ...(kept ? { place: kept } : {}) };
+    });
   }
 
   /** Delete files a caller wrote and give their bytes back to the lifetime upload limit, for a write that cannot stand. */
@@ -1201,7 +1736,14 @@ export class Inbox {
     const next: Answer = { ...answer, delivery: 'force', deliveredAt: null, forcedAt: this.now() };
     this.store.put('answers', id, next);
     this.emit({ type: 'change', card: id });
-    this.flush(this.getCard(id).agent);
+    const card = this.getCard(id);
+    this.flush(recipient(card, next) ?? card.agent);
+    // A webhook call that waits for its retry goes now. A call still running keeps its lease, so it never goes twice at once.
+    const now = this.now();
+    for (const d of this.store.list<OutboxItem>('outbox')) {
+      if (d.card === id && !(d.calling && d.nextAt > now)) this.store.put<OutboxItem>('outbox', d.key, { ...d, nextAt: Math.min(d.nextAt, now) });
+    }
+    this.track(this.deliverAnswers());
     return this.store.get<Answer>('answers', id) ?? next;
   }
 
@@ -1210,7 +1752,7 @@ export class Inbox {
     return this.store.list<Answer>('answers')
       .filter((a) => !a.deliveredAt)
       .map((a) => ({ card: this.getCard(a.card), answer: a }))
-      .filter(({ card }) => card.deliver === 'stream' && cardState(card, this.store.get('answers', card.id)) !== 'closed' && !this.isOnline(card.agent));
+      .filter(({ card, answer }) => { const to = recipient(card, answer); return to !== null && !this.isOnline(to); });
   }
 
   /** The answers this caller has not consumed: stored, and never acknowledged. `agent` narrows it to one agent, which
@@ -1220,9 +1762,12 @@ export class Inbox {
       .filter((a) => !a.readAt)
       .filter((a) => {
         const card = this.store.get<Card>('cards', a.card);
-        if (!card || cardState(card, a) === 'closed') return false;
+        if (!card) return false;
+        // A guidance card closes as the person answers it, and its answer waits for the agent that proposed the text.
+        const guidance = card.kind === 'system' && card.broadcast;
+        if (guidance ? recipient(card, a) === null : cardState(card, a) === 'closed') return false;
         if (caller.role !== 'owner' && card.token !== caller.token) return false;
-        return agent === undefined || card.agent === agent;
+        return agent === undefined || (guidance ? card.broadcast?.from : card.agent) === agent;
       })
       .map((a) => a.card)
       .sort();
@@ -1263,6 +1808,85 @@ export class Inbox {
     this.store.delete('messages', key);
   }
 
+  // ---- default tags ----
+
+  /** The default tags this caller set for one agent id. A token reads only the defaults it set itself. */
+  defaultTags(caller: Caller, agent: string): DefaultTags {
+    if (caller.role !== 'agent') throw new InboxError(403, 'only an agent reads its own default tags');
+    const id = this.agentId(agent);
+    return { agent: id, tags: this.storedTags(caller.token, id) };
+  }
+
+  /** Set, merge, remove or clear the default tags this caller keeps for one agent id. Every card that agent posts
+   * inherits them, under its own tags. */
+  setDefaultTags(caller: Caller, input: Partial<DefaultTagsWrite>): DefaultTags {
+    if (caller.role !== 'agent') throw new InboxError(403, 'only an agent sets its own default tags');
+    const agent = this.agentId(input.agent);
+    const from = input.from === undefined ? 'card_tags' : String(input.from);
+    if (!/^[A-Za-z_][\w.-]{0,39}$/.test(from)) throw new InboxError(400, 'from must be 1 to 40 letters, digits, dots, dashes or underscores');
+    const key = `tags:${caller.token}`;
+    const row = this.store.get<DefaultTagRow>('meta', key);
+    const agents = { ...(row?.agents ?? {}) };
+    const tags: Record<string, DefaultTag> = input.clear === true ? {} : { ...(agents[agent] ?? {}) };
+    if (input.tags !== undefined) {
+      if (!input.tags || typeof input.tags !== 'object' || Array.isArray(input.tags)) throw new InboxError(400, 'tags must be an object of tag keys and values');
+      for (const [k, v] of Object.entries(input.tags)) {
+        if (!k) throw new InboxError(400, 'each tag needs a key');
+        if (k.length > MAX_TAG_CHARS) throw new InboxError(400, `tag key ${k.slice(0, 20)}… must be at most ${MAX_TAG_CHARS} characters`);
+        const value = String(v ?? '');
+        if (!value) throw new InboxError(400, `tag ${k} has an empty value: leave it out, or remove it`);
+        if (value.length > MAX_TAG_CHARS) throw new InboxError(400, `tag ${k} must be at most ${MAX_TAG_CHARS} characters`);
+        tags[k] = { value, from };
+      }
+    }
+    if (input.remove !== undefined) {
+      if (!Array.isArray(input.remove)) throw new InboxError(400, 'remove must be a list of tag keys');
+      for (const k of input.remove.map(String)) delete tags[String(k)];
+    }
+    if (Object.keys(tags).length > MAX_TAGS) throw new InboxError(400, `an agent keeps at most ${MAX_TAGS} default tags`);
+    if (Object.keys(tags).length) agents[agent] = tags;
+    else delete agents[agent];
+    if (Object.keys(agents).length) this.store.put<DefaultTagRow>('meta', key, { token: caller.token, agents, at: this.now() });
+    else this.store.delete('meta', key);
+    return { agent, tags };
+  }
+
+  /** Every token's default tags, or one agent's, for the owner. */
+  defaultTagsList(caller: Caller, agent?: string): { token: string; agent: string; tags: Record<string, DefaultTag> }[] {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner reads every default tag');
+    const out: { token: string; agent: string; tags: Record<string, DefaultTag> }[] = [];
+    for (const row of this.store.list<DefaultTagRow>('meta')) {
+      if (typeof row?.token !== 'string' || !row.agents) continue;
+      for (const [id, tags] of Object.entries(row.agents)) {
+        if ((agent === undefined || id === agent) && tags && Object.keys(tags).length) out.push({ token: row.token, agent: id, tags });
+      }
+    }
+    return out;
+  }
+
+  /** The tag keys a post by this caller takes from its defaults, read after the card commits. The route names them in
+   * the reply, so an agent knows what it inherited without reading the card back. */
+  inheritedTags(caller: Caller, input: NewCard): string[] {
+    if (caller.token === '' || (input.kind ?? 'ask') === 'system') return [];
+    return mergeDefaultTags(this.tagValues(caller.token, String(input.agent ?? '').trim()), ownTags(input.tags)).inherited;
+  }
+
+  /** The defaults this token keeps for one agent id, by value. */
+  private tagValues(token: string, agent: string): Record<string, string> {
+    return Object.fromEntries(Object.entries(this.storedTags(token, agent)).map(([k, t]) => [k, t.value]));
+  }
+
+  private storedTags(token: string, agent: string): Record<string, DefaultTag> {
+    return this.store.get<DefaultTagRow>('meta', `tags:${token}`)?.agents?.[agent] ?? {};
+  }
+
+  private agentId(agent: unknown): string {
+    const id = String(agent ?? '').trim();
+    if (!id) throw new InboxError(400, 'agent is required');
+    if (id.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    return id;
+  }
+
   // ---- connections ----
 
   private key(token: string, agent: string): string {
@@ -1273,11 +1897,11 @@ export class Inbox {
     return this.store.get<Presence>('presence', agent)?.online ?? false;
   }
 
-  /** An agent opens its stream. `instance` names the agent process, and stays the same across its reconnects.
-   * Returns the function that closes it. */
-  /** An agent connects. `resumed` marks a connection the platform rebuilt for a socket that stayed open, such as a
-   * Durable Object waking from hibernation: the agent already got its `hello` on that socket, so it gets none again. */
-  connect(caller: Caller, agent: string, send: AgentSend, instance?: string, opts: { resumed?: boolean } = {}): () => void {
+  /** An agent connects. `instance` names the agent process, and stays the same across its reconnects. `resumed` marks a
+   * connection the platform rebuilt for a socket that stayed open, such as a Durable Object waking from hibernation:
+   * the agent already got its `hello` on that socket, so it gets none again. `channelOff` says the session discards
+   * channel notifications, and a connection that leaves it out keeps what the last one said. */
+  connect(caller: Caller, agent: string, send: AgentSend, instance?: string, opts: { resumed?: boolean; channelOff?: boolean } = {}): () => void {
     if (String(agent).length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     const k = this.key(caller.token, agent);
     let set = this.agents.get(k);
@@ -1287,7 +1911,7 @@ export class Inbox {
     this.usage.saw('agents', agent);
     if (instance) this.usage.saw('instances', instance);
     if (caller.token) this.usage.saw('tokens', caller.token);
-    this.setPresence(agent, true);
+    this.setPresence(agent, true, opts.channelOff);
     if (!opts.resumed) send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     this.flush(agent);
     if (instance) this.resend(caller.token, agent, send, instance);
@@ -1296,13 +1920,27 @@ export class Inbox {
       if (!s?.delete(send)) return;
       if (s.size === 0) this.agents.delete(k);
       const stillOpen = [...this.agents.keys()].some((x) => x.endsWith(`\n${agent}`));
-      if (!stillOpen) this.store.put<Presence>('presence', agent, { agent, online: true, lastSeen: this.now(), leftAt: this.now() });
+      if (!stillOpen) this.putPresence(agent, { online: true, lastSeen: this.now(), leftAt: this.now() });
     };
   }
 
-  private setPresence(agent: string, online: boolean): void {
-    this.store.put<Presence>('presence', agent, { agent, online, lastSeen: this.now() });
+  /** `channelOff` is undefined for a connection that says nothing about the channel, which keeps what is stored. */
+  private setPresence(agent: string, online: boolean, channelOff?: boolean): void {
+    const before = this.store.get<Presence>('presence', agent);
+    const off = channelOff ?? before?.channelOff;
+    const next: Presence = { ...before, agent, online, lastSeen: this.now() };
+    delete next.channelOff;
+    if (off) next.channelOff = true;
+    // A live connection has no closing time, and one left from an earlier close would arm the alarm for a past moment.
+    if (online) delete next.leftAt;
+    this.store.put<Presence>('presence', agent, next);
     this.emit({ type: 'presence', agent, online });
+  }
+
+  /** Write a presence change over what is stored, so the fields a change does not name stay. */
+  private putPresence(agent: string, change: Partial<Presence>): void {
+    const before = this.store.get<Presence>('presence', agent);
+    this.store.put<Presence>('presence', agent, { ...before, agent, online: false, lastSeen: this.now(), ...change });
   }
 
   /** Send a new agent process each answer an earlier process received but never read, such as one a session got before it restarted. */
@@ -1310,8 +1948,7 @@ export class Inbox {
     for (const answer of this.store.list<Answer>('answers')) {
       if (!answer.deliveredAt || answer.readAt || answer.deliveredTo?.includes(instance)) continue;
       const card = this.store.get<Card>('cards', answer.card);
-      if (!card || card.agent !== agent || (card.token ?? '') !== token || card.deliver !== 'stream') continue;
-      if (cardState(card, answer) === 'closed') continue;
+      if (!card || recipient(card, answer) !== agent || (card.token ?? '') !== token) continue;
       const next: Answer = { ...answer, deliveredTo: [...(answer.deliveredTo ?? []), instance] };
       this.store.put('answers', answer.card, next);
       send({ type: 'answer', id: randomId(6), card: publicCard(card), answer: next });
@@ -1323,8 +1960,7 @@ export class Inbox {
     for (const answer of this.store.list<Answer>('answers')) {
       if (answer.deliveredAt) continue;
       const card = this.store.get<Card>('cards', answer.card);
-      if (!card || card.agent !== agent || card.deliver !== 'stream') continue;
-      if (cardState(card, answer) === 'closed') continue;
+      if (!card || recipient(card, answer) !== agent) continue;
       const subs = this.agents.get(this.key(card.token ?? '', agent));
       if (!subs || subs.size === 0) continue;
       const to = [...subs].map((f) => this.instances.get(f)).filter((x): x is string => !!x);
@@ -1400,8 +2036,11 @@ export class Inbox {
       const open = [...this.agents.keys()].some((x) => x.endsWith(`\n${p.agent}`));
       if (p.online && p.leftAt !== undefined && now - p.leftAt >= PRESENCE_GRACE_MS && !open) {
         // The agent was last seen when its connection closed, not when the alarm noticed.
-        this.store.put<Presence>('presence', p.agent, { agent: p.agent, online: false, lastSeen: p.leftAt });
+        this.putPresence(p.agent, { online: false, lastSeen: p.leftAt });
         this.emit({ type: 'presence', agent: p.agent, online: false });
+      } else if (!p.online && now - (p.leftAt ?? p.lastSeen) >= PRESENCE_KEEP_MS) {
+        // The row of an agent gone this long only makes GET /v1/state bigger. A reconnect writes a fresh one.
+        this.store.delete('presence', p.agent);
       }
     }
     // Download counts from earlier days go.
@@ -1477,18 +2116,68 @@ export class Inbox {
   async reset(caller: Caller): Promise<{ removed: number }> {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner resets the inbox');
     const cards = this.store.list<Card>('cards');
-    for (const card of cards) {
-      const answer = this.store.get<Answer>('answers', card.id);
-      const images = [answer, ...(answer?.previous ?? [])].flatMap((a) => a?.images ?? []);
-      // The records go first. An answer that lands while these files are deleted then finds no card, and
-      // `answer` refunds the images it had already stored instead of leaving them where this list cannot name them.
-      this.store.delete('answers', card.id);
-      this.store.delete('cards', card.id);
-      this.store.index(card.id, '');
-      await Promise.all([...(card.attachments ?? []), ...images].filter((f) => f.id).map((f) => this.blobs.delete(f.id ?? '')));
-    }
+    for (const card of cards) await Promise.all(this.drop(card).map((f) => this.blobs.delete(f)));
     this.emit({ type: 'change', card: '' });
     return { removed: cards.length };
+  }
+
+  /** Called by the platform alarm after sweep(). Deletes the cards of `purgeQueue` whose 30 days are up, and the oldest
+   * others while the storage is past its headroom, at most PURGE_BATCH a pass. It removes what `reset` removes for each. */
+  async purge(): Promise<{ removed: number }> {
+    const now = this.now();
+    const files: string[] = [];
+    let removed = 0;
+    for (const { id, since } of this.purgeQueue()) {
+      if (removed >= PURGE_BATCH || (now - since < PURGE_AFTER_MS && !this.needsRoom())) break;
+      const card = this.store.get<Card>('cards', id);
+      if (!card) {
+        // A row whose card is gone would stay due forever, so it goes too.
+        this.store.delete('cleared', id);
+        this.store.delete('summaries', id);
+        continue;
+      }
+      files.push(...this.drop(card));
+      removed++;
+    }
+    // Every record goes before the first await, so no request sees half a batch.
+    if (removed) this.emit({ type: 'change', card: '' });
+    // The records are gone already, so a failed delete must not stop the alarm that called this. R2 deletes the file
+    // 30 days after its upload anyway, and a laptop retries the delete on its next pass.
+    const retry = this.store.get<string[]>('meta', PENDING_FILE_DELETES) ?? [];
+    const settled = await Promise.allSettled([...retry, ...files].map((f) => this.blobs.delete(f)));
+    const failed = [...retry, ...files].filter((_, i) => settled[i]?.status === 'rejected').slice(0, PURGE_BATCH * 10);
+    if (failed.length) this.store.put('meta', PENDING_FILE_DELETES, failed);
+    else if (retry.length) this.store.delete('meta', PENDING_FILE_DELETES);
+    return { removed };
+  }
+
+  /** The cards the purge may delete, oldest first, each with the time its 30 days start: a cleared card from when the
+   * person cleared it, and a card nobody answered from its last revision or agent reply. An answered card on show stays.
+   * It reads the summaries and the oldest PURGE_BATCH cleared rows: a pass deletes no more, and the later rows are newer.
+   * So its time follows the cards on show, never the cleared ones or the size of their text. */
+  private purgeQueue(): { id: string; since: number }[] {
+    const queue = this.store.first<ClearedCard>('cleared', PURGE_BATCH).map((c) => ({ id: c.id, since: c.archivedAt }));
+    for (const s of this.store.list<CardSummary>('summaries')) {
+      if (!s.answer) queue.push({ id: s.id, since: Math.max(s.updatedAt, s.replyAt ?? 0) });
+    }
+    return queue.sort((a, b) => a.since - b.since);
+  }
+
+  /** Whether the storage holds more than its limit less the headroom the purge keeps free. */
+  private needsRoom(): boolean {
+    return this.storageLimit !== undefined && (this.store.bytes?.() ?? 0) > this.storageLimit * (1 - STORAGE_HEADROOM);
+  }
+
+  /** Delete a card's records and search entry, and return the ids of its files and answer images, for the caller to
+   * delete. The records go first: an answer that lands while the files are deleted then finds no card, and `answer`
+   * refunds the images it had already stored instead of leaving them where this list cannot name them. */
+  private drop(card: Card): string[] {
+    const answer = this.store.get<Answer>('answers', card.id);
+    const images = [answer, ...(answer?.previous ?? [])].flatMap((a) => a?.images ?? []);
+    this.store.delete('answers', card.id);
+    this.store.delete('cards', card.id);
+    this.store.index(card.id, '');
+    return [...(card.attachments ?? []), ...images].flatMap((f) => (f.id ? [f.id] : []));
   }
 
   /** GET /v1/state: a summary of each card the page shows, with the states, presence and levels. It reads only the
@@ -1511,25 +2200,34 @@ export class Inbox {
     return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance() };
   }
 
-  /** GET /v1/cards/<id>: the whole card, its answer, its state, and the rev of its summary. */
-  cardDetail(id: string): { card: Card; answer?: Answer; state: CardState; rev?: string } {
+  /** GET /v1/cards/<id>: the whole card, its answer, its state, and the rev of its summary. `owner` keeps what only the
+   * person reads, such as the draft they left on a card they dismissed. */
+  cardDetail(id: string, owner = false): { card: Card; answer?: Answer; state: CardState; rev?: string } {
     const card = this.getCard(id);
     const answer = this.store.get<Answer>('answers', id);
     // A body stored before the inbox checked bodies may not draw whole, so the client gets what it can draw.
     const fallback = card.body !== undefined ? this.fallbackBody?.(card.body) : undefined;
     const summary = this.store.get<CardSummary>('summaries', id);
+    const shown = owner && card.closed ? { ...publicCard(card), closed: card.closed } : publicCard(card);
     return {
-      card: fallback ? { ...publicCard(card), bodyFallback: fallback } : publicCard(card),
+      card: fallback ? { ...shown, bodyFallback: fallback } : shown,
       ...(answer ? { answer } : {}),
       state: this.shownState(card, this.store.get<Presence>('presence', card.agent), answer),
       ...(summary ? { rev: summary.rev } : {}),
     };
   }
 
+  /** Whether an open card's agent has left long ago, so another session can claim it. A row the sweep pruned counts as gone,
+   * and so does a card whose agent never connected, once the card itself is old enough. */
+  private orphaned(c: Card | CardSummary, s: CardState, p: Presence | undefined, now: number): boolean {
+    if (s !== 'open' || c.deliver !== 'stream') return false;
+    if (p) return !p.online && now - p.lastSeen > ORPHAN_MS;
+    return now - (c.updatedAt ?? c.createdAt) > ORPHAN_MS;
+  }
+
   /** A card's state, with orphaned for an open card whose agent left long ago: another session can claim it. */
   private shownState(c: Card | CardSummary, p: Presence | undefined, answer: Pick<Answer, 'savedAt' | 'readAt' | 'deliveredAt'> | undefined): CardState {
-    const s = cardState(c, answer);
-    return s === 'open' && c.deliver === 'stream' && p && !p.online && this.now() - p.lastSeen > ORPHAN_MS ? 'orphaned' : s;
+    return this.orphaned(c, cardState(c, answer), p, this.now()) ? 'orphaned' : cardState(c, answer);
   }
 
   state(): {
@@ -1545,10 +2243,7 @@ export class Inbox {
     const now = this.now();
     const states = Object.fromEntries(cards.map((c) => {
       const s = cardState(c, answers[c.id]);
-      const p = presence[c.agent];
-      // An open card whose agent left long ago is orphaned: another session can claim it.
-      const orphaned = s === 'open' && c.deliver === 'stream' && p && !p.online && now - p.lastSeen > ORPHAN_MS;
-      return [c.id, orphaned ? 'orphaned' : s];
+      return [c.id, this.orphaned(c, s, presence[c.agent], now) ? 'orphaned' : s];
     }));
     const levels = this.priorities();
     // The answers are read already, so each card costs no storage read of its own.
@@ -1565,13 +2260,54 @@ const TYPES_BY_EXTENSION: Record<string, string> = {
 
 const index = (i: number): number => i + 1;
 
+/**
+ * Before cards had `dialog`, the Claude Code AskUserQuestion hook was the only poster of `questions`, and the channel and
+ * the herdr sidecar read `questions` as "this card has a terminal dialog". This marks each card that hook stored then, once
+ * per inbox, so an answer on a card still open at the upgrade closes its dialog. The hook posts ids `ask-<8 hex digits>`.
+ */
+function markDialogCards(store: Storage): void {
+  if (store.get<boolean>('meta', 'dialog-marked')) return;
+  for (const c of store.list<Card>('cards')) {
+    if (c.dialog === undefined && c.questions?.length && c.origin?.harness === 'claude-code' && /^ask-[0-9a-f]{8}$/.test(c.id)) store.put('cards', c.id, { ...c, dialog: true });
+  }
+  store.put('meta', 'dialog-marked', true);
+}
+
+/** The page draws each question from these fields, and the answer picks an option by its label, so two options with one label could not be told apart. */
+function checkQuestions(questions: unknown): void {
+  if (questions === undefined) return;
+  if (!Array.isArray(questions)) throw new InboxError(400, 'questions must be a list of {question, text, options, multiSelect}');
+  questions.forEach((q: Partial<AskQuestion> | null, i) => {
+    const at = `question ${index(i)}`;
+    if (!q || typeof q !== 'object' || typeof q.question !== 'string' || !q.question.trim()) throw new InboxError(400, `${at}: question must be a non-empty string`);
+    if (q.text !== undefined && typeof q.text !== 'string') throw new InboxError(400, `${at}: text must be a string`);
+    if (q.options === undefined) return;
+    if (!Array.isArray(q.options)) throw new InboxError(400, `${at}: options must be a list of {label, description, recommended}`);
+    const labels = new Set<string>();
+    for (const o of q.options) {
+      if (!o || typeof o !== 'object' || typeof o.label !== 'string') throw new InboxError(400, `${at}: each option needs a label`);
+      if (labels.has(o.label)) throw new InboxError(400, `${at}: two options have the label ${o.label}`);
+      labels.add(o.label);
+    }
+    if (!q.multiSelect && q.options.filter((o) => o.recommended === true).length > 1) throw new InboxError(400, `${at}: a question without multiSelect takes at most one recommended option`);
+  });
+}
+
 /** The text search matches: the card's words, its tags, and its file names. */
 function searchText(card: Card): string {
-  return [card.title, card.text, card.recommendation, card.body, card.status, ...Object.entries(card.tags ?? {}).map(([k, v]) => `${k} ${v}`), ...(card.attachments ?? []).map((a) => a.name)]
+  // A card stored before this field existed may hold anything the store accepted then, so read it defensively.
+  const questions = (Array.isArray(card.questions) ? card.questions : []).flatMap((q) => [q?.question, q?.text, ...(Array.isArray(q?.options) ? q.options : []).map((o) => o?.label)]);
+  return [card.title, card.text, card.recommendation, card.body, ...questions, card.status, ...Object.entries(card.tags ?? {}).map(([k, v]) => `${k} ${v}`), ...(card.attachments ?? []).map((a) => a.name)]
     .filter(Boolean).join('\n');
 }
 
 const ORIGIN_FIELDS = ['harness', 'session', 'name', 'host', 'cwd', 'herdrPane', 'herdrWorkspace', 'herdrTab'] as const;
+
+/** A post's tags as the merge reads them: an object of values, or nothing. A client that sends anything else keeps the
+ * tags it sent on the card, as it always did. */
+function ownTags(tags: unknown): Record<string, string> | undefined {
+  return tags && typeof tags === 'object' && !Array.isArray(tags) ? (tags as Record<string, string>) : undefined;
+}
 
 /** The origin fields the page knows, each a string of at most 200 characters. */
 function cleanOrigin(origin: unknown): Origin | undefined {
@@ -1580,6 +2316,17 @@ function cleanOrigin(origin: unknown): Origin | undefined {
   for (const k of ORIGIN_FIELDS) {
     const v = (origin as Record<string, unknown>)[k];
     if (v !== undefined && v !== null && v !== '') out[k] = String(v).slice(0, 200);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** What herdr said about a pane, as short strings, or undefined when it said nothing. */
+function cleanPlace(place: unknown): ApprovalPlace | undefined {
+  if (!place || typeof place !== 'object') return undefined;
+  const out: ApprovalPlace = {};
+  for (const k of ['agent', 'title', 'tab', 'workspace'] as const) {
+    const v = (place as Record<string, unknown>)[k];
+    if (typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, 120);
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -1596,7 +2343,11 @@ function decodeDataUrl(i: number, f: NewAttachment): { type: string; bytes: Uint
   if (size > MAX_ATTACHMENT_BYTES + 2) throw new InboxError(413, `attachment ${i + 1}${f.name ? ` (${cleanName(f.name)})` : ''} is ${size} bytes, over the limit of ${MAX_ATTACHMENT_BYTES}`);
   let raw: string;
   try { raw = atob(data); } catch { throw new InboxError(400, `attachment ${i + 1}: the base64 data is malformed`); }
-  return { type: (m[1] ?? '').toLowerCase(), bytes: Uint8Array.from(raw, (c) => c.charCodeAt(0)) };
+  // A loop, not `Uint8Array.from(raw, ...)`: the callback that form calls once per byte is most of the time this route
+  // spends on a large screenshot.
+  const bytes = new Uint8Array(raw.length);
+  for (let k = 0; k < raw.length; k++) bytes[k] = raw.charCodeAt(k);
+  return { type: (m[1] ?? '').toLowerCase(), bytes };
 }
 
 /** The type of a file by its extension, or application/octet-stream for an extension the inbox does not know. */
@@ -1609,8 +2360,42 @@ export function attachmentType(file: { name: string; type?: string }): string {
   return !file.type || file.type === 'application/octet-stream' ? typeFromName(file.name) : file.type;
 }
 
-/** A card without the id of the token that posted it. */
+/** A webhook address the inbox calls: https only, as for the owner's webhooks. */
+function webhookUrl(url: unknown): string {
+  const text = String(url ?? '');
+  let parsed: URL;
+  try { parsed = new URL(text); } catch { throw new InboxError(400, 'webhook.url must be an https URL'); }
+  if (parsed.protocol !== 'https:') throw new InboxError(400, 'webhook.url must be https');
+  if (text.length > 2000) throw new InboxError(400, 'webhook.url must be at most 2,000 characters');
+  // A backtick is the one URL character that ends a code span on the card, and %60 is the same address.
+  return parsed.href.replace(/`/g, '%60');
+}
+
+/** The headers a client sends with each call: names a header can have, values on one line, and none the inbox sets itself. */
+function webhookHeaders(headers: unknown): Record<string, string> {
+  if (headers === undefined || headers === null) return {};
+  if (typeof headers !== 'object' || Array.isArray(headers)) throw new InboxError(400, 'webhook.headers must be an object of header names and values');
+  const entries = Object.entries(headers as Record<string, unknown>);
+  if (entries.length > MAX_WEBHOOK_HEADERS) throw new InboxError(400, `webhook.headers takes at most ${MAX_WEBHOOK_HEADERS} headers`);
+  const out: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const [name, value] of entries) {
+    if (seen.has(name.toLowerCase())) throw new InboxError(400, `webhook header ${name}: given twice, in two cases`);
+    seen.add(name.toLowerCase());
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(name)) throw new InboxError(400, `webhook header ${JSON.stringify(name.slice(0, 64))}: not a header name`);
+    if (RESERVED_HEADER.test(name)) throw new InboxError(400, `webhook header ${name}: the inbox sets it itself`);
+    const v = String(value ?? '');
+    if (/[\r\n\0]/.test(v) || v.length > 2000) throw new InboxError(400, `webhook header ${name}: the value must be one line of at most 2,000 characters`);
+    out[name] = v;
+  }
+  return out;
+}
+
+/** A card without what only the person reads: the id of the token that posted it, and the draft they left on a card
+ * they dismissed. */
 export function publicCard(card: Card): Card {
   const { token: _token, ...rest } = card;
-  return rest;
+  if (!rest.closed?.draft) return rest;
+  const { kind, outcome, at } = rest.closed;
+  return { ...rest, closed: { kind, outcome, at } };
 }

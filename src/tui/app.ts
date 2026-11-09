@@ -3,14 +3,16 @@
 // opens, what Skip for now and Send answer do, and when a card counts as seen.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import { cardDetails } from '../../web/details.js';
 import { after, buildQueue, type InboxState, type Queue } from '../../web/queue.js';
 import type { CardSummary } from '../core/summary.ts';
 import type { Attachment } from '../core/types.ts';
 import { notOwnerAdvice } from '../client.ts';
+import { homeDir, writePrivate } from '../node/home.ts';
 import { ApiError, InboxApi, ownerConfig } from './api.ts';
 import { loadParser, parserReady, type Action } from './body.ts';
-import { CardView, type CardViewHost } from './cardview.ts';
+import { CardView, onlineAgents, type CardViewHost } from './cardview.ts';
 import type { Hit } from './doc.ts';
 import type { InputEvent, KeyEvent, MouseEvent } from './input.ts';
 import { encodeFrame, type Grid } from './screen.ts';
@@ -40,14 +42,19 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   const api = new InboxApi(config);
   const term = new Terminal(opts.io, opts.env['YOUR_ATTENTION_TUI_SIZE']);
   const remote = !!opts.env['SSH_CONNECTION'];
+  // The groups this device collapsed, kept in the home directory by inbox, as the page keeps them in its local storage.
+  const prefsFile = path.join(homeDir(), 'tui.json');
+  const collapsed = new Set<string>(readCollapsed(prefsFile, config.url));
 
   const m: Model = {
     theme, width: term.cols, height: term.rows, state: null, queue: null, current: null, view: null, zone: 'list',
-    listScroll: 0, cardScroll: 0, groupBy: 'none', fresh: new Set(), connected: false, connecting: true, blank: 'Loading the inbox…',
+    listScroll: 0, cardScroll: 0, groupBy: 'none', collapsed, fresh: new Set(), connected: false, connecting: true, blank: 'Loading the inbox…',
     help: false, cleared: false, now: Date.now(),
   };
   let focus: string | null = null;
   let pinned: string | null = null;
+  /** The pinned tag values the inbox holds, oldest first, as [key, value] pairs. */
+  let pins: [string, string][] = [];
   let known: Set<string> | null = null;
   const views = new Map<string, CardView>();
   // GET /v1/state sends summaries. The card on screen, the one after it and the one it follows load whole, ahead of time.
@@ -62,7 +69,6 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   let pinTyped = '';
   let confirmAction: (() => void) | undefined;
   let reported: string | null | undefined;
-  let seenKey: string | null = null;
   let frames = 0;
   let slowest = 0;
   let done: (code: number) => void = () => {};
@@ -72,6 +78,17 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     m.status = { text, kind };
     clearTimeout(statusTimer);
     statusTimer = setTimeout(() => { m.status = undefined; schedule(); }, ms);
+    schedule();
+  };
+
+  /** Collapse or open a group, and keep the choice on this device. Its cards then leave the queue order, so Skip
+   * for now and the card after an answer pass over them, as on the page. */
+  const toggleCollapse = (id: string) => {
+    if (m.collapsed.has(id)) m.collapsed.delete(id); else m.collapsed.add(id);
+    try { writeCollapsed(prefsFile, config.url, m.collapsed); } catch { /* the choice still holds for this run */ }
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
+    status(m.collapsed.has(id) ? 'Group collapsed.' : 'Group opened.');
+    pick();
     schedule();
   };
 
@@ -117,6 +134,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     }
     const msg = action.message;
     if (msg === 'skip' || msg === 'Skip for now') { skip(); return; }
+    if (msg === 'dismiss') { await dismissCurrent(); return; }
     if (c.kind === 'blocked' && msg !== 'send answer') {
       try { await api.post(`/v1/cards/${encodeURIComponent(c.id)}/open`); status('Opened the session.', 'ok'); } catch (e) { status(`Could not open the session: ${(e as Error).message}`, 'warn'); }
       return;
@@ -139,7 +157,8 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       }
     } else if (c.broadcast && !c.closed) {
       const picked = (view.store.get('broadcast', 'agents') ?? {}) as Record<string, boolean>;
-      body = { values: { choice: msg === 'approve' ? 'approve' : 'reject', agents: c.broadcast.agents.filter((a) => picked[a] ?? true) }, comment: '' };
+      const comment = String(view.store.get('broadcast', 'comment') ?? '').trim();
+      body = { values: { choice: msg === 'approve' ? 'approve' : 'reject', agents: (m.state ? onlineAgents(m.state) : []).filter((a) => picked[a] ?? true) }, comment };
     } else {
       body = { ...view.answer(), version: c.version };
     }
@@ -169,6 +188,27 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     schedule();
   };
   const skip = () => { pinned = null; go(after(order(), m.current ? m.current.id : null)); };
+  /** Dismiss the card on screen: it closes without the agent hearing anything, and the inbox keeps what was typed as a
+   * draft only the person reads. The card leaves the queue for Sent, as a sent answer does. */
+  async function dismissCurrent(): Promise<void> {
+    const c = m.current;
+    if (!c || c.closed) return;
+    const view = m.view;
+    const draft = c.kind === 'secret'
+      ? { values: {}, comment: String(view?.store.get('secret', 'comment') ?? '').trim() }
+      : view?.card.broadcast
+        ? { values: {}, comment: String(view?.store.get('broadcast', 'comment') ?? '').trim() }
+        : view ? view.answer() : { values: {}, comment: '' };
+    try {
+      await api.post(`/v1/cards/${encodeURIComponent(c.id)}/dismiss`, draft);
+    } catch (e) {
+      if (view) { view.notice = { text: `The card was not dismissed: ${(e as Error).message}`, style: 'warn' }; schedule(); }
+      return;
+    }
+    status('Dismissed, and the agent was not told.', 'ok');
+    answered(c.id);
+    await refresh();
+  }
   // An answer shows its receipt for a moment, then opens the card after the answered one, so a skipped card stays skipped.
   const answered = (id: string) => {
     const then = after(order(), id);
@@ -185,7 +225,9 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const q = m.queue;
     if (!q || !m.state) { m.current = null; m.view = null; return; }
     const stillPinned = q.pending.find((c) => c.id === pinned);
-    const current = m.cleared ? null : (focus ? q.byId[focus] : undefined) ?? stillPinned ?? q.replied[0] ?? q.pending[0] ?? null;
+    // A card in a collapsed group stays out of sight until the person picks it, so the queue opens a group's first card only.
+    const inSight = (cards: CardSummary[]) => cards.find((c) => !q.hidden.has(c.id));
+    const current = m.cleared ? null : (focus ? q.byId[focus] : undefined) ?? stillPinned ?? inSight(q.replied) ?? inSight(q.pending) ?? null;
     if (focus && !q.byId[focus]) focus = null;
     pinned = current ? current.id : null;
     if (current?.id !== m.current?.id) { m.reveal = true; m.revealList = true; if (m.zone === 'card' && !current) m.zone = 'list'; }
@@ -211,16 +253,8 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     view.earlier = earlier ? { card: earlier.card, answer: earlier.answer } : undefined;
     m.view = view;
     if (m.entering) settle();
-    // A reply you have looked at for a moment counts as seen.
-    const sk = `${current.id}:${current.replyAt ?? 0}`;
-    if (current.unseenReplies && seenKey !== sk) {
-      seenKey = sk;
-      setTimeout(() => {
-        // A glance shorter than the delay does not count, and the next visit starts the delay again.
-        if (m.current?.id !== current.id) { if (seenKey === sk) seenKey = null; return; }
-        api.post(`/v1/cards/${encodeURIComponent(current.id)}/seen`).catch(() => {});
-      }, 1500);
-    }
+    // A reply counts as seen when the person acts on the card, not when the card is on screen: a reply they scrolled past
+    // stays under "Agent replied" until they dismiss the card, reply to it, or change their answer.
   }
 
   /** Act on a waiting Enter, once the card on screen has changed or loaded. */
@@ -267,7 +301,12 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     }
     known = new Set(s.cards.map((c) => c.id));
     m.state = s;
-    m.queue = buildQueue(s, m.groupBy) as Queue;
+    // Group by and the pins are the inbox's settings, as on the page, so a change on any page reaches this one.
+    if (s.settings) {
+      if (typeof s.settings.groupBy === 'string') m.groupBy = s.settings.groupBy;
+      pins = Array.isArray(s.settings.pins) ? s.settings.pins : [];
+    }
+    m.queue = buildQueue(s, m.groupBy, pins, m.collapsed) as Queue;
     m.blank = undefined;
     m.pin = undefined;
     pinTyped = '';
@@ -307,11 +346,39 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   // ---- input ----
   const quit = (code = 0) => { stop(); done(code); };
   const groups = (): string[] => ['none', 'priority', 'agent', ...(m.queue?.tagKeys ?? []).map((k) => `tag:${k}`)];
+  /** The inbox keeps Group by, so the page and the terminal client group the same way. */
   const cycleGroup = () => {
     const g = groups();
     m.groupBy = g[(g.indexOf(m.groupBy) + 1) % g.length] ?? 'none';
-    if (m.state) m.queue = buildQueue(m.state, m.groupBy) as Queue;
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
     status(`Group by ${m.groupBy === 'none' ? 'nothing' : m.groupBy.replace(/^tag:/, '')}.`);
+    api.call('PUT', '/v1/settings', { groupBy: m.groupBy }).catch((e: Error) => status(`The inbox did not keep the grouping: ${e.message}`, 'warn'));
+  };
+  /** Pin the open card's value of the tag the queue groups by, or unpin it, as a heading's pin does on the page. */
+  const togglePin = async (): Promise<void> => {
+    const key = m.groupBy.startsWith('tag:') ? m.groupBy.slice(4) : null;
+    const value = key && m.current ? String((m.current.tags ?? {})[key] ?? '').trim() : '';
+    if (!key || !m.current) { status('Group by a tag first (g), then p pins the open card’s value.', 'warn'); return; }
+    if (!value) { status(`This card has no ${key} tag.`, 'warn'); return; }
+    // The inbox keeps one list of pins for every device, so the toggle applies to the freshest list it has, not to the
+    // one this terminal read when it last connected: another device may have pinned something since. A read that fails
+    // leaves nothing to base the write on, so nothing is written.
+    let fresh: [string, string][];
+    try {
+      const s = await api.state();
+      fresh = Array.isArray(s.settings?.pins) ? (s.settings.pins as [string, string][]) : [];
+    } catch (e) {
+      status(`The inbox did not answer, so nothing was pinned: ${(e as Error).message}`, 'warn');
+      return;
+    }
+    const had = fresh.some(([k, v]) => k === key && v === value);
+    const next: [string, string][] = had ? fresh.filter(([k, v]) => !(k === key && v === value)) : [...fresh, [key, value]];
+    pins = next;
+    if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
+    status(had ? `Unpinned ${key}: ${value}.` : `Pinned ${key}: ${value} to the top.`, 'ok');
+    // The change travels as one pin in or out, so a pin another device adds at the same moment survives.
+    const change = had ? { pinRemove: [[key, value]] } : { pinAdd: [[key, value]] };
+    api.call('PUT', '/v1/settings', change).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
   };
   const clearDealt = () => {
     const n = m.queue?.dealt.length ?? 0;
@@ -434,9 +501,17 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       if (ev.name === 'escape') { focus = null; pinned = null; m.cleared = true; pick(); return; }
     }
     if (ev.ctrl || ev.alt) return;
+    if (ev.name === 'd') { void dismissCurrent(); return; }
     if (ev.name === 'q') { quit(0); return; }
     if (ev.name === '?') { m.help = true; return; }
     if (ev.name === 'g') { cycleGroup(); return; }
+    if (ev.name === 'x') {
+      const id = m.current ? m.queue?.groupOf[m.current.id] : undefined;
+      if (id) toggleCollapse(id);
+      else status('The open card is not in a group that collapses.');
+      return;
+    }
+    if (ev.name === 'p') { void togglePin(); return; }
     if (ev.name === 'C') { clearDealt(); return; }
     if (ev.name === 'r') { void refresh(); status('Reloaded.'); return; }
     if (ev.name === 'o' && m.current) { open(address(m.current.id)); return; }
@@ -464,6 +539,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     }
     if (h.target === 'bar:help') { m.help = true; return; }
     if (h.target === 'list:group') { cycleGroup(); return; }
+    if (h.target.startsWith('list:collapse:')) { toggleCollapse(h.target.slice('list:collapse:'.length)); return; }
     if (h.target === 'list:clear') { clearDealt(); return; }
     if (h.target.startsWith('list:')) { m.zone = 'list'; go(h.target.slice(5)); return; }
     if (m.view) {
@@ -500,4 +576,24 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     if (!up && !m.state) void refresh();
   });
   return finished;
+}
+
+/** The ids of the groups this device collapsed for one inbox, from the file next to the pairing. */
+export function readCollapsed(file: string, url: string): string[] {
+  try {
+    const prefs = JSON.parse(fs.readFileSync(file, 'utf8')) as { collapsed?: Record<string, unknown> };
+    const list = prefs.collapsed?.[url];
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string' && x !== '') : [];
+  } catch { return []; }
+}
+
+/** Keep the collapsed group ids for one inbox, and every other inbox's. */
+export function writeCollapsed(file: string, url: string, ids: Iterable<string>): void {
+  let prefs: { collapsed?: Record<string, string[]> } = {};
+  try {
+    const read = JSON.parse(fs.readFileSync(file, 'utf8')) as typeof prefs;
+    if (read && typeof read === 'object' && !Array.isArray(read)) prefs = read;
+  } catch { /* a file cut short reads as none */ }
+  prefs.collapsed = { ...(prefs.collapsed || {}), [url]: [...ids] };
+  writePrivate(file, `${JSON.stringify(prefs, null, 2)}\n`);
 }

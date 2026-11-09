@@ -2,6 +2,11 @@
 // this file, so both send the same values for the same card. It touches no browser API.
 const J = JSON.stringify;
 
+// Every row of buttons ends with Dismiss. It closes the card without the agent hearing anything, and the page keeps what
+// the person had typed. The button's name is also its tooltip and its accessible label.
+export const DISMISS = 'Dismiss without telling the agent';
+const dismissButton = (name) => `${name} = IconButton(${J(DISMISS)}, Icon("eye-off"), @ToAssistant("dismiss"), "secondary")`;
+
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
   // A body with forms of its own keeps them where the agent placed them, and gets the comment and buttons below.
@@ -16,33 +21,44 @@ export function cardSource(c) {
       'fcChoice = FormControl("Your answer", choice)',
       `choice = OptionCards("choice", "single", [${c.options.map((_, j) => `c${j}`).join(', ')}])`,
       ...c.options.map((o, j) => `c${j} = OptionCard(${J(optionValue(o))}, ${J(o.label)}, "")`),
-      'buttons = Buttons([save, go, skip], "row")',
+      'buttons = Buttons([save, go, skip, dismiss], "row")',
       'save = Button("Press it in the session", @ToAssistant("send answer"), "primary")',
       'go = Button("Open session", @ToAssistant("open session"), "secondary")',
       'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+      dismissButton('dismiss'),
     ].join('\n');
   }
   if (c.kind === 'blocked') {
     return [
       'root = Card([screen, buttons])',
       `screen = CodeBlock("text", ${J(c.screen || '(screen unavailable)')})`,
-      'buttons = Buttons([go, skip], "row")',
+      'buttons = Buttons([go, skip, dismiss], "row")',
       'go = Button("Open session", @ToAssistant("open session"), "primary")',
       'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+      dismissButton('dismiss'),
     ].join('\n');
   }
   // The page shows the title above the text and attachments, so a generated card has no header.
   const parts = [];
   const L = [];
   if (c.body) { parts.push('custom'); L.push(c.body.replace(/^\s*root\s*=/m, 'custom =')); }
-  const controls = [];
+  // Each question is a section of its own: the question as a heading, its text, its options and a comment field, so the
+  // person answers it while it is in mind. Each section is a form without buttons, and Send answer carries every form.
   (c.questions || []).forEach((q, i) => {
-    controls.push(`fc${i}`);
+    parts.push(`qt${i}`, `qf${i}`);
+    L.push(`qt${i} = TextContent(${J([`### ${q.question}`, q.text].filter(Boolean).join('\n\n'))})`);
     const opts = (q.options || []).map((o, j) => [`o${i}_${j}`, o]);
-    L.push(`fc${i} = FormControl(${J(q.question)}, q${i})`);
+    if (!opts.length) {
+      L.push(`qf${i} = Form(${J(`${c.id}:q${i}`)}, qb${i}, [fc${i}])`, `qb${i} = Buttons([])`, `fc${i} = FormControl("Your answer", TextArea("q${i}", "", 3))`);
+      return;
+    }
+    L.push(`qf${i} = Form(${J(`${c.id}:q${i}`)}, qb${i}, [fc${i}, fcc${i}])`, `qb${i} = Buttons([])`);
+    L.push(`fc${i} = FormControl(${J(q.multiSelect ? 'Your answers' : 'Your answer')}, q${i})`);
     L.push(`q${i} = OptionCards("q${i}", ${J(q.multiSelect ? 'multiple' : 'single')}, [${opts.map(([r]) => r).join(', ')}])`);
     opts.forEach(([r, o]) => L.push(`${r} = OptionCard(${J(o.label)}, ${J(o.label)}, ${J(o.description || '')})`));
+    L.push(`fcc${i} = FormControl("Comment on this question", TextArea(${J(`q${i}_comment`)}, "Why, or anything to add", 2))`);
   });
+  const controls = [];
   if (c.options && c.options.length) {
     controls.push('fcChoice');
     L.push('fcChoice = FormControl("Your answer", choice)');
@@ -53,9 +69,10 @@ export function cardSource(c) {
   L.push('fcComment = FormControl("Comment", comment)', 'comment = TextArea("comment", "Anything to add?", 3)');
   parts.push('form');
   L.push(`form = Form(${J(c.id)}, buttons, [${controls.join(', ')}])`,
-    'buttons = Buttons([save, skip], "row")',
+    'buttons = Buttons([save, skip, dismiss], "row")',
     'save = Button("Send answer", @ToAssistant("send answer"), "primary")',
-    'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")');
+    'skip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+    dismissButton('dismiss'));
   return [`root = Card([${parts.join(', ')}])`, ...L].join('\n');
 }
 
@@ -68,9 +85,10 @@ function withAnswerFooter(body) {
     'yaAnswer = Form("yaAnswer", yaButtons, [yaFcComment])',
     'yaFcComment = FormControl("Comment", yaComment)',
     'yaComment = TextArea("comment", "Anything to add?", 3)',
-    'yaButtons = Buttons([yaSave, yaSkip], "row")',
+    'yaButtons = Buttons([yaSave, yaSkip, yaDismiss], "row")',
     'yaSave = Button("Send answer", @ToAssistant("send answer"), "primary")',
     'yaSkip = Button("Skip for now", @ToAssistant("skip"), "secondary")',
+    dismissButton('yaDismiss'),
   ].join('\n');
 }
 
@@ -216,6 +234,35 @@ export function recommendedOptions(c) {
   return { ids, inside, text };
 }
 
+// The fields the page builds for a card's questions: q0 for the first one's answer, q0_comment for its comment.
+const QUESTION_FIELD = /^q(\d+)(_comment)?$/;
+
+/** The answer to each question, in order: the question, what the person picked or wrote, and the comment. */
+export function questionAnswers(card, values) {
+  // A body with forms of its own draws no questions, so none has an answer.
+  if (keepsOwnForm(card)) return [];
+  return (card.questions || []).map((q, i) => {
+    const v = [values[`q${i}`] ?? []].flat().map(String).filter((x) => x.trim());
+    const comment = String(values[`q${i}_comment`] ?? '').trim();
+    return { question: q.question, answer: v.length ? v.join(', ') : q.options?.length ? '(no option picked)' : '(no answer)', comment };
+  });
+}
+
+/** The answer text for a card's questions, one line per question and an indented line per comment. The page and the agent read the same lines. */
+export function questionLines(card, values) {
+  return questionAnswers(card, values).flatMap((a) => [`${a.question} ${a.answer}`, ...(a.comment ? [`  Comment: ${a.comment}`] : [])]);
+}
+
+/** The options each question recommends, by field name: {q0: ['SQLite']}. The page and the terminal client tag them. */
+export function questionRecommendations(card) {
+  const out = {};
+  (card.questions || []).forEach((q, i) => {
+    const labels = (q.options || []).filter((o) => o.recommended === true).map((o) => o.label);
+    if (labels.length) out[`q${i}`] = labels;
+  });
+  return out;
+}
+
 /** The picks the card still offers, by option id. A revision that dropped or relabeled an option drops its pick. */
 export function answerValues(card, values) {
   const out = { ...values };
@@ -227,10 +274,35 @@ export function answerValues(card, values) {
     else delete out[key];
   };
   keep('choice', new Map((card.options || []).map((o) => [optionValue(o), o.id])));
-  (card.questions || []).forEach((q, i) => keep(`q${i}`, new Map((q.options || []).map((o) => [o.label, o.label]))));
-  // A pick for a question a revision removed goes too.
-  if (card.questions) for (const k of Object.keys(out)) { const m = /^q(\d+)$/.exec(k); if (m && Number(m[1]) >= card.questions.length) delete out[k]; }
+  // A question without options takes its answer as text, and an empty comment says nothing.
+  (card.questions || []).forEach((q, i) => {
+    if (q.options?.length) keep(`q${i}`, new Map(q.options.map((o) => [o.label, o.label])));
+    for (const k of q.options?.length ? [`q${i}_comment`] : [`q${i}`]) if (k in out && !String(out[k] ?? '').trim()) delete out[k];
+  });
+  // A pick or comment for a question a revision removed goes too.
+  if (card.questions) for (const k of Object.keys(out)) { const m = QUESTION_FIELD.exec(k); if (m && Number(m[1]) >= card.questions.length) delete out[k]; }
   return out;
+}
+
+/** One approval_<i> value per approval on the card: true for each the person turned on, false for the rest. */
+export function approvalValues(card, picks) {
+  return Object.fromEntries((card.approvals || []).map((_, i) => [`approval_${i}`, !!(picks && picks[i])]));
+}
+
+/** The line under an approval that names its pane, and the agent and tab when herdr knew them. */
+export function approvalPlace(a) {
+  const p = a.place || {};
+  const who = [p.agent, p.title].filter(Boolean).join(', ');
+  const where = p.tab ? `tab ${p.tab}${p.workspace ? ` in workspace ${p.workspace}` : ''}` : p.workspace ? `workspace ${p.workspace}` : '';
+  return [`Pane ${a.pane}`, who, where].filter(Boolean).join(' · ');
+}
+
+/** What the inbox did with one approval, or '' for one it did not touch. */
+export function approvalResult(a, r) {
+  if (!r) return '';
+  if (r.sentAt) return `Sent to ${a.pane} at ${new Date(r.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  if (r.sendingAt) return `Sending to ${a.pane}`;
+  return `Not sent to ${a.pane}: ${r.error}`;
 }
 
 // Form values by field name, without the comment.
@@ -256,11 +328,14 @@ export function describe(card, a) {
   if (!a) return '';
   if (card.kind === 'secret') return [a.values && a.values.sealed ? 'Sent sealed' : 'Declined', a.comment].filter(Boolean).join('\n');
   let fields;
-  const picks = Object.entries(a.values || {}).map(([k, v]) => {
+  const values = a.values || {};
+  const asked = card.questions?.length ? questionLines(card, values) : [];
+  const picks = Object.entries(values).map(([k, v]) => {
     const list = [].concat(v);
     if (k === 'choice' && card.options) return list.map((x) => (card.options.find((o) => o.id === x) || {}).label || x).join(', ');
-    const qi = /^q(\d+)$/.exec(k);
-    if (qi && card.questions) return `${card.questions[Number(qi[1])]?.question || k} ${list.join(', ')}`;
+    const ai = /^approval_(\d+)$/.exec(k);
+    if (ai && card.approvals) { const ap = card.approvals[Number(ai[1])]; return v === true && ap ? `Approved: ${ap.label || ap.text}` : ''; }
+    if (asked.length && QUESTION_FIELD.test(k)) return '';
     const f = (fields ??= fieldLabels(card.body))[k];
     // A check box or switch group answers with each item on or off: the summary lists the ones turned on.
     const picked = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => v[x]) : list;
@@ -270,7 +345,7 @@ export function describe(card, a) {
     const label = (f && f.label) || (f && Object.keys(f.choices).length ? '' : k);
     return label ? `${label}: ${shown}` : shown;
   });
-  return [...picks, a.comment].filter(Boolean).join('\n') || 'Empty answer';
+  return [...asked, ...picks, a.comment && (asked.length ? `Comment: ${a.comment}` : a.comment)].filter(Boolean).join('\n') || 'Empty answer';
 }
 
 // What changed since the version before, line by line.
@@ -292,4 +367,87 @@ export function changeSteps(card) {
     if (fields.length) steps.push({ version: after.version, fields });
   }
   return steps;
+}
+
+// The words that differ between a removed line and the added line that replaced it,
+// from the longest common run of words. Lines that share no word, or are very long,
+// get no word marks: the whole line changed.
+export function wordDiff(before, after) {
+  const x = before.split(/(\s+)/);
+  const y = after.split(/(\s+)/);
+  if (x.length * y.length > 250000) return null;
+  const t = Array.from({ length: x.length + 1 }, () => new Uint16Array(y.length + 1));
+  for (let i = x.length - 1; i >= 0; i--) for (let j = y.length - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+  const del = [];
+  const add = [];
+  let i = 0;
+  let j = 0;
+  while (i < x.length && j < y.length) {
+    if (x[i] === y[j]) { del.push([x[i++], false]); add.push([y[j++], false]); }
+    else if (t[i + 1][j] >= t[i][j + 1]) del.push([x[i++], true]);
+    else add.push([y[j++], true]);
+  }
+  while (i < x.length) del.push([x[i++], true]);
+  while (j < y.length) add.push([y[j++], true]);
+  if (!del.some(([w, changed]) => !changed && w.trim())) return null;
+  return { del, add };
+}
+
+// The proposed guidance against the current guidance, line by line in order, from the longest common run of lines.
+// A run of removed lines and the run of added lines after it pair up, line by line, for word marks, as Changes pairs
+// them. With `base`, the guidance the proposal started from, a removed line is marked `undone` when the current guidance
+// has more copies of it than `base`: it came after the proposal, and approving removes it.
+export function guidanceDiff(current, proposed, base) {
+  const x = String(current ?? '').split('\n');
+  const y = String(proposed ?? '').split('\n');
+  // The lines both texts start and end with need no table, and a proposal usually changes a few lines in the middle.
+  let head = 0;
+  while (head < x.length && head < y.length && x[head] === y[head]) head++;
+  let tail = 0;
+  while (tail < x.length - head && tail < y.length - head && x[x.length - 1 - tail] === y[y.length - 1 - tail]) tail++;
+  const xm = x.slice(head, x.length - tail);
+  const ym = y.slice(head, y.length - tail);
+  const rows = x.slice(0, head).map((text) => ({ kind: 'same', text }));
+  const w = ym.length + 1;
+  // One flat table of at most four million cells, 16 MB. Past that the middle shows as removed, then added.
+  if ((xm.length + 1) * w > 4000000) {
+    for (const text of xm) rows.push({ kind: 'del', text });
+    for (const text of ym) rows.push({ kind: 'add', text });
+  } else {
+    const t = new Uint32Array((xm.length + 1) * w);
+    for (let i = xm.length - 1; i >= 0; i--) for (let j = ym.length - 1; j >= 0; j--) t[i * w + j] = xm[i] === ym[j] ? t[(i + 1) * w + j + 1] + 1 : Math.max(t[(i + 1) * w + j], t[i * w + j + 1]);
+    let i = 0;
+    let j = 0;
+    while (i < xm.length && j < ym.length) {
+      if (xm[i] === ym[j]) { rows.push({ kind: 'same', text: xm[i++] }); j++; }
+      else if (t[(i + 1) * w + j] >= t[i * w + j + 1]) rows.push({ kind: 'del', text: xm[i++] });
+      else rows.push({ kind: 'add', text: ym[j++] });
+    }
+    while (i < xm.length) rows.push({ kind: 'del', text: xm[i++] });
+    while (j < ym.length) rows.push({ kind: 'add', text: ym[j++] });
+  }
+  for (const text of x.slice(x.length - tail)) rows.push({ kind: 'same', text });
+  for (let k = 0; k < rows.length;) {
+    if (rows[k].kind !== 'del') { k++; continue; }
+    let d = k;
+    while (d < rows.length && rows[d].kind === 'del') d++;
+    let e = d;
+    while (e < rows.length && rows[e].kind === 'add') e++;
+    for (let n = 0; n < Math.min(d - k, e - d); n++) {
+      const w = wordDiff(rows[k + n].text, rows[d + n].text);
+      if (w) { rows[k + n].words = w.del; rows[d + n].words = w.add; }
+    }
+    k = e;
+  }
+  if (base !== undefined && base !== current) {
+    const gained = new Map();
+    for (const l of x) gained.set(l, (gained.get(l) || 0) + 1);
+    for (const l of String(base).split('\n')) gained.set(l, (gained.get(l) || 0) - 1);
+    for (const r of rows) {
+      if (r.kind !== 'del' || !r.text.trim() || !(gained.get(r.text) > 0)) continue;
+      r.undone = true;
+      gained.set(r.text, gained.get(r.text) - 1);
+    }
+  }
+  return rows;
 }

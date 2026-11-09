@@ -6,8 +6,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError } from './core/inbox.ts';
-import type { AgentEvent, Answer, Card, CloseKind, Guidance, NewCard, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CloseKind, DefaultTags, DefaultTagsWrite, Guidance, NewCard, PublicSubscription, TagCount, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
+import { questionLines } from '../web/answers.js';
 
 export interface ClientConfig {
   url: string;
@@ -93,6 +94,8 @@ export class Client {
   private readonly seen = new Set<string>();
   /** This process, the same across reconnects, so the inbox sends a restarted agent the answers its earlier process never read. */
   readonly instance = crypto.randomUUID();
+  /** The newest guidance version each agent of this process has seen, from a hello or a guidance event. */
+  private readonly guidanceSeen = new Map<string, number>();
   /** What the inbox checks itself, from GET /v1/info. An inbox from before the field checks everything. */
   private inboxChecks: Promise<{ diagrams: boolean; body: boolean }> | undefined;
 
@@ -164,10 +167,21 @@ export class Client {
     throw new Error(`no link answered (${(lastError as Error)?.message ?? 'none tried'})`);
   }
 
-  /** The posted card. A revision the person won't see carries `warning`. */
-  async post(card: NewCard): Promise<Card & { warning?: string }> {
+  /** The posted card. A revision the person won't see carries `warning`, and `inheritedTags` names the keys the card
+   * took from the agent's default tags. */
+  async post(card: NewCard): Promise<Card & { warning?: string; inheritedTags?: string[] }> {
     await this.checkFirst('POST /v1/cards', { card: { ...card, attachments: undefined } });
     return this.call('POST', '/v1/cards', card);
+  }
+
+  /** The default tags this token keeps for one agent id: every card that agent posts inherits them. */
+  defaultTags(agent: string): Promise<DefaultTags> {
+    return this.call('GET', `/v1/tags?agent=${encodeURIComponent(agent)}`);
+  }
+
+  /** Set, merge, remove or clear the default tags this token keeps for one agent id. */
+  setDefaultTags(agent: string, write: Omit<DefaultTagsWrite, 'agent'>): Promise<DefaultTags> {
+    return this.call('PUT', '/v1/tags', { agent, ...write });
   }
 
   /** An inbox that does not check diagrams or bodies itself, such as the hosted one, takes them unchecked. So the client
@@ -205,8 +219,9 @@ export class Client {
   saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
   /** The card guidance, and the catalog of widgets an agent can place. */
-  guidance(): Promise<Guidance & { widgets?: string }> { return this.call('GET', '/v1/guidance'); }
-  proposeGuidance(text: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text }); }
+  guidance(): Promise<Guidance & { widgets?: string; tags?: TagCount[] }> { return this.call('GET', '/v1/guidance'); }
+  /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. */
+  proposeGuidance(text: string, agent?: string): Promise<Card> { return this.call('POST', '/v1/guidance', { text, ...(agent ? { agent } : {}) }); }
   reply(id: string, text: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/reply`, { text }); }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
@@ -222,35 +237,98 @@ export class Client {
     const unread = typeof reply?.unread === 'number' && Number.isFinite(reply.unread) ? reply.unread : cards.length;
     return { unread, cards };
   }
+  /** Ask the inbox to send the answers to this agent's cards to a webhook. The owner approves it on a system card, and the
+   * secret that signs each call comes back here once. */
+  subscribe(agent: string, webhook: { url: string; headers?: Record<string, string> }): Promise<{ subscription: PublicSubscription; card: Card; secret: string }> {
+    return this.call('POST', '/v1/cards', { agent, kind: 'system', title: `Send the answers for ${agent} to a webhook`, system: { type: 'subscribe', webhook, events: ['answer'] } });
+  }
+  unsubscribe(agent: string): Promise<{ removed: number }> {
+    return this.call('POST', '/v1/cards', { agent, kind: 'system', title: `Stop sending the answers for ${agent} to a webhook`, system: { type: 'unsubscribe' } });
+  }
+  subscriptions(): Promise<PublicSubscription[]> { return this.call('GET', '/v1/subscriptions'); }
 
   /** Receive answers for one agent until `signal` aborts. Reconnects after a drop, over the next link when one fails.
    * `auto`, the default, uses a WebSocket and falls back to server-sent events on a link that cannot carry one.
-   * `poll` long-polls, for clients that cannot keep a connection. */
-  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto'): Promise<void> {
+   * `poll` long-polls, for clients that cannot keep a connection. `channelOff` tells the inbox that this session
+   * discards channel notifications, so the person sees why an answer does not arrive. */
+  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto', opts: { channelOff?: boolean } = {}): Promise<void> {
+    const channel = opts.channelOff ? '&channel=off' : '';
     let link = 0;
     const noSocket = new Set<string>();
-    const deliver = async (ev: AgentEvent): Promise<void> => { if (this.fresh(ev)) await onEvent(ev); };
+    // A link that answered 410 for its event stream serves events over its socket only. Asking it again every
+    // second is what woke a hosted inbox's Durable Object ~35 times a second, so it is never asked again.
+    const noStream = new Set<string>();
+    const deliver = async (ev: AgentEvent): Promise<void> => {
+      if (!this.fresh(ev)) return;
+      // Record a guidance version before the handler runs, so a fetch that a hello started never hands over older text.
+      if (ev.type === 'guidance') this.guidanceSeen.set(agent, Math.max(this.guidanceSeen.get(agent) ?? 0, ev.guidance.version));
+      await onEvent(ev);
+      // The inbox sends guidance events only to agents online at the approval. A hello on a reconnect carries the
+      // current version, so an agent that was away when the person approved a newer one fetches it and gets it here.
+      if (ev.type !== 'hello') return;
+      const known = this.guidanceSeen.get(agent);
+      // The first hello of this process sets the version it starts from.
+      if (known === undefined) { this.guidanceSeen.set(agent, ev.guidance); return; }
+      if (ev.guidance <= known) return;
+      try {
+        const g = await this.guidance();
+        // A guidance event may have arrived while the fetch ran: hand over the fetched text only when it is newer still.
+        if (g.version <= (this.guidanceSeen.get(agent) ?? 0)) return;
+        this.guidanceSeen.set(agent, g.version);
+        await onEvent({ type: 'guidance', id: `hello-${g.version}`, guidance: { text: g.text, version: g.version, at: g.at } });
+      } catch { /* the next hello tries again, and the agent can read the guidance with card_guidance */ }
+    };
+    // A retry after a failure waits longer each time, so an inbox that is down, or that refuses a transport,
+    // is not woken once a second forever. A transport that ran to its end resets the count.
+    let failures = 0;
+    const backoff = (): number => {
+      const base = Math.min(30_000, 1000 * 2 ** Math.min(Math.max(failures, 1) - 1, 5));
+      return Math.round(base * (0.8 + Math.random() * 0.4));
+    };
     while (!signal.aborted) {
       const url = this.urls[link % this.urls.length] ?? this.url;
+      let wait = 1000;
       try {
         if (this.urls.length > 1 && !(await this.sameInbox(url))) throw new Error('another inbox');
         this.url = url;
-        if (transport === 'poll') await this.overPoll(url, agent, deliver, signal);
-        else if (transport === 'sse' || (transport === 'auto' && noSocket.has(url))) await this.overSse(url, agent, deliver, signal);
+        // The event stream is a fallback for a link whose socket does not open, and only until it refuses.
+        const overStream = transport === 'sse' || (transport === 'auto' && noSocket.has(url) && !noStream.has(url));
+        let ran = true;
+        if (transport === 'poll') await this.overPoll(url, agent, deliver, signal, channel);
+        else if (overStream) await this.overSse(url, agent, deliver, signal, channel);
         else {
-          const opened = await this.overSocket(url, agent, deliver, signal);
+          const opened = await this.overSocket(url, agent, deliver, signal, channel);
           // A socket that never opened on a link that answers means the link cannot carry one. A link that does not answer is down: retry it.
           if (!opened && transport === 'auto') {
             if (!(await this.answers(url))) throw new Error('the link is down');
             noSocket.add(url);
-            continue;
+            ran = false;
+            // Try the stream once when the link has not refused it; otherwise wait before the next socket.
+            wait = noStream.has(url) ? (failures++, backoff()) : 0;
           }
         }
-      } catch {
+        if (ran) failures = 0;
+      } catch (e) {
         if (signal.aborted) return;
-        link++;
+        const status = (e as { status?: number }).status;
+        if (status === 410) {
+          // The inbox serves events over its socket only, as a hosted inbox does. An explicit transport asked for
+          // a stream that this link will never serve, so it reports instead of retrying.
+          if (transport !== 'auto') throw e;
+          noStream.add(url);
+          failures++;
+          wait = backoff();
+        } else if (status === 401 || status === 403 || status === 404) {
+          // A token or address the inbox refuses stays refused: report it instead of retrying forever.
+          throw e;
+        } else {
+          link++;
+          failures++;
+          wait = backoff();
+        }
       }
-      if (!signal.aborted) await new Promise((r) => setTimeout(r, 1000));
+      if (wait === 0) continue;
+      if (!signal.aborted) await new Promise((r) => setTimeout(r, wait));
     }
   }
 
@@ -258,12 +336,12 @@ export class Client {
     try { return (await fetch(`${url}/v1/info`, { signal: AbortSignal.timeout(5000) })).ok; } catch { return false; }
   }
 
-  private async overSse(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
-    const res = await fetch(`${url}/v1/stream?agent=${encodeURIComponent(agent)}&instance=${this.instance}`, {
+  private async overSse(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, channel: string): Promise<void> {
+    const res = await fetch(`${url}/v1/stream?agent=${encodeURIComponent(agent)}&instance=${this.instance}${channel}`, {
       headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
       signal,
     });
-    if (!res.ok || !res.body) throw new Error(`stream: ${res.status}`);
+    if (!res.ok || !res.body) throw new TransportRefused('stream', res.status);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -283,10 +361,10 @@ export class Client {
   }
 
   /** Resolves when the socket closes: true if it opened first, false if it never did. */
-  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<boolean> {
+  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, channel: string): Promise<boolean> {
     return new Promise((resolve) => {
       let opened = false;
-      const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}&instance=${this.instance}`);
+      const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}&instance=${this.instance}${channel}`);
       // An abort ends the stream now: a socket close waits for the far end's answer, and an idle inbox may not send
       // one for as long as the process lives, which would leave a stopped client unable to exit.
       const stop = (): void => { ws.close(); done(); };
@@ -321,12 +399,21 @@ export class Client {
     });
   }
 
-  private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal): Promise<void> {
+  private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, channel: string): Promise<void> {
     while (!signal.aborted) {
-      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&instance=${this.instance}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
-      if (!res.ok) throw new Error(`poll: ${res.status}`);
+      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&instance=${this.instance}${channel}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
+      if (!res.ok) throw new TransportRefused('poll', res.status);
       for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }
+  }
+}
+
+/** A transport the inbox answered with an HTTP status instead of a stream, so the loop can tell permanent from transient. */
+class TransportRefused extends Error {
+  readonly status: number;
+  constructor(name: string, status: number) {
+    super(`${name}: ${status}`);
+    this.status = status;
   }
 }
 
@@ -340,14 +427,19 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
   // A sealed secret is never written out: the integration opens it.
   if (card.kind === 'secret') return answer.comment ? `(a sealed secret)\nComment: ${answer.comment}` : '(a sealed secret)';
   const lines: string[] = [];
-  if (card.questions?.length) {
-    card.questions.forEach((q, i) => {
-      const v = [answer.values[`q${i}`] ?? []].flat();
-      lines.push(`${q.question} ${v.length ? v.join(', ') : '(no option picked)'}`);
-    });
-  }
+  if (card.questions?.length) lines.push(...questionLines(card, answer.values));
+  card.approvals?.forEach((a, i) => {
+    const r = answer.approvalResults?.[i];
+    // Only a recorded send reads as sent: an answer with no result entry says nothing about the pane.
+    const done = !answer.values[`approval_${i}`] ? 'not approved'
+      : r && 'sentAt' in r ? 'approved, and the inbox typed it into the pane as the person\'s message'
+      : r && 'error' in r ? `approved, but not sent: ${r.error}`
+      : 'approved, but the inbox recorded no send';
+    lines.push(`Approval ${i + 1} for pane ${a.pane}, "${a.text}": ${done}`);
+  });
   for (const [k, v] of Object.entries(answer.values)) {
-    if (card.questions?.length && /^q\d+$/.test(k)) continue;
+    if (card.questions?.length && /^q\d+(_comment)?$/.test(k)) continue;
+    if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;
     // A check box or switch group answers with each item on or off, by the item names the agent gave.
     const on = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => (v as Record<string, unknown>)[x]) : undefined;
     const label = on ? on.join(', ') || '(none turned on)'

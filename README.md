@@ -132,11 +132,29 @@ claude() {
 } }
 ```
 
+**A card from a session that stops without one (optional).** With `YOUR_ATTENTION_REQUIRE_CARD=1` in the session's environment, this hook gives the model one request to post a card when it stops with none open, and names the `card_post` call to make. Claude Code marks the stop that request causes with `stop_hook_active`, so the hook does nothing then. A session that ignores the request gets another one at its next stop. Leave the variable out for a background agent that should run without a card.
+
+```json
+{ "hooks": {
+  "Stop": [{ "hooks": [{ "type": "command", "command": "your-attention claude-hook turn-end", "timeout": 10 }] }]
+} }
+```
+
 #### pi
 
 ```sh
 pi install git:github.com/elecnix/your-attention
 ```
+
+A session's cards can take default tags, such as the repository and the topic. Start pi through the launcher, which sets `YOUR_ATTENTION_TAGS` and passes the rest of the command to pi unchanged:
+
+```sh
+your-attention pi --tags repo=acme/api,topic=billing -- [pi args]
+```
+
+Every card the session posts inherits them, under the tags on the card itself. The agent reads or changes them with the `card_tags` tool, so a compaction loses nothing.
+
+With `YOUR_ATTENTION_REQUIRE_CARD=1` in its environment, a session gets one request for a card when a run settles and none of its cards is open. The extension sends the request as a user message and skips the run that request starts, so an agent that ignores it is not asked twice in a row. Leave the variable out for a background agent that should run without a card.
 
 #### OpenCode
 
@@ -209,13 +227,15 @@ An agent's recommendation shows inside the option it recommends, under a **Recom
 
 ```sh
 your-attention status           # the inbox on this machine, its files, and this machine's pairings
-your-attention clear            # clears the cards you answered or that closed; search still finds them
+your-attention clear            # clears the cards you answered or that closed; search finds them for 30 days
 your-attention reset --yes      # removes every card, answer and file; tokens and templates stay
 your-attention login-url        # prints a sign-in link that works once, within 5 minutes
 your-attention stop             # stops the inbox, or its launchd or systemd service
 ```
 
 A card can link a file on the agent's computer with a `file:` address, such as `file:///Users/me/report.html`. On the laptop inbox, a click opens the file in a new tab, when the card came from the same computer. The inbox serves only files that the card's text or recommendation contains, to the owner only, and a served HTML file can't run scripts. A cloud inbox, and a card from another computer, show the path as code.
+
+The inbox deletes a cleared card 30 days after you clear it. It also deletes a card nobody answered 30 days after its agent last changed it, even a card that still waits for you. Each deletion takes the answer and the files with the card. An answered card you haven't cleared stays.
 
 `clear`, `reset` and `stop` act on the inbox this machine runs. `login-url` and `open` sign in to that inbox, or, on a machine that runs none, to the inbox it paired with as owner, such as a cloud inbox: `your-attention pair <url> --role owner`.
 
@@ -243,7 +263,9 @@ Like the other commands, the client reads `YOUR_ATTENTION_URL` and `YOUR_ATTENTI
 | PgUp, PgDn | ten cards up or down | scroll the card |
 | Ctrl+Enter, Ctrl+S | send the answer | send the answer |
 | Ctrl+N | skip for now | skip for now |
+| `d` | dismiss without telling the agent | dismiss without telling the agent |
 | `g` | group by nothing, priority, agent or a tag | |
+| `p` | pin the open card's value of the tag you group by | |
 | `C` | clear the answered and closed cards | |
 | `o` | open the card in the browser | |
 | `?`, `q`, Ctrl+C | help, quit, quit | Ctrl+C quits |
@@ -285,6 +307,17 @@ your-attention watch --role owner --type change --no-card   # the card id, state
 ```
 
 An owner watcher sees every card and every answer. Its token is an owner token, in a file with mode 0600. Pair the machine as owner only when it is yours, and sign it out from the devices button on the page to end its access.
+
+### Send the answers to a webhook
+
+An agent that only runs when something calls it, such as a hosted bot or a CI job, can get its answers at a webhook instead of running `watch`:
+
+```sh
+your-attention subscribe --agent cli:deploy --webhook https://example.com/hooks/abc --header-file ~/.config/deploy-hook-headers
+your-attention unsubscribe --agent cli:deploy
+```
+
+The inbox shows the request to you as a card with the address and the header names. The inbox calls the webhook only after you approve it there, and changing your answer to Deny later stops it. Once you approve, the inbox POSTs each answer to a card of that agent, from the same token, in the format of an agent stream event. It tries again with a growing wait until the webhook answers 2xx, and that answer marks it read. Write a secret header as a `NAME: VALUE` line in a file of mode 0600, and pass that file with `--header-file`. With `--header-file -` the headers come from stdin. Keep `--header 'NAME: VALUE'` for the rest, since `ps` shows command-line arguments to every user of the machine. An address with a secret in its path goes in a file too, with `--webhook-file`. `subscribe` prints the secret that signs each call, once. `your-attention status` lists the webhooks. SPEC.md, "Answer webhooks", has the details.
 
 ## Protect the inbox with a PIN
 
@@ -354,6 +387,12 @@ You need a Cloudflare account with R2 turned on once in the dashboard, a workers
 
 4. Run the `deploy-cloudflare` workflow from the Actions tab, and pick the mode. The Worker is named `app`, so it answers at `https://app.<subdomain>.workers.dev`.
 
+   The same run deploys the telemetry Worker first, which takes laptop inboxes' anonymous daily counts. It uses the same credentials as the inbox and answers at `https://telemetry.<subdomain>.workers.dev`. Deploy both with:
+
+   ```sh
+   gh workflow run deploy-cloudflare -f mode=hosted
+   ```
+
 5. In single mode, open `https://app.<subdomain>.workers.dev/#token=<owner token>`. In hosted mode, add an invite code. Codes need 20 characters or more, and the last number is how many inboxes the code creates:
 
    ```sh
@@ -369,7 +408,7 @@ In hosted mode, each inbox writes its daily usage counts to the `your_attention_
 The Cloudflare build sets these in `wrangler.jsonc`, so a free account stays within its quotas:
 
 - 100 MB of uploaded files over the inbox's life. Each file counts as at least 64 KB, and the count doesn't go down when a file is deleted.
-- 20 MB in the inbox's database. A full inbox takes only deletes, answers and closes until you make room.
+- 20 MB in the inbox's database. A full inbox takes only deletes, answers and closes until you make room. Past 16 MB, the inbox deletes cleared and unanswered cards before their 30 days, oldest first.
 - 2,000 file downloads a day for each client.
 - 300 requests a minute for each signed-in client address, per inbox, and 100 a minute for each address without a token.
 - R2 deletes each file 30 days after its upload. The card stays.

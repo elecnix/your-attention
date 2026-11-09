@@ -67,7 +67,7 @@ test('the queue groups by agent or by a tag when asked, and by nothing at first'
   await inbox.agent.post({ id: 'g1', agent: 'agent-x', title: 'Grouped one', tags: { topic: 'release' } });
   await inbox.agent.post({ id: 'g2', agent: 'agent-y', title: 'Grouped two', tags: { topic: 'docs' } });
   await inbox.open(page);
-  await expect(page.locator('.queue h3').first()).toHaveText('Waiting for you');
+  await expect(page.locator('.queue h3').first().locator('.fold-name')).toHaveText('Waiting for you');
   await page.locator('.group-by select').selectOption('agent');
   await expect(page.locator('.queue h3', { hasText: 'agent-x' })).toBeVisible();
   await page.locator('.group-by select').selectOption('tag:topic');
@@ -354,7 +354,7 @@ test('a broom in the Sent header clears answered and closed cards, without scrol
     await broom.click();
     await expect(page.locator('.q', { hasText: 'Closed already' })).toHaveCount(0);
     await expect(page.locator('.q', { hasText: 'Still waiting here' })).toBeVisible();
-    await expect(page.locator('.queue h3', { hasText: 'Sent, newest first' }).getByRole('button')).toHaveCount(0);
+    await expect(page.locator('.queue h3', { hasText: 'Sent, newest first' }).getByRole('button', { name: /^Clear \d+ answered or closed card/ })).toHaveCount(0);
   } finally { await own.close(); }
 });
 

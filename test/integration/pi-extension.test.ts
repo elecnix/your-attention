@@ -8,9 +8,16 @@ import { seal } from '../../web/sealed.js';
 import { start, until, type Harness } from './harness.ts';
 
 let h: Harness;
+// A card's origin takes the herdr pane from the environment of the process that posts it. These tests run the extension
+// in this process, so the pane of the terminal that runs the tests would reach the inbox, and herdr with it.
+const savedPane = process.env['HERDR_PANE_ID'];
+delete process.env['HERDR_PANE_ID'];
 before(async () => {
   h = await start();
   process.env['YOUR_ATTENTION_HOME'] = h.home;
+});
+after(() => {
+  if (savedPane !== undefined) process.env['HERDR_PANE_ID'] = savedPane;
 });
 after(async () => {
   await handlers.get('session_shutdown')?.({}, ctx);
@@ -35,7 +42,7 @@ const state = async () => (await h.stored()) as { states: Record<string, string>
 describe('the pi extension', () => {
   it('registers the card tools and connects on session start', async () => {
     yourAttention(pi as never);
-    assert.deepEqual([...tools.keys()].sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_reply', 'card_search', 'card_status', 'card_template_save', 'card_widget_save']);
+    assert.deepEqual([...tools.keys()].sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_reply', 'card_search', 'card_status', 'card_tags', 'card_template_save', 'card_widget_save']);
     await handlers.get('session_start')?.({}, ctx);
     await until(async () => (await state()).presence['pi:pi-session-1']?.online);
   });
@@ -70,5 +77,34 @@ describe('the pi extension', () => {
     await tools.get('card_post')!.execute('call-3', { id: 'pi-3', title: 'Tests too?' }, undefined, undefined, ctx);
     await h.owner('POST', '/v1/cards/pi-3/answer', { comment: 'later', delivery: 'followUp' });
     assert.equal((await until(() => sent.find((m) => m.text.includes('pi-3')))).options?.deliverAs, 'followUp');
+  });
+});
+
+describe('the turn-end request', () => {
+  it('asks a session with no open card for one at turn end, once the person opts in', async () => {
+    idle = true;
+    const count = () => sent.filter((m) => m.text.includes('no open card')).length;
+    const turnEnd = () => handlers.get('agent_settled')?.({}, ctx);
+    // Without the opt-in the hook does nothing.
+    await turnEnd();
+    assert.equal(count(), 0);
+    process.env['YOUR_ATTENTION_REQUIRE_CARD'] = '1';
+    // No open card: it asks, and the request starts a turn.
+    await turnEnd();
+    assert.equal(count(), 1);
+    assert.equal(sent[sent.length - 1]!.options, undefined);
+    // The turn that request started is skipped, so an agent that ignores it is not asked twice in a row.
+    await turnEnd();
+    assert.equal(count(), 1);
+    // A later turn with still no card asks again.
+    await turnEnd();
+    assert.equal(count(), 2);
+    // A session with an open card is left alone: the first call skips the turn the last request started, and the second sees the card.
+    await tools.get('card_post')!.execute('call-4', { id: 'pi-4', title: 'Still working?' }, undefined, undefined, ctx);
+    await turnEnd();
+    await turnEnd();
+    assert.equal(count(), 2);
+    await h.owner('POST', '/v1/cards/pi-4/answer', { comment: 'ok' });
+    delete process.env['YOUR_ATTENTION_REQUIRE_CARD'];
   });
 });

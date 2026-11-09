@@ -9,7 +9,14 @@ import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
+import { parseTagsFlag } from '../tags.ts';
 import { cardTools } from '../tools.ts';
+
+// stdout belongs to pi, so a stream that stops for good says why on stderr instead of vanishing.
+const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
+
+/** What a session is asked when a run settles with no open card, once the person opts in with YOUR_ATTENTION_REQUIRE_CARD=1. */
+const NO_CARD = '[your-attention] This session has no open card. Post one with card_post that says what you are working on and what you need from the person.';
 
 // The parts of pi's ExtensionAPI this extension uses.
 interface PiContext {
@@ -23,6 +30,7 @@ interface ToolResult {
 interface PiApi {
   on(event: 'session_start' | 'session_shutdown', handler: (event: unknown, ctx: PiContext) => void | Promise<void>): void;
   on(event: 'context', handler: (event: { messages: unknown[] }, ctx: PiContext) => void | Promise<void>): void;
+  on(event: 'agent_settled', handler: (event: { aborted?: boolean }, ctx: PiContext) => void | Promise<void>): void;
   registerTool(tool: {
     name: string;
     label: string;
@@ -44,7 +52,7 @@ export default function yourAttention(pi: PiApi): void {
   const pending = new Map<string, string>();
   const secrets = new SecretRequests();
 
-  pi.on('session_start', (_event, ctx) => {
+  pi.on('session_start', async (_event, ctx) => {
     const config = loadConfig();
     if (!config) return;
     inbox = new Client(config);
@@ -54,6 +62,18 @@ export default function yourAttention(pi: PiApi): void {
     stop?.abort();
     stop = new AbortController();
     const client = inbox;
+    // The launcher's --tags value gives every card this session posts its default tags. The inbox keeps them, so a
+    // compaction or a restart leaves them in place.
+    const launched = process.env['YOUR_ATTENTION_TAGS'];
+    // The write is awaited, so a card this session posts next finds the defaults already in the inbox.
+    if (launched) {
+      try {
+        const tags = parseTagsFlag(launched);
+        if (tags) await client.setDefaultTags(agent, { tags, from: 'YOUR_ATTENTION_TAGS' }).catch((e: Error) => log('could not set the default tags:', e.message));
+      } catch (e) {
+        log('ignoring YOUR_ATTENTION_TAGS:', (e as Error).message);
+      }
+    }
     void client.stream(agent, async (ev) => {
       if (ev.type === 'guidance' || ev.type === 'returned') {
         const note = ev.type === 'guidance'
@@ -70,12 +90,34 @@ export default function yourAttention(pi: PiApi): void {
       // Steer by default; start a new turn when the agent is idle.
       if (ctx.isIdle()) pi.sendUserMessage(text);
       else pi.sendUserMessage(text, { deliverAs: ev.answer.delivery === 'followUp' ? 'followUp' : 'steer' });
-    }, stop.signal);
+    }, stop.signal).catch((e: Error) => log('stream stopped:', e.message));
   });
 
   pi.on('session_shutdown', () => {
     stop?.abort();
     stop = undefined;
+  });
+
+  // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
+  // card. The run the request itself starts settles too, so the request skips the next settle rather than looping.
+  let asked = false;
+  pi.on('agent_settled', async (_event, ctx) => {
+    if (!inbox || process.env['YOUR_ATTENTION_REQUIRE_CARD'] !== '1') return;
+    if (asked) {
+      asked = false;
+      return;
+    }
+    if (!ctx.isIdle()) return;
+    let open = false;
+    try {
+      open = (await inbox.list()).some((c) => c.card.agent === agent && c.state === 'open');
+    } catch (e) {
+      log('could not read the session cards:', (e as Error).message);
+      return;
+    }
+    if (open) return;
+    asked = true;
+    pi.sendUserMessage(NO_CARD);
   });
 
   pi.on('context', (event) => {

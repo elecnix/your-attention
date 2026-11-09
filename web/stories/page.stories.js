@@ -40,7 +40,7 @@ function page(cards, extra = {}) {
 
 export const Queue = {
   render: () => page([
-    card({ id: 'q1', title: 'Store sessions in SQLite or Postgres?', text: 'The laptop build needs one file.', recommendation: 'SQLite.', options: [{ id: 'o1', label: 'SQLite' }, { id: 'o2', label: 'Postgres' }], origin: { harness: 'claude-code', host: 'laptop', name: 'storage' } }),
+    card({ id: 'q1', title: 'Store sessions in SQLite or Postgres?', text: 'The laptop build needs one file.', recommendation: 'SQLite.', options: [{ id: 'o1', label: 'SQLite' }, { id: 'o2', label: 'Postgres' }], origin: { harness: 'claude-code', host: 'laptop', name: 'storage' }, tags: { topic: 'storage', repo: 'acme/api' } }),
     card({ id: 'q2', title: 'Which layout?', priority: 'soon', agent: 'pi:demo', attachments: [{ url: PNG, name: 'a.png', type: 'image/png', alt: 'A' }], status: 'waiting on CI' }),
     card({ id: 'q3', title: 'api-tests is waiting for you', kind: 'blocked', deliver: 'none', screen: 'Allow this command?\n❯ 1. Yes' }),
     card({ id: 'q4', title: 'Rename the retry flag?', priority: 'later' }),

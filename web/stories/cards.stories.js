@@ -17,6 +17,14 @@ export const AskUserQuestion = {
   render: () => mount(view(card({ title: 'Which port?', questions: [{ question: 'Which port?', options: [{ label: '4815', description: 'The default' }, { label: '8080' }] }, { question: 'Advertise over mDNS?', options: [{ label: 'Yes' }, { label: 'No' }] }] }))),
 };
 
+// A card with three questions: each draws as its own section, with its text, its options and a comment field.
+export const QuestionsWithText = {
+  render: () => mount(view(card({ title: 'Three choices before the release', text: 'This agent prepares the 2.0 release and needs three decisions.', questions: [
+    { question: 'Which database?', text: 'The service stores **one table** of jobs, about 10,000 rows.', options: [{ label: 'SQLite', description: 'One file next to the binary.', recommended: true }, { label: 'Postgres', description: 'A server to run and back up.' }] },
+    { question: 'Which regions get the release first?', text: 'Each region adds a deploy step of about 4 minutes.', multiSelect: true, options: [{ label: 'us-east' }, { label: 'eu-west', recommended: true }, { label: 'ap-south' }] },
+    { question: 'What must the release note say?', text: 'The note goes out with the tag.' },
+  ] }))),
+};
 export const BlockedAgentWithChoices = { render: () => mount(view(card({ kind: 'blocked', title: 'api-tests is waiting for you', text: 'Do you want to proceed?', options: [{ id: 'o1', label: 'Yes' }, { id: 'o2', label: 'No, and tell Claude what to do differently (esc)' }], screen: 'Bash command\n  npm run test:e2e\nDo you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do differently (esc)' }))) };
 export const BlockedAgent = { render: () => mount(view(card({ kind: 'blocked', deliver: 'none', title: 'api-tests is waiting for you', screen: 'Bash command\n  npm run test:e2e\nDo you want to proceed?\n❯ 1. Yes\n  2. No' }))) };
 
@@ -52,9 +60,33 @@ export const ClosedByAgent = {
   render: () => mount(h(ClosedCard, { closed: { kind: 'self-answered', outcome: 'Found it in the README.', at: Date.now() }, onNext: () => {}, animate: false }, view(card()))),
 };
 
-export const GuidanceBroadcast = {
-  render: () => mount(h(BroadcastForm, { card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: 'Attach a screenshot to every UI card.', agents: ['claude:3239ab8e', 'pi:01a17c01', 'herdr:w1:p2'] } }), onDone: () => {} })),
+// A card the person dismissed: the agent was not told, and only the person reads the draft they had on screen.
+export const Dismissed = {
+  render: () => {
+    const c = card({ title: 'Store sessions in SQLite or Postgres?', options: [{ id: 'o1', label: 'SQLite' }, { id: 'o2', label: 'Postgres' }] });
+    return mount(h(ClosedCard, { closed: { kind: 'dismissed', outcome: 'Nothing was sent to the agent.', at: Date.now(), draft: { values: { choice: 'o2' }, comment: 'Not this release, ask me again after the migration.', at: Date.now() } }, card: c, onNext: () => {}, animate: false }, view(c)));
+  },
 };
+
+// A proposal that edits one word and adds one line: the unchanged lines collapse behind a control.
+const GUIDANCE = 'Lead with the goal.\nGive two options, with the one you recommend first.\nEnd with a recommendation.';
+// Live presence: two agents online, and one that connected once and left.
+const PRESENCE = {
+  'claude:3239ab8e': { agent: 'claude:3239ab8e', online: true, lastSeen: 0 },
+  'pi:01a17c01': { agent: 'pi:01a17c01', online: true, lastSeen: 0 },
+  'herdr:w1:p2': { agent: 'herdr:w1:p2', online: false, lastSeen: 0 },
+};
+const PROPOSAL = 'Lead with the goal.\nGive three options, with the one you recommend first.\nEnd with a recommendation.\nAttach a screenshot to every UI card.';
+const guidanceStory = (guidance) => ({
+  render: () => mount(h(BroadcastForm, {
+    card: card({ kind: 'system', title: 'Send new card guidance to agents?', broadcast: { text: PROPOSAL, from: 'claude:3239ab8e', base: { version: 3, text: GUIDANCE } } }),
+    presence: PRESENCE, guidance, onDone: () => {}, onSkip: () => {},
+  })),
+});
+export const GuidanceBroadcast = guidanceStory({ text: GUIDANCE, version: 3, at: 0 });
+
+// The guidance changed after the agent proposed its text: approving would remove the line added since.
+export const GuidanceBroadcastAfterAChange = guidanceStory({ text: `${GUIDANCE}\nName the files the card is about.`, version: 4, at: 0 });
 
 // A saved widget, placed twice in one card. The inbox expands the placing lines when the card is posted.
 export const PullRequestWidgets = {

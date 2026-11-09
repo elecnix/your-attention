@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Inbox, InboxError, PRESENCE_GRACE_MS, cardState, type Caller } from '../../src/core/inbox.ts';
+import { Inbox, InboxError, PRESENCE_GRACE_MS, PRESENCE_KEEP_MS, cardState, type Caller } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
-import type { AgentEvent, PageEvent } from '../../src/core/types.ts';
+import type { AgentEvent, PageEvent, Presence } from '../../src/core/types.ts';
 
 function setup() {
   let t = 1000;
@@ -145,9 +145,25 @@ describe('delivery', () => {
     inbox.connect(agentA, 's1', () => {})();
     t += 500;
     inbox.connect(agentA, 's1', () => {});
+    // Nothing else waits, so only a closing time the reconnect left behind could set a deadline, and it must not.
+    assert.equal(inbox.nextDeadline(), undefined);
     t += PRESENCE_GRACE_MS * 2;
     inbox.sweep();
     assert.equal(inbox.isOnline('s1'), true);
+  });
+
+  it('keeps Channel off on the presence across a disconnect and a reconnect', () => {
+    let t = 0;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const agentA: Caller = { token: 'ta', role: 'agent' };
+    const close = inbox.connect(agentA, 's1', () => {}, undefined, { channelOff: true });
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
+    close();
+    t += PRESENCE_GRACE_MS * 2;
+    inbox.sweep();
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
+    inbox.connect(agentA, 's1', () => {});
+    assert.equal(inbox.state().presence['s1']?.channelOff, true);
   });
 
   it('force-sends an unread answer again', async () => {
@@ -386,3 +402,59 @@ describe('an answer delivered to two processes of one agent at once', () => {
     }
   });
 });
+
+describe('presence pruning', () => {
+  function present() {
+    let t = 1_000_000_000_000;
+    const store = new MemoryStorage();
+    const inbox = new Inbox(store, () => t);
+    const agentA: Caller = { token: 'ta', role: 'agent' };
+    return { inbox, store, agentA, now: () => t };
+  }
+
+  it('prunes the row of an agent offline for 30 days, and keeps a younger one', () => {
+    const { inbox, store, now } = present();
+    store.put<Presence>('presence', 'old', { agent: 'old', online: false, lastSeen: now() - PRESENCE_KEEP_MS - 60_000 });
+    store.put<Presence>('presence', 'young', { agent: 'young', online: false, lastSeen: now() - PRESENCE_KEEP_MS + 60_000 });
+    inbox.sweep();
+    assert.equal(store.get<Presence>('presence', 'old'), undefined);
+    assert.equal(store.get<Presence>('presence', 'young')?.agent, 'young');
+  });
+
+  it('keeps the row of an online agent however old its lastSeen', () => {
+    const { inbox, store, now } = present();
+    store.put<Presence>('presence', 's1', { agent: 's1', online: true, lastSeen: now() - PRESENCE_KEEP_MS * 3 });
+    inbox.sweep();
+    assert.equal(store.get<Presence>('presence', 's1')?.online, true);
+  });
+
+  it('gives a reconnecting agent a fresh row, and its waiting answer', async () => {
+    const { inbox, store, agentA } = present();
+    inbox.postCard(agentA, { id: 'c1', agent: 's1', title: 'q' });
+    store.put<Presence>('presence', 's1', { agent: 's1', online: false, lastSeen: 0 });
+    const saved = await inbox.answer('c1', { values: { choice: 'o1' } });
+    inbox.sweep();
+    assert.equal(store.get<Presence>('presence', 's1'), undefined, 'the stale row is gone');
+    const got: AgentEvent[] = [];
+    inbox.connect(agentA, 's1', (ev) => got.push(ev));
+    assert.equal(store.get<Presence>('presence', 's1')?.online, true, 'the connect writes a fresh row');
+    assert.equal(got.filter((e) => e.type === 'answer').length, 1, 'the answer that waited still reaches the agent');
+    assert.ok(saved.savedAt);
+  });
+
+  it('leaves the pruned agent out of the state payload', () => {
+    const { inbox, store, now } = present();
+    store.put<Presence>('presence', 'old', { agent: 'old', online: false, lastSeen: now() - PRESENCE_KEEP_MS - 60_000 });
+    assert.equal(Object.keys(inbox.summaryState().presence).length, 1);
+    inbox.sweep();
+    assert.deepEqual(Object.keys(inbox.summaryState().presence), []);
+  });
+
+  it('arms the next sweep for the earliest presence expiry', () => {
+    const { inbox, store, now } = present();
+    store.put<Presence>('presence', 'old', { agent: 'old', online: true, lastSeen: now() - 10 });
+    store.put<Presence>('presence', 's1', { agent: 's1', online: false, lastSeen: now() - PRESENCE_KEEP_MS + 60_000 });
+    assert.equal(inbox.nextDeadline(), now() + 60_000);
+  });
+});
+

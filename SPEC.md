@@ -8,9 +8,11 @@ Messages are JSON over HTTP. Agents receive events in whichever of three ways th
 
 - `GET /v1/stream?agent=<id>`: server-sent events, the default. Pages use `GET /v1/events` the same way.
 - `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The client sends `{"type":"ping"}` every 20 seconds and gets `{"type":"pong"}`. An inbox closes a socket that sends nothing for 60 seconds, and the laptop build also sends WebSocket ping frames every 15 seconds. The Cloudflare build counts pings only: it closes a socket 5 minutes after its last ping, whatever other frames it sends.
-- `GET /v1/poll?agent=<id>&wait=25`: a long-poll that returns `{events}` at the first answer, or after `wait` seconds.
+- `GET /v1/poll?agent=<id>&wait=25`: a long-poll that returns `{events}` at the first answer or after `wait` seconds. The inbox ends the wait at once when the client drops the connection.
 
-Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one. The inbox reports an agent offline 2 seconds after its last connection closes, so a reconnect or the next poll does not flicker its presence.
+The Cloudflare build serves events over the WebSocket only, so `GET /v1/stream`, `GET /v1/events` and `GET /v1/poll` answer 410. The Worker returns that status itself, so the inbox object never wakes, and logs an agent that retries once a minute.
+
+Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one. The inbox reports an agent offline 2 seconds after its last connection closes, so a reconnect or the next poll does not flicker its presence. The inbox keeps an agent's presence row for 30 days after the agent goes offline, and the sweep then deletes it, so `GET /v1/state` does not grow with every session that ever connected. The sweep never deletes the row of an online agent. An agent that reconnects after the prune gets a fresh row, and any answer that waited for it.
 
 `GET /v1/info` returns `{"name":"your-attention","protocol":1,"id":"<inbox id>","pair":"/v1/pair","checks":{"diagrams":true,"body":true}}`. The id stays the same over every link to the inbox. `checks` says what the inbox checks itself before it takes a card, as [Checks on the client](#checks-on-the-client) describes. An inbox whose answer has no `checks` checks both.
 
@@ -40,11 +42,11 @@ While an extension checks a card, the card is `in-triage` and the person does no
 
 A hook call without a verdict by its deadline follows the policy: `fail-open` passes the card, and `fail-closed` holds it. The card shows the extension and the reason. With no extension on `card.created`, cards go straight to the person, and an extension that connects later screens the cards still waiting. The platform alarm resolves deadlines, so the inbox itself doesn't set timers.
 
-`POST /v1/webhooks {hook, url}` sends observe-only hook calls to an https service. Each call has the header `x-your-attention-signature: sha256=<HMAC-SHA256 of the body>`, keyed with the secret that the create call returns once.
+`POST /v1/webhooks {hook, url}` sends observe-only hook calls to an https service. Each call has the header `x-your-attention-signature: sha256=<HMAC-SHA256 of the body>`, keyed with the secret that the create call returns once. [Answer webhooks](#answer-webhooks) sends the answers to an agent's own cards to a webhook of its choice.
 
 ## The triage extension
 
-`your-attention triage` checks that each card states a goal, the options that the agent weighed, evidence, and a recommendation. It also searches earlier answers, and returns a card that an earlier answer covers. By default it uses OpenRouter, with the key from `your-attention triage login`, an OAuth PKCE sign-in. `--judge-cmd "claude -p"` uses a coding harness in print mode instead, and `--judge-url` uses any OpenAI-compatible endpoint. A judge that fails or answers in an unreadable form passes the card. `your-attention service triage` writes a launchd or systemd unit for it.
+`your-attention triage` checks that each card states a goal, the options that the agent weighed, evidence, and a recommendation. The prompt includes the card's kind, title, text, recommendation, option labels, questions, secret name, HTML, body, attachment names and tags, so a guidance rule can check any of them. It also searches earlier answers, and returns a card that an earlier answer covers. It returns a card whose text asks two or more questions above one `options` list, so the agent posts them as `questions`. By default it uses OpenRouter, with the key from `your-attention triage login`, an OAuth PKCE sign-in. `--judge-cmd "claude -p"` uses a coding harness in print mode instead, and `--judge-url` uses any OpenAI-compatible endpoint. A judge that fails or answers in an unreadable form passes the card. `your-attention service triage` writes a launchd or systemd unit for it.
 
 ## Person presence
 
@@ -107,10 +109,12 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | -- | -- |
 | `id` | 1 to 80 characters: letters, digits, dots, colons, dashes or the `_` character. Posting the same id again revises the card and adds 1 to its `version`. |
 | `agent` | The session that receives the answer, such as `claude:<session id>`, `pi:<session id>` or `opencode:<session id>`. |
-| `kind` | `ask` (the default), `blocked` for a harness that waits on a prompt, or `system` for cards the inbox posts. |
-| `title`, `text`, `recommendation` | The question, its context, and what the agent would do. |
+| `kind` | `ask` (the default), `blocked` for a harness that waits on a prompt, or `system`. The inbox posts its own `system` cards, such as a pairing request. A client posts a `system` card only to ask the inbox for something, with the request in `system`, as [Answer webhooks](#answer-webhooks) describes. The inbox answers 400 to a client's `system` card without a request. |
+| `title`, `text`, `recommendation` | The question, its context, and what the agent would do. `title` is one line of plain text. The page, the terminal client, a notification and a search result show it as it is written, so Markdown in a title reads as its own source. A link belongs in `text`, or in a field label of the body. |
 | `options`, `multiple` | Answer options as `{id, label, description, recommended}`. The page shows each option as a box the person clicks, with its description inside, as inline Markdown. The person picks with the `choice` field. An agent marks its recommended option with `recommended: true`. A card without `multiple` takes one at most, and the inbox answers 400 to a second one. The `card_post` tool takes each option as `{label, description, recommended}` or as a plain label. |
-| `questions` | Claude Code `AskUserQuestion` questions. Field `q0` answers the first one. |
+| `questions` | The questions of a card that asks two or more, each `{question, header, text, options, multiSelect}`, with each option as `{label, description, recommended}`. The page and the terminal client draw the card's `text` first, then each question as its own section. A section opens with the question as a heading and its `text` in Markdown, and ends with the option boxes and a comment field. A question without `options` takes a free-text answer instead. The answer gives the first question's pick in `q0`, by the option's label, and its comment in `q0_comment`. The agent reads one line per question, the question and the answer, with an indented `Comment:` line under it. The inbox answers 400 for a question with an empty `question`, for two options with one label, and for two recommended options on a question without `multiSelect`. The Claude Code `AskUserQuestion` hook posts its questions in this field too. |
+| `dialog` | `true` when the questions are also open as a dialog in the agent's terminal, as the `AskUserQuestion` hook posts them. In herdr, an answer on the card closes that dialog, and the sidecar posts no `blocked` card for the same pane. `card_post` never sets it. |
+| `approvals` | Up to 5 sentences, each `{pane, text, label}`, that the inbox types into a herdr pane as the person's own message once the person approves it. Field `approval_0` answers the first one. See [Approvals](#approvals). |
 | `body` | OpenUI Lang source for a card that brings its own widgets. A body with its own `Form` statements keeps each form where the agent placed it, between text and tables, and the page ignores `options` and `questions`. The page adds a comment box, **Send answer** and **Skip for now** below the body. When the body has a field of its own named `comment`, the answer joins its text and the comment box text, the body's first. One send carries the values of every form, by field name. **Your answer** shows each field's label and the labels of the choices picked. |
 | `html` | The agent's own HTML and scripts. The page shows it in a frame with `sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"`. After the card's own CSS, the page adds the inbox's text styles: its font, weights, spacing, text size and background, the body text color with bright headings and bold words, and monospace for code. The card keeps its layout, and every HTML card reads like the rest of the inbox. The frame reports its content height, and the page sizes the frame to fit, up to 20,000 pixels, so the page is the only scroll. A link in the frame opens in a new tab, outside the sandbox and with no reference back to the inbox page. The card's warning says so, because a script in the card picks that address. `allowHtml` is off by default. Then the card offers **Show this card**, for this card only, and **Always show HTML cards**, which turns the setting on. A card in a frame offers to turn the setting off. The page adds a comment box, **Send answer** and **Skip for now** below the frame. **Send answer** asks the frame for every named `input`, `select` and `textarea`. Each radio group gives the picked value, and check boxes give the list of checked values. **Send answer** leaves empty fields out. A script in the frame can also send the answer with `yourAttention.answer(values, comment)`, and the comment box text joins that comment. |
 | `attachments` | Up to 10 files, each `{src, name, alt}`. `src` is an https URL or a base64 `data:` URL of at most 8 MB. |
@@ -122,11 +126,29 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 | `priority` | The id of a priority level: `now`, `soon` (the default) or `later` unless the levels changed. |
 | `origin` | Where the session runs: `harness`, `session`, `name`, `host`, `cwd`, `herdrPane`, and the labels of the herdr workspace and tab, `herdrWorkspace` and `herdrTab`. The integration fills it in when the agent posts, and the inbox keeps each field to 200 characters. |
 | `from` | A label the agent picks for itself, such as `the release agent`, at most 80 characters. It changes nothing about access: only the token that posted a card can change that card. |
-| `tags` | String properties for grouping. |
+| `tags` | String properties for grouping. The card header shows each one as `key: value`, and the person can pin a value to the top of the queue. The agent's default tags appear on every card it posts: see [Default tags](#default-tags). A card keeps at most 10 merged, and each key and value is one line of at most 100 characters. |
 | `follows` | The card this one follows up on. The inbox sets `followedBy` on that card. |
 | `deliver` | `stream` (the default) or `none` for a card that only shows state. |
 
-Only the token that posted a card can change it or acknowledge its answer. The inbox never sends that token id to clients.
+Only the token that posted a card can change it or acknowledge its answer. The inbox posts a guidance card itself and gives it the token of the proposing agent, so that agent may acknowledge the answer and close the card, and an edit fails with 403 because only the inbox may post as `system`. The inbox never sends that token id to clients.
+
+## Default tags
+
+An agent keeps default tags in the inbox, and every card it posts inherits them. `PUT /v1/tags` sets them:
+
+```json
+{ "agent": "pi:5f2a", "tags": { "repo": "acme/api", "topic": "billing" } }
+```
+
+Every field except `agent` is optional. A write with `clear` true wipes the defaults first, then merges `tags` into them, then drops the keys in `remove`, so one call can do all three. Each tag is stored as `{value, from}`, where `from` says what set it, such as `card_tags` or `YOUR_ATTENTION_TAGS` from the pi launcher. The route returns `{agent, tags}`.
+
+`GET /v1/tags?agent=<id>` returns the calling token's defaults for one agent id, with the same fields. The owner lists them for every token with `GET /v1/tags`, or for one agent with `?agent=<id>`, as `{defaults: [{token, agent, tags}]}`. Each token reads and changes only the defaults it set, because the inbox keys them by token and agent id. The same agent id under another token has its own row. An extension token has none. The limits follow the card tag limit: at most 10 keys, and each key and value at most 100 characters. The inbox answers 400 past them, and refuses an empty value, since a default with no value means nothing.
+
+When an agent posts a card, the inbox puts the defaults under the card's own `tags`. A key on the card takes its own value, and a key the card passes with an empty string drops that default for that card alone. A default past the 10-key limit of the merged tags loses to the card's own. Cards keep the merged result, so the page, the terminal client, search and the guidance all read the final tags. `POST /v1/cards` replies with `inheritedTags`, which lists each default key the card took, and `card_post` tells the agent. The defaults apply to every card an agent posts, a secret card included. The inbox posts `system` cards itself, and they take no defaults. A patch leaves the card's tags as they are.
+
+The inbox keeps a default tag under its agent id, so a compaction, a restart or a different harness leaves it in place. `card_tags` with no fields returns them, with `from` for each one.
+
+The pi launcher seeds them. `pi` rejects a flag it does not know, so `your-attention pi --tags repo=acme/api,topic=billing -- <pi args>` exports `YOUR_ATTENTION_TAGS` and runs pi with the rest of its arguments unchanged. The pi extension reads the variable at session start and sets the session's defaults with `from: "YOUR_ATTENTION_TAGS"`.
 
 ## Answers
 
@@ -136,13 +158,47 @@ An owner client sends the answer with `POST /v1/cards/<id>/answer {values, comme
 - `steer` or `followUp`: the matching delivery in the harness.
 - `force`: set by `POST /v1/cards/<id>/force` for an answer the model has not read.
 
-A new answer replaces the old one and keeps it in `previous`.
+A new answer replaces the old one and keeps it in `previous`. A card whose agent replied after the answer keeps the answer, so the page offers **Reply**: it sends the answer's own values again with a comment, and the agent receives the comment as a follow-up on the same card. Saving an answer counts the card's agent replies as seen.
+
+An owner client may also dismiss a card, which sends the agent nothing.
 
 `images` is a list of up to 10 pasted images, each `{src, name, field}`. `src` is a base64 `data:` URL of a PNG, JPEG, GIF or WebP image of at most 8 MB, and one answer's images add up to at most 10 MB, because base64 makes them four thirds of their size and the route reads a body of 16 MB. `field` says where the person pasted it, such as `comment` or `q0`. The inbox answers 400 for any other type or an https URL, 413 for an image over 8 MB or for images that add up to more than 10 MB, and 400 for an image on a secret card or on a pairing request, whose card goes a day later without its files. It stores the bytes in the blob store before it saves the answer. They count against `uploadLimitBytes` like a card's files. The answer's `images` keeps a reference `{id, name, type, size, field}` for each one. The answer route takes a body of up to 16 MB, as the card post does. A card's agent token reads each image at `GET /v1/attachments/<id>`, and no other agent token does. Replacing an answer keeps the earlier images in `previous`, and `reset` deletes them.
 
 In the page, an image goes into the general comment box, a question's comment field or any text field of the card on screen by Command+V or by a drop from a window, and a thumbnail shows under that field. A × button removes it before the person sends, and a click on the thumbnail opens the full image in a new tab. An answered card shows its images the same way, as thumbnails that open the stored image. Text on the clipboard still pastes as text. The page refuses a pasted or dropped file that isn't one of the four image types, or that is over 8 MB, and says why under the field. It also refuses images that would take the answer past 10 MB in total. **Send answer** sends the images with the answer and clears them. A secret card's fields don't take images.
 
 An integration saves each image of an answer into `~/.your-attention/images/<agent>/<card>/`, readable by this user only (mode 0600 in a 0700 folder), and the event gives the file's path: `Image pasted in comment: <path>`, or `Image: <path>` when the image has no field. Claude Code, pi and OpenCode all do so before they tell the model.
+
+## Dismissing a card
+
+`POST /v1/cards/<id>/dismiss {values, comment}` closes a card as `dismissed`, for the owner only. The agent hears nothing about it: this route doesn't save an answer, and it sends nothing on the agent's stream. The card leaves the queue for **Sent**, and `GET /v1/cards/<id>` returns `closed.kind: "dismissed"`. A caller that is not the owner gets 403, and the inbox answers 409 to a card it already closed.
+
+When the person dismisses a card, the inbox records what they had on screen: the form values and the comment, both possibly empty. These go in `closed.draft`, with the time in `at`. Only the owner reads them: `publicCard` leaves the draft out, so an agent's stream and its `GET /v1/cards/<id>` never carry it, `card_search` does not index the comment, and the state summary has no draft.
+
+The inbox saves a revision or a reply on a dismissed card, and the card stays in **Sent**: the reply does not bring it back under **Agent replied**. The person may still answer the card, and that answer goes to the agent as any answer to a closed card does.
+
+## Approvals
+
+Some actions need the person's own words in an agent's session, such as lifting a denial from Claude Code's auto-mode check. An agent puts that sentence on its card as an approval, and the person approves it on the card instead of typing it in the pane.
+
+Each approval is `{pane, text, label}`:
+
+- `pane` is a herdr pane id, `w` and letters or digits, a colon, then `p` and letters or digits, such as `w6P:p2`.
+- `text` is the exact message, from 1 to 1,000 characters. It may not start with a dash, because herdr would read it as an option.
+- `label` is optional, at most 120 characters, and says what the approval allows.
+
+The inbox answers 400 for more than 5 approvals, a malformed pane id, a text that breaks these rules, or approvals on a card that is not `ask`. Only the laptop inbox sends approvals, because it runs on the computer that runs herdr. The hosted inbox answers 400 to any card with approvals. When the laptop inbox takes the card, it asks herdr about each pane and stores `place: {agent, title, tab, workspace}` on the approval. The inbox sets `place` itself and drops one an agent sends.
+
+The page shows each `text` in a code block, with a toggle beside it that reads **Approve** when off and **Approved** when on. Each toggle starts off. An **Open pane** link beside the toggle goes to `https://herdr.invalid/v1/pane/<pane>`, and a line below it gives the pane id, plus its agent and tab when herdr knew them. Approvals work beside options, questions, a body or an HTML frame. The answer gives `approval_<i>` for each one, `true` or `false`.
+
+The answer route sends the approvals after it saves the owner's answer. For each `approval_<i>` that is `true`, the inbox:
+
+1. Checks that the answer is for the card's current version. When it isn't, the person read other sentences, so the inbox records an error and doesn't send.
+2. Records `{sendingAt}` before the first send, so a second answer saved meanwhile sends that approval again only after a failure.
+3. Checks with `herdr pane get` that the pane exists.
+4. Reads the pane with `herdr pane read <pane> --lines 40 --source visible --format ansi`, and finds the input box: the last line with Claude Code's `❯` or Codex's `›`. Text in that box drawn faint, SGR 2, is a suggestion the harness shows, and the inbox types over it. Any other text is the person's draft, and the inbox doesn't send. It doesn't send to a pane with no input box either.
+5. Runs `herdr agent prompt <pane> <text>`, with `HERDR_BIN_PATH` or `herdr`.
+
+The answer's `approvalResults[i]` records what happened: `{sentAt}`, `{error}`, or `{sendingAt}` while the send runs. An approval left off has `null`. The answer route replies with the answer after the sends, and the page then shows `Sent to w6P:p2 at 14:02`, or the error. A new answer to the same card version keeps each `sentAt` and `sendingAt`. The inbox then types a sentence once per version, and the page keeps its toggle on. An answer after an error sends again. A revision of the card starts over, with every toggle off. The agent token can't answer a card, so an agent never sends an approval.
 
 ## Secret cards
 
@@ -186,29 +242,46 @@ The page copies code with a click, so an agent puts text the person should copy,
 
 Agents point at another agent's session with a herdr link, `[label](https://herdr.invalid/v1/<kind>/<id>)`. The kind is `agent`, `pane`, `tab` or `workspace`, and herdr's session fingerprint may come before it. An orchestrator uses one to report on a blocked agent in another tab. The page shows the link as a terminal chip in the card's text, body, Markdown files and HTML. A click keeps the page where it is. The page sends the link to `POST /v1/focus`, which only the owner may call. The inbox then runs `herdr agent focus`, `tab focus` or `workspace focus` on this computer. For a shell pane without an agent, the inbox opens the pane's tab. The id uses letters, digits, `_`, `:`, `.` and `-`, and never starts with a dash. A hosted inbox has no herdr, so it answers 501 and the chip shows the error.
 
-Agents point at a file on their own machine with a `file:` address, bare as `file:///Users/me/report.html` or as a Markdown link, `[the report](file:///Users/me/report.html)`. The address is percent-encoded, so a space in a path is `%20`. A browser refuses to open a `file:` address from an `http` page, so the laptop inbox serves the file at `GET /v1/cards/<id>/file?path=<path>`, where `path` is the decoded path of the address. The page links a file address there when `GET /v1/cards/<id>` marks the card with `localFiles: true`. The laptop inbox sets that mark for the owner when the card's `origin.host` matches the computer's host name. Without the mark, as on the hosted inbox or for a card from another computer, the page and the terminal client show the path as inline code, which a terminal can open itself. A file address that names another host, such as `file://server/share`, stays text.
+Agents point at a file on their own machine with a `file:` address, bare as `file:///Users/me/report.html` or as a Markdown link, `[the report](file:///Users/me/report.html)`. The address is percent-encoded, so a space in a path is `%20`. A browser refuses to open a `file:` address from an `http` page, so the laptop inbox serves the file itself. The page shows a file address as a file chip when `GET /v1/cards/<id>` marks the card with `localFiles: true`. The laptop inbox sets that mark for the owner when the card's `origin.host` matches the computer's host name. Without the mark, as on the hosted inbox or for a card from another computer, the page and the terminal client show the path as inline code, which a terminal can open itself. A file address that names another host, such as `file://server/share`, stays text.
 
-The route serves the owner only, and it serves a file under these rules:
+A file chip shows an icon for the file's type (a web page, an image, a document, or another file) and the file's name, the last segment of its path. A Markdown link's label doesn't replace the name, so the chip shows the name of the file it opens. Hovering the name shows the whole path. A click on the name opens the file in a new tab. The chip's **Copy path** button copies the path, and reads **Copied** for a moment after.
+
+`GET /v1/cards/<id>/file?path=<path>` checks a file for the owner, where `path` is the decoded path of the address. It applies these rules:
 
 - The card's `text` or `recommendation` must contain a `file:` address whose decoded path is `path`, after dot segments resolve. A path that the card doesn't contain answers 403. So the agent that posted the card chooses what the route exposes, as it does with attachments.
 - The card's `origin.host` must match the computer's host name, or the route answers 403.
 - A directory, a missing file, or anything else that isn't a regular file answers 404. A file over 8 MB, the attachment limit, answers 413.
-- The extension sets the type. HTML comes back as `text/html`, and text, Markdown, logs and CSV as `text/plain`, with JSON, images and PDF as their own types. The route serves any other extension as a download.
-- Each response has `x-content-type-options: nosniff` and the Content Security Policy of an attachment, which starts with `sandbox`. So a served HTML report runs in an opaque origin, without scripts, and can't read the inbox's cookie or its storage. A PDF goes without `sandbox`, as an attachment does, because browsers refuse to show a sandboxed PDF.
-- The page opens the file with a ticket. At a click it opens a new tab, then asks `POST /v1/cards/<id>/file-ticket {path}`, which only the owner may call. The inbox checks the rules above and answers 201 `{ticket, expiresAt}`. The tab then loads `GET /v1/cards/<id>/file?ticket=<ticket>`. A ticket opens one file once, for its card and path, within 60 seconds, and a used, expired or other card's ticket answers 403. The inbox keeps tickets in memory and never replays the ticket response for an `x-message-id`.
+
+A file that passes answers 303 and redirects to its folder ticket's address. The page skips that redirect. At a click it opens a new tab and calls `POST /v1/cards/<id>/file-ticket {path}`, a route for the owner only. The inbox checks the same rules and answers 201 `{ticket, name}`, where `name` is the file's name. The tab then loads `GET /v1/files/<ticket>/<name>`. The inbox keeps tickets in memory. A page that asks again for a file gets its existing ticket back. The inbox doesn't replay a ticket response for an `x-message-id`.
+
+A folder ticket's address is shaped like the file's path, so a relative address in an HTML file resolves under the ticket: `img/logo.png` in the page loads `GET /v1/files/<ticket>/img/logo.png`. The ticket in the address is the credential. A sandboxed page has an opaque origin and loads its images, stylesheets and fonts without the cookie, so the route doesn't ask for a cookie or a bearer token. The route serves under these rules:
+
+- `<name>` opens the file that the card links.
+- A ticket for an HTML file (`.html` or `.htm`) also opens each file in that file's folder and the folders below it, read-only, and nothing above it. A ticket for any other file opens that file only, and any other address under it answers 403.
+- Each segment of the address after the ticket decodes on its own. The route answers 403 for a segment that is empty, starts with a dot, or contains a slash, a backslash or a NUL after decoding. So the route refuses `..`, `%2e%2e%2f`, an absolute path, the folder itself, and hidden files and folders such as `.env` or `.git`. A browser resolves a plain `..` before it sends the request, so that request doesn't carry the ticket.
+- The inbox reads each file by its real path, after every symlink, and answers 404 when that path isn't inside the real path of the ticket's folder. So a symlink that leaves the folder opens nothing.
+- A ticket ends when its card is cleared or removed, when the device that asked for it signs out, and when the inbox stops. When the inbox has a PIN, a ticket works only while the unlock token of the page that asked for it stays live. Locking that page ends it, and so does a PIN set after the ticket. An ended ticket answers 403, and the page asks for a new one at the next click.
+- The extension sets the type. HTML comes back as `text/html`, a stylesheet as `text/css`, fonts as `font/woff`, `font/woff2`, `font/ttf` and `font/otf`, and text, Markdown, logs and CSV as `text/plain`, with JSON, images and PDF as their own types. The route serves any other extension as a download. A font also gets `access-control-allow-origin: *`, since a page loads fonts in CORS mode and its opaque origin never matches the inbox's.
+- Each response has `x-content-type-options: nosniff`, `referrer-policy: no-referrer`, so a link in the page doesn't send the ticket on, and this Content Security Policy: `sandbox; default-src 'none'; img-src 'self' data: blob:; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'`. So a served HTML page draws the images and fonts it embeds and the files of its folder, and runs in an opaque origin, without scripts, unable to read the inbox's cookie or its storage. A PDF goes without `sandbox`, as an attachment does, because browsers refuse to show a sandboxed PDF.
 
 A new tab signs in with the cookie and doesn't send an unlock header, so whether the inbox has a PIN sets what opens a file:
 
-| The inbox | A request without a ticket | A request with a ticket |
+| The inbox | `GET /v1/cards/<id>/file?path=` | `GET /v1/files/<ticket>/…` |
 | --- | --- | --- |
-| has no PIN | serves the file to the cookie, or to an owner token | serves the file once |
-| has a PIN | answers 403 to the cookie, and 423 while the cookie is locked. A PIN-exempt owner token still opens the file | serves the file once, even to a locked cookie |
+| has no PIN | sends the cookie, or an owner token, to a folder ticket | serves the file |
+| has a PIN | answers 403 to an unlocked cookie, and 423 to a locked one. A PIN-exempt owner token still gets a folder ticket | serves files while the page that asked for it stays unlocked |
 
 `POST /v1/cards/<id>/file-ticket` follows the PIN gate as other routes do, so a locked page gets 423 and no ticket.
 
-The hosted inbox has no file system, so the route answers 404 there.
+The hosted inbox has no file system, so it keeps today's file links: it shows each path as code, and both routes answer 404 there.
 
 In any field of the card on screen, Command+Enter or Control+Enter sends the answer, as the card's Send answer button does. Enter and Shift+Enter add a line. In the queue, a card that waits for you shows a raised hand, and the card on screen shows it filled. **Skip for now** opens the next card in queue order, and wraps around at the end. Sending an answer also opens the card after the answered one, and a skipped card opens again only after the queue wraps around.
+
+Every card's row of buttons ends with **Dismiss**, an icon button whose tooltip reads **Dismiss without telling the agent**. It closes the card as `dismissed`, and the card shows in **Sent** with the draft they had on screen. When an agent replies on a card the person already answered, the card comes back under **Agent replied** with a comment box, **Reply** and **Dismiss** beside it: **Reply** sends the comment as a follow-up, with the earlier answer kept, and the answer form folds away behind **Change your answer**. A reply the person scrolled past keeps its card under **Agent replied**, until the person answers or dismisses the card.
+
+Pinning a tag value, such as `topic: billing`, moves its cards to the top of the queue. The card header shows each tag after the meta row, with a pin right after its value. When the queue is grouped by a tag key, the heading of each value's group has a pin after its name too. An unpinned value's pin is dim, and a pinned value's pin is bright. Its tooltip reads **Pin topic: billing to the top** or **Unpin topic: billing**. Each pinned value gets its own group at the top of the queue, above **Agent replied**, oldest pin first, under every **Group by** choice. A card that matches a pin shows in that group only, and a card that matches two pins goes to the oldest pin's group. A pinned group with no waiting card keeps its heading, with **Nothing waiting**, so the person can still remove the pin. **Skip for now** and the card after an answer follow the queue as drawn, so pinned cards come first. The outbox and sent sections stay as they are. The pins are the inbox's settings, beside **Group by**, so every page and the terminal client share them. A page that finds pins in this browser's local storage and none in the inbox copies them over once.
+
+Each group heading is a button, with a triangle at the left of its name that points down while the group is open and right while it is collapsed. The triangle turns through a short animation, and a system set to reduce motion shows the two positions without it. A click anywhere on the heading opens or collapses the group, and the button reports its state as `aria-expanded` for the keyboard and a screen reader. A collapsed group keeps its heading in the same place, with its count, such as **Waiting for you (4)**, and its cards hide. A card that arrives in a collapsed group remains hidden and raises the count, and the group opens again only when the person opens it. **Skip for now** and the card that opens after an answer pass over a collapsed group's cards, while a card opened from a link or from search still opens. A card that arrives in a collapsed group doesn't raise a browser notification, except at the first priority level, so muting a group can never hide a **Decide now** card. The page keeps the collapsed groups in this browser's local storage, under the group's kind and value, such as `tag: topic: billing`, so another **Group by** choice has its own collapsed groups and switching back restores them. A colon in a tag key or value is escaped, so a tag can't take another group's id. Pinned groups collapse the same way.
 
 The card on screen shows its age at the top right, such as `15 min ago` or `4 h 30 min ago`. Under an hour, the age rounds to 5 minutes. Under a day, it rounds to 10 minutes, and after that to the hour. The page updates the age each minute by the browser's clock. Its tooltip gives the exact sending time and the time of the last revision.
 
@@ -230,7 +303,7 @@ Every inbox applies these:
 - A title is at most 300 characters, and an agent id at most 80.
 - A template or widget source is at most 64 KB, and each name keeps at most 50 versions.
 - A reply is at most 4,096 characters, and a card takes at most 200 replies.
-- An inbox takes at most 5 webhooks.
+- An inbox takes at most 5 webhooks and 20 answer webhooks, and an answer webhook sends up to 10 headers of its agent's, each one line of at most 2,000 characters.
 - A request body is at most 16 MB for a card post and for an answer, 4 KB on the routes open without a token, and 1 MB elsewhere. The inbox reads `content-length` first, and stops reading a body that grows past the limit.
 
 An inbox built with `storageLimitBytes` refuses writes with 507 while it stores more than the limit. It still takes deletes, `reset`, `archive`, answers, closes, sign-in and presence reports, so the owner can make room.
@@ -310,11 +383,23 @@ The inbox ignores a report on a closed or answered card, so a second page that d
 
 ## Card guidance
 
-`GET /v1/guidance` returns `{text, version, widgets}`, with the widget catalog in `widgets`. `POST /v1/guidance {text}` proposes new guidance: the inbox posts a system card that lists the agents it knows, all picked. An owner client approves with `choice: approve` and the `agents` to reach. The inbox then stores the new version and sends `guidance` events to the picked agents that are online. The `hello` event carries the current guidance version, so an agent that was offline can fetch it.
+`GET /v1/guidance` returns `{text, version, widgets, tags}`, with the widget catalog in `widgets`. `tags` lists the tag keys in use, each with its values and a count of the cards that use each one, as `[{key, values: [{value, count}]}]`. The inbox counts the cards still on show, whatever their state, and the cards cleared in the last 30 days. A card that closed more than 30 days before drops off, so a value nobody uses anymore leaves the list. Keys sort by their total count, then by key, and values by count, then by value. The list keeps at most 20 keys and 15 values per key, so a busy inbox doesn't flood the agent's context. `card_guidance` prints the list after the guidance text, one line per key. An inbox with no tagged card doesn't print that line. `POST /v1/guidance {text, agent}` proposes new guidance: the inbox posts a system card. The inbox doesn't store a list of agents for it. An older card may have one in `broadcast.agents`, which nothing reads. That card keeps the proposal in `broadcast`, with the proposing agent in `broadcast.from` and the guidance it starts from in `broadcast.base`, as `{version, text}`. Each guidance card stores the proposal twice, in its text and in `broadcast`, beside the guidance it starts from. When that makes the card larger than the limit for one card, the proposal fails with 413. An owner client approves with `choice: approve` and the `agents` to reach, or rejects with `choice: reject`, and either answer may carry a comment. An approval makes the inbox store the new version and send `guidance` events to the picked agents that are still online. An answer without `agents` picks every connected agent. A rejection leaves the guidance as it was. The inbox doesn't store a list of the offline agents. The `hello` event carries the current guidance version, and on a reconnect the client compares it with the version it last saw: when the inbox has a newer one, the client fetches it and hands it to the agent as a `guidance` event. `card_guidance` returns the current version at any time. `card_guidance` with `propose` sends the session's agent name as `agent`.
+
+Both the page and the terminal client show the proposal as a diff against the current guidance. A removed line starts with `−`, an added line with `+`, and a changed line marks the words that changed, as **What changed** does for a revised card. Unchanged lines collapse, and a control shows the full text. When the guidance changed after the agent proposed its text, the card says so, and it marks each line that approving removes because the proposal never saw it. The page and the terminal client read live presence and list the agents that are online now, under a heading such as "Send to 73 online agents". Each one starts ticked. An agent that comes online while the card is open joins the list, and one that leaves drops off it. One line says that offline agents get the new guidance when they reconnect, or when they call `card_guidance`. Like other cards, it has a comment box and **Skip for now**.
+
+An answer closes the card, and the inbox delivers it with the comment to the agent in `broadcast.from` as an `answer` event, as for a card the agent posted itself. That agent can then revise the text and propose again. It may acknowledge the answer, and closing the card retracts the proposal. An edit to the card answers 403. A proposal without `agent` delivers its answer to nobody.
 
 ## Settings
 
-`GET /v1/settings` returns `{allowHtml}`. Only the owner changes it, with `PUT /v1/settings`.
+`GET /v1/settings` returns `{allowHtml, groupBy, pins}`. Only the owner changes them, with `PUT /v1/settings`, which takes any of the three fields and leaves the others as they are.
+
+- `allowHtml` lets a card carry its own HTML and scripts, in a sandboxed frame.
+- `groupBy` is the queue's grouping: `none`, `priority`, `agent`, or `tag:<key>` for any tag key a card has. It starts unset, and the queue groups by nothing.
+- `pins` lists the pinned tag values as `[key, value]` pairs, oldest first, at most 20. A pin puts each matching card in its own group at the top of the queue. It starts unset, so the queue doesn't show a pinned group.
+
+The inbox answers 400 for a value it cannot use, such as a `groupBy` of `week`, or for a pin that is not a tag key with its value. The terminal client reads the same two settings from `GET /v1/state`. It saves its **Group by** choice with `PUT /v1/settings`, and pressing `p` pins or unpins the value of the queue's tag in the open card.
+
+A page that finds **Group by** or the pins in this browser's local storage and none in the inbox copies them into the inbox once, then reads the inbox. A value the inbox already has is never overwritten, and each device copies once.
 
 ## Usage counts
 
@@ -368,12 +453,12 @@ A hosted inbox writes its own reports to the `TELEMETRY` binding at its next req
 | `answered` | The inbox stored the answer. Its agent is offline or has not received it yet. |
 | `delivered` | The harness received the answer. |
 | `read` | The model has the answer in its context: the agent called `POST /v1/cards/<id>/ack`. |
-| `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`, or the card expired. |
+| `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`, the person dismissed it with `POST /v1/cards/<id>/dismiss`, or the card expired. The inbox also closes its own system cards, a pairing request, a priority proposal or a guidance proposal, once it applies the person's answer. |
 | `in-triage` | An extension on the `card.created` hook is checking the card. |
 | `held` | A fail-closed hook timed out, or an extension stopped the card. The card shows which extension and why. |
 | `orphaned` | The card is open, and its agent has been offline for more than an hour. Another session can claim it. |
 
-An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered.
+An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered. A guidance card reads `closed` as soon as the inbox applies the answer, and its answer still goes to the agent in `broadcast.from`, so the receipt on the card shows when that agent received and read it.
 
 ## Blocked agents in herdr
 
@@ -389,9 +474,18 @@ If all three hold, the sidecar sends the choice's number with `herdr agent send-
 
 ## Clearing the inbox
 
-`POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
+`POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved, dismissed or expired, with no agent reply you haven't seen. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer for 30 days, or until the inbox deletes the card to stay under its storage limit, so agents can check past answers before they ask again. A revision or a reply from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
 
 `POST /v1/reset {"confirm": "reset"}` removes every card, answer and attached file, and it cannot be undone. Tokens, templates, widgets, settings and guidance stay. Only the owner can reset, and `your-attention reset --yes` calls it.
+
+The inbox also deletes old cards by itself. `purge()` removes the same card, answer, search entry, files and answer images that `reset` removes for a card:
+
+- A cleared card goes 30 days after the person cleared it.
+- A card without an answer goes 30 days after its agent last revised it or replied on it. This includes an open card that still waits on the person, a `held` card the owner never released, and a closed card nobody answered.
+- An answered card that the person hasn't cleared stays.
+- An inbox built with `storageLimitBytes` deletes those cards sooner, oldest first, while it stores more than 80% of its limit.
+
+Each pass deletes at most 100 cards, oldest first, so no alarm does unbounded work. The pass deletes the records first, then waits for every file delete. A file delete that fails leaves the file: a laptop retries it on the next purge pass, and R2 deletes it 30 days after its upload. A pass reads the summaries and the first 100 `cleared` rows, then only the cards it deletes, so its time follows the cards on show, whatever the number of cleared cards. `npm run cpu-budget` measures one pass over 20 MB of cleared cards. `nextDeadline()` includes the earliest purge time, and returns the current time while more cards are due, so the alarm runs again at once. The laptop inbox runs `purge()` after `sweep()` every second, and doesn't start a purge while the last one still deletes files.
 
 ## Delivery
 
@@ -403,11 +497,17 @@ An agent opens `GET /v1/stream?agent=<id>`, and the inbox reports the agent onli
 
 The event above is trimmed to the fields an agent reads. The `id` is a receipt: the Claude Code channel watches the session transcript for it before it sends the acknowledgment.
 
+The agent addresses take an optional `&channel=off`, which says that the session drops every channel notification, so an answer pushed to it never arrives. The inbox records it on the agent's presence as `channelOff: true`, `GET /v1/state` sends it with the rest of the presence, and the card shows **Channel off** until a connection reports otherwise. The Claude Code channel reads the development-channels flag off its parent's command line, and a session started without `--dangerously-load-development-channels server:your-attention` sends that parameter.
+
+The Claude Code channel sends nothing until the client has finished connecting. It waits for a request that follows the client's `notifications/initialized` notification, which is where Claude Code registers the channel's notification handler. An answer that arrives before that moment waits, so a resumed session keeps the answers that queued up for it. A client that never asks for a tool gets its answers after 30 seconds anyway.
+
+The channel keeps watching the transcript for the receipt. When the receipt has not appeared within 60 seconds, and the transcript has not changed in that time, the channel pushes the answer once more. When the second push misses too, and the session runs in a herdr pane, the channel types the answer into that pane with `herdr agent prompt`. It follows the rule of an approval: it sends only to the session's own pane. It never types over text the person put in that pane's input box, and it puts a space before a text that opens with a dash, which herdr would read as an option. A successful send acknowledges the answer, because the session now has it as its own message. Outside herdr, in a pane with a draft, or in a pane with no input box, the answer stays `delivered`, and the card's status reads **Not seen by the agent** with the reason.
+
 The OpenCode plugin follows one stream per session, as agent `opencode:<session id>`: each session that calls a card tool, and each session from before a restart that still has an open card. It sends each answer into its session with OpenCode's `promptAsync`. OpenCode starts a new turn when the session is idle, and queues the message behind a turn that runs. The plugin acknowledges the answer when OpenCode's `chat.message` hook shows the receipt in the conversation.
 
 A client adds `instance=<id>` to the stream, `/v1/ws` or `/v1/poll` address, with one id per process that stays the same across its reconnects. The inbox records the instance that received each answer. When a different instance of the agent connects, such as a session restarted before it read an answer, the inbox sends it every answer that was delivered but never read. A reconnect from the same instance gets nothing twice.
 
-Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST /v1/cards/<id>/claim {agent}` hands one to a successor session. `GET /v1/unread` counts every answer this caller has not acknowledged, and names up to 20 cards to acknowledge. `?agent=<id>` narrows it to one agent, which is what a watcher asks when it starts or ends: an answer that arrived while nothing was listening is in that count and in no event.
+Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST /v1/cards/<id>/claim {agent}` hands one to a successor session. A guidance answer waits for the agent in `broadcast.from`, and a claim of that card sets `broadcast.from` to the successor. `GET /v1/unread` counts every answer this caller has not acknowledged, and names up to 20 cards to acknowledge. `?agent=<id>` narrows it to one agent, which is what a watcher asks when it starts or ends: an answer that arrived while nothing was listening is in that count and in no event. A guidance answer counts for the agent in `broadcast.from` until that agent acknowledges it.
 
 `your-attention watch` follows that stream for a script: it prints each event as one line of JSON, the inbox's own event with `receivedAt` added and nothing else changed. A `beat` is not one of those events. It reports that the stream answers, rather than a card, so the watcher drops it as the client already drops it on the event stream and the long-poll. An inbox with nothing to say prints the `hello` line when a stream opens, and then only the answers that arrive. `--agent` names the agent, `--no-card` leaves the card out, `--select` keeps the card fields it names, and `--ack` acknowledges each answer after printing it. Without `--ack` the watcher acknowledges nothing, so it never marks read what the agent waiting for that answer has not seen. A script that takes an answer out of band marks it read with `your-attention ack <card>`, which is the `POST /v1/cards/<id>/ack` route.
 
@@ -419,6 +519,45 @@ A page event gives a card's id only, so for each `change` the watcher reads `GET
 
 An owner watcher sees every card and every answer, and the agents' presence, as a page does. It uses an owner token: the `owner-token` file, or the paired token in `owner.json`. `writePrivate` writes both with mode 0600. To end a paired watcher's access, sign that machine out from the devices list on the page, which sends `DELETE /v1/tokens/<id>`.
 
+## Answer webhooks
+
+An agent that only runs when something calls it, such as a hosted bot or a CI job, can have the inbox send each answer to its cards to a webhook, and then it doesn't need a `watch` process. The agent posts a `system` card:
+
+```json
+{
+  "kind": "system",
+  "agent": "cli:deploy",
+  "title": "Send the answers for cli:deploy to a webhook",
+  "system": {
+    "type": "subscribe",
+    "webhook": { "url": "https://example.com/hooks/abc", "headers": { "Authorization": "Bearer <token>" } },
+    "events": ["answer"]
+  }
+}
+```
+
+1. The inbox answers 201 `{subscription, card, secret}`. `subscription` has `status: "pending"`. `secret` keys the signature of each call, and the inbox returns it only this once. The message store never keeps this reply, so a retry with the same `x-message-id` makes a new subscription, which replaces the first.
+2. The inbox posts its own system card, `subscribe-<id>`, with the agent, the webhook address and the header names, and leaves out every header value.
+3. The person picks `approve` or `deny` in the `choice` field. The inbox calls the webhook only after an approve.
+4. From then on, each answer to a card of that agent id and token goes to the webhook as the agent stream's `answer` event.
+
+A webhook belongs to one agent id and the token that asked for it, and a new request from them replaces the one before. `url` must be https. A header's name must be a valid header name, and the inbox refuses `content-type`, `content-length`, `host`, `transfer-encoding`, `connection` and any `x-your-attention-` name, since it sets those itself. A name given twice in two cases is refused too. `events` takes `answer` only. The card shows the agent id, the address and each header name in code spans, so none of them adds links or text to the card, and the inbox writes a backtick in the address as `%60`. Header values go to the webhook alone: the inbox keeps them in its storage and never sends them to a client or a page.
+
+Each call is a POST with the body `{type: "answer", id, card, answer}`, as on the agent stream, and these headers, after the agent's own:
+
+| Header | Value |
+| -- | -- |
+| `content-type` | `application/json` |
+| `x-your-attention-event` | `answer` |
+| `x-your-attention-delivery` | the answer id, the same as `id` in the body |
+| `x-your-attention-signature` | `sha256=<HMAC-SHA256 of the body>`, keyed with the secret |
+
+The answer id is `<card id>@<savedAt>`. It stays the same on every try of one answer, and a changed answer gets a new one, so a receiver can drop a copy it has seen. A 2xx marks the answer read, as `POST /v1/cards/<id>/ack` does. Any other status, or no answer in 10 seconds, counts as a failure. The inbox tries again after 5 seconds, then doubles the wait each time, up to an hour, so it delivers each answer at least once. After 24 hours it gives up on that answer and records why on the subscription. The answer still waits for the agent stream. The platform alarm runs each retry, and storage keeps the waiting calls, so a restart or a hibernation loses none. A force-send of the answer tries again at once, unless a call for it is still running. An answer the agent read on its stream first goes to no webhook. A secret card's answer goes to no webhook, since it opens only with the key in its session's memory.
+
+To stop, the agent posts `system: {type: "unsubscribe"}` with its agent id and gets 200 `{removed}`. The person stops it by changing the answer on the card to `deny`, or with `DELETE /v1/subscriptions/<id>`. Revoking a token removes every webhook it asked for. The card closes with what happened in each case. `GET /v1/subscriptions` lists every webhook for the owner, and its own for an agent token, as `{id, agent, url, headers, events, status, createdAt, approvedAt, delivered, waiting, lastError}`, where `headers` lists the header names without their values.
+
+`your-attention subscribe --agent cli:deploy --webhook URL --header-file FILE` posts the request and prints `{id, status, card, secret}`. `--webhook-file FILE` reads the address from a file instead, for an address with a secret in its path. Each line of the file, or of stdin with `--header-file -`, is one `NAME: VALUE` header, and `--header 'NAME: VALUE'` adds one from the command line. A secret belongs in the file, since `ps` shows the arguments to every user of the machine. `your-attention unsubscribe --agent cli:deploy` stops it. `your-attention status` lists each webhook with its agent, its host, whether the person approved it, and its last failure. It prints the host and the header names without their values, because the address and the header values can contain a secret.
+
 ## Pages
 
 `GET /v1/state` returns `{cards, answers, presence, states, priorities, levels, settings, guidance}`. `cards` has one summary for each card except the cleared ones, enough for the queue, the levels, presence and the answer states:
@@ -426,13 +565,13 @@ An owner watcher sees every card and every answer, and the agents' presence, as 
 - `id`, `agent`, `kind`, `title`, `priority`, `status`, `rating`, `from`, `follows`, `followedBy`, `deliver`, `version`, `createdAt`, `updatedAt` and `expiresAt`, as on the card.
 - `tags`, at most 10, with each key and value cut to 100 characters. `origin` keeps `name` and `harness`.
 - `closed`, with its outcome cut to 300 characters, and `triage` with its `state` only.
-- `replyAt`, the time of the newest agent reply, and `unseenReplies` while one waits to be seen.
+- `replyAt`, the time of the newest agent reply, and `unseenReplies` while one waits to be seen. A reply waits until the person answers or dismisses the card, and `POST /v1/cards/<id>/seen` marks it seen for a front-end that offers that on its own.
 - `links`, the ids that the text links with `[[card-id]]`, at most 20, and `preview`, the first 300 characters of the text.
 - `rev`, which changes with every change to the card or its answer.
 
 `answers` has `{version, savedAt, deliveredAt, readAt, forcedAt}` for each answered card. The values and the comment come with the card. `GET /v1/cards/<id>` returns `{card, answer, state, rev}`, where `card` is the whole card and `rev` is its summary's. The page and the terminal client fetch it when a card opens, and fetch the card after it in queue order, and the card it follows, ahead of time. So moving to the next card draws at once. A copy whose `rev` differs from the summary's is out of date, and the client fetches it again, while it keeps the old copy on screen.
 
-The inbox writes each summary into a collection of its own, each time the card or its answer changes, and deletes it when the card is cleared. So `GET /v1/state` reads small rows of the shown cards only. An inbox stored before summaries writes them once when it starts. Both builds send summaries, so the page and the terminal client use one protocol.
+The inbox writes each summary into a collection of its own, each time the card or its answer changes, and deletes it when the card is cleared. So `GET /v1/state` reads small rows of the shown cards only. A cleared card gets a `cleared` row `{id, archivedAt}` instead, which the inbox writes when the person clears the card, so the oldest clearing comes first. An inbox stored before summaries or cleared rows writes them once when it starts. Both builds send summaries, so the page and the terminal client use one protocol.
 
 An inbox built with `shownCardLimit` shows at most that many cards. A new card past the limit answers 507 until the person clears answered or closed cards, and so does a pairing request, whose card would pass it. A revision of a shown card still goes in. The Cloudflare build sets the limit from `SHOWN_CARDS_LIMIT`, 500 in `wrangler.jsonc`, so its state fits 10 ms of CPU time. The laptop inbox has no CPU limit and shows every card. `GET /v1/events` sends `change {card}`, `presence {agent, online}`, and `code` when the page source changed. A page refetches the state on each `change`. On `code`, a hidden page reloads at once. A page someone looks at reloads once nothing has happened on it for 3 seconds and no field has focus, so it never takes a field away while the person types. Drafts and the scroll position come back after the reload. When the agent revises a card while the person answers it, the form stays in place with its text and focus, and shows the new version. A pick records the option's id and label, so a revision that drops or relabels the picked option drops that pick.
 
@@ -448,9 +587,9 @@ On a screen 760 pixels wide or less, the page puts the queue below the card, and
 
 ## The terminal client
 
-`your-attention tui` is a second front-end, for a terminal. It calls the page's routes, with an owner token in the `Authorization` header: `GET /v1/state`, `GET /v1/cards/<id>`, `POST /v1/cards/<id>/answer`, `/seen` (the person read the agent's replies), `/open` (herdr focuses the card's own pane, and a hosted inbox answers 501), `/release`, `/force`, `POST /v1/archive`, `POST /v1/focus` for herdr session links, and `GET /v1/attachments/<id>` for the text of Markdown, CSV, JSON and plain files. It follows `/v1/ws?page=1&viewer=<page id>`, with `GET /v1/events` when the socket never opens, and refetches the state on each `change`. Its page id starts with `tui-`, and it reports `POST /v1/person/<page id>` as a page does. The terminal's focus reports set `visible`. When the inbox answers 423 with `locked`, the client asks for the PIN in the terminal, derives its key with the salt and iterations of `GET /v1/pin`, and sends `POST /v1/unlock {key}`. It keeps the unlock token in memory for the life of the process, and sends it in `x-your-attention-unlock` and in `unlock=` on the page socket. It never stores or prints the PIN, and a socket closed with 4423 makes it ask again.
+`your-attention tui` is a second front-end, for a terminal. It calls the page's routes, with an owner token in the `Authorization` header: `GET /v1/state`, `GET /v1/cards/<id>`, `POST /v1/cards/<id>/answer`, `/seen` (the person read the agent's replies), `/open` (herdr focuses the card's own pane, and a hosted inbox answers 501), `/release`, `/force`, `POST /v1/archive`, `POST /v1/focus` for herdr session links, `POST /v1/cards/<id>/dismiss`, `PUT /v1/settings` for **Group by** and the pins, and `GET /v1/attachments/<id>` for the text of Markdown, CSV, JSON and plain files. It follows `/v1/ws?page=1&viewer=<page id>`, with `GET /v1/events` when the socket never opens, and refetches the state on each `change`. Its page id starts with `tui-`, and it reports `POST /v1/person/<page id>` as a page does. The terminal's focus reports set `visible`. When the inbox answers 423 with `locked`, the client asks for the PIN in the terminal, derives its key with the salt and iterations of `GET /v1/pin`, and sends `POST /v1/unlock {key}`. It keeps the unlock token in memory for the life of the process, and sends it in `x-your-attention-unlock` and in `unlock=` on the page socket. It never stores or prints the PIN, and a socket closed with 4423 makes it ask again.
 
-The client builds each card's OpenUI Lang with `cardSource` from `web/answers.js`, the page's own code, and parses it with `@openuidev/lang-core` and the page's component list in `src/adapters/openui-library.ts`. The inbox checks bodies against that same list. Each field keeps its value as the page's renderer stores it, in `{form: {field: {value}}}`, so `formValues` and `answerValues` from `web/answers.js` give the same answer for the same picks. Secret, broadcast and HTML cards get forms of their own, with the page's buttons. A secret card seals its value with `web/sealed.js` in the client's process. The client queue comes from `web/queue.js`, also shared with the page, so the sections, Skip for now and the card after an answer follow the page's order.
+The client builds each card's OpenUI Lang with `cardSource` from `web/answers.js`, the page's own code, and parses it with `@openuidev/lang-core` and the page's component list in `src/adapters/openui-library.ts`. The inbox checks bodies against that same list. Each field keeps its value as the page's renderer stores it, in `{form: {field: {value}}}`, so `formValues` and `answerValues` from `web/answers.js` give the same answer for the same picks. Secret, broadcast and HTML cards get forms of their own, with the page's buttons. A secret card seals its value with `web/sealed.js` in the client's process. The client queue comes from `web/queue.js`, also shared with the page, so the sections, Skip for now and the card after an answer follow the page's order. The `d` key dismisses the card on screen, as the page's **Dismiss** button does, with the draft its fields hold, and `p` pins or unpins the value of the queue's tag in the open card. A click on a group heading, or **x** on the open card, collapses or opens that group, and its cards then leave the list and the Skip order as on the page. The client keeps the collapsed groups in `tui.json` in the home directory, by inbox, so each device has its own.
 
 The client never runs an HTML card's scripts. For an HTML card, a chart or another component it can't draw, it shows a line with the card's address on the page, `<inbox url>/#card=<id>`. It drops escape sequences, other control characters and bidirectional overrides from every card field before it writes them to the terminal.
 
@@ -472,11 +611,11 @@ On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `
 
 ## The Cloudflare build
 
-`src/cloudflare/worker.ts` runs the same core on Workers. It doesn't bundle mermaid or the OpenUI parser, since the clients check diagrams and bodies, as [Checks on the client](#checks-on-the-client) describes. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. The object hibernates when idle:
+`src/cloudflare/worker.ts` runs the same core on Workers. It doesn't bundle mermaid or the OpenUI parser, since the clients check diagrams and bodies, as [Checks on the client](#checks-on-the-client) describes. Each inbox is one Durable Object, `InboxObject`, which keeps its state in the object's SQLite database, with FTS5 for search, and file bytes in R2 under the object's id. FTS5 finds an entry fast only by its row id, so a `search_rows` table gives each card the row id of its entry, and replacing or removing a card's entry costs the same however many cards the inbox has. The object hibernates when idle:
 
 - Each agent WebSocket keeps its agent id and token in the socket attachment, so the object reconnects every socket to the inbox when it wakes, and presence stays as it was. The socket itself stayed open, so a wake doesn't send `hello` again: an agent gets `hello` once per socket it opens.
-- The object answers `{"type":"ping"}` with `{"type":"pong"}` through the runtime's auto-response, which does not wake it. So the object notices a silent socket only when its alarm wakes it. A socket closes when its last pong, or its opening when it has not ponged yet, is 5 minutes old. With one socket open, the object wakes about 300 times a day for heartbeats, and an agent whose client stops sending pings shows offline 5 minutes after its last pong.
-- The object sets its alarm for the earliest of three times: the next moment `sweep()` has work, from `nextDeadline()`, 5 minutes after the oldest last pong among the open sockets, and 10 seconds after each socket that has not signed in opened. It doesn't set an alarm for any other time.
+- While it hibernates, the object answers `{"type":"ping"}` with `{"type":"pong"}` through the runtime's auto-response, and while it runs it answers on its message path. The object also stamps each ping it answers, in the socket's attachment, and the runtime stamps each auto-response pong. A socket closes when the later of those two stamps, or its opening when it has neither, is 5 minutes old, and the close logs which stamp set the deadline. So the object notices a silent socket only when its alarm wakes it. With one socket open, the object wakes about 300 times a day for heartbeats, and an agent whose client stops sending pings shows offline 5 minutes after its last ping or pong.
+- The object sets its alarm for the earliest of three times: the next moment `sweep()` or `purge()` has work, from `nextDeadline()`, 5 minutes after the oldest of the open sockets' liveness clocks, and 10 seconds after each socket that has not signed in opened. It doesn't set an alarm for any other time. The alarm awaits `purge()`, so R2 has deleted a purged card's files before the alarm returns.
 
 With `MODE` set to `single`, the Worker serves one inbox, whose owner token is the `OWNER_TOKEN` secret. With `MODE` set to `hosted`, it serves many:
 

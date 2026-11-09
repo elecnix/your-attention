@@ -1,7 +1,7 @@
 // The HTTP protocol, with fetch Request and Response only, so the same handler
 // runs on Node, Bun, Deno and Workers. SPEC.md lists each route.
 import { randomId } from './crypto.ts';
-import { fileLinkPaths } from './file-links.ts';
+import { fileLinkPaths, folderFilePath } from './file-links.ts';
 import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
 import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller } from './inbox.ts';
@@ -13,29 +13,47 @@ import { PROTOCOL_VERSION } from './types.ts';
 export const COOKIE = 'ya_token';
 /** Cookie-authenticated writes must carry this header, which a cross-site form cannot set. */
 export const CSRF_HEADER = 'x-your-attention';
+/** Marks a reply the message store must not keep, such as one with a secret the inbox returns once. */
+const ONCE_HEADER = 'x-your-attention-once';
 /** A client-chosen id that makes a write idempotent across links and retries. */
 export const MESSAGE_HEADER = 'x-message-id';
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'text/html']);
-/** How long a file ticket opens its file, once. */
-const FILE_TICKET_MS = 60_000;
 /** The type of a local file, by its extension. Text that a browser would download, such as Markdown and CSV, shows as plain text. */
 const LOCAL_TYPES: Record<string, string> = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', txt: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
   md: 'text/plain; charset=utf-8', markdown: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8', json: 'application/json; charset=utf-8',
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+  css: 'text/css; charset=utf-8', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
 };
+/** The policy of a served file. A folder ticket's page also draws the images and fonts it embeds, and the files of its folder. */
+const FILE_POLICY = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'";
+const FOLDER_POLICY = "default-src 'none'; img-src 'self' data: blob:; font-src 'self' data: blob:; style-src 'self' 'unsafe-inline'";
 
 /** The headers of a served file, shown in place or downloaded. Nothing served this way runs scripts. */
-function fileHeaders(type: string, inline: boolean, name: string, cache: string): Record<string, string> {
+function fileHeaders(type: string, inline: boolean, name: string, cache: string, policy = FILE_POLICY): Record<string, string> {
   return {
     'content-type': type,
     'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name)}`,
     // Browsers refuse to show a PDF in a sandboxed document, so a PDF gets the other limits without sandbox.
-    'content-security-policy': `${type === 'application/pdf' ? '' : 'sandbox; '}default-src 'none'; img-src 'self'; style-src 'unsafe-inline'`,
+    'content-security-policy': `${type === 'application/pdf' ? '' : 'sandbox; '}${policy}`,
     'x-content-type-options': 'nosniff',
     'cache-control': cache,
   };
+}
+
+/** A folder ticket: the address of a file a card names, and with an HTML file, the files in its folder and below it. */
+interface FolderTicket {
+  card: string;
+  /** The path the card names, and its last segment, which the address ends with. */
+  file: string;
+  name: string;
+  /** The folder of an HTML file. A ticket for any other file opens that file only. */
+  folder?: string;
+  /** The token that asked for the ticket, whether the PIN gates it, and the unlock it asked under. */
+  token: string;
+  gated: boolean;
+  unlock?: string;
 }
 
 export interface HandlerOptions {
@@ -53,7 +71,7 @@ export interface HandlerOptions {
   telemetry?: { source: Source; destination: string; blocked?: () => string | undefined };
   /** The files of this machine, which the laptop inbox serves for a card's file: links. `host` is this machine's name, as
    * a client puts it in a card's origin. A build with no file system has none, and GET /v1/cards/<id>/file answers 404. */
-  localFiles?: { host: string; file(path: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> } | undefined> };
+  localFiles?: { host: string; file(path: string, folder?: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> } | undefined> };
 }
 
 /** The largest body each kind of route reads. A card post carries its files as data: URLs. */
@@ -132,8 +150,73 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
   const heartbeatMs = options.heartbeatMs ?? 2000;
   /** Whether this inbox serves the files a card names: it has a file system, and the card came from this machine. */
   const servesFiles = (card: Card): boolean => !!options.localFiles && card.origin?.host === options.localFiles.host;
-  /** The tickets the page asked for to open a file in a new tab, each good for one use, for one card and path. */
-  const tickets = new Map<string, { card: string; path: string; expiresAt: number }>();
+  /** The folder tickets the inbox gave out. A ticket in memory ends when the inbox stops, and the page asks for a new one. */
+  const tickets = new Map<string, FolderTicket>();
+
+  /** Whether the card's text or recommendation contains a file: address whose decoded path is `path`. */
+  const names = (card: Card, path: string): boolean => [card.text, card.recommendation].some((t) => fileLinkPaths(t ?? '').includes(path));
+
+  /** Whether a ticket still opens files: its card is in the inbox, not cleared, and still names the file, its token is not
+   * signed out, and with a PIN, the unlock it was asked under is live. A ticket from before the PIN has no unlock, so it ends. */
+  function ticketLive(t: FolderTicket): boolean {
+    let card: Card;
+    try {
+      card = inbox.getCard(t.card);
+    } catch {
+      return false;
+    }
+    if (card.archivedAt || !names(card, t.file) || !inbox.hasToken(t.token)) return false;
+    return !t.gated || !inbox.pin.isSet() || inbox.pin.live(t.unlock);
+  }
+
+  /** The folder ticket for a file the card names, the one this caller already has or a new one. */
+  function folderTicket(card: string, file: string, me: Caller, gate: { gated: boolean; unlock?: string }): FolderTicket & { id: string } {
+    for (const [id, t] of tickets) if (!ticketLive(t)) tickets.delete(id);
+    for (const [id, t] of tickets) {
+      if (t.card === card && t.file === file && t.token === me.token && t.gated === gate.gated && t.unlock === gate.unlock) return { ...t, id };
+    }
+    const name = file.split('/').pop() ?? '';
+    const folder = /\.html?$/i.test(name) ? file.slice(0, file.length - name.length - 1) || '/' : undefined;
+    const t: FolderTicket = { card, file, name, folder, token: me.token, gated: gate.gated, unlock: gate.unlock };
+    const id = randomId(24);
+    tickets.set(id, t);
+    return { ...t, id };
+  }
+
+  /** GET /v1/files/<ticket>/<path>: the file a ticket opens. The ticket is the credential, since a sandboxed page has an
+   * opaque origin and loads its images and fonts without the cookie. */
+  async function ticketFile(pathname: string): Promise<Response> {
+    const local = options.localFiles;
+    if (!local) return json({ error: 'this inbox serves no local files' }, 404);
+    const [id = '', ...segments] = pathname.split('/').slice(3);
+    const t = tickets.get(id);
+    if (!t || !ticketLive(t)) {
+      tickets.delete(id);
+      throw new InboxError(403, 'this file link has ended: open the file again from its card');
+    }
+    const rest = segments.join('/');
+    let named: string | undefined;
+    try {
+      named = decodeURIComponent(rest);
+    } catch {}
+    // The file the card names opens by its own path. Every other file must be in the folder of an HTML file.
+    const path = named === t.name ? t.file : t.folder !== undefined ? folderFilePath(t.folder, rest) : undefined;
+    if (path === undefined) throw new InboxError(403, t.folder === undefined ? 'this link opens one file only' : 'this address leaves the folder of the file the card names');
+    const file = await local.file(path, path === t.file ? undefined : t.folder);
+    if (!file) throw new InboxError(404, 'no such file');
+    if (file.size > MAX_ATTACHMENT_BYTES) throw new InboxError(413, `the file is ${file.size} bytes, over the limit of ${MAX_ATTACHMENT_BYTES}`);
+    const bytes = await file.read();
+    // A file can grow between the size check and the read.
+    if (bytes.byteLength > MAX_ATTACHMENT_BYTES) throw new InboxError(413, `the file is over the limit of ${MAX_ATTACHMENT_BYTES} bytes`);
+    const base = path.split('/').pop() ?? '';
+    const type = LOCAL_TYPES[/\.([^.]+)$/.exec(base)?.[1]?.toLowerCase() ?? ''];
+    const headers = fileHeaders(type ?? 'application/octet-stream', !!type, base, 'no-store', FOLDER_POLICY);
+    // The address carries the ticket, so a link the page follows must not send it on.
+    headers['referrer-policy'] = 'no-referrer';
+    // A font loads in CORS mode, and the page's opaque origin is never the inbox's.
+    if (type?.startsWith('font/')) headers['access-control-allow-origin'] = '*';
+    return new Response(bytes, { headers });
+  }
 
   /** The file a card names at `name`, or the refusal. The agent that posted the card chose what it exposes: the inbox
    * serves a file only when the card came from this machine and its text or recommendation names that exact path. */
@@ -141,7 +224,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const local = options.localFiles;
     if (!local) throw new InboxError(404, 'this inbox serves no local files');
     if (!servesFiles(card)) throw new InboxError(403, 'this card came from another machine');
-    if (![card.text, card.recommendation].some((t) => fileLinkPaths(t ?? '').includes(name))) throw new InboxError(403, 'the card does not name this file');
+    if (!names(card, name)) throw new InboxError(403, 'the card does not name this file');
     const file = await local.file(name);
     if (!file) throw new InboxError(404, 'no such file');
     if (file.size > MAX_ATTACHMENT_BYTES) throw new InboxError(413, `the file is ${file.size} bytes, over the limit of ${MAX_ATTACHMENT_BYTES}`);
@@ -160,6 +243,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
 
   async function route(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    if (req.method === 'GET' && url.pathname.startsWith('/v1/files/')) return ticketFile(url.pathname);
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
     if (parts[0] !== 'v1') return json({ error: 'not found' }, 404);
     const [, a, b, c] = parts;
@@ -192,13 +276,12 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const unlockSecret = req.headers.get(UNLOCK_HEADER) ?? (method === 'GET' && a === 'events' ? url.searchParams.get('unlock') : null);
     const gate = await inbox.pinGate(who.token, who.viaCookie, unlockSecret);
     // A locked caller may read the PIN state, unlock, and fetch a file by its id, which only an unlocked page can list.
-    // A new tab sends no unlock header, so it opens a card's file link with a ticket that an unlocked page asked for.
     const pinRoute = a === 'pin' || a === 'unlock' || a === 'lock';
-    const fileRoute = method === 'GET' && (a === 'attachments' || (a === 'cards' && c === 'file' && url.searchParams.has('ticket')));
+    const fileRoute = method === 'GET' && a === 'attachments';
     if (gate.locked && !pinRoute && !fileRoute) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
     const me: Caller = { token: who.token.id, role: who.token.role };
     // A full inbox takes the writes that free space or answer cards, and refuses the rest.
-    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'answer' || c === 'file-ticket'));
+    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'dismiss' || c === 'answer' || c === 'file-ticket'));
     if (method !== 'GET' && !frees && inbox.storageFull()) return json({ error: 'this inbox is full: remove cards, templates or widgets to make room' }, 507);
     // A message that arrives over two links, or again after a retry, is applied once: the inbox
     // keeps the first result for each x-message-id, per client.
@@ -219,7 +302,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         inbox.forgetMessage(key);
         throw e;
       }
-      if (res.status < 500 && (res.headers.get('content-type') ?? '').startsWith('application/json')) inbox.rememberMessage(key, res.status, await res.clone().text());
+      // A reply that carries a secret shown once is never kept to replay. A retry of that request makes a new subscription.
+      if (res.status < 500 && !res.headers.has(ONCE_HEADER) && (res.headers.get('content-type') ?? '').startsWith('application/json')) inbox.rememberMessage(key, res.status, await res.clone().text());
       else inbox.forgetMessage(key);
       return res;
     }
@@ -330,9 +414,12 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       const events: AgentEvent[] = [];
       let wake: () => void = () => {};
       const woken = new Promise<void>((r) => { wake = r; });
-      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } }, url.searchParams.get('instance') ?? undefined);
+      const channelOff = url.searchParams.get('channel') === 'off';
+      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } }, url.searchParams.get('instance') ?? undefined, { channelOff });
       let timer: ReturnType<typeof setTimeout> | undefined;
-      if (!events.length) await Promise.race([woken, new Promise<void>((r) => { timer = setTimeout(r, wait); })]);
+      // A client that drops its connection ends the wait at once, so the inbox lets go of its subscriber and its timer.
+      const gone = req.signal.aborted ? Promise.resolve() : new Promise<void>((r) => req.signal.addEventListener('abort', () => r(), { once: true }));
+      if (!events.length) await Promise.race([woken, gone, new Promise<void>((r) => { timer = setTimeout(r, wait); })]);
       if (timer !== undefined) clearTimeout(timer);
       disconnect();
       return json({ events });
@@ -345,7 +432,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'stream') {
       const agent = url.searchParams.get('agent');
       if (!agent) return json({ error: 'agent is required' }, 400);
-      return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined), heartbeatMs);
+      return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined, { channelOff: url.searchParams.get('channel') === 'off' }), heartbeatMs);
     }
     if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, 100), url.searchParams.get('answered') === '1'));
     if (method === 'GET' && a === 'unread') return json(inbox.unread(me, url.searchParams.get('agent') ?? undefined));
@@ -378,8 +465,11 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       }
     }
     if (a === 'guidance') {
-      if (method === 'GET') return json({ ...inbox.guidance(), widgets: inbox.widgetCatalog() });
-      if (method === 'POST') return json(publicCard(inbox.proposeGuidance(String((await readJson<{ text?: string }>(req)).text ?? ''))), 201);
+      if (method === 'GET') return json({ ...inbox.guidance(), widgets: inbox.widgetCatalog(), tags: inbox.tagsInUse() });
+      if (method === 'POST') {
+        const g = await readJson<{ text?: string; agent?: string }>(req);
+        return json(publicCard(inbox.proposeGuidance(String(g.text ?? ''), g.agent ? { caller: me, agent: String(g.agent) } : undefined)), 201);
+      }
     }
     if (a === 'telemetry' && !b && (method === 'GET' || method === 'PUT')) {
       owner();
@@ -430,6 +520,10 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       }
       if (method === 'DELETE' && b) { inbox.deleteWebhook(b); return json({ ok: true }); }
     }
+    if (a === 'subscriptions') {
+      if (method === 'GET' && !b) return json(inbox.listSubscriptions(me));
+      if (method === 'DELETE' && b) { inbox.deleteSubscription(me, b); return json({ ok: true }); }
+    }
     if (method === 'GET' && a === 'attachments' && b) {
       const { file, bytes } = await inbox.attachment(me, b);
       // Only types a browser renders go inline, HTML in a sandbox that runs no script. Everything else downloads.
@@ -440,38 +534,48 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'tokens') { owner(); return json(inbox.listTokens()); }
     if (method === 'DELETE' && a === 'tokens' && b) { owner(); inbox.revokeToken(b); return json({ ok: true }); }
 
+    // The default tags an agent's cards inherit. A token reads and writes only its own, and the owner lists them all.
+    if (a === 'tags' && !b) {
+      if (method === 'GET') {
+        if (me.role === 'owner') return json({ defaults: inbox.defaultTagsList(me, url.searchParams.get('agent') ?? undefined) });
+        if (me.role !== 'agent') throw new InboxError(403, 'only an agent reads its own default tags');
+        const agent = url.searchParams.get('agent');
+        if (!agent) return json({ error: 'agent is required' }, 400);
+        return json(inbox.defaultTags(me, agent));
+      }
+      if (method === 'PUT') return json(inbox.setDefaultTags(me, (await readJson(req)) ?? {}));
+    }
+
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
     if (a === 'cards') {
-      if (method === 'POST' && !b) return json(withWarning(publicCard(await inbox.postCardWithFiles(me, await readJson<NewCard>(req, BODY_LIMIT.card)))), 201);
+      if (method === 'POST' && !b) {
+        const input = await readJson<NewCard>(req, BODY_LIMIT.card);
+        // A system card from a client asks the inbox for something, and the answer says what the inbox did.
+        if (input?.kind === 'system') {
+          const done = inbox.systemRequest(me, input);
+          return 'secret' in done ? json(done, 201, { [ONCE_HEADER]: '1' }) : json(done, 200);
+        }
+        const card = await inbox.postCardWithFiles(me, input);
+        // The reply names the tags the card took from the agent's defaults, so the agent knows what it inherited.
+        return json({ ...withWarning(publicCard(card)), inheritedTags: inbox.inheritedTags(me, input) }, 201);
+      }
       if (method === 'GET' && !b) return json(inbox.listCards(me));
       if (!b) return json({ error: 'not found' }, 404);
       if (method === 'GET' && !c) {
         const card = inbox.getCard(b);
         if (me.role !== 'owner' && card.token !== me.token) throw new InboxError(403, 'another client owns this card');
-        const detail = inbox.cardDetail(b);
+        const detail = inbox.cardDetail(b, me.role === 'owner');
         return json(me.role === 'owner' && servesFiles(card) ? { ...detail, card: { ...detail.card, localFiles: true } } : detail);
       }
       if (method === 'GET' && c === 'file') {
         owner();
-        const card = inbox.getCard(b);
-        let name = url.searchParams.get('path') ?? '';
-        const id = url.searchParams.get('ticket');
-        if (id !== null) {
-          const ticket = tickets.get(id);
-          tickets.delete(id);
-          if (!ticket || ticket.card !== b || ticket.expiresAt < Date.now()) throw new InboxError(403, 'this file link has expired: open it again from the card');
-          name = ticket.path;
-        } else if (gate.gated && inbox.pin.isSet()) {
-          // With a PIN, a cookie alone never opens a file: the tab needs a ticket from an unlocked page.
-          throw new InboxError(403, 'open this file from its card');
-        }
-        const file = await cardFile(card, name);
-        const base = name.split('/').pop() ?? '';
-        const type = LOCAL_TYPES[/\.([^.]+)$/.exec(base)?.[1]?.toLowerCase() ?? ''];
-        // A file can grow between the size check and the read.
-        const bytes = await file.read();
-        if (bytes.byteLength > MAX_ATTACHMENT_BYTES) throw new InboxError(413, `the file is over the limit of ${MAX_ATTACHMENT_BYTES} bytes`);
-        return new Response(bytes, { headers: fileHeaders(type ?? 'application/octet-stream', !!type, base, 'no-store') });
+        // With a PIN, a cookie alone never opens a file: the tab needs a ticket from an unlocked page.
+        if (gate.gated && inbox.pin.isSet()) throw new InboxError(403, 'open this file from its card');
+        const name = url.searchParams.get('path') ?? '';
+        await cardFile(inbox.getCard(b), name);
+        // The file opens at its folder ticket's address, where the relative addresses of its images and styles resolve.
+        const t = folderTicket(b, name, me, gate);
+        return new Response(null, { status: 303, headers: { location: `../../files/${t.id}/${encodeURIComponent(t.name)}`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
       }
       if (method !== 'POST') return json({ error: 'not found' }, 404);
       const body = await readJson<Record<string, unknown>>(req, c === 'answer' ? BODY_LIMIT.card : BODY_LIMIT.other);
@@ -480,23 +584,26 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           owner();
           const path = String(body['path'] ?? '');
           await cardFile(inbox.getCard(b), path);
-          const now = Date.now();
-          for (const [k, t] of tickets) if (t.expiresAt < now) tickets.delete(k);
-          const ticket = randomId(24);
-          tickets.set(ticket, { card: b, path, expiresAt: now + FILE_TICKET_MS });
-          return json({ ticket, expiresAt: now + FILE_TICKET_MS }, 201);
+          const t = folderTicket(b, path, me, gate);
+          return json({ ticket: t.id, name: t.name }, 201);
         }
-        case 'answer':
+        case 'answer': {
           owner();
-          return json(await inbox.answer(b, {
+          const saved = await inbox.answer(b, {
             images: body['images'] as Parameters<Inbox['answer']>[1]['images'],
             values: body['values'] as Record<string, unknown> | undefined,
             comment: body['comment'] as string | undefined,
             delivery: body['delivery'] as Delivery | undefined,
             version: body['version'] as number | undefined,
-          }));
+          });
+          // The owner's answer types each approval it turned on into its pane, and the reply says how each went.
+          return json((await inbox.sendApprovals(me, b)) ?? saved);
+        }
         case 'close':
           return json(publicCard(inbox.close(me, b, body['kind'] as CloseKind, String(body['outcome'] ?? ''), body['ifUnanswered'] === true)));
+        case 'dismiss':
+          owner();
+          return json(publicCard(inbox.dismiss(me, b, { values: body['values'], comment: body['comment'] })));
         case 'reply':
           return json(publicCard(inbox.reply(me, b, String(body['text'] ?? ''))));
         case 'ack':

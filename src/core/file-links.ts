@@ -28,3 +28,21 @@ export function fileLinkPaths(text: string): string[] {
   }
   return [...paths];
 }
+
+/** The path that the rest of a folder ticket's address names under `folder`, or undefined when it would leave the folder.
+ * Each segment decodes on its own, so an encoded slash or backslash never splits one. A segment that is empty, starts with
+ * a dot, or contains a slash, a backslash or a NUL is refused. That covers `..`, an absolute path, and hidden files such as `.env`. */
+export function folderFilePath(folder: string, rest: string): string | undefined {
+  const names: string[] = [];
+  for (const segment of rest.split('/')) {
+    let name: string;
+    try {
+      name = decodeURIComponent(segment);
+    } catch {
+      return undefined;
+    }
+    if (!name || name.startsWith('.') || /[/\\\0]/.test(name)) return undefined;
+    names.push(name);
+  }
+  return `${folder.replace(/\/+$/, '')}/${names.join('/')}`;
+}

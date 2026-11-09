@@ -36,12 +36,21 @@ export class FileBlobs implements BlobStore {
 }
 
 /** A file on this machine, by the decoded path of its file: address, for the laptop inbox's file links. A directory, a
- * missing file or anything else that is not a regular file is undefined. The caller reads the bytes after it checks the size. */
-export async function localFile(name: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> } | undefined> {
+ * missing file or anything else that is not a regular file is undefined. With `folder`, so is a file whose real path, after
+ * every symlink, is not inside the real path of that folder. The caller reads the bytes after it checks the size. */
+export async function localFile(name: string, folder?: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> } | undefined> {
   // A file: address on Windows has a path like /C:/Users/me, with a slash before the drive.
-  const file = process.platform === 'win32' ? path.normalize(name.replace(/^\/(?=[A-Za-z]:)/, '')) : name;
+  const native = (p: string): string => (process.platform === 'win32' ? path.normalize(p.replace(/^\/(?=[A-Za-z]:)/, '')) : p);
+  let file = native(name);
   if (!path.isAbsolute(file)) return undefined;
   try {
+    if (folder !== undefined) {
+      const [real, root] = await Promise.all([fs.realpath(file), fs.realpath(native(folder))]);
+      const inside = path.relative(root, real);
+      if (!inside || inside.split(path.sep)[0] === '..' || path.isAbsolute(inside)) return undefined;
+      // Read the path that was checked, so a symlink swapped in after the check is not followed.
+      file = real;
+    }
     const stat = await fs.stat(file);
     if (!stat.isFile()) return undefined;
     return {

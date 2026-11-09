@@ -1,15 +1,15 @@
 // The parts of the page, each one renderable alone, as the stories do.
-import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, notifyOn, store } from './env.js';
+import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, notifyOn, store, time } from './env.js';
 import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
-import { installCopy } from './copy.js';
-import { answerValues, cardSource, changeSteps, describe, formValues, optionValue, parseSource, recommendedOptions } from './answers.js';
+import { copyText, installCopy } from './copy.js';
+import { DISMISS, answerValues, approvalPlace, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
-export { agentName, answerValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions };
+export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions };
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 // Code on every card copies with a click, on the page and in each story.
@@ -142,28 +142,35 @@ export function Diagram({ source }) {
 const PlainFormControl = openuiChatLibrary.components.FormControl.component;
 const MarkdownFormControl = (args) => PlainFormControl({ ...args, props: { ...args.props, label: h(React.Fragment, null, renderInline(h, args.props.label)) } });
 // The option a card recommends shows a Recommended tag, and the card's recommendation, below its description.
-// CardView gives the recommended option values and the recommendation to the `choice` field the page builds from the options.
+// CardView gives the recommended option values by field name: the `choice` field the page builds from the options, with
+// the recommendation, and each question's field, with the tag alone.
 const Recommended = React.createContext(null);
 const RECOMMENDED = { type: 'recommended-option' };
 function RecommendedNote({ note }) {
   // A link in the recommendation opens without picking the option around it.
   return h('div', { className: 'rec-in-option', onClick: (e) => { if (e.target.closest('a')) e.stopPropagation(); } },
-    h('strong', { className: 'rec-tag' }, 'Recommended'), note);
+    h('strong', { className: 'rec-tag' }, 'Recommended'), note || null);
 }
 const PlainOptionCards = openuiChatLibrary.components.OptionCards.component;
 function RecommendingOptionCards(args) {
-  const rec = React.useContext(Recommended);
-  if (!rec || args.props.name !== 'choice') return PlainOptionCards(args);
+  const rec = React.useContext(Recommended)?.[args.props.name];
+  if (!rec) return PlainOptionCards(args);
   // OpenUI draws an option's top content through renderNode, so the note goes there and the stylesheet moves it below the text.
   const items = (args.props.items || []).map((it) => (rec.values.includes(it?.props?.value) ? { ...it, props: { ...it.props, topContent: RECOMMENDED } } : it));
   const renderNode = (n) => (n === RECOMMENDED ? h(RecommendedNote, { note: rec.note }) : args.renderNode(n));
   return PlainOptionCards({ ...args, props: { ...args.props, items }, renderNode });
 }
+// An icon button's name is its accessible label in OpenUI, and the page shows it as a tooltip too. Every card's row of
+// buttons ends with Dismiss, whose name says what it does to the agent.
+const PlainIconButton = openuiChatLibrary.components.IconButton.component;
+const TitledIconButton = (args) => h('span', { className: 'ib-titled', title: String(args.props.name ?? '') }, h(PlainIconButton, args));
+
 const library = extendLibrary(openuiChatLibrary, {
   CheckWithText,
   Mermaid: ({ props }) => h(Diagram, { source: String(props.source ?? '') }),
   FormControl: MarkdownFormControl,
   OptionCards: RecommendingOptionCards,
+  IconButton: TitledIconButton,
 });
 /** The page's component list, as the inbox reads it from src/adapters/openui-library.ts. */
 export const librarySchema = () => library.toJSONSchema();
@@ -201,7 +208,8 @@ export function CardView({ draftKey, card, onAction, recommendationText }) {
   // `recommendationText` draws a recommendation as the page does, for the option it recommends.
   const { ids, text } = recommendedOptions(card);
   const values = (card.options || []).filter((o) => ids.includes(o.id)).map(optionValue);
-  const rec = values.length ? { values, note: text && recommendationText ? recommendationText(text) : null } : null;
+  const rec = Object.fromEntries(Object.entries(questionRecommendations(card)).map(([name, labels]) => [name, { values: labels, note: null }]));
+  if (values.length) rec.choice = { values, note: text && recommendationText ? recommendationText(text) : null };
   return h(React.Fragment, null, checker, h(Recommended.Provider, { value: rec },
     h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction })));
 }
@@ -222,8 +230,9 @@ function CardBody({ draftKey, response, broken, onAction }) {
     h('div', { className: broken ? 'body-source' : 'card-body' }, h(Renderer, { response, library, initialState, ...handlers })));
 }
 
-// A card the agent closed while you looked at it: it collapses to its outcome, and opens again on demand.
-export function ClosedCard({ closed, children, onNext, animate }) {
+// A card the agent closed while you looked at it, or one you dismissed: it collapses to its outcome, and opens again on
+// demand. A dismissal also shows the draft the person had on screen, which no agent reads.
+export function ClosedCard({ closed, card, children, onNext, animate }) {
   const ref = React.useRef(null);
   const [collapsed, setCollapsed] = React.useState(false);
   const [height, setHeight] = React.useState(null);
@@ -233,18 +242,57 @@ export function ClosedCard({ closed, children, onNext, animate }) {
     const t = setTimeout(() => setCollapsed(true), 900);
     return () => clearTimeout(t);
   }, []);
+  const draft = closed.draft;
+  const draftText = draft && card ? describe(card, { values: draft.values, comment: draft.comment }) : '';
   return h('div', null,
     h('div', { className: 'closed-line', style: { marginBottom: collapsed ? 0 : 10 } },
       h('span', { className: 'tag' }, CLOSED_LABEL[closed.kind] || 'Closed'),
       h('span', { className: 'o' }, closed.outcome),
       h('button', { className: 'btn', onClick: () => setCollapsed((c) => !c) }, collapsed ? 'Show card' : 'Hide card'),
       h('button', { className: 'btn', onClick: onNext }, 'Next card')),
+    draft && h('div', { className: 'dismiss-draft' },
+      h('div', { className: 'dismiss-draft-head' }, `Your unsent draft, at ${time(draft.at)}`),
+      h('div', { className: 'dismiss-draft-body' }, draftText && draftText !== 'Empty answer' ? draftText : 'Nothing typed yet.')),
     h('div', { ref, className: 'collapse', style: { maxHeight: collapsed ? 0 : (height || 4000), opacity: collapsed ? 0 : 1 } }, children));
+}
+
+// The icon button that dismisses the card on screen, for the rows the page draws itself: an HTML card's footer, a secret
+// card's buttons, a guidance proposal, and the follow-up a replied card offers.
+export function DismissButton({ onClick }) {
+  return h('button', { type: 'button', className: 'icon-btn dismiss', title: DISMISS, 'aria-label': DISMISS, onClick },
+    h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.dismissed.map((d) => h('path', { key: d, d }))));
+}
+
+// A card whose agent replied after the person answered: a comment box of its own sends a follow-up on the same card, with
+// the earlier answer kept as it was. The answer form folds away below it, behind Change your answer.
+export function FollowUp({ card, answer, onDone }) {
+  const draftKey = `draft:${card.id}:reply`;
+  const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
+  const [error, setError] = React.useState(null);
+  // The follow-up keeps the answer's values, less its approval toggles: those are typed into a pane once, with the answer.
+  const kept = Object.fromEntries(Object.entries(answer.values || {}).filter(([k]) => !k.startsWith('approval_')));
+  const send = async (route, payload) => {
+    setError(null);
+    try {
+      const res = await api(`${BASE}v1/cards/${card.id}/${route}`, payload);
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+      store.del(draftKey);
+      onDone();
+    } catch (e) {
+      setError(`It did not go: ${String(e.message || e)}`);
+    }
+  };
+  return h('div', { className: 'follow-up' },
+    h('label', null, 'Your reply', h('textarea', { rows: 2, value: comment, placeholder: 'Say more, without changing your answer', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
+    error && h('div', { className: 'note warn' }, error),
+    h('div', { className: 'follow-up-actions' },
+      h('button', { type: 'button', className: 'btn primary', onClick: () => send('answer', { values: kept, comment: comment.trim(), version: card.version }) }, 'Reply'),
+      h(DismissButton, { onClick: () => send('dismiss', { values: kept, comment: comment.trim() }) })));
 }
 
 // A secret request. The value is sealed in this browser with the agent's key,
 // so the inbox stores only ciphertext. Drafts are never saved for it.
-export function SecretForm({ card, onSent, onSkip }) {
+export function SecretForm({ card, onSent, onSkip, onDismiss }) {
   const [value, setValue] = React.useState('');
   const [comment, setComment] = React.useState('');
   const [error, setError] = React.useState(null);
@@ -277,11 +325,27 @@ export function SecretForm({ card, onSent, onSkip }) {
     h('div', { className: 'nav' },
       h('button', { className: 'btn primary', type: 'submit', disabled: !value }, 'Send sealed'),
       h('button', { className: 'btn', type: 'button', onClick: () => send(false) }, 'Decline'),
-      h('button', { className: 'btn', type: 'button', onClick: onSkip }, 'Skip for now')),
+      h('button', { className: 'btn', type: 'button', onClick: onSkip }, 'Skip for now'),
+      onDismiss && h(DismissButton, { onClick: () => onDismiss(comment.trim()) })),
     h('p', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the model sees a file path, never the value.'));
 }
 
 // How long ago the agent sent the card, roughly. It moves on at each turn of the clock's minute.
+/** The pin right after a tag value's label: dimmed while the value is not pinned, bright once it is. */
+export function TagPin({ tag: [key, value], on, onToggle }) {
+  const tip = on ? `Unpin ${key}: ${value}` : `Pin ${key}: ${value} to the top`;
+  return h('button', { type: 'button', className: `tag-pin${on ? ' on' : ''}`, title: tip, 'aria-label': tip, 'aria-pressed': on, onClick: (e) => { e.stopPropagation(); onToggle([key, value]); } },
+    h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.pin.map((d) => h('path', { key: d, d }))));
+}
+
+/** The card's tags as chips, `topic: billing`, each with its pin. */
+export function CardTags({ tags, isPinned, onToggle }) {
+  const entries = Object.entries(tags || {}).map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v);
+  if (!entries.length) return null;
+  return h('div', { className: 'tags' }, entries.map((tag) => h('span', { key: tag[0], className: 'tag' },
+    h('span', { className: 'tag-label' }, `${tag[0]}: ${tag[1]}`), h(TagPin, { tag, on: isPinned(tag), onToggle }))));
+}
+
 export function CardAge({ card }) {
   // The tick only re-renders: each render reads the clock, so a card opened between ticks shows its own age.
   const [, setTick] = React.useState(0);
@@ -307,25 +371,46 @@ export async function openSessionLink(href, el) {
   el.title = error ? `Could not open: ${error}` : 'Opened in herdr';
 }
 
-// Card text with [[card-id]] links. A link shows the linked card title, and its text on hover.
-// Card text is Markdown, and [[card-id]] links to another card by its title.
-// A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
-/** Open a card's file in a new tab. A new tab sends no unlock header, so it opens the file with a ticket that this page
- * asks for, good once. The tab opens at the click, since a popup blocker stops one that opens after a fetch. */
+/** Open a card's file in a new tab. A new tab sends no unlock header, so it opens the file at the address of a folder
+ * ticket that this page asks for, where an HTML file's images and stylesheets load too. The tab opens at the click,
+ * since a popup blocker stops one that opens after a fetch. */
 export function openCardFile(card, path) {
   const tab = window.open('', '_blank');
   if (!tab) return;
   tab.opener = null;
-  const route = `${BASE}v1/cards/${encodeURIComponent(card)}/file`;
-  api(`${route}-ticket`, { path })
+  api(`${BASE}v1/cards/${encodeURIComponent(card)}/file-ticket`, { path })
     .then((r) => r.json().then((d) => {
       if (!r.ok) throw new Error(d.error || `the inbox answered ${r.status}`);
-      tab.location.href = new URL(`${route}?ticket=${encodeURIComponent(d.ticket)}`, location.href).href;
+      tab.location.href = new URL(`${BASE}v1/files/${encodeURIComponent(d.ticket)}/${encodeURIComponent(d.name)}`, location.href).href;
     }))
     .catch((e) => { tab.document.title = 'File not opened'; tab.document.body.textContent = `The file did not open: ${e.message}`; });
 }
 
-// With a card id in `files`, a file: link opens the file in a new tab, which the laptop inbox serves for that card only.
+const FILE_KINDS = [[/\.html?$/i, 'file-code'], [/\.(png|jpe?g|gif|webp|svg)$/i, 'file-image'], [/\.(pdf|txt|log|md|markdown|csv|json)$/i, 'file-text']];
+const chipIcon = (name) => h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS[name].map((d) => h('path', { key: d, d })));
+
+// A file a card names, as a chip: an icon for its type and its name. Hovering shows the whole path, a click opens the
+// file in a new tab, and the Copy path button copies the path, for a terminal or an editor.
+export function FileChip({ card, path }) {
+  const [copied, setCopied] = React.useState('');
+  React.useEffect(() => {
+    if (!copied) return undefined;
+    const t = setTimeout(() => setCopied(''), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  const name = path.split('/').filter(Boolean).pop() || path;
+  const kind = (FILE_KINDS.find(([re]) => re.test(name)) || [null, 'file'])[1];
+  return h('span', { className: 'file-chip' },
+    h('a', { className: 'file-link', title: path, href: `${BASE}v1/cards/${encodeURIComponent(card)}/file?path=${encodeURIComponent(path)}`,
+      onClick: (e) => { e.preventDefault(); openCardFile(card, path); } }, chipIcon(kind), h('span', { className: 'file-chip-name' }, name)),
+    h('button', { type: 'button', className: 'file-copy', title: copied || 'Copy path', 'aria-label': copied || 'Copy path', 'data-copied': copied || undefined,
+      onClick: () => { void copyText(path).then((ok) => setCopied(ok ? 'Copied' : 'Copy failed')); } }, chipIcon(copied === 'Copied' ? 'read' : 'copy')));
+}
+
+// Card text with [[card-id]] links. A link shows the linked card title, and its text on hover.
+// Card text is Markdown, and [[card-id]] links to another card by its title.
+// A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
+// With a card id in `files`, a file: link is a chip that opens the file in a new tab, which the laptop inbox serves for that card only.
 // Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
 export function LinkedText({ text, byId, open, diagrams = true, files }) {
   const cardLink = (id, key) => {
@@ -336,9 +421,7 @@ export function LinkedText({ text, byId, open, diagrams = true, files }) {
     return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
   };
   const diagram = diagrams ? (source, key) => h(Diagram, { key, source }) : undefined;
-  const fileLink = files ? (path, label, key) => h('a', { key, className: 'file-link', title: path,
-    href: `${BASE}v1/cards/${encodeURIComponent(files)}/file?path=${encodeURIComponent(path)}`,
-    onClick: (e) => { e.preventDefault(); openCardFile(files, path); } }, label) : undefined;
+  const fileLink = files ? (path, _label, key) => h(FileChip, { key, card: files, path }) : undefined;
   return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram, fileLink }));
 }
 
@@ -433,8 +516,29 @@ const MAX_FRAME_HEIGHT = 20000;
 /** Turn showing HTML cards on or off for the whole inbox. */
 const setAllowHtml = (on) => fetch(BASE + 'v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-your-attention': '1' }, body: J({ allowHtml: on }) });
 
+// Sentences the inbox types into a herdr pane as the person's message. Each one is off until the person turns it on,
+// and Send answer sends the ones that are on. A sentence already sent for this version stays on and can't be turned off.
+export function Approvals({ card, answer, picks, onToggle }) {
+  const results = answer && answer.version === card.version ? answer.approvalResults || [] : [];
+  return h('div', { className: 'approvals' }, card.approvals.map((a, i) => {
+    const r = results[i];
+    const locked = !!(r && (r.sentAt || r.sendingAt));
+    const on = locked || !!picks[i];
+    const result = approvalResult(a, r);
+    return h('div', { key: i, className: 'approval' },
+      a.label && h('div', { className: 'approval-label' }, a.label),
+      h('div', { className: 'approval-row' },
+        codeBlock(h, a.text, 'text'),
+        h('div', { className: 'approval-actions' },
+          h('button', { type: 'button', className: `btn approval-toggle${on ? ' on' : ''}`, 'aria-pressed': on ? 'true' : 'false', disabled: locked, onClick: () => onToggle(i, !on) }, on ? 'Approved' : 'Approve'),
+          h('a', { className: 'session-link', href: `https://herdr.invalid/v1/pane/${a.pane}`, title: 'Open this pane in herdr' }, 'Open pane'))),
+      h('div', { className: 'approval-place' }, approvalPlace(a)),
+      result && h('div', { className: `approval-result${r.error ? ' failed' : ''}` }, result));
+  }));
+}
+
 // A card with the agent's own HTML. It shows only when the owner allows HTML cards, or asks to see this one.
-export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
+export function HtmlCard({ card, allowed, onAnswer, onSkip, onDismiss }) {
   const ref = React.useRef(null);
   // The comment draft belongs to the card, not its version, so a revision keeps what the person typed.
   const draftKey = `draft:${card.id}:comment`;
@@ -475,7 +579,8 @@ export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
     h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
     h('div', { className: 'html-answer-actions' },
       h('button', { type: 'button', className: 'btn primary', onClick: async () => { onAnswer(await collect(), comment.trim()); store.del(draftKey); } }, 'Send answer'),
-      h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now')));
+      h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now'),
+      onDismiss && h(DismissButton, { onClick: async () => onDismiss(await collect(), comment.trim()) })));
   if (!always && once !== card.id) {
     return h(React.Fragment, null, h('div', { className: 'note warn html-gate' },
       h('p', null, 'This card brings its own HTML and scripts. They run in a sandboxed frame that cannot reach the network or this page. A click in the card can open a page in a new tab, and the card chooses its address.'),
@@ -492,32 +597,10 @@ export function HtmlCard({ card, allowed, onAnswer, onSkip }) {
     footer);
 }
 
+const marked = (words) => words.map(([w, changed], k) => (changed && w.trim() ? h('mark', { key: k }, w) : w));
+
 // What changed since the version before, line by line.
 // Every revision, newest first: for each one, the lines it removed and added in each field.
-// The words that differ between a removed line and the added line that replaced it,
-// from the longest common run of words. Lines that share no word, or are very long,
-// get no word marks: the whole line changed.
-export function wordDiff(before, after) {
-  const x = before.split(/(\s+)/);
-  const y = after.split(/(\s+)/);
-  if (x.length * y.length > 250000) return null;
-  const t = Array.from({ length: x.length + 1 }, () => new Uint16Array(y.length + 1));
-  for (let i = x.length - 1; i >= 0; i--) for (let j = y.length - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
-  const del = [];
-  const add = [];
-  let i = 0;
-  let j = 0;
-  while (i < x.length && j < y.length) {
-    if (x[i] === y[j]) { del.push([x[i++], false]); add.push([y[j++], false]); }
-    else if (t[i + 1][j] >= t[i][j + 1]) del.push([x[i++], true]);
-    else add.push([y[j++], true]);
-  }
-  while (i < x.length) del.push([x[i++], true]);
-  while (j < y.length) add.push([y[j++], true]);
-  if (!del.some(([w, changed]) => !changed && w.trim())) return null;
-  return { del, add };
-}
-const marked = (words) => words.map(([w, changed], k) => (changed && w.trim() ? h('mark', { key: k }, w) : w));
 
 export function Changes({ card }) {
   const steps = changeSteps(card);
@@ -532,18 +615,69 @@ export function Changes({ card }) {
         f.added.map((l, i) => { const w = i < f.removed.length && wordDiff(f.removed[i], l); return h('div', { key: `a${i}`, className: 'add' }, '+ ', w ? marked(w.add) : l); }))))));
 }
 
-// The system card for new guidance: the person picks the agents, all of them at first.
-export function BroadcastForm({ card, cards = [], onDone }) {
-  const [picked, setPicked] = React.useState(() => new Set(card.broadcast.agents));
-  const send = (choice) => api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: [...picked] } }).then(onDone);
+// The system card for new guidance: the proposal as a diff against the current guidance, the agents to send it to,
+// all of them at first, and the comment, which goes with the answer to the agent that proposed the text.
+export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDone, onSkip, onDismiss }) {
+  const b = card.broadcast;
+  // The agents online now, from live presence, every one ticked until the person unticks it: an agent that comes
+  // online while the card is open joins ticked, and one that leaves drops off the list.
+  const online = Object.values(presence).filter((p) => p.online && p.agent !== 'system').map((p) => p.agent).sort();
+  const [unticked, setUnticked] = React.useState(() => new Set());
+  // The comment draft belongs to the card, as on an HTML card.
+  const draftKey = `draft:${card.id}:comment`;
+  const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
+  const [whole, setWhole] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const current = guidance || b.base || { text: '', version: 0 };
+  const changed = !!(b.base && guidance && b.base.version !== guidance.version);
+  const rows = guidanceDiff(current.text, b.text, changed ? b.base.text : undefined);
+  const same = rows.filter((r) => r.kind === 'same').length;
+  const matches = same === rows.length;
+  // A failed answer keeps the comment and says why, so the person can send it again.
+  async function send(choice) {
+    setError(null);
+    try {
+      const res = await api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: online.filter((a) => !unticked.has(a)) }, comment: comment.trim() });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
+      store.del(draftKey);
+      onDone();
+    } catch (e) {
+      setError(`The answer did not go: ${String(e.message || e)}`);
+    }
+  }
+  const lines = [];
+  for (let k = 0; k < rows.length; k++) {
+    const r = rows[k];
+    if (r.kind === 'same' && !whole) {
+      if (matches) break;
+      let n = k;
+      while (n < rows.length && rows[n].kind === 'same') n++;
+      lines.push(h('div', { key: k, className: 'same-run' }, `${n - k} unchanged line${n - k === 1 ? '' : 's'}`));
+      k = n - 1;
+      continue;
+    }
+    const sign = r.kind === 'del' ? '− ' : r.kind === 'add' ? '+ ' : '  ';
+    lines.push(h('div', { key: k, className: r.kind === 'same' ? 'same' : r.kind, title: r.undone ? 'Added to the guidance after the agent proposed this text. Approving removes it.' : undefined },
+      sign, r.words ? marked(r.words) : r.text, r.undone && h('span', { className: 'undone' }, ' (added after the proposal)')));
+  }
   return h('div', { className: 'broadcast' },
-    h('pre', null, card.broadcast.text),
-    h('div', { className: 'agents' }, card.broadcast.agents.length ? card.broadcast.agents.map((a) => h('label', { key: a },
-      h('input', { type: 'checkbox', checked: picked.has(a), onChange: () => setPicked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards)))
-      : h('span', null, 'No agent has connected yet. Agents get the guidance when they connect.')),
-    h('div', { className: 'nav' },
-      h('button', { className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),
-      h('button', { className: 'btn', onClick: () => send('reject') }, 'Reject')));
+    h('div', { className: 'field' }, `${b.from ? `${agentName(b.from, cards)} proposes` : 'Proposed'} changes to card guidance version ${current.version}`),
+    changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
+    h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
+    same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
+    h('fieldset', { className: 'agents' },
+      h('legend', null, `Send to ${online.length} online agent${online.length === 1 ? '' : 's'}`),
+      online.map((a) => h('label', { key: a },
+        h('input', { type: 'checkbox', checked: !unticked.has(a), onChange: () => setUnticked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards))),
+      h('span', { className: 'hint' }, 'Offline agents get the new guidance when they reconnect, or when they call card_guidance.')),
+    h('div', { className: 'html-answer' },
+      h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: b.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
+      h('div', { className: 'html-answer-actions' },
+        h('button', { type: 'button', className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),
+        h('button', { type: 'button', className: 'btn', onClick: () => send('reject') }, 'Reject'),
+        h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now'),
+        onDismiss && h(DismissButton, { onClick: () => onDismiss(comment.trim()) })),
+      error && h('div', { className: 'note warn' }, error)));
 }
 
 export function NotifyToggle() {

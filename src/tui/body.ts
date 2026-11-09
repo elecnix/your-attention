@@ -80,8 +80,8 @@ export interface BodyContext {
   onAction(action: Action, form: string | undefined): void;
   /** The address of this card on the page, for what the terminal cannot draw. */
   address: string;
-  /** The values of the options the card recommends in its `choice` field, and the recommendation to show inside the one it recommends. */
-  recommended?: { values: string[]; text?: string | undefined };
+  /** The values of the options the card recommends, by field name: its `choice` field with the recommendation to show inside the one it recommends, and each question's field. */
+  recommended?: Record<string, { values: string[]; text?: string | undefined }>;
 }
 
 /** A field with rules registers here, so a primary button can check its form before it sends. */
@@ -538,8 +538,8 @@ export class BodyRenderer {
       const hang: Span[] = [...this.pad(), { text: ' '.repeat(2 + textWidth(mark) + 1), target }];
       doc.para(label, { first: lead, rest: hang });
       if (it.description) doc.para(inlineSpans(it.description, this.ctx.md, s.dim).map((sp) => ({ ...sp, target: sp.target ?? target })), { first: hang, rest: hang });
-      const rec = this.ctx.recommended;
-      if (kind === 'OptionCards' && name === 'choice' && rec?.values.includes(it.value)) {
+      const rec = this.ctx.recommended?.[name];
+      if (kind === 'OptionCards' && rec?.values.includes(it.value)) {
         // As on the page: a tag and the recommendation below the description, behind the callout's accent line.
         const bar: Span[] = [...hang, { text: `${g.quote} `, style: s.accent, target }];
         doc.para([{ text: 'Recommended', style: { ...s.accent, bold: true }, target }], { first: bar, rest: bar });
@@ -682,7 +682,8 @@ export class BodyRenderer {
       ids.length = 0;
     };
     for (const b of list) {
-      const label = sanitize(str(b.props['label']));
+      // An icon button names itself with `name`, which is also the action it sends; a text button names itself with `label`.
+      const label = sanitize(str(b.props['label']) || str(b.props['name']));
       const variant = str(b.props['variant']) || 'primary';
       const action = buttonAction(b.props['action'], label);
       const id = this.nextId('button', label);

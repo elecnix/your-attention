@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
 import { typeFromName } from '../core/inbox.ts';
-import type { CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
+import type { Approval, AskQuestion, CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
 import { cardTools } from './tools.ts';
 
@@ -27,6 +27,27 @@ export function toAttachment(a: { path?: string; url?: string; name?: string; al
 
 const str = (v: unknown): string | undefined => (v === undefined || v === null ? undefined : String(v));
 
+type OptionArg = string | null | { label?: unknown; description?: unknown; recommended?: unknown };
+/** An option is an object with its explanation, or a plain label. Only `recommended: true` marks it. */
+function optionArg(o: OptionArg): { label: string; description?: string; recommended?: true } {
+  const obj = o && typeof o === 'object' ? o : undefined;
+  const description = obj ? str(obj.description) : undefined;
+  return { label: obj ? String(obj.label ?? '') : String(o ?? ''), ...(description ? { description } : {}), ...(obj?.recommended === true ? { recommended: true } : {}) };
+}
+
+/** Each question as the inbox stores it. A field the agent left out stays out. */
+function questionArg(q: { question?: unknown; header?: unknown; text?: unknown; options?: OptionArg[]; multiSelect?: unknown }): AskQuestion {
+  const header = str(q?.header);
+  const text = str(q?.text);
+  return {
+    question: String(q?.question ?? ''),
+    ...(header ? { header } : {}),
+    ...(text ? { text } : {}),
+    ...(q?.multiSelect === true ? { multiSelect: true } : {}),
+    ...(Array.isArray(q?.options) ? { options: q.options.map(optionArg) } : {}),
+  };
+}
+
 export async function runTool(ctx: ToolContext, name: string, args: Record<string, unknown>): Promise<string> {
   const { inbox, agent } = ctx;
   // Where the session runs only labels the card, so a failed lookup posts the card without it.
@@ -44,14 +65,10 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         title: String(args['title'] ?? ''),
         text: str(args['text']),
         recommendation: str(args['recommendation']),
-        // An option is an object with its explanation, or a plain label.
-        options: (args['options'] as (string | null | { label?: unknown; description?: unknown; recommended?: unknown })[] | undefined)?.map((o, i): Option => {
-          const obj = o && typeof o === 'object' ? o : undefined;
-          const label = obj ? String(obj.label ?? '') : String(o ?? '');
-          const description = obj ? str(obj.description) : undefined;
-          return { id: `o${i + 1}`, label, ...(description ? { description } : {}), ...(obj?.recommended === true ? { recommended: true } : {}) };
-        }),
+        options: (args['options'] as OptionArg[] | undefined)?.map((o, i): Option => ({ id: `o${i + 1}`, ...optionArg(o) })),
         multiple: args['multiple'] as boolean | undefined,
+        approvals: args['approvals'] as Approval[] | undefined,
+        questions: Array.isArray(args['questions']) ? (args['questions'] as Parameters<typeof questionArg>[0][]).map(questionArg) : undefined,
         body: str(args['body']),
         html: str(args['html']),
         attachments: (args['attachments'] as { path?: string; url?: string; name?: string; alt?: string }[] | undefined)?.map(toAttachment),
@@ -65,8 +82,10 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         origin: await origin(),
       };
       const posted = await inbox.post(card);
-      if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. Warning: ${posted.warning}`;
-      return `Posted card ${posted.id}. The answer arrives ${ctx.arrival}; keep working meanwhile.`;
+      const inherited = posted.inheritedTags ?? [];
+      const tags = inherited.length ? `It took the default tags ${inherited.join(', ')}.` : 'It took no default tags.';
+      if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. ${tags} Warning: ${posted.warning}`;
+      return `Posted card ${posted.id}. ${tags} The answer arrives ${ctx.arrival}; keep working meanwhile.`;
     }
     case 'card_patch': {
       const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']));
@@ -85,11 +104,26 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
     }
     case 'card_guidance': {
       if (args['propose']) {
-        const card = await inbox.proposeGuidance(String(args['propose']));
-        return `Proposed the guidance on card ${card.id}. It changes only if the person approves it.`;
+        const card = await inbox.proposeGuidance(String(args['propose']), agent);
+        return `Proposed the guidance on card ${card.id}. It changes only if the person approves it. The answer and the person's comment arrive ${ctx.arrival}.`;
       }
       const g = await inbox.guidance();
-      return `Card guidance, version ${g.version}:\n${g.text}${g.widgets ? `\n\n${g.widgets}` : ''}`;
+      // The tags other cards set go last, one line per key, so the agent reuses a value instead of inventing one.
+      const tags = (g.tags ?? []).map((t) => `\`${t.key}\` = ${t.values.map((v) => `${v.value} (${v.count})`).join(', ')}.`);
+      return `Card guidance, version ${g.version}:\n${g.text}${g.widgets ? `\n\n${g.widgets}` : ''}${tags.length ? `\n\nTags in use:\n${tags.join('\n')}` : ''}`;
+    }
+    case 'card_tags': {
+      // A call that sends nothing reads the defaults back, which is what an agent does after a compaction.
+      const tags = args['tags'] === undefined ? undefined : (args['tags'] as Record<string, string>);
+      const remove = Array.isArray(args['remove']) ? (args['remove'] as unknown[]).map(String) : undefined;
+      const clear = args['clear'] === true;
+      const held = tags !== undefined || remove !== undefined || clear
+        ? await inbox.setDefaultTags(agent, { ...(tags === undefined ? {} : { tags }), ...(remove === undefined ? {} : { remove }), ...(clear ? { clear } : {}) })
+        : await inbox.defaultTags(agent);
+      const lines = Object.entries(held.tags).map(([k, t]) => `- ${k}: ${t.value} (from ${t.from})`);
+      return lines.length
+        ? `The default tags of this session, which every card it posts inherits under its own tags:\n${lines.join('\n')}`
+        : 'This session has no default tags. Set them with card_tags, for example {"tags": {"repo": "acme/api", "topic": "billing"}}, and every card it posts inherits them under its own tags.';
     }
     case 'card_ask_secret': {
       const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await origin() });

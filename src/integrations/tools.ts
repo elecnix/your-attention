@@ -9,26 +9,50 @@ export interface CardTool {
 export const cardTools: CardTool[] = [
   {
     name: 'card_post',
-    description: 'Ask the person for a decision on a card in their inbox. Returns at once: the answer arrives later, so keep working. State the goal, the options you weighed, the evidence, and your recommendation. Put each question next to the field that answers it, so the person answers while the question is in mind: never list questions in the text with the answers at the bottom.',
+    description: 'Ask the person for a decision on a card in their inbox. Returns at once: the answer arrives later, so keep working. State the goal, the options you weighed, the evidence, and your recommendation. Put each question next to the field that answers it, so the person answers while the question is in mind: never list questions in the text with the answers at the bottom. One question uses options. Two or more use questions, each with its own text and options.',
     schema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'The question, in one line.' },
-        text: { type: 'string', description: 'Context: the goal, the options you weighed, and the evidence. On the card, "you" is the person who reads it: write about yourself as "this agent", never "I". No questions here: each question sits beside its answer field, in options for one question or in body forms for several. Write what you will check yourself as statements. Markdown: [label](https://...) links, lists, **bold**, `code`, tables. Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click. A bare https address becomes a link, and [[card-id]] links to another card. To point at another agent\'s session, such as a blocked agent you report on, write its herdr link: [release agent](https://herdr.invalid/v1/pane/w7:p2), with the pane id from `herdr agent list`, or /tab/<tab id> for its tab. A click opens that session in herdr. A ```mermaid fenced block draws as a diagram. The inbox parses it with mermaid when you post or patch, and answers 400 with mermaid\'s error for one that does not parse, so fix it and post again.' },
+        text: { type: 'string', description: 'Context: the goal, the options you weighed, and the evidence. On the card, "you" is the person who reads it: write about yourself as "this agent", never "I". No questions here: each question sits beside its answer field, in options for one question or in questions for two or more. Write what you will check yourself as statements. Markdown: [label](https://...) links, lists, **bold**, `code`, tables. Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click. A bare https address becomes a link, and [[card-id]] links to another card. To point at another agent\'s session, such as a blocked agent you report on, write its herdr link: [release agent](https://herdr.invalid/v1/pane/w7:p2), with the pane id from `herdr agent list`, or /tab/<tab id> for its tab. A click opens that session in herdr. A ```mermaid fenced block draws as a diagram. The inbox parses it with mermaid when you post or patch, and answers 400 with mermaid\'s error for one that does not parse, so fix it and post again.' },
         recommendation: { type: 'string', description: 'What you would do, and why. Markdown, like text. With options, mark the option you recommend with recommended: true and write only the reasons here: the page shows them inside that option, under a Recommended tag. A recommendation that starts with an option\'s label, such as "Go ahead. The key is read-only.", marks that option too.' },
-        options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string', description: 'The choice, in a few words.' }, description: { type: 'string', description: 'What happens if the person picks it, with you in the third person: "This agent reruns the deploy, which changes …". Inline Markdown: **bold**, `code`, links. It shows inside the option\'s box.' }, recommended: { type: 'boolean', description: 'true on the option you recommend. One option at most, unless multiple is true.' } }, required: ['label'] }, description: 'Answer options for a card that asks one question. The page shows each option as a box the person clicks, with its description inside it. Explain each option there, not in a list in the text. For several questions, give each its own field in body forms instead. Every option is optional to the person.' },
+        options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string', description: 'The choice, in a few words.' }, description: { type: 'string', description: 'What happens if the person picks it, with you in the third person: "This agent reruns the deploy, which changes …". Inline Markdown: **bold**, `code`, links. It shows inside the option\'s box.' }, recommended: { type: 'boolean', description: 'true on the option you recommend. One option at most, unless multiple is true.' } }, required: ['label'] }, description: 'Answer options for a card that asks one question. The page shows each option as a box the person clicks, with its description inside it. Explain each option there, not in a list in the text. For two or more questions, use questions instead, never one options list after all the text. Every option is optional to the person.' },
+        questions: {
+          type: 'array',
+          description: 'For a card that asks two or more questions. The page draws the card text first, then each question as its own section: the question as a heading, its text, its option boxes, and a short comment field the page adds. The answer gives each choice as q0, q1 and so on, by the question\'s place in this list, and each comment as q0_comment. A question without options takes a free-text answer in q0. Leave options and multiple out of a card that uses questions.',
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', description: 'The question, in one line.' },
+              header: { type: 'string', description: 'Optional. A short label for the question, a few words.' },
+              text: { type: 'string', description: 'Optional. The context for this question alone, in Markdown like the card text: the evidence and the options you weighed for it.' },
+              options: { type: 'array', items: { type: 'object', properties: { label: { type: 'string', description: 'The choice, in a few words. Each label in one question must differ.' }, description: { type: 'string', description: 'What happens if the person picks it, with you in the third person. Inline Markdown.' }, recommended: { type: 'boolean', description: 'true on the option you recommend. One option at most, unless multiSelect is true.' } }, required: ['label'] }, description: 'The choices for this question. Leave it out for a free-text answer.' },
+              multiSelect: { type: 'boolean', description: 'Allow more than one option.' },
+            },
+            required: ['question'],
+          },
+        },
         multiple: { type: 'boolean', description: 'Allow more than one option.' },
+        approvals: {
+          type: 'array',
+          description: 'Sentences the inbox types into a herdr pane as the person\'s own message, once the person approves them on the card. Use one when an action needs the person\'s own words in a session, such as lifting an auto-mode denial, instead of asking the person to type the sentence there. The card shows each text with an Approve toggle and an Open pane link. When the person sends the answer with the toggle on, the inbox checks that the pane exists and that its input box holds no draft, then submits the text with `herdr agent prompt`. The answer carries approval_<i> true or false for each one, by its place in this list, and the card shows when each was sent or why it was not. Only the laptop inbox sends approvals: the hosted inbox refuses the card. At most 5.',
+          items: { type: 'object', properties: {
+            pane: { type: 'string', description: 'The herdr pane id to type into, such as w6P:p2, from `herdr agent list` or HERDR_PANE_ID.' },
+            text: { type: 'string', description: 'The exact message to send, at most 1,000 characters, not starting with a dash. Write it in the person\'s voice, as they would type it.' },
+            label: { type: 'string', description: 'Optional. What the approval allows, in a few words, shown above the text.' },
+          }, required: ['pane', 'text'] },
+        },
         priority: { type: 'string', enum: ['now', 'soon', 'later'], description: 'now: blocks your work. soon: needed before you finish. later: can wait.' },
         follows: { type: 'string', description: 'The id of the card this one follows up on.' },
         body: { type: 'string', description: [
           'Optional OpenUI Lang source for a card that needs other components. Place a saved widget with a line of its own: `pr = widget pull-request {"title": "Add stop"}`, or `widget pull-request@2` for one version.',
-          'To ask several things, put each question beside the text or table it is about: give the body its own forms, between TextContent and Table statements. Give each form `Buttons([])`. The page adds a comment box, Send answer and Skip below every card, and one send carries every form, so add no general comment field or send button of your own. When you ask several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
+          'Questions with options and text need no body: use questions. When a question needs a table or a widget beside it, give the body its own forms, between TextContent and Table statements. Give each form `Buttons([])`. The page adds a comment box, Send answer and Skip below every card, and one send carries every form, so add no general comment field or send button of your own. When you ask several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
           'Fields: FormControl(label, input) around RadioGroup(name, [RadioItem(label, "", value)]), CheckBoxGroup(name, [CheckBoxItem(label, "", name)]), Select(name, [SelectItem(value, label)]), Input(name), TextArea(name), Slider(name, "discrete", min, max, step, [start], label). A slider shows its name when it has no label. SwitchGroup(name, [SwitchItem(label, "", name)]) goes in a form without a FormControl. Use a distinct name for each field: the answer gives each value by its field name.',
           'TextContent reads Markdown, so a herdr session link works there too: TextContent("Blocked: [release agent](https://herdr.invalid/v1/pane/w7:p2)").',
           'Mermaid(source) draws a diagram from Mermaid source given as a string: flow = Mermaid("flowchart TD\\n  A --> B"). The built-in widget places the same: flow = widget mermaid {"source": "flowchart TD\\n  A --> B"}. The inbox parses each diagram when you post or patch, and answers 400 with mermaid\'s error for one that does not parse.',
           'Example:\nroot = Card([intro, risks, pr12])\nintro = TextContent("#12 adds retries to the uploader.")\nrisks = Table([Col("Risk", ["Duplicate uploads"]), Col("Likelihood", ["low"])])\npr12 = Form("pr12", none, [merge, note12])\nnone = Buttons([])\nmerge = FormControl("Merge #12?", RadioGroup("merge12", [RadioItem("Merge it", "", "yes"), RadioItem("Wait", "", "no")]))\nnote12 = FormControl("Comment on #12", Input("note12", "Optional"))',
         ].join(' ') },
-        tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Properties for grouping, such as topic.' },
+        tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Properties for grouping, such as topic. Reuse a value that card_guidance lists when one fits, so the inbox groups your card with the ones that already set it.' },
         id: { type: 'string', description: 'Reuse an id to revise your own card.' },
         from: { type: 'string', description: 'Optional. The name you give yourself, such as "the release agent", shown on the card. The card already shows your session name and where you run.' },
         attachments: {
@@ -65,6 +89,18 @@ export const cardTools: CardTool[] = [
     schema: { type: 'object', properties: { card_id: { type: 'string' }, status: { type: 'string' } }, required: ['card_id', 'status'] },
   },
   {
+    name: 'card_tags',
+    description: 'Set the default tags that every card this session posts inherits: repo, topic, or any other grouping key. The tool returns every default it holds, with what set it, so after a compaction this call shows the setting again. The inbox merges the defaults under the card\'s own tags when the session posts: a key on the card wins, and a key the card passes with an empty string drops that default for that card alone. The defaults stay in the inbox for this agent id, so a restart keeps them.',
+    schema: {
+      type: 'object',
+      properties: {
+        tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Tag keys and values to merge into the defaults, such as {repo: "acme/api", topic: "billing"}. At most 10 keys, and each key and value at most 100 characters.' },
+        remove: { type: 'array', items: { type: 'string' }, description: 'Tag keys to drop from the defaults.' },
+        clear: { type: 'boolean', description: 'true drops every default tag this session holds. The inbox clears first, then merges tags, then drops remove.' },
+      },
+    },
+  },
+  {
     name: 'card_template_save',
     description: 'Save a card format that works as a template, in OpenUI Lang with {{name}} placeholders. Saving the same name again makes a new version; give the feedback the new version answers.',
     schema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string' }, feedback: { type: 'string' } }, required: ['name', 'source'] },
@@ -80,7 +116,7 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_guidance',
-    description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it.',
+    description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it, or rejects it. Their answer and comment come back to you, so you can revise the text and propose again.',
     schema: { type: 'object', properties: { propose: { type: 'string', description: 'The new guidance text. Leave it out to read the current guidance.' } } },
   },
   {

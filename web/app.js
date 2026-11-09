@@ -3,14 +3,17 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Attachments, BroadcastForm, CardAge, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, UsageNotice, UsageToggle, answerValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
-import { after, buildQueue } from './queue.js';
+import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, FollowUp, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { after, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails } from './details.js';
 
 const { React, createRoot } = window.__OpenUI;
 
 export function App() {
   const [state, setState] = React.useState(null);
+  // The approvals the person turned on, by card version: a revision may change the sentences, so it starts with all off.
+  // They live in the device store, so an idle reload of the page for new code keeps them, as it keeps a comment draft.
+  const [approvalPicks, setApprovalPicks] = React.useState(() => { try { return JSON.parse(store.get('approvalPicks') || '{}'); } catch { return {}; } });
   // GET /v1/state sends card summaries. The whole card on screen, and the one after it, come from GET /v1/cards/<id>.
   const [, setLoaded] = React.useState(0);
   const detailsRef = React.useRef(null);
@@ -31,11 +34,36 @@ export function App() {
   const focusRef = React.useRef(null);
   React.useEffect(() => installPaste(() => focusRef.current), []);
   const knownRef = React.useRef(null);
-  const seenRef = React.useRef(null);
   const reportedFocus = React.useRef(undefined);
   // Escape clears the card pane; nothing takes the pane again until the person picks a card.
   const [cleared, setCleared] = React.useState(false);
-  const [groupBy, setGroupBy] = React.useState(() => store.get('groupBy') || 'none');
+  // Group by and the pinned tag values are the inbox's settings, so every page and the terminal client share them.
+  // This page reads them from GET /v1/state and changes them with PUT /v1/settings.
+  const [groupBy, setGroupBy] = React.useState('none');
+  // The pinned tag values, oldest first.
+  const [tagPins, setTagPins] = React.useState([]);
+  // The groups the person muted, by the group's kind and value, kept on this device next to the pins.
+  const [collapsedGroups, setCollapsedGroups] = React.useState(() => storedCollapsedGroups());
+  const toggleGroup = (id) => setCollapsedGroups((groups) => {
+    const next = new Set(groups);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    store.set('collapsedGroups', [...next]);
+    return next;
+  });
+  const samePin = (a, b) => a[0] === b[0] && a[1] === b[1];
+  const isPinned = (tag) => tagPins.some((p) => samePin(p, tag));
+  const saveSettings = (patch) => api(`${BASE}v1/settings`, patch, 'PUT').catch(() => {});
+  // A save in flight owns the list until it answers, so a state that arrives meanwhile cannot undo the click.
+  const savingPins = React.useRef(0);
+  // The same guard for Group by: a state that arrives before the PUT commits must not put the old choice back.
+  const savingGroupBy = React.useRef(0);
+  const togglePin = (tag) => setTagPins((pins) => {
+    const next = pins.some((p) => samePin(p, tag)) ? pins.filter((p) => !samePin(p, tag)) : [...pins, tag];
+    savingPins.current += 1;
+    const mine = savingPins.current;
+    api(`${BASE}v1/settings`, { pins: next }, 'PUT').catch(() => {}).finally(() => { if (savingPins.current === mine) savingPins.current = 0; });
+    return next;
+  });
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
   const [telemetry, changeTelemetry] = useTelemetry(auth === 'ok');
   // The PIN state, read once the page is signed in. `pinForm` is the form on screen: the offer to set one, or a change.
@@ -59,8 +87,17 @@ export function App() {
     const ids = new Set(s.cards.map((c) => c.id));
     if (knownRef.current) {
       const added = s.cards.filter((c) => !knownRef.current.has(c.id) && !c.closed);
-      if (added.length) setFresh((f) => ({ ...f, ...Object.fromEntries(added.map((c) => [c.id, true])) }));
-      added.forEach((c) => notify(c.kind === 'blocked' ? 'An agent is blocked' : 'An agent asked you something', c.title));
+      if (added.length) {
+        setFresh((f) => ({ ...f, ...Object.fromEntries(added.map((c) => [c.id, true])) }));
+        // A card that arrives in a collapsed group raises no notification, unless it is at the highest level:
+        // muting a group must never hide an urgent card.
+        const q = buildQueue(s, groupBy, tagPins, collapsedGroups);
+        const top = (s.levels || [])[0];
+        added.forEach((c) => {
+          if (q.hidden.has(c.id) && (!top || q.levelOf(c) !== top.id)) return;
+          notify(c.kind === 'blocked' ? 'An agent is blocked' : 'An agent asked you something', c.title);
+        });
+      }
       for (const c of s.cards) {
         if (c.closed && focusRef.current === c.id && !closing[c.id] && state && !state.cards.find((x) => x.id === c.id)?.closed) setClosing((x) => ({ ...x, [c.id]: true }));
       }
@@ -68,9 +105,38 @@ export function App() {
     knownRef.current = ids;
     details.keep(ids);
     setState(s);
-  }); }, [state, closing]);
+  }); }, [state, closing, groupBy, tagPins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
+
+  // Each state carries the inbox's Group by and pins, so a change on another page reaches this one without a reload.
+  React.useEffect(() => {
+    if (!state) return;
+    const s = state.settings || {};
+    if (!savingGroupBy.current) setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
+    if (!savingPins.current) setTagPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
+  }, [state]);
+
+  // A page that finds Group by or the pins in this device's storage and none in the inbox copies them over once,
+  // then reads the inbox. A value the inbox already has is never overwritten, and each device copies once.
+  const copiedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!state || copiedRef.current) return;
+    copiedRef.current = true;
+    const s = state.settings || {};
+    const copy = {};
+    if (typeof s.groupBy !== 'string' && store.get('groupBy:copied') !== true) {
+      store.set('groupBy:copied', true);
+      const device = store.get('groupBy');
+      if (typeof device === 'string' && (['none', 'priority', 'agent'].includes(device) || (device.startsWith('tag:') && device.length > 4 && device.length <= 104))) copy.groupBy = device;
+    }
+    if (!Array.isArray(s.pins) && store.get('tagPins:copied') !== true) {
+      store.set('tagPins:copied', true);
+      const device = storedTagPins();
+      if (device.length) copy.pins = device;
+    }
+    if (Object.keys(copy).length) saveSettings(copy);
+  }, [state]);
 
   // New page code loads at once in a hidden tab. In a tab the person looks at, it loads once they have
   // done nothing for a moment and no field has focus. A send in flight finishes within that moment.
@@ -256,7 +322,7 @@ export function App() {
   if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
-  const { byId, st, levelOf, label, waiting, pending, checking, replied, outbox, sent, tagKeys, dealt, groups, order } = buildQueue(state, groupBy);
+  const { byId, st, levelOf, label, waiting, pending, checking, pinned: pinnedGroups, replied, outbox, sent, tagKeys, dealt, groups, order, hidden } = buildQueue(state, groupBy, tagPins, collapsedGroups);
   const visible = state.cards;
   const levels = state.levels || [];
   // The tab icon gets a red dot while a card waits for you.
@@ -264,8 +330,10 @@ export function App() {
   const iconHref = pending.length ? 'favicon-waiting.svg' : 'favicon.svg';
   if (icon && icon.getAttribute('href') !== iconHref) icon.setAttribute('href', iconHref);
   const pinned = pending.find((c) => c.id === pinnedRef.current);
-  const lastVisit = pending.find((c) => c.id === lastVisitRef.current);
-  const shown = cleared ? null : byId[focus] || pinned || lastVisit || replied[0] || pending[0] || null;
+  // A card in a collapsed group stays out of sight until the person picks it, so the queue opens a group's first card only.
+  const firstInSight = (cards) => cards.find((c) => !hidden.has(c.id));
+  const lastVisit = firstInSight(pending.filter((c) => c.id === lastVisitRef.current));
+  const shown = cleared ? null : byId[focus] || pinned || lastVisit || firstInSight(replied) || firstInSight(pending) || null;
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
   details.want([shown, shown && byId[after(order, shown.id)], shown && shown.follows && byId[shown.follows]]);
   const detail = details.get(shown);
@@ -280,11 +348,6 @@ export function App() {
     report({ focus: reportedFocus.current, active: true });
   }
   if (current && cardInAddress() !== current.id && !/(?:token|signin)=/.test(location.hash)) history.replaceState({ card: current.id }, '', cardAddress(current.id));
-  const seenKey = current ? `${current.id}:${shown.replyAt || 0}` : null;
-  if (current && shown.unseenReplies && seenRef.current !== seenKey) {
-    seenRef.current = seenKey;
-    setTimeout(() => api(`${BASE}v1/cards/${current.id}/seen`, {}), 1500);
-  }
 
   // Each card you open is a step in the browser's history, so back and forward move between them.
   const go = (id) => {
@@ -308,12 +371,28 @@ export function App() {
     }, 700);
   };
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
+  // Dismiss closes the card without telling the agent, and the inbox keeps what the person had on screen as a draft that
+  // only the owner reads. The card leaves the queue for Sent, as an answer does.
+  const dismiss = async (c, values, comment) => {
+    const res = await api(`${BASE}v1/cards/${c.id}/dismiss`, { values, comment });
+    if (!res.ok) return;
+    store.del(`draft:${c.id}:${c.version}`);
+    store.del(`draft:${c.id}:comment`);
+    answered(c.id);
+  };
+  const picksOf = (c) => approvalPicks[`${c.id}:${c.version}`] || {};
+  const toggleApproval = (c, i, on) => setApprovalPicks((all) => {
+    const next = { ...all, [`${c.id}:${c.version}`]: { ...(all[`${c.id}:${c.version}`] || {}), [i]: on } };
+    store.set('approvalPicks', JSON.stringify(next));
+    return next;
+  });
 
   async function onAction(c, ev) {
     if (ev.humanFriendlyMessage === 'skip' || ev.humanFriendlyMessage === 'Skip for now') return skip();
-    if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
     const { values: picked, comment } = formValues(ev.formState);
-    const values = answerValues(c, picked);
+    if (ev.humanFriendlyMessage === 'dismiss') return dismiss(c, answerValues(c, picked), comment);
+    if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
+    const values = { ...answerValues(c, picked), ...approvalValues(c, picksOf(c)) };
     const images = pastedImages.payload(c.id);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
     clearPasted(c.id);
@@ -334,21 +413,35 @@ export function App() {
       h('span', { className: 't' }, c.title, fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio),
       h(Icon, { name: icon, tip, cls: `s ${s}`, color }));
   };
-  const group = (title, items, empty, cls, action) => h(React.Fragment, { key: title },
-    h('h3', { className: cls }, title, action),
-    // The cards you sent are done with: they read dimmer than the ones that wait for you.
-    items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty));
+  // A group heading is a button: a triangle at the left of its name opens or collapses the group, and a collapsed
+  // group keeps its heading and its count while its cards hide.
+  const group = (title, items, empty, cls, action, collapseId, key = title) => {
+    const shut = !!collapseId && collapsedGroups.has(collapseId);
+    return h(React.Fragment, { key },
+      h('h3', { className: cls },
+        collapseId
+          ? h('button', { type: 'button', className: 'fold', 'aria-expanded': !shut, onClick: () => toggleGroup(collapseId) },
+            h('span', { className: 'fold-tri', 'aria-hidden': 'true' }, '▸'),
+            h('span', { className: 'fold-name' }, title, shut && items.length > 0 && ` (${items.length})`))
+          : title,
+        action),
+      // The cards you sent are done with: they read dimmer than the ones that wait for you.
+      !shut && (items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty)));
+  };
 
+  // A tag key saved as Group by stays on offer after its last card leaves, so the choice still reads.
+  const groupTags = groupBy.startsWith('tag:') && !tagKeys.includes(groupBy.slice(4)) ? [...tagKeys, groupBy.slice(4)] : tagKeys;
   const queue = h('nav', { className: 'queue' },
     h('label', { className: 'group-by' }, 'Group by ',
-      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); store.set('groupBy', e.target.value); } },
+      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); savingGroupBy.current += 1; const mine = savingGroupBy.current; api(`${BASE}v1/settings`, { groupBy: e.target.value }, 'PUT').catch(() => {}).finally(() => { if (savingGroupBy.current === mine) savingGroupBy.current = 0; }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
-        tagKeys.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
-    replied.length > 0 && group('Agent replied', replied, ''),
-    groups.length ? groups.map(([title, items]) => group(title, items, 'Nothing waiting')) : group('Waiting for you', [], 'Nothing waiting'),
-    checking.length > 0 && group('Being checked by triage', checking, ''),
-    group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent'),
-    group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length })),
+        groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
+    pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
+    replied.length > 0 && group('Agent replied', replied, '', undefined, undefined, SECTION_ID.replied),
+    groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),
+    checking.length > 0 && group('Being checked by triage', checking, '', undefined, undefined, SECTION_ID.checking),
+    group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent', undefined, SECTION_ID.outbox),
+    group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length }), SECTION_ID.sent),
     dealt.length > 0 && h('button', { className: 'btn clear-dealt', onClick: () => api(`${BASE}v1/archive`, {}) },
       `Clear ${dealt.length} answered or closed card${dealt.length === 1 ? '' : 's'}`),
     h(UsageToggle, { telemetry, onChange: changeTelemetry }),
@@ -356,12 +449,20 @@ export function App() {
 
   let main;
   if (!current) {
-    main = h('div', { className: 'focus-card done' }, cleared && pending.length ? 'No card selected. Pick a card from the list.' : 'Nothing needs you. New cards appear here on their own.');
+    // Every waiting card can sit out of sight in a collapsed group, so the pane says that instead of reporting an empty inbox.
+    const allHidden = pending.length > 0 && pending.every((c) => hidden.has(c.id));
+    main = h('div', { className: 'focus-card done' },
+      cleared && pending.length ? 'No card selected. Pick a card from the list.'
+        : allHidden ? 'Every waiting card is in a collapsed group. Open the group in the list to see its cards.'
+          : 'Nothing needs you. New cards appear here on their own.');
   } else if (!detail || !detail.card) {
     main = h('div', { className: 'focus-card done', 'aria-busy': 'true' }, `Loading ${current.title}…`);
   } else {
     const a = detail.answer;
     const s = st(current);
+    // A replied card whose answer is still there offers Reply and Dismiss, with the answer form folded away: a follow-up
+    // keeps the answer, so picking again is a change the person asks for.
+    const followedUp = !!a && !!shown && st(shown) === 'reply';
     const pres = presenceOf(current, state);
     const prevDetail = current.follows ? details.get(byId[current.follows]) : undefined;
     const prev = prevDetail && prevDetail.card;
@@ -381,6 +482,7 @@ export function App() {
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
         h(CardAge, { card: current })),
+      h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin }),
       current.triage && current.triage.state === 'passed' && /did not answer|failed/.test(current.triage.reason || '') && h('div', { className: 'note' }, `Triage did not check this card: ${current.triage.reason}`),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,
@@ -393,8 +495,8 @@ export function App() {
         o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/open`, {}) }, 'Open session')),
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { text: r.text, byId, open, diagrams: false }))),
-      a && s !== 'reply' && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
-      a && s !== 'reply' && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
+      a && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
+      a && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
       h('h2', { className: 'card-title' }, current.title),
       !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined }),
       // The agent's recommendation, drawn by the page on every kind of card, so it reads as the conclusion and never gets lost.
@@ -402,12 +504,18 @@ export function App() {
       current.recommendation && !recommendedOptions(current).inside && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), recommendationText(current.recommendation)),
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
+      current.approvals && current.approvals.length > 0 && h(Approvals, { card: current, answer: a, picks: picksOf(current), onToggle: (i, on) => toggleApproval(current, i, on) }),
       current.broadcast && !current.closed
-        ? h(BroadcastForm, { card: current, cards: state.cards, onDone: skip })
+        ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip, onDismiss: (comment) => dismiss(current, {}, comment) })
         : current.html !== undefined
-        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); } })
+        ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); }, onDismiss: (values, comment) => dismiss(current, values, comment) })
         : current.kind === 'secret'
-        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id) })
+        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id), onDismiss: (comment) => dismiss(current, {}, comment) })
+        : followedUp
+        ? h(React.Fragment, null,
+          h(FollowUp, { key: `reply:${a.savedAt}`, card: current, answer: a, onDone: () => answered(current.id) }),
+          h('details', { className: 'change-answer' }, h('summary', null, 'Change your answer'),
+            h(CardView, { key: `${current.id}:${a.savedAt}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) })))
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
@@ -424,7 +532,7 @@ export function App() {
     // A diagram or a body the page cannot draw goes back to the card's agent.
     main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
       // The summary has the closure as soon as the state does, before the whole card arrives again.
-      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, onNext: skip, animate: !!closing[current.id] }, card)
+      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id] }, card)
       : card);
   }
 
@@ -462,6 +570,19 @@ const LAPTOP_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0|10(\.\d{1,
 function reloadPage() {
   store.set('scroll:y', window.scrollY);
   location.reload();
+}
+
+// The pins an older page kept on this device, as [key, value] pairs. A page that finds them here and none in the inbox
+// copies them into the inbox once. Anything else in the store reads as no pins.
+function storedTagPins() {
+  const pins = store.get('tagPins');
+  return Array.isArray(pins) ? pins.filter((p) => Array.isArray(p) && p.length === 2 && p.every((x) => typeof x === 'string' && x)) : [];
+}
+
+// The groups this device collapsed, by the group's kind and value. Anything else in the store reads as none.
+function storedCollapsedGroups() {
+  const groups = store.get('collapsedGroups');
+  return new Set(Array.isArray(groups) ? groups.filter((x) => typeof x === 'string' && x) : []);
 }
 
 // A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.

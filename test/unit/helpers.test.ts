@@ -25,7 +25,7 @@ describe('describeAnswer', () => {
 
   it('pairs each AskUserQuestion with its picks', () => {
     const c = card({ questions: [{ question: 'Which port?' }, { question: 'Which host?' }] });
-    assert.equal(describeAnswer(c, answer({ values: { q0: ['4815'] } })), 'Which port? 4815\nWhich host? (no option picked)');
+    assert.equal(describeAnswer(c, answer({ values: { q0: ['4815'] } })), 'Which port? 4815\nWhich host? (no answer)');
   });
 
   it('lists the items turned on in a check box or switch group, by their names', () => {

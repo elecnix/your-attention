@@ -37,7 +37,8 @@ describe('the state sends card summaries', () => {
     assert.equal(c.preview?.length, 300);
     assert.deepEqual(c.tags, { topic: 'release' });
     assert.deepEqual(c.origin, { name: 'release agent', harness: 'pi' });
-    assert.equal(c.unseenReplies, true);
+    // The answer counts as seeing the reply, and the summary keeps the time so the page can still show it.
+    assert.equal(c.unseenReplies, undefined);
     assert.ok(c.replyAt);
     const sent = JSON.stringify(s);
     for (const content of ['secret plan', '<p>big</p>', 'One more thing.', 'go ahead', '/home/me/repo', '"yes"']) assert.equal(sent.includes(content), false, content);

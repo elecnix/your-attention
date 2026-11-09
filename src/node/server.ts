@@ -12,10 +12,11 @@ import { bodyErrors, fallbackBody } from '../adapters/openui-body.ts';
 import { SqliteStorage } from '../adapters/sqlite.ts';
 import { randomId } from '../core/crypto.ts';
 import { createHandler } from '../core/http.ts';
-import type { Caller } from '../core/inbox.ts';
+import type { ApprovalSender, Caller } from '../core/inbox.ts';
 import { agentSocket, pageSocket } from '../core/socket.ts';
 import { WebSocketServer } from 'ws';
 import { Inbox } from '../core/inbox.ts';
+import { herdrApprovals } from '../integrations/herdr/approve.ts';
 import { focusHerdrPane, focusSessionLink } from '../integrations/herdr/focus.ts';
 import { homeDir, writePrivate } from './home.ts';
 import { relayClient } from './links.ts';
@@ -55,6 +56,10 @@ export interface ServeOptions {
   telemetry?: TelemetryEnv;
   /** Offer usage counts in the terminal the inbox runs in, once. Without it, the page offers them. */
   ask?: (question: string) => Promise<boolean>;
+  /** Types approved sentences into panes. The default runs herdr. */
+  approvals?: ApprovalSender;
+  /** How the inbox calls webhooks. Tests take the calls here, since a webhook is https only. */
+  fetch?: typeof fetch;
 }
 
 export interface RunningServer {
@@ -101,7 +106,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');
@@ -157,12 +162,18 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const headers = new Headers();
     for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v);
+    // A client that goes away before its answer aborts this signal, so a long-poll stops waiting, and drops its
+    // subscriber, instead of holding a connection and a timer until its wait expires.
+    const gone = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) gone.abort(); });
     const request = new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, {
       method: req.method,
       headers,
       body: chunks.length && req.method !== 'GET' && req.method !== 'HEAD' ? Buffer.concat(chunks) : undefined,
+      signal: gone.signal,
     });
     const response = await handle(request);
+    if (res.destroyed || res.writableEnded) return;
     res.writeHead(response.status, Object.fromEntries(response.headers));
     if (!response.body) return void res.end();
     const reader = response.body.getReader();
@@ -213,7 +224,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       caller = { token: t.id, role: t.role };
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const conn = agentSocket(inbox, agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, u.searchParams.get('instance') ?? undefined);
+      const conn = agentSocket(inbox, agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, u.searchParams.get('instance') ?? undefined, false, u.searchParams.get('channel') === 'off');
       // A connection that misses a heartbeat is gone, and presence follows within seconds.
       let alive = true;
       ws.on('pong', () => { alive = true; });
@@ -244,9 +255,16 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const serverInfo = JSON.stringify({ url, port, pid: process.pid });
   writePrivate(path.join(home, 'server.json'), serverInfo);
 
-  // The platform alarm for this build.
-  // The platform alarm for this build: presence grace and hook timeouts need about a second.
-  const alarm = setInterval(() => inbox.sweep(), 1000);
+  // The platform alarm for this build: presence grace, hook timeouts and webhook retries need about a second. While a
+  // purge still deletes files, the next tick starts no other, so purges never overlap, and close() waits for it.
+  // Store calls fail once the inbox has closed, so a webhook call still running at shutdown is dropped, and sent again at the next start.
+  let purging: Promise<unknown> | undefined;
+  const alarm = setInterval(() => {
+    inbox.sweep();
+    void inbox.deliverAnswers().catch(() => {});
+    if (purging) return;
+    purging = inbox.purge().catch((e: unknown) => log(`purge failed: ${(e as Error).message}`)).finally(() => { purging = undefined; });
+  }, 1000);
   let ad: Advertisement | undefined;
   if (opts.mdns) ad = advertise({ port, inboxId: inbox.id() });
   let watcher: fs.FSWatcher | undefined;
@@ -281,6 +299,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
     sendUsage,
     async close() {
       clearInterval(alarm);
+      await purging;
       clearInterval(usageTimer);
       clearTimeout(firstSend);
       relay?.stop();

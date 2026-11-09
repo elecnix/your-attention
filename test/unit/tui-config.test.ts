@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { notOwnerAdvice } from '../../src/client.ts';
+import { readCollapsed, writeCollapsed } from '../../src/tui/app.ts';
 import { ownerConfig } from '../../src/tui/api.ts';
 
 const home = (files: Record<string, unknown>): string => {
@@ -29,5 +30,19 @@ describe('terminal client inbox', () => {
     assert.match(advice, /paired with https:\/\/inbox\.example\.com\/i\/abc as an agent/);
     assert.match(advice, /your-attention pair https:\/\/inbox\.example\.com\/i\/abc --role owner/);
     assert.match(advice, /keeps the agent pairing/);
+  });
+
+  it('keeps the collapsed groups of each inbox on this device, apart from the others', () => {
+    const file = path.join(home({}), 'tui.json');
+    assert.deepEqual(readCollapsed(file, 'https://one.example.com'), []);
+    writeCollapsed(file, 'https://one.example.com', ['topic: billing', 'priority: Decide now']);
+    writeCollapsed(file, 'https://two.example.com', ['agent: claude:demo']);
+    assert.deepEqual(readCollapsed(file, 'https://one.example.com'), ['topic: billing', 'priority: Decide now']);
+    writeCollapsed(file, 'https://one.example.com', []);
+    assert.deepEqual(readCollapsed(file, 'https://one.example.com'), []);
+    assert.deepEqual(readCollapsed(file, 'https://two.example.com'), ['agent: claude:demo']);
+    // A file cut short, or a value of the wrong shape, reads as no collapsed groups.
+    fs.writeFileSync(file, '{"collapsed": {"https://one.example.com": "nope"');
+    assert.deepEqual(readCollapsed(file, 'https://one.example.com'), []);
   });
 });

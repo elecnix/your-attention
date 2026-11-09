@@ -8,7 +8,7 @@ import { buildQueue, type InboxState } from '../../web/queue.js';
 import { editKey } from '../../src/tui/edit.ts';
 import type { Card } from '../../src/core/types.ts';
 import { loadParser } from '../../src/tui/body.ts';
-import { CardView, type CardViewHost } from '../../src/tui/cardview.ts';
+import { CardView, onlineAgents, type CardViewHost } from '../../src/tui/cardview.ts';
 import type { KeyEvent } from '../../src/tui/input.ts';
 import { makeTheme } from '../../src/tui/theme.ts';
 
@@ -18,6 +18,9 @@ function card(c: Partial<Card> & { id: string; title: string }): Card {
   return { agent: 'a1', kind: 'ask', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], ...c };
 }
 
+/** The text a card view draws, one line of the terminal per line. */
+const plain = (doc: { lines: { spans: { text: string }[] }[] }): string => doc.lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+
 function setup(c: Card) {
   const acts: unknown[] = [];
   const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: (_v, a) => acts.push(a), fileText: () => undefined, now: () => 600_000 };
@@ -25,7 +28,7 @@ function setup(c: Card) {
   const view = new CardView(c, host);
   const build = () => view.build(70, s, buildQueue(s, 'none'));
   build();
-  const text = () => build().lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
+  const text = () => plain(build());
   /** Focus the stop whose id starts with `prefix`. */
   const focus = (prefix: string) => { build(); const id = view.stops().find((x) => x.startsWith(prefix)); assert.ok(id, `no stop ${prefix} in ${view.stops().join(', ')}`); view.focus = id; build(); };
   const key = (name: string, mods: Partial<KeyEvent> = {}) => { const ok = view.key({ type: 'key', name, ctrl: false, alt: false, shift: false, ...mods }); build(); return ok; };
@@ -84,13 +87,30 @@ describe('the card pane', () => {
   it('answers an options card with the option id, and questions by their labels', () => {
     const t = setup(card({ id: 'o', title: 'Pick', options: [{ id: 'o1', label: 'SQLite', description: 'One file' }, { id: 'o2', label: 'Postgres' }], questions: [{ question: 'Which test runner?', options: [{ label: 'node:test' }, { label: 'vitest' }] }] }));
     assert.ok(t.text().includes('One file'));
-    t.focus('field:o/q0'); t.key('down'); t.key('enter');
+    t.focus('field:o:q0/q0'); t.key('down'); t.key('enter');
     t.focus('field:o/choice'); t.key('2');
     assert.deepEqual(t.view.answer().values, { q0: 'vitest', choice: 'o2' });
     // A click on an option picks it too.
     const target = t.view.stops().find((x) => x === 'field:o/choice')!;
     t.view.click(`${target}#0`, 0, 0);
     assert.deepEqual(t.view.answer().values['choice'], 'o1');
+  });
+
+  it('draws the card text, then each question as a section with its heading, text, options and comment field, and answers each one', () => {
+    const t = setup(card({ id: 'qs', title: 'Release choices', text: 'This agent prepares the release.', questions: [
+      { question: 'Which database?', text: 'One table of jobs.', options: [{ label: 'SQLite', recommended: true }, { label: 'Postgres' }] },
+      { question: 'Which regions?', text: 'Each region adds a deploy step.', multiSelect: true, options: [{ label: 'us-east' }, { label: 'eu-west' }] },
+      { question: 'What must the note say?' },
+    ] }));
+    const text = t.text();
+    const order = ['This agent prepares the release.', 'Which database?', 'One table of jobs.', 'SQLite', 'Recommended', 'Postgres', 'Comment on this question',
+      'Which regions?', 'Each region adds a deploy step.', 'us-east', 'eu-west', 'Comment on this question', 'What must the note say?', 'Your answer', 'Anything to add?'];
+    let at = -1;
+    for (const s of order) { const next = text.indexOf(s, at + 1); assert.ok(next > at, `${s} after position ${at} in:\n${text}`); at = next; }
+    t.focus('field:qs:q0/q0'); t.key('down'); t.key('enter');
+    t.focus('field:qs:q0/q0_comment'); t.type('We run it already.');
+    t.focus('field:qs:q2/q2'); t.type('Say the API is unchanged.');
+    assert.deepEqual(t.view.answer().values, { q0: 'Postgres', q0_comment: 'We run it already.', q2: 'Say the API is unchanged.' });
   });
 
   it('keeps OptionCards defaults and toggles multiple picks, as OpenUI stores them', () => {
@@ -104,7 +124,8 @@ describe('the card pane', () => {
     const t = setup(card({ id: 'forms', title: 'Two pull requests', body: FORMS }));
     const stops = t.view.stops();
     assert.deepEqual(stops.slice(0, 5), ['field:pr12/merge12', 'field:pr12/checks12', 'field:pr13/merge13', 'field:pr13/flags13', 'field:pr13/ticket']);
-    assert.equal(stops.at(-2), 'button:Send answer');
+    assert.equal(stops.at(-3), 'button:Send answer');
+    assert.equal(stops.at(-1), 'button:Dismiss without telling the agent');
     t.view.focus = undefined;
     assert.equal(t.view.move(1), true);
     assert.equal(t.view.focus, 'field:pr12/merge12');
@@ -157,6 +178,60 @@ describe('the card pane', () => {
     assert.match(html.text(), /brings its own HTML[\s\S]*#card=h[\s\S]*\[ Send answer \]/);
     const blocked = setup(card({ id: 'b', title: 'Blocked', kind: 'blocked', screen: 'Allow?\n1. Yes\n2. No', options: [{ id: '1', label: 'Yes' }, { id: '2', label: 'No' }] }));
     assert.match(blocked.text(), /Allow\?[\s\S]*\[ Press it in the session \][\s\S]*\[ Open session \]/);
+  });
+});
+
+describe('a guidance card', () => {
+  const current = 'Lead with the goal.\nGive two options.\nEnd with a recommendation.';
+  const proposal = card({
+    id: 'g', title: 'Send new card guidance to agents?', agent: 'system', kind: 'system', deliver: 'none',
+    broadcast: { text: 'Lead with the goal.\nGive three options.\nEnd with a recommendation.\nAttach a screenshot.', from: 's1', base: { version: 1, text: current } },
+  });
+  const draw = (c: Card = proposal, presence: InboxState['presence'] = {}) => {
+    const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 600_000 };
+    const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };
+    const view = new CardView(c, host);
+    const text = () => plain(view.build(70, s, buildQueue(s, 'none')));
+    return { view, text, s };
+  };
+
+  it('shows the proposal as a diff against the current guidance, with the unchanged lines collapsed', () => {
+    const { view, text } = draw();
+    const shown = text();
+    assert.match(shown, /− Give two options\./);
+    assert.match(shown, /\+ Give three options\./);
+    assert.match(shown, /\+ Attach a screenshot\./);
+    assert.doesNotMatch(shown, /Lead with the goal/);
+    const stop = view.stops().find((x) => x === 'meta:guidance-full');
+    assert.ok(stop, `no stop for the full text in ${view.stops().join(', ')}`);
+    view.focus = stop;
+    text();
+    view.key({ type: 'key', name: 'enter', ctrl: false, alt: false, shift: false });
+    assert.match(text(), /Lead with the goal/);
+  });
+
+  it('says when the proposal matches the current guidance', () => {
+    const { text } = draw(card({ ...proposal, broadcast: { ...proposal.broadcast!, text: current } }));
+    assert.match(text(), /The proposal matches the current guidance\./);
+  });
+
+  it('lists only the agents online now, all ticked, with the count and the line about offline agents', () => {
+    const presence: InboxState['presence'] = Object.fromEntries([
+      ...Array.from({ length: 25 }, (_, i) => [`gone-${i}`, { agent: `gone-${i}`, online: false, lastSeen: 0 }]),
+      ['s1', { agent: 's1', online: true, lastSeen: 0 }], ['s2', { agent: 's2', online: true, lastSeen: 0 }],
+    ]);
+    const { text, s } = draw(proposal, presence);
+    const shown = text();
+    assert.match(shown, /Send to 2 online agents/);
+    assert.match(shown, /Offline agents get the new guidance when they reconnect, or when they\s+call card_guidance\./);
+    assert.doesNotMatch(shown, /gone-/);
+    assert.deepEqual(onlineAgents(s), ['s1', 's2'], 'the answer goes to these, less any the person unticks');
+  });
+
+  it('has a comment field, Skip for now, and sends the comment with the answer', () => {
+    const { view, text } = draw();
+    assert.match(text(), /Comment[\s\S]*\[ Approve and send \][\s\S]*\[ Reject \][\s\S]*\[ Skip for now \]/);
+    assert.ok(view.stops().some((x) => x.startsWith('field:broadcast/comment')), `no comment field in ${view.stops().join(', ')}`);
   });
 });
 
