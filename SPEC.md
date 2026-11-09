@@ -158,7 +158,7 @@ An owner client sends the answer with `POST /v1/cards/<id>/answer {values, comme
 - `steer` or `followUp`: the matching delivery in the harness.
 - `force`: set by `POST /v1/cards/<id>/force` for an answer the model has not read.
 
-A new answer replaces the old one and keeps it in `previous`. An agent that needs more after an answer posts a new card that follows the answered one: see [Follow-ups](#follow-ups).
+A new answer replaces the old one and keeps it in `previous`. When an agent needs more after an answer, it posts a new card that follows the answered one, as [Follow-ups](#follow-ups) describes.
 
 An owner client may also dismiss a card, which sends the agent nothing.
 
@@ -230,11 +230,11 @@ The fold under a card that follows another one shows the earlier card's text as 
 
 ## Follow-ups
 
-An agent follows up on a card by posting a new card with `follows` set to the id of the earlier card. The card tools do this with `card_post` and `follows: "<card id>"`. The inbox sets `followedBy` on the earlier card, so the chain links both ways. The page shows **Followed by** on the earlier card and, on the new card, a fold named **The card before this one, and your answer**.
+An agent follows up on a card by posting a new card with `follows` set to the id of the earlier card. The card tools do this with `card_post` and `follows: "<card id>"`. The inbox sets `followedBy` on the earlier card, so the chain links both ways. The page shows **Followed by** on the earlier card. On the new card it shows a fold labeled **The card before this one, and your answer**.
 
 A card has no reply. `POST /v1/cards/<id>/reply` answers 410 for every caller and every id, with a message that tells the caller to post a new card with `follows`. The `card_reply` tool no longer exists.
 
-Replies that older inboxes stored stay on the card as `replies`, and the inbox never deletes them. Nothing adds a reply, and nothing reads one to decide a card's state, its place in the queue, whether the person cleared it or when the purge deletes it. The page and the terminal client draw the stored replies in a fold that starts closed, named **Replies from before linked follow-ups**.
+Replies that older inboxes stored stay on the card as `replies`, and the inbox keeps every one. No route adds a reply. A stored reply has no effect on a card's state, its place in the queue, clearing it or the purge. The page and the terminal client draw the stored replies in a fold that starts closed, labeled **Replies from before linked follow-ups**.
 
 ## Editing cards
 
