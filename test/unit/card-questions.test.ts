@@ -64,6 +64,15 @@ describe('a card with questions', () => {
     assert.ok(!src.includes('q2_comment'));
   });
 
+  it('leaves out a question heading that repeats the card title, so the question shows once', () => {
+    const one = { id: 'c1', kind: 'ask', title: 'Which database?', questions: [THREE[0]] } as Card;
+    const src = cardSource(one);
+    assert.ok(!src.includes('### Which database?'), src);
+    assert.ok(src.includes('"The service stores **one table** of jobs."'), src);
+    const bare = { id: 'c1', kind: 'ask', title: 'Which regions?', questions: [{ question: 'Which regions?', options: [{ label: 'us-east' }, { label: 'eu-west' }] }] } as Card;
+    assert.ok(!cardSource(bare).includes('qt0'), cardSource(bare));
+  });
+
   it('gives the agent each choice and comment under its own question', () => {
     const card = { id: 'c1', kind: 'ask', title: 'Three choices', questions: THREE } as Card;
     const values = answerValues(card, { q0: 'SQLite', q0_comment: 'One file is enough.', q1: ['eu-west'], q1_comment: '', q2: 'Say that the API is unchanged.' });
