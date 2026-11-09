@@ -23,6 +23,10 @@ export function App() {
   const details = detailsRef.current;
   const [auth, setAuth] = React.useState('checking');
   const [up, setUp] = React.useState(false);
+  // When the last state request answered. The pill calls the inbox reconnecting while this stays fresh, and
+  // unreachable only once even the plain requests stop arriving.
+  const reachedRef = React.useRef(0);
+  const [reach, setReach] = React.useState('unreachable');
   // New page code waits until the person pauses: a reload under their typing would take the field away.
   const [codeReady, setCodeReady] = React.useState(false);
   // A card in the address is one the person asked for. The card from the last visit comes back only while it waits for them.
@@ -83,6 +87,7 @@ export function App() {
     return r.json();
   }).then((s) => {
     if (!s) return;
+    reachedRef.current = Date.now();
     setAuth('ok');
     const ids = new Set(s.cards.map((c) => c.id));
     if (knownRef.current) {
@@ -231,13 +236,33 @@ export function App() {
       clearInterval(ping);
       clearTimeout(retry);
     };
-    // The server-sent event stream, for an inbox that serves no page socket.
+    // The server-sent event stream, for an inbox that serves no page socket. It is not a resting place: the hosted
+    // build refuses it with 410, so a stream that fails sends the page back to the socket instead of leaving it dead.
     const overStream = () => {
       es = new EventSource(withUnlock(`${BASE}v1/events?viewer=${encodeURIComponent(VIEWER)}`));
       es.onopen = () => refreshRef.current();
-      // A stream that fails may mean a revoked token: the state request tells.
-      es.onerror = () => refreshRef.current();
+      es.onerror = () => {
+        if (closed) return;
+        refreshRef.current();
+        if (es) es.close();
+        es = undefined;
+        retry = setTimeout(overSocket, 5000);
+      };
       for (const type of ['beat', 'change', 'presence', 'code']) es.addEventListener(type, () => onEvent(type));
+    };
+    // Where a socket is served, a plain request on its address answers 200. The status classifies a failed upgrade,
+    // which the browser reports without one: 410, 404 and 426 mean this inbox serves no page socket, and 423 means
+    // the PIN, so anything else leaves the page retrying the socket, which is what a refused upgrade needs.
+    const classification = async () => {
+      try {
+        const r = await fetch(new URL(`${BASE}v1/ws`, location.href).href, { method: 'GET', headers: { 'x-your-attention-probe': '1' } });
+        if (r.status === 423) return 'locked';
+        if (r.status === 410 || r.status === 404 || r.status === 426) return 'none';
+        return 'socket';
+      } catch {
+        // A probe that cannot reach the inbox says nothing about sockets, so the page keeps trying its own.
+        return 'socket';
+      }
     };
     // A WebSocket lets a cloud inbox sleep between events: its pings get their answer without waking it.
     let refusals = 0;
@@ -253,16 +278,17 @@ export function App() {
         ping = setInterval(beat, 2000);
       };
       ws.onmessage = (m) => { try { onEvent(JSON.parse(m.data).type); } catch {} };
-      ws.onclose = () => {
+      ws.onclose = async () => {
         clearInterval(ping);
         if (closed) return;
         refreshRef.current();
         if (opened) { retry = setTimeout(overSocket, 1000); return; }
-        // A socket that never opened is worth retrying: a cloud inbox refuses a newcomer when a budget is full,
-        // and the hosted build answers the event stream with 410, so a single refusal used to leave the page
-        // unreachable until a reload. Only an inbox that serves no page socket at all falls back to the stream.
         refusals++;
-        retry = setTimeout(refusals >= 3 ? overStream : overSocket, Math.min(500 * 2 ** refusals, 15000));
+        const where = await classification();
+        if (closed) return;
+        if (where === 'locked') { setUp(false); window.dispatchEvent(new Event('your-attention-locked')); return; }
+        if (where === 'none') { retry = setTimeout(overStream, Math.min(500 * 2 ** refusals, 15000)); return; }
+        retry = setTimeout(overSocket, Math.min(500 * 2 ** refusals, 15000));
       };
     };
     const connect = () => signIn().then(() => {
@@ -274,7 +300,11 @@ export function App() {
     connect();
     const onHash = () => { if (!lockedRef.current) connect(); };
     window.addEventListener('hashchange', onHash);
-    const watchdog = setInterval(() => { if (Date.now() - last > 5000) setUp(false); }, 1000);
+    const watchdog = setInterval(() => {
+      if (Date.now() - last <= 5000) return;
+      setUp(false);
+      setReach(Date.now() - reachedRef.current < 15000 ? 'reconnecting' : 'unreachable');
+    }, 1000);
     return () => { closed = true; stop(); clearInterval(watchdog); window.removeEventListener('hashchange', onHash); };
   }, []);
 
@@ -540,7 +570,7 @@ export function App() {
     h('div', { className: 'bar' }, h('div', { className: 'bar-inner' },
       h('h1', null, 'Your attention'),
       h(NotifyToggle),
-      h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : 'Inbox unreachable')),
+      h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable')),
       h(DevicesLink),
       h(PhoneLink),
       h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: 'Your Attention on GitHub' },
