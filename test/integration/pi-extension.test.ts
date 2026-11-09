@@ -81,29 +81,40 @@ describe('the pi extension', () => {
 });
 
 describe('the turn-end request', () => {
-  it('asks a session with no open card for one at turn end, once the person opts in', async () => {
+  it('asks a session with no open card for one at turn end, three times at most', async () => {
     idle = true;
     const count = () => sent.filter((m) => m.text.includes('no open card')).length;
     const turnEnd = () => handlers.get('agent_settled')?.({}, ctx);
+    const turnStart = () => handlers.get('agent_start')?.({}, ctx);
     // Without the opt-in the hook does nothing.
     await turnEnd();
     assert.equal(count(), 0);
     process.env['YOUR_ATTENTION_REQUIRE_CARD'] = '1';
-    // No open card: it asks, and the request starts a turn.
+    // No open card: it asks, and the request starts a turn of its own.
     await turnEnd();
     assert.equal(count(), 1);
     assert.equal(sent[sent.length - 1]!.options, undefined);
-    // The turn that request started is skipped, so an agent that ignores it is not asked twice in a row.
-    await turnEnd();
-    assert.equal(count(), 1);
-    // A later turn with still no card asks again.
+    // The run that request started is ours: it does not reset the count, and its settle asks again.
+    await turnStart();
     await turnEnd();
     assert.equal(count(), 2);
-    // A session with an open card is left alone: the first call skips the turn the last request started, and the second sees the card.
+    await turnStart();
+    await turnEnd();
+    assert.equal(count(), 3);
+    // Three asks is the cap: a session that cannot post a card is left alone.
+    await turnStart();
+    await turnEnd();
+    await turnEnd();
+    assert.equal(count(), 3);
+    // A run the request did not start resets the count, so the person waking the session up gets it asked again.
+    await turnStart();
+    await turnEnd();
+    assert.equal(count(), 4);
+    // A card of its own is what the request asks for: the settle sees it, asks nothing, and resets the count.
     await tools.get('card_post')!.execute('call-4', { id: 'pi-4', title: 'Still working?' }, undefined, undefined, ctx);
+    await turnStart();
     await turnEnd();
-    await turnEnd();
-    assert.equal(count(), 2);
+    assert.equal(count(), 4);
     await h.owner('POST', '/v1/cards/pi-4/answer', { comment: 'ok' });
     delete process.env['YOUR_ATTENTION_REQUIRE_CARD'];
   });

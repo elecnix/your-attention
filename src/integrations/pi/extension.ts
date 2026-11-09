@@ -17,6 +17,8 @@ const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
 
 /** What a session is asked when a run settles with no open card, once the person opts in with YOUR_ATTENTION_REQUIRE_CARD=1. */
 const NO_CARD = '[your-attention] This session has no open card. Post one with card_post that says what you are working on and what you need from the person.';
+/** How many times one stretch without a card is asked about. The person chose three. */
+const CARD_REQUESTS = 3;
 
 // The parts of pi's ExtensionAPI this extension uses.
 interface PiContext {
@@ -30,6 +32,7 @@ interface ToolResult {
 interface PiApi {
   on(event: 'session_start' | 'session_shutdown', handler: (event: unknown, ctx: PiContext) => void | Promise<void>): void;
   on(event: 'context', handler: (event: { messages: unknown[] }, ctx: PiContext) => void | Promise<void>): void;
+  on(event: 'agent_start', handler: (event: unknown, ctx: PiContext) => void | Promise<void>): void;
   on(event: 'agent_settled', handler: (event: { aborted?: boolean }, ctx: PiContext) => void | Promise<void>): void;
   registerTool(tool: {
     name: string;
@@ -99,14 +102,20 @@ export default function yourAttention(pi: PiApi): void {
   });
 
   // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
-  // card. The run the request itself starts settles too, so the request skips the next settle rather than looping.
-  let asked = false;
-  pi.on('agent_settled', async (_event, ctx) => {
-    if (!inbox || process.env['YOUR_ATTENTION_REQUIRE_CARD'] !== '1') return;
-    if (asked) {
-      asked = false;
+  // card. The count resets on any run the request did not start, and it stops at three.
+  let asked = 0;
+  // The run our own request started. A run that begins for any other reason, such as the person typing or an answer
+  // arriving, resets the count; the run we asked for must not, or the cap below would never bite.
+  let ourRun = false;
+  pi.on('agent_start', () => {
+    if (ourRun) {
+      ourRun = false;
       return;
     }
+    asked = 0;
+  });
+  pi.on('agent_settled', async (_event, ctx) => {
+    if (!inbox || process.env['YOUR_ATTENTION_REQUIRE_CARD'] !== '1') return;
     if (!ctx.isIdle()) return;
     let open = false;
     try {
@@ -115,8 +124,15 @@ export default function yourAttention(pi: PiApi): void {
       log('could not read the session cards:', (e as Error).message);
       return;
     }
-    if (open) return;
-    asked = true;
+    // A card of its own is what the request asks for, so that resets the count along with any run it did not start.
+    if (open) {
+      asked = 0;
+      return;
+    }
+    // Three asks is the cap: a session that cannot post a card is left alone rather than asked forever.
+    if (asked >= CARD_REQUESTS) return;
+    asked++;
+    ourRun = true;
     pi.sendUserMessage(NO_CARD);
   });
 
