@@ -258,9 +258,9 @@ export function App() {
         if (closed) return;
         refreshRef.current();
         if (opened) { retry = setTimeout(overSocket, 1000); return; }
-        // A socket that never opened is worth retrying: a cloud inbox closes the least recently active socket to
-        // make room, and the hosted build answers the event stream with 410, so a single refusal used to leave the
-        // page unreachable until a reload. Only an inbox that serves no page socket at all falls back to the stream.
+        // A socket that never opened is worth retrying: a cloud inbox refuses a newcomer when a budget is full,
+        // and the hosted build answers the event stream with 410, so a single refusal used to leave the page
+        // unreachable until a reload. Only an inbox that serves no page socket at all falls back to the stream.
         refusals++;
         retry = setTimeout(refusals >= 3 ? overStream : overSocket, Math.min(500 * 2 ** refusals, 15000));
       };

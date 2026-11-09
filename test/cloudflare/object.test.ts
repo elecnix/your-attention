@@ -440,28 +440,27 @@ describe('sockets that cost the inbox', () => {
     assert.equal(person.pages, 0);
   });
 
-  it('makes room for a newcomer by closing the least recently active agent socket', async () => {
-    // The budget used to answer 503 instead: on the hosted build that refusal was permanent for the page,
-    // whose only fallback is the event stream the object refuses with 410.
+  it('refuses a newcomer over the agents budget and closes nothing that was open', async () => {
+    // Eviction was the first attempt, and it is a denial of service: closing an active socket takes the link away
+    // from a session that did nothing wrong. A refused newcomer only retries, and what it missed is in storage.
     const rt = runtime();
     const obj = rt.make();
     const owner = await init(obj);
-    for (let i = 0; i < 64; i++) await openSocket(obj, `agent=a${i}`, owner);
-    const oldest = rt.sockets[0]!;
+    for (let i = 0; i < 512; i++) await openSocket(obj, `agent=a${i}`, owner);
     const res = await openSocket(obj, 'agent=late', owner);
-    assert.equal(res.status, 200, 'a full inbox still accepts the newcomer');
-    assert.equal(oldest.closed, 1013, 'the least recently active socket made room');
-    assert.equal(rt.sockets.filter((s) => s.closed === undefined).length, 64, 'the budget holds at 64');
+    assert.equal(res.status, 503, 'the newcomer is refused');
+    assert.equal(rt.sockets.filter((s) => s.closed !== undefined).length, 0, 'no open socket was closed');
+    assert.equal(rt.sockets.filter((s) => s.closed === undefined).length, 512, 'every open socket is still open');
   });
 
   it('keeps a socket for the page however many agents are open', async () => {
     const rt = runtime();
     const obj = rt.make();
     const owner = await init(obj);
-    for (let i = 0; i < 64; i++) await openSocket(obj, `agent=a${i}`, owner);
+    for (let i = 0; i < 512; i++) await openSocket(obj, `agent=a${i}`, owner);
     const res = await openSocket(obj, 'page=1&viewer=v-test', owner);
     assert.equal(res.status, 200, 'the page has a budget of its own');
-    assert.equal(rt.sockets.filter((s) => s.closed === undefined).length, 65);
+    assert.equal(rt.sockets.filter((s) => s.closed === undefined).length, 513);
   });
 
   it('serves no event stream, since an open request keeps the object awake', async () => {

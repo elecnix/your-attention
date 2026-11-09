@@ -46,10 +46,12 @@ type Conn = AgentSocket | ReturnType<typeof pageSocket>;
 
 /** A socket that has not signed in this long after it opened closes. */
 const AUTH_LIMIT_MS = 10_000;
-/** The most agent sockets one inbox serves at once. Far below the platform's 32,768, because one writer serves them all. */
-const MAX_AGENT_SOCKETS = 64;
-/** The most page sockets, counted apart from the agents' budget so the owner's page always has a place. */
-const MAX_PAGE_SOCKETS = 8;
+/** The most agent sockets one inbox serves at once. The platform's own ceiling is 32,768 hibernating sockets per
+ * object, so this is headroom we choose, not a limit we inherit. */
+const MAX_AGENT_SOCKETS = 512;
+/** The most page sockets. They are counted apart from the agents' budget, so no fleet of agents can take the slot the
+ * owner's page needs. */
+const MAX_PAGE_SOCKETS = 16;
 /** A stamp of the object's own ping clock re-writes the socket's attachment at most this often. A page
  * pings every 2 seconds and the deadline is minutes away, so a finer stamp buys nothing. */
 const PING_STAMP_MS = 10_000;
@@ -175,36 +177,10 @@ export class InboxObject {
     if (at !== Infinity) await this.ctx.storage.setAlarm(Math.max(at, now + 50));
   }
 
-  /** The last moment this socket proved it was alive: the object's own ping stamp, or the runtime's pong, whichever is later. */
-  private lastSeen(ws: WebSocket): number {
-    const a = ws.deserializeAttachment() as SocketAttachment;
-    const pong = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
-    return Math.max(a.connectedAt ?? 0, pong, a.lastPing ?? 0);
-  }
-
-  /**
-   * The open sockets of one kind, least recently active first. A page socket carries its tag from the day it was
-   * accepted; one accepted before the tags existed is an agent's, which is what it was.
-   */
+  /** The open sockets of one kind. A page socket carries its tag from the day it was accepted; one accepted before the
+   * tags existed is an agent's, which is what it was. */
   private socketsOf(kind: 'page' | 'agent'): WebSocket[] {
-    return this.ctx.getWebSockets()
-      .filter((ws) => (this.ctx.getTags(ws).includes('page') ? 'page' : 'agent') === kind)
-      .sort((a, b) => this.lastSeen(a) - this.lastSeen(b));
-  }
-
-  /**
-   * Make room in one kind's budget by closing its least recently active socket, rather than refusing the newcomer.
-   * A refused socket cost the page its live link until a reload: the hosted build answers the event stream with 410,
-   * so the fallback a refused socket falls back to cannot deliver anything. The evicted client reconnects after its
-   * own backoff, and what it missed is in storage.
-   */
-  private makeRoom(kind: 'page' | 'agent', budget: number): void {
-    const open = this.socketsOf(kind);
-    if (open.length < budget) return;
-    const oldest = open[0];
-    if (!oldest) return;
-    this.sockets.delete(oldest);
-    try { oldest.close(1013, 'made room for a newer socket'); } catch { /* the socket was already gone */ }
+    return this.ctx.getWebSockets().filter((ws) => (this.ctx.getTags(ws).includes('page') ? 'page' : 'agent') === kind);
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -243,7 +219,9 @@ export class InboxObject {
         // A browser cannot set headers on a WebSocket, so the page sends its unlock token in the address.
         const gate = await this.inbox.pinGate(token, !auth?.startsWith('Bearer '), url.searchParams.get('unlock'));
         if (gate.locked) return new Response('this inbox is locked: type its PIN to open it', { status: 423 });
-        this.makeRoom('page', MAX_PAGE_SOCKETS);
+        // A page is never refused for an agent's sake: the two budgets are counted apart, and nothing active is
+        // killed to admit a newcomer.
+        if (this.socketsOf('page').length >= MAX_PAGE_SOCKETS) return new Response('too many open page sockets', { status: 503 });
         const pair = new WebSocketPair();
         const server = pair[1];
         this.ctx.acceptWebSocket(server, ['page']);
@@ -258,7 +236,10 @@ export class InboxObject {
       const auth = req.headers.get('authorization');
       const token = auth?.startsWith('Bearer ') ? await this.inbox.authenticate(auth.slice(7).trim()) : undefined;
       if (auth && !token) return new Response('unknown token', { status: 401 });
-      this.makeRoom('agent', MAX_AGENT_SOCKETS);
+      // Over budget, the newcomer is refused and its client retries; no working session is disconnected to admit it.
+      // Closing an active socket is a denial of service on the agent that holds it, and what it would lose is only
+      // a link: the answers it missed are in storage.
+      if (this.socketsOf('agent').length >= MAX_AGENT_SOCKETS) return new Response('too many open sockets', { status: 503 });
       const pair = new WebSocketPair();
       const server = pair[1];
       this.ctx.acceptWebSocket(server, ['agent']);
