@@ -66,7 +66,8 @@ export async function main(mode: string): Promise<void> {
       await inbox.post({
         id,
         agent: `claude:${sid}`,
-        title: questions[0]?.question ?? 'A question from the agent',
+        // Each question's text heads its own section, so the title joins their short labels instead of repeating one.
+        title: questions.map((q) => q.header?.trim()).filter(Boolean).join(' · ') || 'A question from the agent',
         questions,
         dialog: true,
         priority: 'now',

@@ -20,7 +20,7 @@ const hook = (mode: string, input: Record<string, unknown>): Promise<{ status: n
   child.stdin.end(JSON.stringify(input));
 });
 const ask = (session: string, question: string) => ({ session_id: session, tool_name: 'AskUserQuestion', tool_input: { questions: [{ question, header: 'Q', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] }] } });
-const card = async (session: string, title: string) => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.agent === `claude:${session}` && c.title === title);
+const card = async (session: string, title: string) => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.agent === `claude:${session}` && c.questions?.[0]?.question === title);
 
 describe('the AskUserQuestion hooks', () => {
   it('close the card when the person cancels the dialog in the terminal', async () => {
@@ -43,6 +43,18 @@ describe('the AskUserQuestion hooks', () => {
     await hook('ask-pre', ask('s3', 'Second?'));
     assert.equal((await card('s3', 'First?'))?.closed?.kind, 'resolved');
     assert.equal((await card('s3', 'Second?'))?.closed, undefined);
+  });
+
+  it('title the card with the questions\' short labels, so the question text shows once, in its section', async () => {
+    const two = { session_id: 's5', tool_name: 'AskUserQuestion', tool_input: { questions: [
+      { question: 'Where should the Mac setting go?', header: 'Mac dotfiles', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] },
+      { question: 'Commit the legacy repo?', header: 'Legacy commit', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] },
+    ] } };
+    await hook('ask-pre', two);
+    assert.equal((await card('s5', 'Where should the Mac setting go?'))?.title, 'Mac dotfiles · Legacy commit');
+    const bare = { session_id: 's6', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'No label?', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] }] } };
+    await hook('ask-pre', bare);
+    assert.equal((await card('s6', 'No label?'))?.title, 'A question from the agent');
   });
 
   it('leave a card the person answered on the card', async () => {
