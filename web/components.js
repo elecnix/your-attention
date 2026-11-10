@@ -160,6 +160,17 @@ function RecommendingOptionCards(args) {
   const renderNode = (n) => (n === RECOMMENDED ? h(RecommendedNote, { note: rec.note }) : args.renderNode(n));
   return PlainOptionCards({ ...args, props: { ...args.props, items }, renderNode });
 }
+// A table cell reads inline Markdown, as a field label does, so a row can link to the pull request it lists.
+// OpenUI draws an object cell through renderNode, so each text cell goes there as a marker the page draws itself.
+const MD_CELL = 'markdown-cell';
+const PlainTable = openuiChatLibrary.components.Table.component;
+function MarkdownTable(args) {
+  const columns = (args.props.columns || []).map((c) => (c && c.props && Array.isArray(c.props.data)
+    ? { ...c, props: { ...c.props, data: c.props.data.map((d) => (typeof d === 'string' ? { type: MD_CELL, text: d } : d)) } }
+    : c));
+  const renderNode = (n) => (n && n.type === MD_CELL ? h(React.Fragment, null, renderInline(h, n.text)) : args.renderNode(n));
+  return PlainTable({ ...args, props: { ...args.props, columns }, renderNode });
+}
 // An icon button's name is its accessible label in OpenUI, and the page shows it as a tooltip too. Every card's row of
 // buttons ends with Dismiss, whose name says what it does to the agent.
 const PlainIconButton = openuiChatLibrary.components.IconButton.component;
@@ -170,6 +181,7 @@ const library = extendLibrary(openuiChatLibrary, {
   Mermaid: ({ props }) => h(Diagram, { source: String(props.source ?? '') }),
   FormControl: MarkdownFormControl,
   OptionCards: RecommendingOptionCards,
+  Table: MarkdownTable,
   IconButton: TitledIconButton,
 });
 /** The page's component list, as the inbox reads it from src/adapters/openui-library.ts. */

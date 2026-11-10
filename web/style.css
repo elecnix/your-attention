@@ -227,6 +227,8 @@
   .file pre, .file .markdown, .file table { margin: 0; padding: 10px; overflow-x: auto; }
   .file iframe.pdf { width: 100%; height: 520px; border: 0; display: block; }
   .markdown table, .file table.csv { border-collapse: collapse; }
+  /* OpenUI keeps each table cell on one line, so a long cell pushed the table past the card. Cells wrap at word breaks. */
+  .openui-table-cell { white-space: normal; vertical-align: top; }
   .markdown th, .markdown td, .file table.csv th, .file table.csv td { border: 1px solid var(--line); padding: 4px 8px; }
   /* A diagram shrinks to the card's width and never grows past its own. Its labels keep mermaid's line breaks, not the text's. */
   .diagram { margin: 8px 0 12px; white-space: normal; overflow-x: auto; }

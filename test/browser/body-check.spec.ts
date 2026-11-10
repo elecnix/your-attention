@@ -72,3 +72,18 @@ test('the card a card follows shows its text as Markdown, with its table and cod
   await expect(earlier.locator('strong', { hasText: 'Why:' })).toBeVisible();
   await expect(earlier).not.toContainText('| --');
 });
+
+test('a table cell reads inline Markdown, and a long cell wraps so the table fits the card', async ({ page }) => {
+  const long = 'All six sheets drop the stale sentence. Context overflow moves to supported for three harnesses, and one row records the decision to keep the estimate.';
+  await inbox.agent.post({ id: 'table-md', agent: 's-table', title: 'Merge the checklist PRs?', priority: 'now',
+    body: `root = Card([t])\nt = Table([Col("PR", ["[#3055](https://example.com/pull/3055)", "**#3062**"]), Col("What it proves", [${JSON.stringify(long)}, ${JSON.stringify(long)}])])` });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Merge the checklist PRs?' }).click();
+  const table = page.locator('.focus-card .openui-table');
+  await expect(table.locator('a[href="https://example.com/pull/3055"]')).toHaveText('#3055');
+  await expect(table.locator('strong', { hasText: '#3062' })).toBeVisible();
+  await expect(table).not.toContainText('](');
+  // The long column wraps inside the card, so the table needs no sideways scroll.
+  const fits = await page.locator('.focus-card .openui-table').evaluate((t) => t.getBoundingClientRect().width <= (t.closest('.focus-card')?.getBoundingClientRect().width ?? 0));
+  expect(fits).toBe(true);
+});
