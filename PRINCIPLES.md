@@ -134,7 +134,7 @@ Your workflow will need states nobody listed here, and the agent that posted a c
 
 ### DP21: An agent can retract its card or answer it itself
 
-When an agent no longer needs an answer, it retracts the card or closes it with its own answer and a one-line outcome. The card changes state in the inbox at once, and the outcome stays on the card. You can still reply to a closed card, and the agent receives your reply. An answer from an agent is always marked as the agent's, and it is never shown as yours.
+When an agent no longer needs an answer, it retracts the card or closes it with its own answer and a one-line outcome. The card changes state in the inbox at once, and the outcome stays on the card. You can still answer a closed card, and the agent receives your answer. If the agent needs more, it posts a new card that follows the closed one ([DP4](#dp4-a-follow-up-is-a-new-card-linked-both-ways-to-the-one-before)). An answer from an agent is always marked as the agent's, and it is never shown as yours.
 
 Agents often find the answer on their own, and you must always see who answered.
 

@@ -280,8 +280,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const fileRoute = method === 'GET' && a === 'attachments';
     if (gate.locked && !pinRoute && !fileRoute) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
     const me: Caller = { token: who.token.id, role: who.token.role };
-    // A full inbox takes the writes that free space or answer cards, and refuses the rest.
-    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'dismiss' || c === 'answer' || c === 'file-ticket'));
+    // A full inbox takes the writes that free space or answer cards, and the reply route, which writes nothing, and refuses the rest.
+    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'dismiss' || c === 'answer' || c === 'reply' || c === 'file-ticket'));
     if (method !== 'GET' && !frees && inbox.storageFull()) return json({ error: 'this inbox is full: remove cards, templates or widgets to make room' }, 507);
     // A message that arrives over two links, or again after a retry, is applied once: the inbox
     // keeps the first result for each x-message-id, per client.
@@ -605,7 +605,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           owner();
           return json(publicCard(inbox.dismiss(me, b, { values: body['values'], comment: body['comment'] })));
         case 'reply':
-          return json(publicCard(inbox.reply(me, b, String(body['text'] ?? ''))));
+          // Agents no longer reply on a card: a follow-up is a new card that follows this one.
+          return json({ error: `agent replies are gone: post a new card with card_post and follows: "${b}"` }, 410);
         case 'ack':
           return json(inbox.ack(me, b));
         case 'patch':
@@ -614,8 +615,6 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(publicCard(inbox.setStatus(me, b, String(body['status'] ?? ''))));
         case 'claim':
           return json(publicCard(inbox.claim(me, b, String(body['agent'] ?? ''))));
-        case 'seen':
-          owner(); inbox.seen(b); return json({ ok: true });
         case 'draw-fault':
           return json(publicCard(inbox.drawFault(me, b, body)));
         case 'force':

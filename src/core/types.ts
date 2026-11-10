@@ -304,9 +304,10 @@ export interface Card {
   version: number;
   createdAt: number;
   updatedAt: number;
-  /** When the owner cleared it from the inbox. Search still finds it, and a revision or a reply brings it back. */
+  /** When the owner cleared it from the inbox. Search still finds it, and a revision brings it back. */
   archivedAt?: number;
   closed?: Closure;
+  /** Agent replies stored before linked follow-ups. Nothing writes one now, and the page shows the old ones in a fold. */
   replies: Reply[];
 }
 

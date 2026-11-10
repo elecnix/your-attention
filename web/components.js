@@ -257,37 +257,10 @@ export function ClosedCard({ closed, card, children, onNext, animate }) {
 }
 
 // The icon button that dismisses the card on screen, for the rows the page draws itself: an HTML card's footer, a secret
-// card's buttons, a guidance proposal, and the follow-up a replied card offers.
+// card's buttons, and a guidance proposal.
 export function DismissButton({ onClick }) {
   return h('button', { type: 'button', className: 'icon-btn dismiss', title: DISMISS, 'aria-label': DISMISS, onClick },
     h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.dismissed.map((d) => h('path', { key: d, d }))));
-}
-
-// A card whose agent replied after the person answered: a comment box of its own sends a follow-up on the same card, with
-// the earlier answer kept as it was. The answer form folds away below it, behind Change your answer.
-export function FollowUp({ card, answer, onDone }) {
-  const draftKey = `draft:${card.id}:reply`;
-  const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
-  const [error, setError] = React.useState(null);
-  // The follow-up keeps the answer's values, less its approval toggles: those are typed into a pane once, with the answer.
-  const kept = Object.fromEntries(Object.entries(answer.values || {}).filter(([k]) => !k.startsWith('approval_')));
-  const send = async (route, payload) => {
-    setError(null);
-    try {
-      const res = await api(`${BASE}v1/cards/${card.id}/${route}`, payload);
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
-      store.del(draftKey);
-      onDone();
-    } catch (e) {
-      setError(`It did not go: ${String(e.message || e)}`);
-    }
-  };
-  return h('div', { className: 'follow-up' },
-    h('label', null, 'Your reply', h('textarea', { rows: 2, value: comment, placeholder: 'Say more, without changing your answer', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
-    error && h('div', { className: 'note warn' }, error),
-    h('div', { className: 'follow-up-actions' },
-      h('button', { type: 'button', className: 'btn primary', onClick: () => send('answer', { values: kept, comment: comment.trim(), version: card.version }) }, 'Reply'),
-      h(DismissButton, { onClick: () => send('dismiss', { values: kept, comment: comment.trim() }) })));
 }
 
 // A secret request. The value is sealed in this browser with the agent's key,

@@ -313,13 +313,22 @@ describe('Markdown in the card pane', () => {
   });
 });
 
-describe('an agent reply in the terminal client', () => {
-  it('draws its Markdown, as the card text does', () => {
-    const t = setup(card({ id: 'rmd', title: 'Replied', replies: [{ at: 1, seenAt: null, text: '**Deployed.** See [the run](https://example.com/run).\n\n- one\n- two' }] })).text();
+describe('a reply an agent sent before linked follow-ups, in the terminal client', () => {
+  const stored = () => card({ id: 'rmd', title: 'Replied', replies: [{ at: 1, seenAt: null, text: '**Deployed.** See [the run](https://example.com/run).\n\n- one\n- two' }] });
+
+  it('draws it on the card with its Markdown, as the card text does', () => {
+    const { text } = setup(stored());
+    const t = text();
+    assert.match(t, /Agent reply/);
     assert.match(t, /Deployed\. See the run/);
     assert.doesNotMatch(t, /\*\*Deployed/);
     assert.doesNotMatch(t, /\]\(https/);
     assert.match(t, /• one|- one/);
+  });
+
+  it('draws no reply on a card without replies', () => {
+    const { text } = setup(card({ id: 'none', title: 'Plain' }));
+    assert.doesNotMatch(text(), /Agent reply/);
   });
 });
 

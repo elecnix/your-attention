@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, FollowUp, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails } from './details.js';
 
@@ -322,7 +322,7 @@ export function App() {
   if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
-  const { byId, st, levelOf, label, waiting, pending, checking, pinned: pinnedGroups, replied, outbox, sent, tagKeys, dealt, groups, order, hidden } = buildQueue(state, groupBy, tagPins, collapsedGroups);
+  const { byId, st, levelOf, label, waiting, pending, checking, pinned: pinnedGroups, outbox, sent, tagKeys, dealt, groups, order, hidden } = buildQueue(state, groupBy, tagPins, collapsedGroups);
   const visible = state.cards;
   const levels = state.levels || [];
   // The tab icon gets a red dot while a card waits for you.
@@ -333,7 +333,7 @@ export function App() {
   // A card in a collapsed group stays out of sight until the person picks it, so the queue opens a group's first card only.
   const firstInSight = (cards) => cards.find((c) => !hidden.has(c.id));
   const lastVisit = firstInSight(pending.filter((c) => c.id === lastVisitRef.current));
-  const shown = cleared ? null : byId[focus] || pinned || lastVisit || firstInSight(replied) || firstInSight(pending) || null;
+  const shown = cleared ? null : byId[focus] || pinned || lastVisit || firstInSight(pending) || null;
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
   details.want([shown, shown && byId[after(order, shown.id)], shown && shown.follows && byId[shown.follows]]);
   const detail = details.get(shown);
@@ -403,9 +403,9 @@ export function App() {
   const item = (c, dim) => {
     const s = st(c);
     const prio = h('span', { className: `prio small ${levelOf(c)}` }, label(levelOf(c)));
-    // Every card that waits for you raises its hand, except an agent reply, which keeps its speech bubble.
+    // Every card that waits for you raises its hand.
     const hand = current && current.id === c.id ? 'open-filled' : 'open';
-    const icon = s === 'closed' ? c.closed.kind : waiting(s) && s !== 'reply' ? hand : s;
+    const icon = s === 'closed' ? c.closed.kind : waiting(s) ? hand : s;
     const tip = s === 'closed' ? CLOSED_LABEL[c.closed.kind] : STATE_LABEL[s];
     // A raised hand takes the color of the card's priority level.
     const color = icon === hand ? (levels.find((l) => l.id === levelOf(c)) || {}).color : undefined;
@@ -437,7 +437,6 @@ export function App() {
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
     pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
-    replied.length > 0 && group('Agent replied', replied, '', undefined, undefined, SECTION_ID.replied),
     groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),
     checking.length > 0 && group('Being checked by triage', checking, '', undefined, undefined, SECTION_ID.checking),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent', undefined, SECTION_ID.outbox),
@@ -460,9 +459,6 @@ export function App() {
   } else {
     const a = detail.answer;
     const s = st(current);
-    // A replied card whose answer is still there offers Reply and Dismiss, with the answer form folded away: a follow-up
-    // keeps the answer, so picking again is a change the person asks for.
-    const followedUp = !!a && !!shown && st(shown) === 'reply';
     const pres = presenceOf(current, state);
     const prevDetail = current.follows ? details.get(byId[current.follows]) : undefined;
     const prev = prevDetail && prevDetail.card;
@@ -494,6 +490,7 @@ export function App() {
           `herdr: ${[o.herdrWorkspace && `workspace ${o.herdrWorkspace}`, o.herdrTab && `tab ${o.herdrTab}`].filter(Boolean).join(' › ')}`),
         o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/open`, {}) }, 'Open session')),
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
+      // Replies agents sent before linked follow-ups stay on the card. No new reply can appear: a follow-up is a card that follows this one.
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { text: r.text, byId, open, diagrams: false }))),
       a && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
       a && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
@@ -511,11 +508,6 @@ export function App() {
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); }, onDismiss: (values, comment) => dismiss(current, values, comment) })
         : current.kind === 'secret'
         ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id), onDismiss: (comment) => dismiss(current, {}, comment) })
-        : followedUp
-        ? h(React.Fragment, null,
-          h(FollowUp, { key: `reply:${a.savedAt}`, card: current, answer: a, onDone: () => answered(current.id) }),
-          h('details', { className: 'change-answer' }, h('summary', null, 'Change your answer'),
-            h(CardView, { key: `${current.id}:${a.savedAt}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) })))
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),

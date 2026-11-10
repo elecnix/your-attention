@@ -1,9 +1,9 @@
 // Card features from the batch of principles about the card model.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_REPLY_BYTES, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PRESENCE_KEEP_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
+import { DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PRESENCE_KEEP_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
-import type { AgentEvent } from '../../src/core/types.ts';
+import type { AgentEvent, Card } from '../../src/core/types.ts';
 
 function setup() {
   let t = 1_000_000;
@@ -556,13 +556,11 @@ describe('limits on what a client can store', () => {
     assert.throws(() => inbox.connect(agent, 'a'.repeat(81), () => {}), /agent/);
   });
 
-  it('caps template sources, their versions, replies and webhooks', () => {
+  it('caps template sources, their versions and webhooks', () => {
     const inbox = new Inbox(new MemoryStorage());
     assert.throws(() => inbox.saveTemplate('t', 'x'.repeat(MAX_SOURCE_BYTES + 1)), /source/);
     for (let i = 0; i < MAX_VERSIONS; i++) inbox.saveTemplate('t', `v${i}`);
     assert.throws(() => inbox.saveTemplate('t', 'one more'), /versions/);
-    inbox.postCard(agent, { id: 'c1', agent: 'a', title: 'q' });
-    assert.throws(() => inbox.reply(agent, 'c1', 'x'.repeat(MAX_REPLY_BYTES + 1)), /reply/);
     for (let i = 0; i < MAX_WEBHOOKS; i++) inbox.addWebhook('card.created', 'https://example.com/h', 's');
     assert.throws(() => inbox.addWebhook('card.created', 'https://example.com/h', 's'), /webhooks/);
     void owner;
@@ -611,11 +609,14 @@ describe('fixes from the review of the limits', () => {
     await inbox.attachment(owner, id);
   });
 
-  it('lets an agent revise a card with many long replies', () => {
-    const inbox = new Inbox(new MemoryStorage());
+  it('lets an agent revise a card that stores many long replies from before linked follow-ups', () => {
+    const store = new MemoryStorage();
+    const inbox = new Inbox(store);
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
-    for (let i = 0; i < 80; i++) inbox.reply(agent, 'c1', 'x'.repeat(MAX_REPLY_BYTES));
+    const stored = store.get<Card>('cards', 'c1')!;
+    store.put('cards', 'c1', { ...stored, replies: Array.from({ length: 80 }, (_, i) => ({ text: 'x'.repeat(4096), at: i, seenAt: null })) });
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q, revised' });
+    assert.equal(inbox.getCard('c1').replies.length, 80);
   });
 
   it('measures the card in UTF-8 bytes', () => {

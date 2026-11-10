@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { Client } from '../../src/client.ts';
 import type { ApprovalSender } from '../../src/core/inbox.ts';
+import type { Storage } from '../../src/core/storage.ts';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
 import { serve, type RunningServer } from '../../src/node/server.ts';
 
@@ -16,6 +17,8 @@ export interface TestInbox {
   open(page: Page): Promise<void>;
   /** The whole cards and answers, as the inbox stores them. The page reads summaries from GET /v1/state, and each card it opens. */
   state(): Promise<{ cards: Card[]; states: Record<string, string>; answers: Record<string, { values: Record<string, unknown>; comment: string }> }>;
+  /** Store replies on a card, as an inbox wrote them before linked follow-ups. Nothing posts a reply now. Call it before the page opens. */
+  seedReplies(id: string, texts: string[]): void;
   /** Receive answers for one agent, into a list the test reads. */
   listen(agentId: string): { events: AgentEvent[]; stop(): void };
   /** The keys to this inbox, as the owner's own route lists them: one per browser, phone and paired machine. */
@@ -41,6 +44,11 @@ export async function startInbox(opts: { usage?: boolean; pinPrompt?: boolean; a
     },
     async state() {
       return server.inbox.state() as unknown as Awaited<ReturnType<TestInbox['state']>>;
+    },
+    seedReplies(id, texts) {
+      const store = (server.inbox as unknown as { store: Storage }).store;
+      const card = store.get<Card>('cards', id)!;
+      store.put('cards', id, { ...card, replies: texts.map((text, i) => ({ text, at: i + 1, seenAt: null })) });
     },
     async tokens() {
       const res = await fetch(`${server.url}/v1/tokens`, { headers: { authorization: `Bearer ${server.ownerToken}` } });

@@ -1,4 +1,4 @@
-// Dismissing a card: close without telling the agent, and replies that wait for a real action.
+// Dismissing a card: close without telling the agent.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Inbox, InboxError, cardState, publicCard, type Caller } from '../../src/core/inbox.ts';
@@ -25,9 +25,6 @@ function refusal(call: () => unknown): number {
     return e instanceof InboxError ? e.status : 0;
   }
 }
-
-/** When the inbox saw the agent reply at `i` on card c1, or null while it waits. */
-const seenAt = (inbox: Inbox, i = 0): number | null => inbox.getCard('c1').replies[i]?.seenAt ?? null;
 
 describe('dismiss', () => {
   it('keeps the draft when the agent closes the card later', () => {
@@ -107,20 +104,10 @@ describe('dismiss', () => {
     assert.equal(inbox.search('quiet thought').length, 0, 'the draft comment is not indexed for search');
   });
 
-  it('counts the card\'s agent replies as seen', () => {
-    const inbox = setup();
-    inbox.reply(agent, 'c1', 'Here is the diff you asked for.');
-    assert.equal(seenAt(inbox), null);
-    inbox.dismiss(owner, 'c1', {});
-    assert.ok(seenAt(inbox), 'the dismiss counted as seeing the reply');
-  });
-
-  it('keeps a later agent reply or patch off the queue: saved, still closed, still dismissed', () => {
+  it('keeps a later agent patch off the queue: saved, still closed, still dismissed', () => {
     const inbox = setup();
     inbox.dismiss(owner, 'c1', {});
-    inbox.reply(agent, 'c1', 'Noted.');
     const card = inbox.getCard('c1');
-    assert.equal(card.replies.length, 1, 'the reply is saved');
     assert.equal(cardState(card, undefined), 'closed');
     assert.equal(card.closed?.kind, 'dismissed');
     inbox.patchCard(agent, 'c1', [{ old: 'Pick a size.', new: 'Pick a colour.' }]);
@@ -129,31 +116,14 @@ describe('dismiss', () => {
     assert.equal(patched.closed?.kind, 'dismissed', 'the patch did not reopen the card');
   });
 
-  it('puts a dismissed card with a later reply in Sent, never under Agent replied', () => {
+  it('puts a dismissed card in Sent', () => {
     const dismissed = {
       id: 'c1', agent: 's1', kind: 'ask', title: 'Which one?', priority: 'soon', deliver: 'stream', version: 1,
-      createdAt: 0, updatedAt: 1, closed: { kind: 'dismissed' as const, outcome: 'Dismissed.', at: 1 }, replyAt: 2, unseenReplies: true, rev: 'r1',
+      createdAt: 0, updatedAt: 1, closed: { kind: 'dismissed' as const, outcome: 'Dismissed.', at: 1 }, rev: 'r1',
     };
-    const retracted = { ...dismissed, id: 'c2', title: 'Retracted one', closed: { kind: 'retracted' as const, outcome: 'Gone.', at: 1 } };
-    const state = { cards: [dismissed, retracted], answers: {}, presence: {}, states: { c1: 'closed', c2: 'closed' }, priorities: {}, levels: [], settings: { allowHtml: false }, guidance: { text: '', version: 1, at: 0 } } as InboxState;
+    const state = { cards: [dismissed], answers: {}, presence: {}, states: { c1: 'closed' }, priorities: {}, levels: [], settings: { allowHtml: false }, guidance: { text: '', version: 1, at: 0 } } as InboxState;
     const queue = buildQueue(state, 'none');
-    assert.equal(queue.st(queue.byId['c1']!), 'closed', 'a dismissed card with an unseen reply stays closed');
-    assert.equal(queue.st(queue.byId['c2']!), 'reply', 'any other closed card with an unseen reply still comes back');
-    assert.deepEqual(queue.replied.map((c) => c.id), ['c2']);
+    assert.equal(queue.st(queue.byId['c1']!), 'closed');
     assert.ok(queue.sent.some((c) => c.id === 'c1'), 'the dismissed card is in Sent');
-  });
-});
-
-describe('replies seen', () => {
-  it('keeps a reply unseen until the person answers the card', async () => {
-    const inbox = setup();
-    inbox.reply(agent, 'c1', 'Still waiting on this.');
-    assert.equal(seenAt(inbox), null);
-    assert.equal(inbox.summaryState().cards[0]?.unseenReplies, true);
-    inbox.getCard('c1');
-    assert.equal(seenAt(inbox), null, 'reading the card changes nothing');
-    await inbox.answer('c1', { values: { choice: 'o1' } });
-    assert.ok(seenAt(inbox), 'the answer counted as seeing the reply');
-    assert.equal(inbox.summaryState().cards[0]?.unseenReplies, undefined);
   });
 });

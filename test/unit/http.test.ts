@@ -62,7 +62,6 @@ describe('http', () => {
       await call('POST', '/v1/cards', { token: agent, body: { id: 'c1', agent: 's1', title: 'q' } }),
       await call('GET', '/v1/cards/c1', { token: agent }),
       await call('GET', '/v1/cards', { token: agent }),
-      await call('POST', '/v1/cards/c1/reply', { token: agent, body: { text: 'more' } }),
       await call('POST', '/v1/cards/c1/claim', { token: agent, body: { agent: 's2' } }),
       await call('POST', '/v1/cards/c1/close', { token: agent, body: { kind: 'retracted', outcome: 'x' } }),
     ];
@@ -214,6 +213,8 @@ describe('limits a hosted inbox needs', () => {
     assert.equal((await call('POST', '/v1/cards', { id: 'big', agent: 'a', title: 'q', text: 'x'.repeat(4000) })).status, 201);
     assert.equal((await call('POST', '/v1/cards', { agent: 'a', title: 'one more' })).status, 507);
     assert.equal((await call('POST', '/v1/pair', { name: 'x' })).status, 507);
+    // The reply route writes nothing, so a full inbox still tells a stale client that replies are gone.
+    assert.equal((await call('POST', '/v1/cards/big/reply', { text: 'x' })).status, 410);
     assert.equal((await call('POST', '/v1/reset', { confirm: 'reset' })).status, 200);
     assert.equal((await call('POST', '/v1/cards', { agent: 'a', title: 'room again' })).status, 201);
   });

@@ -28,7 +28,7 @@ export function detectCaps(env: Env, opts: { mono?: boolean; ascii?: boolean; pl
 }
 
 export interface Glyphs {
-  marker: string; waiting: string; onScreen: string; reply: string; triage: string; held: string;
+  marker: string; waiting: string; onScreen: string; triage: string; held: string;
   stored: string; delivered: string; read: string; closed: string;
   radioOn: string; radioOff: string; checkOn: string; checkOff: string;
   bullet: string; quote: string; rule: string; ellipsis: string; session: string; select: string;
@@ -39,7 +39,7 @@ export interface Glyphs {
 }
 
 const UNICODE: Glyphs = {
-  marker: '▶', waiting: '●', onScreen: '◉', reply: '↩', triage: '◌', held: '‖',
+  marker: '▶', waiting: '●', onScreen: '◉', triage: '◌', held: '‖',
   stored: '○', delivered: '◑', read: '✓', closed: '×',
   radioOn: '(•)', radioOff: '( )', checkOn: '[x]', checkOff: '[ ]',
   bullet: '•', quote: '│', rule: '─', ellipsis: '…', session: '❯', select: '▾',
@@ -50,7 +50,7 @@ const UNICODE: Glyphs = {
 };
 
 const ASCII: Glyphs = {
-  marker: '>', waiting: '*', onScreen: '@', reply: '<', triage: '~', held: '=',
+  marker: '>', waiting: '*', onScreen: '@', triage: '~', held: '=',
   stored: 'o', delivered: 'd', read: 'v', closed: 'x',
   radioOn: '(*)', radioOff: '( )', checkOn: '[x]', checkOff: '[ ]',
   bullet: '*', quote: '|', rule: '-', ellipsis: '...', session: '>', select: 'v',

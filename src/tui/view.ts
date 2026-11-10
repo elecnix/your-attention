@@ -103,11 +103,9 @@ export function listRows(m: Model, width: number): Row[] {
     if (!cards.length && empty) rows.push({ spans: [{ text: `  ${empty}`, style: st.dim }] });
     for (const c of cards) rows.push(cardRow(m, c, width, sent));
   };
-  const replied = q.replied;
   const waitingGroups = q.groups;
   // Each pinned tag value gets its own group at the top, under every Group by choice, as on the page.
   for (const p of q.pinned) section(`${p.key}: ${p.value}`, p.items, 'Nothing waiting', false);
-  if (replied.length) section('Agent replied', replied, '', false, SECTION_ID.replied);
   if (waitingGroups.length) for (const [title, cards, , id] of waitingGroups) section(title, cards, 'Nothing waiting', false, id);
   else section('Waiting for you', [], 'Nothing waiting', false);
   if (q.checking.length) section('Being checked by triage', q.checking, '', false, SECTION_ID.checking);
@@ -125,9 +123,9 @@ function cardRow(m: Model, c: Card, width: number, sent: boolean): Row {
   const { s: st, g } = m.theme;
   const state = q.st(c);
   const selected = m.current?.id === c.id;
-  const waiting = q.waiting(state) && state !== 'reply';
+  const waiting = q.waiting(state);
   // Each state has a symbol of its own shape, so the list reads without color.
-  const symbol = state === 'reply' ? g.reply : waiting ? (selected ? g.onScreen : g.waiting) : state === 'in-triage' ? g.triage
+  const symbol = waiting ? (selected ? g.onScreen : g.waiting) : state === 'in-triage' ? g.triage
     : state === 'answered' ? g.stored : state === 'delivered' ? g.delivered : state === 'read' ? g.read : state === 'closed' ? g.closed : g.waiting;
   const level = (m.state!.levels ?? []).find((l) => l.id === q.levelOf(c));
   const spans: Row['spans'] = [

@@ -15,11 +15,11 @@ export interface InboxState {
   /** The current card guidance, which a guidance card diffs its proposal against. */
   guidance?: Guidance;
 }
-export type ShownState = CardState | 'reply';
+export type ShownState = CardState;
 export const CLOSED_LABEL: Record<string, string>;
 export const STATE_LABEL: Record<string, string>;
 /** The ids of the sections every Group by choice shows. */
-export const SECTION_ID: { replied: string; checking: string; outbox: string; sent: string };
+export const SECTION_ID: { checking: string; outbox: string; sent: string };
 export function agentName(id: string, cards: Card[]): string;
 export function presenceOf(card: Pick<Card, 'agent' | 'deliver'>, state: InboxState): ['off' | 'busy' | 'on', string] | null;
 export interface Queue {
@@ -32,7 +32,6 @@ export interface Queue {
   checking: Card[];
   /** One group per pinned tag value, in pin order, with the waiting cards it holds and the id that names it. */
   pinned: { key: string; value: string; id: string; items: Card[] }[];
-  replied: Card[];
   outbox: Card[];
   sent: Card[];
   tagKeys: string[];
