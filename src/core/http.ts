@@ -280,8 +280,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const fileRoute = method === 'GET' && a === 'attachments';
     if (gate.locked && !pinRoute && !fileRoute) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
     const me: Caller = { token: who.token.id, role: who.token.role };
-    // A full inbox takes the writes that free space or answer cards, and refuses the rest.
-    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'dismiss' || c === 'answer' || c === 'file-ticket'));
+    // A full inbox takes the writes that free space or answer cards, and the reply route, which writes nothing, and refuses the rest.
+    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'dismiss' || c === 'answer' || c === 'reply' || c === 'file-ticket'));
     if (method !== 'GET' && !frees && inbox.storageFull()) return json({ error: 'this inbox is full: remove cards, templates or widgets to make room' }, 507);
     // A message that arrives over two links, or again after a retry, is applied once: the inbox
     // keeps the first result for each x-message-id, per client.
