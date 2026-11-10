@@ -103,10 +103,10 @@ describe('triage under load', () => {
 });
 
 describe('triage prompts by card kind', () => {
-  it('tells the judge that a secret card needs only a reason, and shows it an HTML card form', () => {
-    const secret = triagePrompt({ ...card, kind: 'secret', secret: { name: 'DEMO_KEY', publicKey: { kty: 'RSA' } }, text: 'To call the demo API.' }, '', []);
-    assert.match(secret, /"secret": "DEMO_KEY"/);
-    assert.match(secret, /secret card .* pass it when it names the value and says why/);
+  it('tells the judge that a card asking for a secret needs only a reason, and shows it an HTML card form', () => {
+    const secret = triagePrompt({ ...card, secrets: ['DEMO_KEY'], text: 'To call the demo API.' }, '', []);
+    assert.match(secret, /"secrets": \[\s*"DEMO_KEY"\s*\]/);
+    assert.match(secret, /A card with `secrets` asks for those values.*pass it when the card says why/);
     const html = triagePrompt({ ...card, html: '<button>Ship it (recommended)</button>' }, '', []);
     assert.match(html, /Ship it \(recommended\)/);
   });

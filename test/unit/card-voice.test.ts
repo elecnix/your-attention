@@ -32,9 +32,8 @@ describe('who speaks on a card', () => {
     assert.match(DEFAULT_GUIDANCE, /recommended: true/);
   });
 
-  it('tells the agent in card_post and card_ask_secret that "you" on the card is the person', () => {
+  it('tells the agent in card_post that "you" on the card is the person', () => {
     assert.match(describeOf('card_post', ['properties', 'text']), /"you" is the person/);
-    assert.match(describeOf('card_ask_secret', ['properties', 'text']), /"you" is the person/);
   });
 });
 

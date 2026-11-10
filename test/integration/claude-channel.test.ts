@@ -36,7 +36,7 @@ after(async () => {
 describe('the Claude Code channel', () => {
   it('offers the card tools', async () => {
     const { tools } = await mcp.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_search', 'card_status', 'card_tags', 'card_template_save', 'card_widget_save']);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_close', 'card_guidance', 'card_patch', 'card_post', 'card_search', 'card_status', 'card_tags', 'card_template_save', 'card_widget_save']);
   });
 
   it('posts a card, pushes the answer into the session, and marks it read from the transcript', async () => {
@@ -68,16 +68,17 @@ describe('the Claude Code channel', () => {
     assert.equal(s.states['cc-2'], 'closed');
   });
 
-  it('asks for a secret, and hands the model a file path, never the value', async () => {
-    const res = await mcp.callTool({ name: 'card_ask_secret', arguments: { name: 'DEMO_API_KEY', title: 'Need the demo key', text: 'To set the CI secret.' } });
-    const id = /card (\S+)\./.exec(JSON.stringify(res.content))?.[1];
-    assert.ok(id);
+  it('asks for a secret with the secret widget, and hands the model a file path, never the value', async () => {
+    const res = await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-key', title: 'Need the demo key', text: 'To set the CI secret.', body: 'root = Card([key])\nkey = widget secret {"name": "DEMO_API_KEY"}' } });
+    assert.match(JSON.stringify(res.content), /Posted card cc-key\..*names a file for each secret/);
+    const id = 'cc-key';
     const card = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === id);
-    assert.equal(card?.kind, 'secret');
-    const sealed = await seal(card!.secret!.publicKey, 'demo-value-not-real');
-    await h.owner('POST', `/v1/cards/${id}/answer`, { values: { sealed } });
+    assert.deepEqual(card?.secrets, ['DEMO_API_KEY']);
+    const publicKey = JSON.parse(JSON.parse(/SecretInput\("DEMO_API_KEY", ("(?:[^"\\]|\\.)*")\)/.exec(card!.body!)![1]!)) as JsonWebKey;
+    await h.owner('POST', `/v1/cards/${id}/answer`, { values: { DEMO_API_KEY: await seal(publicKey, 'demo-value-not-real') } });
     const note = await until(() => notes.find((n) => n.meta.card_id === id));
     assert.doesNotMatch(note.content, /demo-value-not-real/);
+    assert.match(note.content, /DEMO_API_KEY: \(sealed\)/);
     const file = /It is in (\S+), which/.exec(note.content)?.[1];
     assert.ok(file, note.content);
     assert.equal(fs.readFileSync(file, 'utf8'), 'demo-value-not-real');
@@ -93,6 +94,11 @@ describe('the Claude Code channel', () => {
     assert.ok(file, note.content);
     assert.equal(fs.readFileSync(file).length, 70);
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  });
+
+  it('answers a call to the removed card_ask_secret with the widget that replaces it', async () => {
+    const res = await mcp.callTool({ name: 'card_ask_secret', arguments: { name: 'K', title: 'Key?' } });
+    assert.match(JSON.stringify(res.content), /card_ask_secret was removed.*widget secret/);
   });
 
   it('searches earlier answers', async () => {

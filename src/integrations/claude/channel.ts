@@ -258,7 +258,8 @@ void inbox.stream(agent, async (ev) => {
     ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
     : `The person answered card "${card.title}":`;
   const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
-  const body = card.kind === 'secret' ? await secrets.receive(card, answer) : `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(inbox, agent, answer))}`;
+  const sealed = await secrets.receive(card, answer);
+  const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(inbox, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
   // A newer answer to the same card replaces the one the channel is still trying to deliver.
   for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);
   const push: Push = { card: card.id, body, meta: { card_id: card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };

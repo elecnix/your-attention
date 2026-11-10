@@ -88,7 +88,8 @@ export default function yourAttention(pi: PiApi): void {
       }
       if (ev.type !== 'answer') return;
       pending.set(ev.id, ev.card.id);
-      const what = ev.card.kind === 'secret' ? await secrets.receive(ev.card, ev.answer) : `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}`;
+      const sealed = await secrets.receive(ev.card, ev.answer);
+      const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}${sealed ? `\n${sealed}` : ''}`;
       const text = `[your-attention answer ${ev.id}] ${what}`;
       // Steer by default; start a new turn when the agent is idle.
       if (ctx.isIdle()) pi.sendUserMessage(text);

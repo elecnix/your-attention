@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, SecretForm, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, forgetSecrets, sealSecrets, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails } from './details.js';
 
@@ -408,6 +408,7 @@ export function App() {
     if (!res.ok) return;
     store.del(`draft:${c.id}:${c.version}`);
     store.del(`draft:${c.id}:comment`);
+    forgetSecrets(c.id);
     answered(c.id);
   };
   const picksOf = (c) => approvalPicks[`${c.id}:${c.version}`] || {};
@@ -422,10 +423,11 @@ export function App() {
     const { values: picked, comment } = formValues(ev.formState);
     if (ev.humanFriendlyMessage === 'dismiss') return dismiss(c, answerValues(c, picked), comment);
     if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
-    const values = { ...answerValues(c, picked), ...approvalValues(c, picksOf(c)) };
+    const values = { ...answerValues(c, picked), ...(await sealSecrets(c.id)), ...approvalValues(c, picksOf(c)) };
     const images = pastedImages.payload(c.id);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
     clearPasted(c.id);
+    forgetSecrets(c.id);
     store.del(`draft:${c.id}:${c.version}`);
     answered(c.id);
   }
@@ -536,8 +538,6 @@ export function App() {
         ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip, onDismiss: (comment) => dismiss(current, {}, comment) })
         : current.html !== undefined
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); }, onDismiss: (values, comment) => dismiss(current, values, comment) })
-        : current.kind === 'secret'
-        ? h(SecretForm, { key: `${current.id}:${a ? a.savedAt : 0}`, card: current, onSkip: skip, onSent: () => answered(current.id), onDismiss: (comment) => dismiss(current, {}, comment) })
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),

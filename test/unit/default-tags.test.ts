@@ -1,6 +1,7 @@
 // Default tags: the per-agent tags that every card it posts inherits (SPEC.md, "Default tags").
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { createHandler } from '../../src/core/http.ts';
 import { Inbox, mergeDefaultTags, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
@@ -178,7 +179,7 @@ describe('the card tools and default tags', () => {
       setDefaultTags: async () => held,
       defaultTags: async () => held,
     } as never;
-    const ctx = { inbox, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' };
+    const ctx = { inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' };
     const changed = await runTool(ctx, 'card_tags', { tags: { repo: 'acme/api' } });
     assert.match(changed, /repo: acme\/api \(from card_tags\)/);
     assert.match(changed, /topic: billing \(from YOUR_ATTENTION_TAGS\)/);
@@ -189,7 +190,7 @@ describe('the card tools and default tags', () => {
   it('card_tags says when the session holds none', async () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     const inbox = { defaultTags: async () => ({ agent: 's1', tags: {} }) } as never;
-    const text = await runTool({ inbox, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_tags', {});
+    const text = await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_tags', {});
     assert.match(text, /no default tags/);
   });
 
@@ -197,7 +198,7 @@ describe('the card tools and default tags', () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     const post = async (inheritedTags?: string[]) => {
       const inbox = { post: async () => ({ id: 'c9', inheritedTags }) } as never;
-      return runTool({ inbox, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a channel event' }, 'card_post', { title: 'q' });
+      return runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a channel event' }, 'card_post', { title: 'q' });
     };
     assert.match(await post(['repo', 'topic']), /Posted card c9. It took the default tags repo, topic./);
     assert.match(await post([]), /Posted card c9. It took no default tags./);
@@ -205,7 +206,7 @@ describe('the card tools and default tags', () => {
 
   it('card_tags does not take an agent field: the tool works on the calling session only', async () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
-    const ctx = { inbox: {} as never, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' };
+    const ctx = { inbox: {} as never, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' };
     await assert.rejects(runTool(ctx, 'card_tags', { agent: 'pi:other' }), /card_tags does not take agent/);
   });
 });

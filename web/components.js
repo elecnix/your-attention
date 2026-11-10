@@ -168,6 +168,7 @@ const TitledIconButton = (args) => h('span', { className: 'ib-titled', title: St
 const library = extendLibrary(openuiChatLibrary, {
   CheckWithText,
   Mermaid: ({ props }) => h(Diagram, { source: String(props.source ?? '') }),
+  SecretInput,
   FormControl: MarkdownFormControl,
   OptionCards: RecommendingOptionCards,
   IconButton: TitledIconButton,
@@ -210,8 +211,8 @@ export function CardView({ draftKey, card, onAction, recommendationText }) {
   const values = (card.options || []).filter((o) => ids.includes(o.id)).map(optionValue);
   const rec = Object.fromEntries(Object.entries(questionRecommendations(card)).map(([name, labels]) => [name, { values: labels, note: null }]));
   if (values.length) rec.choice = { values, note: text && recommendationText ? recommendationText(text) : null };
-  return h(React.Fragment, null, checker, h(Recommended.Provider, { value: rec },
-    h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction })));
+  return h(React.Fragment, null, checker, h(SecretScope.Provider, { value: card.id }, h(Recommended.Provider, { value: rec },
+    h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction }))));
 }
 
 function CardBody({ draftKey, response, broken, onAction }) {
@@ -256,51 +257,53 @@ export function ClosedCard({ closed, card, children, onNext, animate }) {
     h('div', { ref, className: 'collapse', style: { maxHeight: collapsed ? 0 : (height || 4000), opacity: collapsed ? 0 : 1 } }, children));
 }
 
-// The icon button that dismisses the card on screen, for the rows the page draws itself: an HTML card's footer, a secret
-// card's buttons, and a guidance proposal.
+// The icon button that dismisses the card on screen, for the rows the page draws itself: an HTML card's footer and a
+// guidance proposal.
 export function DismissButton({ onClick }) {
   return h('button', { type: 'button', className: 'icon-btn dismiss', title: DISMISS, 'aria-label': DISMISS, onClick },
     h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.dismissed.map((d) => h('path', { key: d, d }))));
 }
 
-// A secret request. The value is sealed in this browser with the agent's key,
-// so the inbox stores only ciphertext. Drafts are never saved for it.
-export function SecretForm({ card, onSent, onSkip, onDismiss }) {
-  const [value, setValue] = React.useState('');
-  const [comment, setComment] = React.useState('');
-  const [error, setError] = React.useState(null);
+// SecretInput(name, publicKey): a secret field, which the secret widget places. The typed value stays in this tab's
+// memory, out of the form state and so out of every saved draft, until Send answer seals it with the agent's public key.
+// The inbox then stores only ciphertext.
+const SecretScope = React.createContext('');
+const typedSecrets = new Map(); // card id -> Map(field name -> {publicKey, value})
+function SecretInput({ props }) {
+  const card = React.useContext(SecretScope);
+  const name = String(props.name ?? '');
+  const publicKey = String(props.publicKey ?? '');
+  const [value, setValue] = React.useState(() => typedSecrets.get(card)?.get(name)?.value ?? '');
+  // A revision of the card brings a new key: a value typed before it seals with the new one.
+  React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.publicKey = publicKey; }, [card, name, publicKey]);
   if (!window.isSecureContext || !crypto.subtle) {
     return h('div', { className: 'note warn' }, 'This page cannot seal a secret over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.');
   }
-  async function send(withValue) {
-    setError(null);
-    try {
-      const values = {};
-      if (withValue) {
-        const { seal } = await import(`${BASE}sealed.js`);
-        values.sealed = await seal(card.secret.publicKey, value);
-      }
-      const res = await api(`${BASE}v1/cards/${card.id}/answer`, { values, comment: comment.trim(), version: card.version });
-      if (!res.ok) throw new Error((await res.json()).error || res.status);
-      setValue('');
-      onSent();
-    } catch (e) {
-      setError(String(e.message || e));
-    }
-  }
-  return h('form', { className: 'secret', onSubmit: (e) => { e.preventDefault(); send(true); } },
-    h('label', null, card.secret.name,
-      h('span', { className: 'secret-field' },
-        h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
-        h('input', { type: 'password', autoComplete: 'off', spellCheck: false, value, onChange: (e) => setValue(e.target.value) }))),
-    h('label', null, 'Comment', h('textarea', { rows: 2, value: comment, onChange: (e) => setComment(e.target.value), placeholder: 'Anything to add?' })),
-    error && h('div', { className: 'note warn' }, error),
-    h('div', { className: 'nav' },
-      h('button', { className: 'btn primary', type: 'submit', disabled: !value }, 'Send sealed'),
-      h('button', { className: 'btn', type: 'button', onClick: () => send(false) }, 'Decline'),
-      h('button', { className: 'btn', type: 'button', onClick: onSkip }, 'Skip for now'),
-      onDismiss && h(DismissButton, { onClick: () => onDismiss(comment.trim()) })),
-    h('p', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the model sees a file path, never the value.'));
+  const change = (next) => {
+    setValue(next);
+    const fields = typedSecrets.get(card) ?? new Map();
+    if (next) fields.set(name, { publicKey, value: next });
+    else fields.delete(name);
+    typedSecrets.set(card, fields);
+  };
+  return h('span', { className: 'secret' },
+    h('span', { className: 'secret-field' },
+      h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
+      h('input', { type: 'password', name, 'aria-label': name, autoComplete: 'off', spellCheck: false, value, onChange: (e) => change(e.target.value) })),
+    h('span', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the agent gets a file path, never the value.'));
+}
+
+/** The secrets typed on a card, each sealed with the public key its field shows, by field name. */
+export async function sealSecrets(card) {
+  const fields = [...(typedSecrets.get(card) ?? new Map())];
+  if (!fields.length) return {};
+  const { seal } = await import(`${BASE}sealed.js`);
+  return Object.fromEntries(await Promise.all(fields.map(async ([name, f]) => [name, await seal(JSON.parse(f.publicKey), f.value)])));
+}
+
+/** Drop what was typed in a card's secret fields, once the answer went or the card was dismissed. */
+export function forgetSecrets(card) {
+  typedSecrets.delete(card);
 }
 
 // How long ago the agent sent the card, roughly. It moves on at each turn of the clock's minute.

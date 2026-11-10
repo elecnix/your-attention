@@ -4,9 +4,10 @@
 
 /** `base` extended with the page's components. `draw` holds how the page draws each one; without it, they draw nothing. */
 export function extendLibrary(base, draw = {}) {
-  const { FormControl, AccordionItem, CodeBlock, OptionCards, IconButton } = base.components;
+  const { FormControl, AccordionItem, CodeBlock, Input, OptionCards, IconButton } = base.components;
   const nothing = () => null;
   const mermaidProps = FormControl.props.pick({}).extend({ source: CodeBlock.props.shape.codeString });
+  const secretInputProps = Input.props.pick({ name: true }).extend({ publicKey: Input.props.shape.name });
   const checkWithTextProps = FormControl.props.pick({ label: true }).extend({ check: FormControl.props.shape.input, content: AccordionItem.props.shape.content });
   return base.extend({ components: {
     add: [{
@@ -16,6 +17,9 @@ export function extendLibrary(base, draw = {}) {
       component: { name: 'Mermaid', props: mermaidProps, ref: mermaidProps, description: 'A diagram drawn from Mermaid source.', component: draw.Mermaid ?? nothing },
       // Wherever a CodeBlock can go.
       slots: ['Card.children', 'SectionItem.content', 'TabItem.content', 'AccordionItem.content', 'Carousel.children'],
+    }, {
+      component: { name: 'SecretInput', props: secretInputProps, ref: secretInputProps, description: 'A secret field: the page seals the value with the public key, a JSON Web Key as text.', component: draw.SecretInput ?? nothing },
+      slots: ['FormControl.input'],
     }],
     override: [
       { ...FormControl, component: draw.FormControl ?? FormControl.component },

@@ -5,7 +5,7 @@
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
-import { isSealed } from './sealed.ts';
+import { isSealed, sealedFields, secretInputs, withoutSealed } from './sealed.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
@@ -92,7 +92,7 @@ export const DEFAULT_PRIORITIES: PriorityLevel[] = [
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
 /** The version of `DEFAULT_GUIDANCE`. It moves whenever that text changes, so a client reads the words it has not seen. */
-export const DEFAULT_GUIDANCE_VERSION = 4;
+export const DEFAULT_GUIDANCE_VERSION = 5;
 export const DEFAULT_GUIDANCE = [
   'On a card, "you" is the person who reads it. Write about yourself in the third person, as "this agent" or the name in `from`, never "I" or "we", so the person always knows who acts.',
   'Write each card so the person can answer it without opening the session.',
@@ -109,6 +109,7 @@ export const DEFAULT_GUIDANCE = [
   'When an action needs the person\'s own words in a session, post the sentence as an approval on the card instead of asking the person to type it there.',
   'A card title is one line of plain text: no Markdown and no links. Name the thing there, as "PR #93 — an empty list no longer looks like a success". Put the link in `text`, or in a field label in the body: both read inline Markdown.',
   'To follow up on a card, post a new card with `follows: "<card id>"`. The inbox links the two cards both ways, and there is no reply to a card.',
+  'Never ask for a secret, such as an API key, in a text field. Place the secret widget in the card body, `key = widget secret {"name": "API_KEY"}`, and card_post seals it for this session.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
@@ -505,12 +506,7 @@ export class Inbox {
 
     const kind = input.kind ?? 'ask';
     if (kind === 'system' && caller.token !== '') throw new InboxError(400, 'a system card from a client asks the inbox for something: send system.type subscribe or unsubscribe');
-    if (kind === 'secret') {
-      const s = input.secret;
-      if (!s || typeof s !== 'object' || !s.publicKey || typeof s.publicKey !== 'object') throw new InboxError(400, 'a secret card needs secret.name and secret.publicKey');
-      if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(String(s.name ?? ''))) throw new InboxError(400, 'secret.name must be a variable name, such as API_KEY');
-      if (s.publicKey.kty !== 'RSA') throw new InboxError(400, 'secret.publicKey must be an RSA-OAEP key');
-    }
+    if (kind === 'secret') throw new InboxError(400, 'the secret card kind was removed. Place the secret widget in the card body instead: key = widget secret {"name": "API_KEY"}. The card_post tool fills its public key. A session that started before this change must restart to load that tool');
     const now = this.now();
     const before = this.store.get<Card>('cards', id);
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
@@ -523,6 +519,7 @@ export class Inbox {
     // The page drops what it cannot read of a body without a word, so the agent hears it here.
     const bodyProblems = body === undefined || !this.checkBody || this.clientChecks ? [] : this.checkBody(String(body));
     if (bodyProblems.length) throw new InboxError(400, bodyProblemsMessage(bodyProblems));
+    const secrets = body === undefined ? [] : secretInputs(String(body));
     let widgets = before?.widgets;
     let responses = before?.responses;
     if (expanded) {
@@ -571,7 +568,7 @@ export class Inbox {
       approvals,
       dialog: input.dialog === true ? true : undefined,
       screen: input.screen,
-      secret: kind === 'secret' ? { name: String(input.secret?.name), publicKey: (input.secret?.publicKey ?? {}) as JsonWebKey } : undefined,
+      secrets: secrets.length ? secrets : undefined,
       html: input.html,
       attachments: attachments?.length ? attachments : undefined,
       template: template ?? before?.template,
@@ -617,7 +614,7 @@ export class Inbox {
     }
     this.emit({ type: 'change', card: id });
     // Agent cards go through the card.created hook before the person sees them.
-    if ((kind === 'ask' || kind === 'secret') && caller.token !== '') return this.requestTriage(card);
+    if (kind === 'ask' && caller.token !== '') return this.requestTriage(card);
     return card;
   }
 
@@ -809,7 +806,8 @@ export class Inbox {
   }
 
   private observeAnswer(card: Card, answer: Answer): void {
-    const event: HookEvent = { type: 'hook', version: HOOK_VERSION, id: randomId(8), hook: 'answer.saved', card: publicCard(card), answer };
+    // A sealed value opens only with the key in its session's memory, so no hook gets it.
+    const event: HookEvent = { type: 'hook', version: HOOK_VERSION, id: randomId(8), hook: 'answer.saved', card: publicCard(card), answer: withoutSealed(card, answer) };
     for (const e of this.extensions.values()) if (e.reg.hooks.includes('answer.saved')) e.send(event);
     for (const w of this.webhooks().filter((x) => x.hook === 'answer.saved')) this.track(deliverWebhook(w, event, this.fetcher));
   }
@@ -951,7 +949,8 @@ export class Inbox {
       // Hold the call before the await, so a second run does not make it again. A call that a crash cut off goes after the lease.
       this.store.put<OutboxItem>('outbox', item.key, { ...item, nextAt: now + DELIVERY_LEASE_MS, calling: true });
       const id = answerId(card.id, answer.savedAt);
-      const ev: AnswerEvent = { type: 'answer', id, card: publicCard(card), answer };
+      // A sealed value opens only with the key in its session's memory, so the webhook gets the rest of the answer.
+      const ev: AnswerEvent = { type: 'answer', id, card: publicCard(card), answer: withoutSealed(card, answer) };
       const headers = { ...sub.headers, 'x-your-attention-event': 'answer', 'x-your-attention-delivery': id };
       calls.push(postSigned(sub.url, sub.secret, headers, ev, ANSWER_WEBHOOK_TIMEOUT_MS, this.fetcher).then((r) => this.called(item, r)));
     }
@@ -1474,10 +1473,11 @@ export class Inbox {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner dismisses a card');
     const card = this.getCard(id);
     if (card.closed) throw new InboxError(409, 'this card is already closed');
-    // A secret card's field holds the secret itself, and a dismissal is not an answer to seal it, so its values stay out
-    // of the record. The comment is the person's own words about the card, so it stays.
-    const values = card.kind === 'secret' || !input.values || typeof input.values !== 'object' || Array.isArray(input.values)
-      ? {} : input.values as Record<string, unknown>;
+    // A secret field holds the secret itself, and a dismissal is not an answer to seal it, so it stays out of the record.
+    // The other fields and the comment are the person's own words about the card, so they stay.
+    const sealed = sealedFields(card);
+    const values = !input.values || typeof input.values !== 'object' || Array.isArray(input.values)
+      ? {} : Object.fromEntries(Object.entries(input.values as Record<string, unknown>).filter(([k]) => !sealed.includes(k)));
     return this.closeAs(card, 'dismissed', 'Nothing was sent to the agent.', { values, comment: String(input.comment ?? '').trim(), at: this.now() });
   }
 
@@ -1502,12 +1502,14 @@ export class Inbox {
     const posted = this.getCard(id);
     const delivery = input.delivery ?? 'default';
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
-    const values = input.values && typeof input.values === 'object' ? input.values : {};
-    // The inbox accepts only a sealed value for a secret, so plain text never reaches storage.
-    if (posted.kind === 'secret' && (Object.keys(values).some((k) => k !== 'sealed') || ('sealed' in values && !isSealed(values['sealed'])))) {
-      throw new InboxError(400, 'a secret card takes only a sealed value: seal it with the card\'s public key');
+    const values = input.values && typeof input.values === 'object' ? { ...input.values } : {};
+    // A secret field takes only a sealed value, so plain text never reaches storage. An empty one declines.
+    for (const field of sealedFields(posted)) {
+      const v = values[field];
+      if (v === undefined || v === null || v === '') delete values[field];
+      else if (!isSealed(v)) throw new InboxError(400, `${field} takes only a sealed value: seal it with the public key on the card`);
+      if (input.images?.some((f) => f?.field === field)) throw new InboxError(400, `${field} takes no images`);
     }
-    if (posted.kind === 'secret' && input.images?.length) throw new InboxError(400, 'a secret card takes no images');
     // A pairing request takes a code and its card goes a day later, and the sweep deletes the answer without its
     // files, so an image here would be stored bytes nothing can name again. The stored pairing decides, not the id:
     // an agent may post a card of its own called `pair-something`, and that one is neither swept nor a request.
@@ -1554,8 +1556,7 @@ export class Inbox {
     else if (card.kind === 'system' && card.id.startsWith('priorities-')) this.resolvePriorityProposal(card, answer);
     else if (card.kind === 'system' && card.subscription) this.resolveSubscription(card, answer);
     else this.flush(card.agent);
-    // A secret card's answer opens only with the key in its session's memory, so no webhook gets it.
-    if (card.kind !== 'system' && card.kind !== 'secret') {
+    if (card.kind !== 'system') {
       const saved = this.store.get<Answer>('answers', id) ?? answer;
       this.observeAnswer(card, saved);
       this.queueAnswer(card, saved);

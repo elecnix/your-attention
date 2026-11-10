@@ -8,6 +8,7 @@ export const MAX_TAG_CHARS = 100;
 
 /** The id of a priority level. The defaults are now, soon and later. */
 export type Priority = string;
+/** `secret` is a card an older inbox stored. The inbox refuses a new one: a body asks for a secret with the secret widget. */
 export type CardKind = 'ask' | 'blocked' | 'system' | 'secret';
 export type CloseKind = 'retracted' | 'self-answered' | 'answered-in-terminal' | 'resolved' | 'expired' | 'returned' | 'dismissed';
 export type CardState = 'in-triage' | 'held' | 'open' | 'orphaned' | 'answered' | 'delivered' | 'read' | 'closed';
@@ -75,7 +76,7 @@ export interface Sealed {
   data: string;
 }
 
-/** What an agent asks for on a secret card. */
+/** What a secret card that an older inbox stored asks for. */
 export interface SecretRequest {
   /** The name the agent uses for the value, such as OLLAMA_API_KEY. */
   name: string;
@@ -260,7 +261,10 @@ export interface Card {
   dialog?: boolean;
   /** The terminal screen of a blocked agent. */
   screen?: string;
+  /** Only on a secret card that an older inbox stored. */
   secret?: SecretRequest;
+  /** The answer fields that take only a sealed value: the names of the SecretInput fields in the body, which the secret widget places. */
+  secrets?: string[];
   /** Raw HTML with scripts, shown in a sandboxed frame when the settings allow it. */
   html?: string;
   attachments?: Attachment[];
@@ -445,7 +449,6 @@ export interface NewCard {
   /** The questions are also open as a dialog in the agent's terminal, as Claude Code's AskUserQuestion is. An answer on the card closes that dialog. */
   dialog?: boolean;
   screen?: string;
-  secret?: SecretRequest;
   html?: string;
   attachments?: NewAttachment[];
   /** Fill the body from a template: each {{name}} takes the value in vars. */

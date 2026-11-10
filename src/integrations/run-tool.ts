@@ -5,7 +5,7 @@ import { describeAnswer, type Client } from '../client.ts';
 import { typeFromName } from '../core/inbox.ts';
 import type { Approval, AskQuestion, CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
-import { cardTools } from './tools.ts';
+import { cardTools, removedTools } from './tools.ts';
 
 export interface ToolContext {
   inbox: Client;
@@ -52,6 +52,8 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
   const { inbox, agent } = ctx;
   // Where the session runs only labels the card, so a failed lookup posts the card without it.
   const origin = (): Promise<Origin | undefined> => ctx.origin().catch(() => undefined);
+  const removed = removedTools[name];
+  if (removed) throw new Error(removed);
   // An argument the tool does not take is a mistake to report, not to drop.
   const known = cardTools.find((t) => t.name === name)?.schema['properties'] as Record<string, unknown> | undefined;
   const unknown = known ? Object.keys(args).filter((k) => !(k in known)) : [];
@@ -81,11 +83,14 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         from: str(args['from']),
         origin: await origin(),
       };
-      const posted = await inbox.post(card);
+      const sealing = await ctx.secrets.prepare(card.body);
+      const posted = await inbox.post({ ...card, body: sealing.body });
+      sealing.keep(posted.id);
       const inherited = posted.inheritedTags ?? [];
       const tags = inherited.length ? `It took the default tags ${inherited.join(', ')}.` : 'It took no default tags.';
       if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. ${tags} Warning: ${posted.warning}`;
-      return `Posted card ${posted.id}. ${tags} The answer arrives ${ctx.arrival}; keep working meanwhile.`;
+      const asks = sealing.count ? ` The answer names a file for each secret, never the value.` : '';
+      return `Posted card ${posted.id}. ${tags} The answer arrives ${ctx.arrival}; keep working meanwhile.${asks}`;
     }
     case 'card_patch': {
       const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']));
@@ -124,10 +129,6 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return lines.length
         ? `The default tags of this session, which every card it posts inherits under its own tags:\n${lines.join('\n')}`
         : 'This session has no default tags. Set them with card_tags, for example {"tags": {"repo": "acme/api", "topic": "billing"}}, and every card it posts inherits them under its own tags.';
-    }
-    case 'card_ask_secret': {
-      const id = await ctx.secrets.ask(inbox, { agent, name: String(args['name'] ?? ''), title: String(args['title'] ?? ''), text: str(args['text']), priority: str(args['priority']) ?? 'now', origin: await origin() });
-      return `Asked for the secret on card ${id}. The answer arrives ${ctx.arrival} with the path of a file, never the value.`;
     }
     case 'card_close':
       await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));

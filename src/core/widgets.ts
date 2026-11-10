@@ -19,6 +19,15 @@ export const BUILTIN_WIDGETS: Template[] = [{
     when: 'A diagram drawn from Mermaid source, such as a flowchart, a sequence or a state diagram. Put the source in `source`, or write `name = Mermaid("flowchart TD\\n  A --> B")` in the body. In card text, a ```mermaid block draws the same diagram. The inbox parses each diagram with mermaid when the card is posted or patched, and answers 400 with mermaid\'s error for one it cannot draw.',
     at: 0,
   }],
+}, {
+  name: 'secret',
+  builtin: true,
+  versions: [{
+    version: 1,
+    source: 'root = Form({{name}}, buttons, [field])\nbuttons = Buttons([])\nfield = FormControl({{name}}, SecretInput({{name}}, {{publicKey}}))',
+    when: 'A value the person must not paste into the conversation, such as an API key. Place it in the card body of a card_post call, on a card of any kind: `key = widget secret {"name": "OLLAMA_API_KEY"}`. Give only `name`, a variable name: card_post fills `publicKey`, and the private key stays in your session. The person\'s browser seals the value, the answer names a file that holds it, and you never see the value. Use the file inside a command and never print it.',
+    at: 0,
+  }],
 }];
 
 export interface WidgetSource {
@@ -55,6 +64,22 @@ export function respond(template: string, answer: Record<string, unknown>, place
 
 const PLACE = /^(\s*)([A-Za-z_]\w*)\s*=\s*widget\s+([\w.-]+)(?:@(\d+))?\s*(.*)$/;
 const STRING = /("(?:[^"\\]|\\.)*")/;
+
+/** Set `values` on each line of the body that places `widget`, over any the line gives. Returns the new body and how
+ * many lines it set. The integrations fill a secret widget's public key this way. */
+export function addToPlacements(body: string, widget: string, values: Record<string, unknown>): { body: string; count: number } {
+  let count = 0;
+  const lines = body.split('\n').map((line) => {
+    const m = PLACE.exec(line);
+    if (!m || m[3] !== widget) return line;
+    let vars: unknown = {};
+    try { vars = m[5]!.trim() ? JSON.parse(m[5]!) : {}; } catch { return line; }
+    if (!vars || typeof vars !== 'object' || Array.isArray(vars)) return line;
+    count++;
+    return `${m[1]}${m[2]} = widget ${m[3]}${m[4] === undefined ? '' : `@${m[4]}`} ${JSON.stringify({ ...vars, ...values })}`;
+  });
+  return { body: lines.join('\n'), count };
+}
 const MAX_DEPTH = 8;
 // Depth alone does not bound the work: eight widgets that each place the next fifty times would expand 50^7 times.
 const MAX_PLACEMENTS = 100;

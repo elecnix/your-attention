@@ -1,36 +1,51 @@
-// Secret requests for the harness integrations. The private key stays in this
-// process, so only the session that asked can open the answer. The value goes
-// to a file only this user can read, and the model gets the path, never the value.
+// The secret widget for the harness integrations. card_post fills each placement's public key, and the private key
+// stays in this process, so only the session that asked can open the answer. Each value goes to a file only this user
+// can read, and the model gets the path, never the value.
 import path from 'node:path';
-import type { Client } from '../client.ts';
-import { isSealed, newSealKeys, openSealed } from '../core/sealed.ts';
-import type { Answer, Card, NewCard } from '../core/types.ts';
+import { isSealed, newSealKeys, openSealed, sealedFields } from '../core/sealed.ts';
+import type { Answer, Card } from '../core/types.ts';
+import { addToPlacements } from '../core/widgets.ts';
 import { homeDir, writePrivate } from '../node/home.ts';
 
 export class SecretRequests {
-  private readonly keys = new Map<string, CryptoKey>(); // card id -> private key
+  // card id -> the private keys of its posts, newest first. A revision makes a new key, and an answer sealed for an
+  // earlier version still opens.
+  private readonly keys = new Map<string, CryptoKey[]>();
 
-  /** Post a secret card. Returns the card id. */
-  async ask(inbox: Client, card: Omit<NewCard, 'kind' | 'secret'> & { name: string }): Promise<string> {
+  /** Fill the public key into each secret widget the body places. `keep` holds the private key under the posted card's id. */
+  async prepare(body: string | undefined): Promise<{ body: string | undefined; count: number; keep: (id: string) => void }> {
+    if (body === undefined || !/\bwidget\s+secret\b/.test(body)) return { body, count: 0, keep: () => {} };
     const { publicKey, privateKey } = await newSealKeys();
-    const { name, ...rest } = card;
-    const posted = await inbox.post({ ...rest, kind: 'secret', secret: { name, publicKey } });
-    this.keys.set(posted.id, privateKey);
-    return posted.id;
+    const filled = addToPlacements(body, 'secret', { publicKey: JSON.stringify(publicKey) });
+    if (!filled.count) return { body, count: 0, keep: () => {} };
+    return { ...filled, keep: (id) => this.keys.set(id, [privateKey, ...(this.keys.get(id) ?? [])].slice(0, 10)) };
   }
 
-  /** The message for the model about a secret answer. It never contains the value. */
+  /** The lines for the model about each secret field of the card. They never contain a value. Empty for a card with none. */
   async receive(card: Card, answer: Answer): Promise<string> {
-    const name = card.secret?.name ?? 'SECRET';
-    const note = answer.comment ? `\nComment: ${answer.comment}` : '';
-    const sealed = answer.values['sealed'];
-    if (!isSealed(sealed)) return `The person did not send ${name} on card ${card.id}.${note}`;
-    const key = this.keys.get(card.id);
-    if (!key) return `The person sent ${name} on card ${card.id}, but this session no longer has the key to open it. Ask again with card_ask_secret.${note}`;
-    const value = await openSealed(key, sealed);
-    const file = secretFile(card.agent, name);
-    writePrivate(file, value);
-    return `The person sent ${name} on card ${card.id}. It is in ${file}, which only this user can read. Use it inside a command, such as "$(cat '${file}')", and never print it or write it into the conversation. Delete the file when you no longer need it.${note}`;
+    const lines: string[] = [];
+    for (const field of sealedFields(card)) {
+      // A secret card that an older inbox stored names its value in `secret` and seals it in `sealed`.
+      const name = card.kind === 'secret' && card.secret ? card.secret.name : field;
+      const sealed = answer.values[field];
+      if (!isSealed(sealed)) { lines.push(`The person did not send ${name} on card ${card.id}.`); continue; }
+      const value = await this.open(card.id, sealed);
+      if (value === undefined) {
+        lines.push(`The person sent ${name} on card ${card.id}, but this session no longer has the key to open it. Ask again: post a new card that places the secret widget.`);
+        continue;
+      }
+      const file = secretFile(card.agent, name);
+      writePrivate(file, value);
+      lines.push(`The person sent ${name} on card ${card.id}. It is in ${file}, which only this user can read. Use it inside a command, such as "$(cat '${file}')", and never print it or write it into the conversation. Delete the file when you no longer need it.`);
+    }
+    return lines.join('\n');
+  }
+
+  private async open(id: string, sealed: Parameters<typeof openSealed>[1]): Promise<string | undefined> {
+    for (const key of this.keys.get(id) ?? []) {
+      try { return await openSealed(key, sealed); } catch { /* sealed for another version's key */ }
+    }
+    return undefined;
   }
 }
 

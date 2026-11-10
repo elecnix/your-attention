@@ -66,7 +66,7 @@ export function triagePrompt(card: Card, guidance: string, earlier: { title: str
     'Return the card when it lacks one of these: the goal, the options the agent weighed, the evidence, or a recommendation.',
     'Also return it when an earlier answer below already answers the same question.',
     'Pass it otherwise. Cards from a harness prompt that blocks the agent always pass.',
-    'A secret card (kind "secret") asks for one value, such as an API key: pass it when it names the value and says why the agent needs it. It has no options or recommendation, by design.',
+    'A card with `secrets` asks for those values, such as an API key, in sealed fields the secret widget places: pass it when the card says why the agent needs each one. A card that asks only for a secret has no options or recommendation, by design.',
     'An HTML card brings its own form in "html": read its options and recommendation there.',
     'Return a card whose text asks two or more questions above one options list: each question goes in "questions", with its own text and options, so the person answers it beside its context.',
     '',
@@ -75,7 +75,7 @@ export function triagePrompt(card: Card, guidance: string, earlier: { title: str
     'The card:',
     JSON.stringify({
       kind: card.kind, title: card.title, text: card.text, recommendation: card.recommendation, options: card.options?.map((o) => o.label),
-      questions: card.questions, secret: card.secret?.name, html: card.html?.slice(0, 4000), body: card.body?.slice(0, 4000), attachments: card.attachments?.map((a) => a.name),
+      questions: card.questions, secrets: card.secrets, html: card.html?.slice(0, 4000), body: card.body?.slice(0, 4000), attachments: card.attachments?.map((a) => a.name),
       tags: card.tags ?? {},
     }, null, 2),
     '',

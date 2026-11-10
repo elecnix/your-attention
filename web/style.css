@@ -158,17 +158,16 @@
   .pin-help { color: var(--muted); }
   .pin-help code { white-space: nowrap; }
   .pin-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px; }
-  .secret, .html-answer { display: grid; gap: 12px; margin-top: 8px; }
-  .html-answer { margin-top: 14px; }
+  .html-answer { display: grid; gap: 12px; margin-top: 14px; }
+  .secret { display: grid; gap: 6px; }
   .html-answer-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-  .html-answer label,
-  .secret label { display: grid; gap: 4px; font-size: calc(14px * var(--text-scale)); font-weight: 600; }
+  .html-answer label { display: grid; gap: 4px; font-size: calc(14px * var(--text-scale)); font-weight: 600; }
   .html-answer textarea,
-  .secret input, .secret textarea { font: inherit; font-weight: 400; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .secret input { font: inherit; font-weight: 400; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
   .secret .secret-field { position: relative; display: block; }
   .secret .secret-field input { width: 100%; box-sizing: border-box; padding-left: 34px; }
   .secret .key-icon { position: absolute; left: 10px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
-  .secret .hint { margin: 0; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
+  .secret .hint { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn.danger { background: var(--bad); color: var(--bg); border-color: var(--bad); }
   .btn:disabled { opacity: .5; cursor: default; }

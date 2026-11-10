@@ -52,7 +52,7 @@ Resending a large card for each small edit wastes tokens and hides what changed.
 
 ### DP8: Secrets go to the agent sealed, and never into the conversation
 
-A secret card requests one value, such as an API key. The card contains a public key. The matching private key stays in the memory of the session that posted the card. Your browser encrypts the value with it before it leaves the page, so the inbox stores ciphertext only. The agent opens the value into a file that only your user account can read, and the model gets the path of the file. The value itself never appears in a transcript or a log.
+The secret widget requests one value, such as an API key, on a card of any kind. The card contains a public key. The matching private key stays in the memory of the session that posted the card. Your browser encrypts the value with it before it leaves the page, so the inbox stores ciphertext only. The agent opens the value into a file that only your user account can read, and the model gets the path of the file. The value itself never appears in a transcript or a log.
 
 Agents need keys to finish their work, and a key typed into a chat remains in its transcript after the session ends.
 

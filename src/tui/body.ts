@@ -76,6 +76,9 @@ export interface BodyContext {
   errors: Map<string, string>;
   focused: string | undefined;
   widgets: Map<string, Widget>;
+  /** The public key of each secret field the card draws, as JSON Web Key text, by field name. The view seals those
+   * fields before it sends. */
+  secrets: Map<string, string>;
   /** A button was pressed. `validated` is false when a rule stopped it. */
   onAction(action: Action, form: string | undefined): void;
   /** The address of this card on the page, for what the terminal cannot draw. */
@@ -298,6 +301,10 @@ export class BodyRenderer {
       case 'TextArea':
         this.textField(n, form ?? '', n.typeName === 'TextArea');
         return;
+      case 'SecretInput':
+        this.ctx.secrets.set(str(p['name']), str(p['publicKey']));
+        this.textField(n, form ?? '', false, undefined, true);
+        return;
       case 'DatePicker':
         if (str(p['mode']) === 'range') { this.fallback('DatePicker'); return; }
         this.textField(n, form ?? '', false, 'date');
@@ -379,13 +386,13 @@ export class BodyRenderer {
     return focused ? this.ctx.theme.g.focusBox : this.ctx.theme.g.box;
   }
 
-  private textField(n: ElementNode, form: string, multiline: boolean, kind?: 'date'): void {
+  private textField(n: ElementNode, form: string, multiline: boolean, kind?: 'date', secret = false): void {
     const p = n.props;
     const name = str(p['name']);
     const id = this.nextId('field', `${form}/${name}`);
     const { s } = this.ctx.theme;
     const store = this.ctx.store;
-    const password = str(p['type']) === 'password';
+    const password = secret || str(p['type']) === 'password';
     const initial = sanitize(str(p['value']));
     const uiKey = `${id}:text`;
     // The indent this field is drawn at, for a click that comes after the drawing.

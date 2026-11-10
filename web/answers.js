@@ -9,6 +9,14 @@ const dismissButton = (name) => `${name} = IconButton(${J(DISMISS)}, Icon("eye-o
 
 // OpenUI Lang for a card that brings no body of its own.
 export function cardSource(c) {
+  // A secret card that an older inbox stored asks for one value, in the field `sealed`, as the secret widget draws it.
+  if (c.kind === 'secret' && c.secret) {
+    return withAnswerFooter([
+      'root = Form("secret", secretButtons, [secretField])',
+      'secretButtons = Buttons([])',
+      `secretField = FormControl(${J(c.secret.name)}, SecretInput("sealed", ${J(JSON.stringify(c.secret.publicKey))}))`,
+    ].join('\n'));
+  }
   // A body with forms of its own keeps them where the agent placed them, and gets the comment and buttons below.
   // So does a body with no form and no options or questions, so the card stays answerable.
   if (keepsOwnForm(c)) return withAnswerFooter(c.body);
@@ -178,7 +186,7 @@ export const optionValue = (o) => `${o.id}:${o.label}`;
 
 const keepsOwnForm = (c) => !!c.body && (/\bForm\(/.test(c.body) || (!c.options?.length && !c.questions?.length));
 // The page draws a card's options as boxes unless the card brings its own HTML, form or kind of form.
-const drawsOptions = (c) => !!c.options?.length && c.html === undefined && c.kind !== 'secret' && !c.broadcast && !keepsOwnForm(c);
+const drawsOptions = (c) => !!c.options?.length && c.html === undefined && !c.broadcast && !keepsOwnForm(c);
 // Markdown emphasis out, so "**Go ahead.**" reads as "Go ahead.". An underscore inside a word, as in MY_KEY, stays.
 const plain = (s) => String(s ?? '').replace(/\*+/g, '').replace(/(^|[^\p{L}\p{N}])_+|_+(?=[^\p{L}\p{N}]|$)/gu, '$1').trim();
 const ENDS_CLAUSE = /^[.!?,:]/;
@@ -324,9 +332,11 @@ export function formValues(formState) {
   return { values, comment };
 }
 
+/** Whether an answer value is a secret the page sealed. */
+const isSealedValue = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.alg === 'string' && typeof v.data === 'string';
+
 export function describe(card, a) {
   if (!a) return '';
-  if (card.kind === 'secret') return [a.values && a.values.sealed ? 'Sent sealed' : 'Declined', a.comment].filter(Boolean).join('\n');
   let fields;
   const values = a.values || {};
   const asked = card.questions?.length ? questionLines(card, values) : [];
@@ -337,6 +347,8 @@ export function describe(card, a) {
     if (ai && card.approvals) { const ap = card.approvals[Number(ai[1])]; return v === true && ap ? `Approved: ${ap.label || ap.text}` : ''; }
     if (asked.length && QUESTION_FIELD.test(k)) return '';
     const f = (fields ??= fieldLabels(card.body))[k];
+    // A sealed secret shows that it went, never its ciphertext.
+    if (isSealedValue(v)) return `${(f && f.label) || (card.secret && k === 'sealed' ? card.secret.name : k)}: Sent sealed`;
     // A check box or switch group answers with each item on or off: the summary lists the ones turned on.
     const picked = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => v[x]) : list;
     const shown = picked.map((x) => (f && f.choices[x]) || x).join(', ');

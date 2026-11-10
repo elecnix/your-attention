@@ -7,6 +7,7 @@ import { describe as describeAnswer } from '../../web/answers.js';
 import { buildQueue, type InboxState } from '../../web/queue.js';
 import { editKey } from '../../src/tui/edit.ts';
 import type { Card } from '../../src/core/types.ts';
+import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
 import { loadParser } from '../../src/tui/body.ts';
 import { CardView, onlineAgents, type CardViewHost } from '../../src/tui/cardview.ts';
 import type { KeyEvent } from '../../src/tui/input.ts';
@@ -168,12 +169,27 @@ describe('the card pane', () => {
     assert.deepEqual(t.view.answer().values, { ask_review: { yes: true } });
   });
 
-  it('builds secret, broadcast and HTML cards from forms of its own, and blocked cards from the page source', () => {
-    const secret = setup(card({ id: 's', title: 'Key', kind: 'secret', secret: { name: 'API_KEY', publicKey: {} } }));
-    assert.match(secret.text(), /API_KEY[\s\S]*\[ Send sealed \][\s\S]*\[ Decline \]/);
-    secret.focus('field:secret/value'); secret.type('hunter2');
+  it('draws a secret field as dots, seals it before it sends, and leaves it out of a dismissal', async () => {
+    const keys = await newSealKeys();
+    const body = `root = Card([key])\nkey = Form("API_KEY", kb, [kf])\nkb = Buttons([])\nkf = FormControl("API_KEY", SecretInput("API_KEY", ${JSON.stringify(JSON.stringify(keys.publicKey))}))`;
+    const secret = setup(card({ id: 's', title: 'Key', body, secrets: ['API_KEY'] }));
+    assert.match(secret.text(), /API_KEY[\s\S]*\[ Send answer \]/);
+    secret.focus('field:API_KEY/API_KEY'); secret.type('hunter2');
     assert.doesNotMatch(secret.text(), /hunter2/);
     assert.match(secret.text(), /•••••••/);
+    const sent = await secret.view.sealedAnswer();
+    assert.equal(await openSealed(keys.privateKey, sent.values['API_KEY'] as never), 'hunter2');
+    assert.deepEqual(secret.view.draft().values, {});
+  });
+
+  it('draws a secret card an older inbox stored as a secret field named sealed', () => {
+    const legacy = setup(card({ id: 'old', title: 'Key', kind: 'secret', secret: { name: 'OLD_KEY', publicKey: { kty: 'RSA', n: 'x', e: 'AQAB' } } }));
+    assert.match(legacy.text(), /OLD_KEY[\s\S]*\[ Send answer \]/);
+    legacy.focus('field:secret/sealed'); legacy.type('abc');
+    assert.match(legacy.text(), /•••/);
+  });
+
+  it('builds broadcast and HTML cards from forms of its own, and blocked cards from the page source', () => {
     const html = setup(card({ id: 'h', title: 'HTML', html: '<b>x</b>' }));
     assert.match(html.text(), /brings its own HTML[\s\S]*#card=h[\s\S]*\[ Send answer \]/);
     const blocked = setup(card({ id: 'b', title: 'Blocked', kind: 'blocked', screen: 'Allow?\n1. Yes\n2. No', options: [{ id: '1', label: 'Yes' }, { id: '2', label: 'No' }] }));
