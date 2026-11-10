@@ -51,7 +51,8 @@ export function linkLookup(load, changed) {
       for (const id of ask) found.set(id, undefined);
       Promise.resolve().then(() => load(ask)).then(
         (cards) => { for (const id of ask) found.set(id, cards[id] ?? null); },
-        () => { for (const id of ask) found.delete(id); },
+        // A failed request is not asked again until the page reloads, so a broken lookup cannot loop; the links show their ids.
+        () => { for (const id of ask) found.set(id, null); },
       ).finally(changed);
     },
   };
