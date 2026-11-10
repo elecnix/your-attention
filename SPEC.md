@@ -234,7 +234,7 @@ An agent follows up on a card by posting a new card with `follows` set to the id
 
 A card has no reply. `POST /v1/cards/<id>/reply` answers 410 for every caller and every id, with a message that tells the caller to post a new card with `follows`. The `card_reply` tool no longer exists.
 
-Replies that older inboxes stored stay on the card as `replies`, and the inbox keeps every one. No route adds a reply. A stored reply has no effect on a card's state, its place in the queue, clearing it or the purge. The page and the terminal client draw the stored replies in a fold that starts closed, labeled **Replies from before linked follow-ups**.
+Replies that older inboxes stored stay on the card as `replies`, and the inbox keeps every one. No route adds a reply. A stored reply has no effect on a card's state, its place in the queue, clearing it or the purge. The page and the terminal client draw each stored reply on the card, newest first, headed **Agent reply** and its time.
 
 ## Editing cards
 

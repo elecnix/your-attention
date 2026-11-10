@@ -44,7 +44,6 @@ test('a card stored with replies lists no Agent replied group, and dismissing it
   await inbox.open(page);
   await expect(page.locator('.card-title')).toHaveText('Still needed?');
   await expect(page.locator('nav.queue h3', { hasText: 'Agent replied' })).toHaveCount(0);
-  await page.locator('.focus-card details.earlier-replies summary').click();
   await expect(page.locator('.reply-msg')).toContainText('Ping about this one.');
   await page.locator('.focus-card').getByRole('button', { name: 'Dismiss without telling the agent' }).click();
   await expect.poll(async () => (await cardDetail('waiting')).card.closed?.kind).toBe('dismissed');

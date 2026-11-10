@@ -490,10 +490,8 @@ export function App() {
           `herdr: ${[o.herdrWorkspace && `workspace ${o.herdrWorkspace}`, o.herdrTab && `tab ${o.herdrTab}`].filter(Boolean).join(' › ')}`),
         o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/open`, {}) }, 'Open session')),
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
-      // Replies agents sent before linked follow-ups stay readable in a fold. No new reply can appear: a follow-up is a card that follows this one.
-      current.replies.length > 0 && h('details', { className: 'earlier-replies' },
-        h('summary', null, 'Replies from before linked follow-ups'),
-        current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { text: r.text, byId, open, diagrams: false })))),
+      // Replies agents sent before linked follow-ups stay on the card. No new reply can appear: a follow-up is a card that follows this one.
+      current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { text: r.text, byId, open, diagrams: false }))),
       a && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
       a && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
       h('h2', { className: 'card-title' }, current.title),

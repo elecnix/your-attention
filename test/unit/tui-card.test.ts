@@ -313,31 +313,22 @@ describe('Markdown in the card pane', () => {
   });
 });
 
-describe('a reply stored before linked follow-ups, in the terminal client', () => {
+describe('a reply an agent sent before linked follow-ups, in the terminal client', () => {
   const stored = () => card({ id: 'rmd', title: 'Replied', replies: [{ at: 1, seenAt: null, text: '**Deployed.** See [the run](https://example.com/run).\n\n- one\n- two' }] });
 
-  it('folds it away under a label that says why it is there', () => {
+  it('draws it on the card with its Markdown, as the card text does', () => {
     const { text } = setup(stored());
-    assert.match(text(), /Replies from before linked follow-ups/);
-    assert.doesNotMatch(text(), /Deployed/);
-  });
-
-  it('draws its Markdown, as the card text does, once the fold is open', () => {
-    const { view, text, key } = setup(stored());
-    text();
-    view.focus = view.stops().find((x) => x === 'meta:replies');
-    assert.ok(view.focus, `no stop for the fold in ${view.stops().join(', ')}`);
-    key('enter');
     const t = text();
+    assert.match(t, /Agent reply/);
     assert.match(t, /Deployed\. See the run/);
     assert.doesNotMatch(t, /\*\*Deployed/);
     assert.doesNotMatch(t, /\]\(https/);
     assert.match(t, /• one|- one/);
   });
 
-  it('shows no fold on a card without replies', () => {
+  it('draws no reply on a card without replies', () => {
     const { text } = setup(card({ id: 'none', title: 'Plain' }));
-    assert.doesNotMatch(text(), /Replies from before/);
+    assert.doesNotMatch(text(), /Agent reply/);
   });
 });
 

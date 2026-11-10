@@ -172,8 +172,6 @@
   .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn.danger { background: var(--bad); color: var(--bg); border-color: var(--bad); }
   .btn:disabled { opacity: .5; cursor: default; }
-  .earlier-replies { margin: 0 0 12px; }
-  .earlier-replies > summary { cursor: pointer; color: var(--muted); font-size: calc(13px * var(--text-scale)); margin-bottom: 8px; }
   /* An icon button inside a row of card buttons, such as Dismiss: it keeps its own tooltip, so the span carries it. */
   .ib-titled { display: inline-flex; }
   /* What the person had typed on a card they dismissed. Only they read it. */
