@@ -17,6 +17,7 @@ import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { claudeSessionName } from './session-name.ts';
+import { resetAsks } from './turn-end-hook.ts';
 import { devChannelEnabled, parentArgs } from './channel-flag.ts';
 import { boxState, runHerdr } from '../herdr/approve.ts';
 import { herdrPlace } from '../herdr/place.ts';
@@ -249,6 +250,8 @@ void inbox.stream(agent, async (ev) => {
   }
   if (ev.type !== 'answer') return;
   const { card, answer } = ev;
+  // An answer arriving starts a turn of its own, so the next stop may ask for a card again.
+  resetAsks(session);
   const dismissed = card.dialog ? await closeOwnDialog(card.origin?.herdrPane) : false;
   const receipt = ev.id;
   const head = card.dialog
