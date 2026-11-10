@@ -92,6 +92,14 @@ describe('the secret widget', () => {
     assert.equal(declined.values['API_KEY'], undefined, 'an empty field declines, and the inbox keeps nothing for it');
   });
 
+  it('declines an empty secret field whose name an object inherits, such as constructor', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const { body } = await secretBody('constructor');
+    inbox.postCard(agent, { id: 'k2', agent: 's1', title: 'Key?', body });
+    const a = await inbox.answer('k2', { values: {}, comment: 'Not now.' });
+    assert.equal(Object.hasOwn(a.values, 'constructor'), false);
+  });
+
   it('keeps a secret field out of a dismissal\'s draft', async () => {
     const inbox = new Inbox(new MemoryStorage());
     const { body } = await secretBody();

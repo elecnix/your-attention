@@ -1505,7 +1505,8 @@ export class Inbox {
     const values = input.values && typeof input.values === 'object' ? { ...input.values } : {};
     // A secret field takes only a sealed value, so plain text never reaches storage. An empty one declines.
     for (const field of sealedFields(posted)) {
-      const v = values[field];
+      // An own property only: a field named like an inherited one, such as constructor, is empty when the answer leaves it out.
+      const v = Object.hasOwn(values, field) ? values[field] : undefined;
       if (v === undefined || v === null || v === '') delete values[field];
       else if (!isSealed(v)) throw new InboxError(400, `${field} takes only a sealed value: seal it with the public key on the card`);
       if (input.images?.some((f) => f?.field === field)) throw new InboxError(400, `${field} takes no images`);

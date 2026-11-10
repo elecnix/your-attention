@@ -182,11 +182,15 @@ describe('the card pane', () => {
     assert.deepEqual(secret.view.draft().values, {});
   });
 
-  it('draws a secret card an older inbox stored as a secret field named sealed', () => {
-    const legacy = setup(card({ id: 'old', title: 'Key', kind: 'secret', secret: { name: 'OLD_KEY', publicKey: { kty: 'RSA', n: 'x', e: 'AQAB' } } }));
+  it('draws a secret card an older inbox stored as a secret field named sealed, and seals it with the stored key', async () => {
+    // An older inbox stored secret.publicKey as a JWK object, so the source encodes it to JSON text once.
+    const keys = await newSealKeys();
+    const legacy = setup(card({ id: 'old', title: 'Key', kind: 'secret', secret: { name: 'OLD_KEY', publicKey: keys.publicKey } }));
     assert.match(legacy.text(), /OLD_KEY[\s\S]*\[ Send answer \]/);
     legacy.focus('field:secret/sealed'); legacy.type('abc');
     assert.match(legacy.text(), /•••/);
+    const sent = await legacy.view.sealedAnswer();
+    assert.equal(await openSealed(keys.privateKey, sent.values['sealed'] as never), 'abc');
   });
 
   it('builds broadcast and HTML cards from forms of its own, and blocked cards from the page source', () => {
