@@ -45,10 +45,8 @@ export function cardSource(c) {
   // Each question is a section of its own: the question as a heading, its text, its options and a comment field, so the
   // person answers it while it is in mind. Each section is a form without buttons, and Send answer carries every form.
   (c.questions || []).forEach((q, i) => {
-    // The page already shows the title, so a question that repeats it gets no heading of its own.
-    const head = [q.question !== c.title && `### ${q.question}`, q.text].filter(Boolean).join('\n\n');
-    if (head) { parts.push(`qt${i}`); L.push(`qt${i} = TextContent(${J(head)})`); }
-    parts.push(`qf${i}`);
+    parts.push(`qt${i}`, `qf${i}`);
+    L.push(`qt${i} = TextContent(${J([`### ${q.question}`, q.text].filter(Boolean).join('\n\n'))})`);
     const opts = (q.options || []).map((o, j) => [`o${i}_${j}`, o]);
     if (!opts.length) {
       L.push(`qf${i} = Form(${J(`${c.id}:q${i}`)}, qb${i}, [fc${i}])`, `qb${i} = Buttons([])`, `fc${i} = FormControl("Your answer", TextArea("q${i}", "", 3))`);
