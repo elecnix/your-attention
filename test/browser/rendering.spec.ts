@@ -659,3 +659,22 @@ test('a reply an agent sent before linked follow-ups draws its Markdown on the c
   await expect(page.locator('nav.queue h3', { hasText: 'Agent replied' })).toHaveCount(0);
   await expect(page.locator('.follow-up')).toHaveCount(0);
 });
+
+test('a link to a cleared card shows its title, and every unknown link on the card costs one request', async ({ page }) => {
+  await inbox.agent.post({ id: 'cleared-a', agent: 's-cleared', title: 'Deploy to staging?', priority: 'now', text: 'The fix passes its tests.' });
+  await inbox.agent.post({ id: 'cleared-b', agent: 's-cleared', title: 'Rotate the key?', priority: 'now' });
+  await inbox.agent.close('cleared-a', 'resolved', 'Deployed.');
+  await inbox.agent.close('cleared-b', 'resolved', 'Rotated.');
+  inbox.server.inbox.archive({ token: 'test', role: 'owner' });
+  await inbox.agent.post({ id: 'cleared-next', agent: 's-cleared', title: 'Promote to prod?', priority: 'now', text: 'Follows [[cleared-a]] and [[cleared-b]], not [[never-was]].' });
+  const lookups: string[] = [];
+  page.on('request', (r) => { if (r.url().includes('/v1/cards?ids=')) lookups.push(r.url()); });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Promote to prod?' }).click();
+  const text = page.locator('.focus-card .card-text');
+  await expect(text.locator('.cleared-link', { hasText: 'Deploy to staging?' })).toHaveAttribute('title', /^Cleared on .+\n\nThe fix passes its tests\.$/);
+  await expect(text.locator('.cleared-link', { hasText: 'Rotate the key?' })).toBeVisible();
+  await expect(text.locator('.unknown-link')).toHaveText('never-was');
+  await expect(text.locator('.dead-link')).toHaveCount(0);
+  expect(lookups).toHaveLength(1);
+});

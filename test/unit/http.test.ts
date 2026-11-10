@@ -127,6 +127,25 @@ describe('http routes for the card model', () => {
     assert.match(img.headers.get('content-disposition') ?? '', /^inline/);
   });
 
+  it('looks up the cards a text links to in one request, cleared ones included', async () => {
+    const { call, owner, agent } = await setup();
+    await call('POST', '/v1/cards', { token: agent, body: { id: 'done', agent: 's1', title: 'Deploy to staging?', text: 'The fix passes its tests.' } });
+    await call('POST', '/v1/cards', { token: agent, body: { id: 'open', agent: 's1', title: 'Promote to prod?' } });
+    await call('POST', '/v1/cards/done/close', { token: agent, body: { kind: 'resolved', outcome: 'Deployed.' } });
+    assert.equal((await call('POST', '/v1/archive', { token: owner, headers: { 'x-your-attention': '1' } })).status, 200);
+    const res = await call('GET', '/v1/cards?ids=done,open,never', { token: owner });
+    assert.equal(res.status, 200);
+    const { cards } = (await res.json()) as { cards: Record<string, { title: string; preview?: string; archivedAt?: number }> };
+    assert.deepEqual(Object.keys(cards).sort(), ['done', 'open']);
+    assert.equal(cards['done']!.title, 'Deploy to staging?');
+    assert.equal(cards['done']!.preview, 'The fix passes its tests.');
+    assert.equal(typeof cards['done']!.archivedAt, 'number');
+    assert.equal(cards['open']!.archivedAt, undefined);
+    // One request names at most 20 ids, as many as a card's text links.
+    const many = Array.from({ length: 21 }, (_, i) => `c${i}`).join(',');
+    assert.equal((await call('GET', `/v1/cards?ids=${many}`, { token: owner })).status, 400);
+  });
+
   it('serves an HTML file in place, sandboxed so its scripts never run', async () => {
     const { call, agent } = await setup();
     const html = `data:text/html;base64,${Buffer.from('<script>alert(1)</script>').toString('base64')}`;

@@ -33,3 +33,26 @@ export function cardDetails(load, changed) {
     },
   };
 }
+
+/** The ids a text links to with [[card-id]], as the inbox reads them for a summary's `links`. */
+export const linkIds = (...texts) => [...new Set(texts.filter(Boolean).flatMap((t) => [...String(t).matchAll(/\[\[([\w.:-]{1,80})\]\]/g)].map((m) => m[1])))];
+
+/** Cards a text links to that the state leaves out, such as a card the person cleared. `want(ids)` asks the inbox for every
+ * id it has not asked about yet in one request, GET /v1/cards?ids=. `get(id)` is the card's `{title, preview, archivedAt}`,
+ * null when the inbox does not store it, or undefined before the answer arrives. */
+export function linkLookup(load, changed) {
+  const found = new Map();
+  return {
+    get: (id) => found.get(id),
+    want(ids) {
+      const ask = ids.filter((id) => !found.has(id)).slice(0, 20);
+      if (!ask.length) return;
+      // Asked once: an id stays pending until the answer, so the next draw asks for nothing again.
+      for (const id of ask) found.set(id, undefined);
+      Promise.resolve().then(() => load(ask)).then(
+        (cards) => { for (const id of ask) found.set(id, cards[id] ?? null); },
+        () => { for (const id of ask) found.delete(id); },
+      ).finally(changed);
+    },
+  };
+}
