@@ -7,6 +7,7 @@ This file specifies the messages, card states and delivery rules that every inbo
 Messages are JSON over HTTP. Agents receive events in whichever of three ways their environment allows:
 
 - `GET /v1/stream?agent=<id>`: server-sent events, the default. Pages use `GET /v1/events` the same way.
+- `GET /v1/ws` without an upgrade: `{webSocket: true}`, the answer a page uses to tell a build that serves a page socket from one that does not.
 - `GET /v1/ws?agent=<id>`: a WebSocket. A client that cannot send an Authorization header sends `{type: "auth", token}` as its first frame, and acknowledges with `{type: "ack", card}`. The client sends `{"type":"ping"}` every 20 seconds and gets `{"type":"pong"}`. An inbox closes a socket that sends nothing for 60 seconds, and the laptop build also sends WebSocket ping frames every 15 seconds. The Cloudflare build counts pings only: it closes a socket 5 minutes after its last ping, whatever other frames it sends.
 - `GET /v1/poll?agent=<id>&wait=25`: a long-poll that returns `{events}` at the first answer or after `wait` seconds. The inbox ends the wait at once when the client drops the connection.
 
@@ -50,7 +51,7 @@ A hook call without a verdict by its deadline follows the policy: `fail-open` pa
 
 ## Person presence
 
-Each page opens a WebSocket at `/v1/ws?page=1&viewer=<page id>&unlock=<unlock token>`, signed in with its cookie, and falls back to `GET /v1/events?viewer=<page id>` when the socket never opens. The page socket sends the same events as the stream. The page sends `{"type":"ping"}` every 2 seconds and gets `{"type":"pong"}`. Each page reports `POST /v1/person/<page id> {visible, active, focus}`. The inbox combines the pages into `{pages, visible, activeAt, focus}` at `GET /v1/person`, for the owner and extensions. With two people on one inbox, each page counts.
+Each page opens a WebSocket at `/v1/ws?page=1&viewer=<page id>&unlock=<unlock token>`, signed in with its cookie. A browser doesn't report a status for an upgrade that fails, so the page asks `GET /v1/ws` without an upgrade after one. An answer of 410, 404 or 426 tells it this build has no page socket, and it reads `GET /v1/events?viewer=<page id>` instead. A 423 tells it the inbox needs its PIN. Any other answer leaves it retrying the socket with backoff. A stream that fails or ends sends the page back to the socket, so the stream is never where it stays. Its status pill reads `Inbox connected`, `Inbox reconnecting` while `GET /v1/state` still answers, and `Inbox unreachable` only when that stops too. The page socket sends the same events as the stream. The page sends `{"type":"ping"}` every 2 seconds and gets `{"type":"pong"}`. Each page reports `POST /v1/person/<page id> {visible, active, focus}`. The inbox combines the pages into `{pages, visible, activeAt, focus}` at `GET /v1/person`, for the owner and extensions. With two people on one inbox, each page counts.
 
 ## Clients and tokens
 

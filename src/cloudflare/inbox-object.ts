@@ -248,6 +248,12 @@ export class InboxObject {
       await this.schedule();
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
+    // The page probes this address with a plain request to classify a failed upgrade, which a browser reports without
+    // a status. 200 says this build serves a page socket here.
+    if (url.pathname === '/v1/ws' && req.method === 'GET' && req.headers.get('upgrade') === null) {
+      await this.schedule();
+      return Response.json({ webSocket: true });
+    }
     const res = await this.handle(req);
     await this.schedule();
     // An answer calls its webhook at once. When the call fails, the alarm moves to its retry.

@@ -396,6 +396,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if ((await readJson<{ confirm?: string }>(req)).confirm !== 'reset') throw new InboxError(400, 'send {"confirm": "reset"} to remove every card');
       return json(await inbox.reset(me));
     }
+    // The page probes this address with a plain request to learn whether a socket is served here, since a browser
+    // reports no status for an upgrade that fails. 200 says yes, and a build without sockets never answers this.
+    if (method === 'GET' && a === 'ws' && !c && req.headers.get('upgrade') === null) return json({ webSocket: true });
     if (options.streams === false && method === 'GET' && (a === 'events' || a === 'stream' || a === 'poll')) {
       return json({ error: 'this inbox serves events over the WebSocket at /v1/ws only' }, 410);
     }
