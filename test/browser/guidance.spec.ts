@@ -106,6 +106,8 @@ test('one toggle unticks every agent, a newcomer joins unticked, and the toggle 
   const agents = page.locator('.broadcast .agents');
   const all = agents.getByRole('checkbox', { name: 'All agents' });
   await expect(all).toBeChecked();
+  // The box heads the list, heavier than the agent rows under it.
+  expect(Number(await agents.locator('.all').evaluate((e) => getComputedStyle(e).fontWeight))).toBeGreaterThanOrEqual(600);
   await all.uncheck();
   await expect(agents.locator('.agent input[type=checkbox]:checked')).toHaveCount(0);
   // An agent that comes online after the person unticked them all joins unticked too.
