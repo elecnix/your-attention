@@ -4,7 +4,7 @@
 
 /** `base` extended with the page's components. `draw` holds how the page draws each one; without it, they draw nothing. */
 export function extendLibrary(base, draw = {}) {
-  const { FormControl, AccordionItem, CodeBlock, Input, OptionCards, IconButton } = base.components;
+  const { FormControl, AccordionItem, CodeBlock, Input, OptionCards, IconButton, Table } = base.components;
   const nothing = () => null;
   const mermaidProps = FormControl.props.pick({}).extend({ source: CodeBlock.props.shape.codeString });
   const secretInputProps = Input.props.pick({ name: true }).extend({ publicKey: Input.props.shape.name });
@@ -26,6 +26,8 @@ export function extendLibrary(base, draw = {}) {
       { ...OptionCards, component: draw.OptionCards ?? OptionCards.component },
       // The page shows an icon button's name as a tooltip too; the inbox needs only the same props.
       { ...IconButton, component: draw.IconButton ?? IconButton.component },
+      // The page draws each text cell as inline Markdown; the inbox needs only the same props.
+      { ...Table, component: draw.Table ?? Table.component },
     ],
   } });
 }

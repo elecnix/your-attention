@@ -1439,6 +1439,20 @@ export class Inbox {
       .map((c) => ({ card: publicCard(c), state: cardState(c, this.store.get<Answer>('answers', c.id)) }));
   }
 
+  /** The title, text preview and clear time of each card the caller may read, by id, for the card links on screen.
+   * A cleared card leaves the state but stays stored until the purge, so its links still name it. Ids it never stored are left out. */
+  linkedCards(caller: Caller, ids: string[]): Record<string, { title: string; preview?: string; archivedAt?: number }> {
+    if (ids.length > MAX_LOOKUP) throw new InboxError(400, `name at most ${MAX_LOOKUP} card ids`);
+    const out: [string, { title: string; preview?: string; archivedAt?: number }][] = [];
+    for (const id of ids) {
+      const card = this.store.get<Card>('cards', id);
+      if (!card || (caller.role !== 'owner' && card.token !== caller.token)) continue;
+      out.push([id, { title: card.title, ...(card.text ? { preview: card.text.slice(0, 300) } : {}), ...(card.archivedAt ? { archivedAt: card.archivedAt } : {}) }]);
+    }
+    // fromEntries makes every id an own key, even one named like an Object property.
+    return Object.fromEntries(out);
+  }
+
   private owned(caller: Caller, id: string): Card {
     const card = this.getCard(id);
     if (caller.role !== 'owner' && card.token !== caller.token) throw new InboxError(403, 'another client owns this card');
@@ -2227,6 +2241,8 @@ const TYPES_BY_EXTENSION: Record<string, string> = {
   html: 'text/html', htm: 'text/html',
 };
 
+/** At most as many ids as a card's text links with [[card-id]]. */
+const MAX_LOOKUP = 20;
 const index = (i: number): number => i + 1;
 
 /**

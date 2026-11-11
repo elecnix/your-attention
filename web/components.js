@@ -160,6 +160,17 @@ function RecommendingOptionCards(args) {
   const renderNode = (n) => (n === RECOMMENDED ? h(RecommendedNote, { note: rec.note }) : args.renderNode(n));
   return PlainOptionCards({ ...args, props: { ...args.props, items }, renderNode });
 }
+// A table cell reads inline Markdown, as a field label does, so a row can link to the pull request it lists.
+// OpenUI draws an object cell through renderNode, so each text cell goes there as a marker the page draws itself.
+const MD_CELL = 'markdown-cell';
+const PlainTable = openuiChatLibrary.components.Table.component;
+function MarkdownTable(args) {
+  const columns = (args.props.columns || []).map((c) => (c && c.props && Array.isArray(c.props.data)
+    ? { ...c, props: { ...c.props, data: c.props.data.map((d) => (typeof d === 'string' ? { type: MD_CELL, text: d } : d)) } }
+    : c));
+  const renderNode = (n) => (n && n.type === MD_CELL ? h(React.Fragment, null, renderInline(h, n.text)) : args.renderNode(n));
+  return PlainTable({ ...args, props: { ...args.props, columns }, renderNode });
+}
 // An icon button's name is its accessible label in OpenUI, and the page shows it as a tooltip too. Every card's row of
 // buttons ends with Dismiss, whose name says what it does to the agent.
 const PlainIconButton = openuiChatLibrary.components.IconButton.component;
@@ -171,6 +182,7 @@ const library = extendLibrary(openuiChatLibrary, {
   SecretInput,
   FormControl: MarkdownFormControl,
   OptionCards: RecommendingOptionCards,
+  Table: MarkdownTable,
   IconButton: TitledIconButton,
 });
 /** The page's component list, as the inbox reads it from src/adapters/openui-library.ts. */
@@ -388,10 +400,16 @@ export function FileChip({ card, path }) {
 // A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
 // With a card id in `files`, a file: link is a chip that opens the file in a new tab, which the laptop inbox serves for that card only.
 // Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
-export function LinkedText({ text, byId, open, diagrams = true, files }) {
+// A link to a card the state leaves out shows what `lookup(id)` finds: a cleared card's title, or the id as plain text.
+export function LinkedText({ text, byId, open, diagrams = true, files, lookup = () => undefined }) {
   const cardLink = (id, key) => {
     const target = byId[id];
-    if (!target) return h('span', { key, className: 'dead-link', title: 'This card is not in the inbox' }, id);
+    if (!target) {
+      const other = lookup(id);
+      if (other && other.archivedAt) return h('span', { key, className: 'cleared-link', title: [`Cleared on ${new Date(other.archivedAt).toLocaleDateString()}`, other.preview].filter(Boolean).join('\n\n') }, other.title);
+      if (other) return h('span', { key, className: 'cleared-link', title: other.preview || other.title }, other.title);
+      return h('span', { key, className: 'unknown-link', title: other === null ? 'The inbox does not store this card' : '' }, id);
+    }
     // The state sends the start of each card's text as its preview.
     const preview = [target.title, target.preview ?? target.text].filter(Boolean).join('\n\n').slice(0, 400);
     return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);

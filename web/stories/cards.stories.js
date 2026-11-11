@@ -31,7 +31,8 @@ export const BlockedAgent = { render: () => mount(view(card({ kind: 'blocked', d
 export const WithLinks = {
   render: () => {
     const target = card({ id: 'c2', title: 'Pick the database', text: 'SQLite or Postgres.' });
-    return mount(h(LinkedText, { text: 'This plan depends on [[c2]] and on [[missing]].', byId: { c2: target }, open: () => {} }));
+    const cleared = { old: { title: 'Rotate the key', preview: 'The key is 90 days old.', archivedAt: Date.UTC(2026, 10, 2) } };
+    return mount(h(LinkedText, { text: 'This plan depends on [[c2]], on [[old]] and on [[missing]].', byId: { c2: target }, open: () => {}, lookup: (id) => cleared[id] ?? null }));
   },
 };
 
