@@ -27,23 +27,124 @@ export function isSealed(v: unknown): v is Sealed {
 }
 
 const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
-// A string literal, or the start of a SecretInput call outside one.
-const SCAN = /"(?:[^"\\]|\\.)*"|\bSecretInput\s*\(/g;
-const ARGS = /SecretInput\s*\(\s*("(?:[^"\\]|\\.)*")\s*,\s*("(?:[^"\\]|\\.)*")\s*\)/y;
 // The members of an RSA private key in a JWK. A public key has none of them.
 const PRIVATE_MEMBERS = ['d', 'p', 'q', 'dp', 'dq', 'qi', 'oth'];
+const LITERALS = 'SecretInput takes two string literals, the field name and the public key. Place it with the secret widget: key = widget secret {"name": "API_KEY"}';
 
-/** The field names of the SecretInput calls in a body, in order. Each must name its field and give an RSA public key,
- * both as string literals, so the inbox knows every field that takes only a sealed value. */
+// The body as the OpenUI parser reads it, after the steps of @openuidev/lang-core 1.0.1 that decide what is code: the
+// code of its ``` fences when it has any, then without // and # comments. A string can hide a call only the way the
+// parser's own strings do, so a stray quote in prose or in a comment hides nothing.
+function skipDoubleQuoted(input: string, start: number): number {
+  if (input[start] !== '"') return start;
+  let i = start + 1;
+  while (i < input.length) {
+    if (input[i] === '\\') i += 2;
+    else if (input[i] === '"') return i + 1;
+    else i++;
+  }
+  return i;
+}
+function fencedCode(input: string): string {
+  const blocks: string[] = [];
+  const fenceAt = (i: number) => input.startsWith('```', i);
+  let i = 0;
+  while (i < input.length) {
+    let start = -1;
+    while (i < input.length) {
+      const next = skipDoubleQuoted(input, i);
+      if (next > i) { i = next; continue; }
+      if (fenceAt(i)) { start = i; break; }
+      i++;
+    }
+    if (start === -1) break;
+    let j = input.indexOf('\n', start + 3);
+    if (j === -1) { blocks.push(input.slice(start + 3).replace(/^[^\n]*\n?/, '')); break; }
+    j++;
+    let close = -1;
+    let k = j;
+    while (k < input.length) {
+      const next = skipDoubleQuoted(input, k);
+      if (next > k) { k = next; continue; }
+      if (fenceAt(k)) { close = k; break; }
+      k++;
+    }
+    blocks.push(input.slice(j, close === -1 ? undefined : close));
+    i = close === -1 ? input.length : close + 3;
+  }
+  if (blocks.length) return blocks.join('\n');
+  if (input.startsWith('```')) {
+    const body = input.slice(input.includes('\n') ? input.indexOf('\n') + 1 : 3);
+    const end = body.lastIndexOf('```');
+    return end === -1 ? body : body.slice(0, end);
+  }
+  return input;
+}
+function withoutComments(input: string): string {
+  let quote: string | false = false;
+  return input.split('\n').map((line) => {
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (quote) {
+        if (c === '\\' && i + 1 < line.length) { i++; continue; }
+        if (c === quote) quote = false;
+        continue;
+      }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if ((c === '/' && line[i + 1] === '/') || c === '#') return line.slice(0, i).trimEnd();
+    }
+    return line;
+  }).join('\n');
+}
+
+/** Read the string literal at `i`, as the OpenUI lexer decodes it. Undefined when no string starts there. */
+function stringAt(src: string, i: number): { value: string; end: number } | undefined {
+  if (src[i] === '"') {
+    let j = i + 1;
+    let closed = false;
+    while (j < src.length) {
+      if (src[j] === '\\') j += 2;
+      else if (src[j] === '"') { j++; closed = true; break; } else j++;
+    }
+    const raw = src.slice(i, j);
+    try { return { value: String(JSON.parse(closed ? raw : `${raw}"`)), end: j }; } catch { return { value: raw.replace(/^"|"$/g, ''), end: j }; }
+  }
+  if (src[i] === "'") {
+    let j = i + 1;
+    let value = '';
+    while (j < src.length) {
+      if (src[j] === '\\') {
+        const esc = src[j + 1];
+        if (esc !== undefined) value += esc === 'n' ? '\n' : esc === 't' ? '\t' : esc;
+        j += 2;
+      } else if (src[j] === "'") { j++; break; } else value += src[j++];
+    }
+    return { value, end: j };
+  }
+  return undefined;
+}
+
+/** The field names of the SecretInput calls in a body, in order, read with the OpenUI parser's strings, comments and
+ * fences. Each call must give its field name and an RSA public key as string literals, so the inbox knows every field
+ * that takes only a sealed value. */
 export function secretInputs(body: string): string[] {
+  const src = withoutComments(fencedCode(body.trim())).trim();
   const names: string[] = [];
-  for (const m of body.matchAll(SCAN)) {
-    if (m[0].startsWith('"')) continue;
-    ARGS.lastIndex = m.index;
-    const args = ARGS.exec(body);
-    if (!args) throw new InboxError(400, 'SecretInput takes two string literals, the field name and the public key. Place it with the secret widget: key = widget secret {"name": "API_KEY"}');
-    const name = JSON.parse(args[1]!) as string;
-    const key = JSON.parse(args[2]!) as string;
+  const space = (i: number) => { while (/\s/.test(src[i] ?? '')) i++; return i; };
+  let i = 0;
+  while (i < src.length) {
+    const str = stringAt(src, i);
+    if (str) { i = str.end; continue; }
+    const word = /^[A-Za-z_]\w*/.exec(src.slice(i, i + 64))?.[0];
+    if (!word) { i++; continue; }
+    i += word.length;
+    if (word !== 'SecretInput' || src[space(i)] !== '(') continue;
+    const first = stringAt(src, space(space(i) + 1));
+    const comma = first ? space(first.end) : -1;
+    const second = first && src[comma] === ',' ? stringAt(src, space(comma + 1)) : undefined;
+    if (!first || !second || src[space(second.end)] !== ')') throw new InboxError(400, LITERALS);
+    i = space(second.end) + 1;
+    const name = first.value;
+    const key = second.value;
     if (!FIELD_NAME.test(name)) throw new InboxError(400, `secret ${JSON.stringify(name)}: the name must be a variable name, such as API_KEY`);
     if (names.includes(name)) throw new InboxError(400, `the card asks for ${name} twice: give each secret its own name`);
     if (!key) throw new InboxError(400, `secret ${name} needs the public key that card_post fills in. Post the card with the card_post tool of a Claude Code, pi or opencode session, which keeps the private key`);

@@ -65,6 +65,35 @@ describe('the secret widget', () => {
     assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Key?', body: twice }), /K twice/);
   });
 
+  it('finds a call after a single-quoted string or a comment that holds a double quote, as the OpenUI parser reads them', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const keys = await newSealKeys();
+    const key = JSON.stringify(JSON.stringify(keys.publicKey));
+    const single = inbox.postCard(agent, { agent: 's1', title: 'Key?', body: `root = Card([t, k])\nt = TextContent('say "hi"')\nk = Form("k", b, [f])\nb = Buttons([])\nf = FormControl("A", SecretInput("A", ${key}))` });
+    assert.deepEqual(single.secrets, ['A']);
+    const comment = inbox.postCard(agent, { agent: 's1', title: 'Key?', body: `root = Card([k]) # it's "the key\nk = Form("k", b, [f])\nb = Buttons([])\nf = FormControl("B", SecretInput('B', ${key}))` });
+    assert.deepEqual(comment.secrets, ['B']);
+  });
+
+  it('answers 400, not an internal error, for a name with an escape JSON does not read', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const keys = await newSealKeys();
+    const body = `root = Card([k])\nk = Form("k", b, [f])\nb = Buttons([])\nf = FormControl("A", SecretInput("A\\'B", ${JSON.stringify(JSON.stringify(keys.publicKey))}))`;
+    assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Key?', body }), (e: Error & { status?: number }) => e.status === 400 && /variable name/.test(e.message));
+  });
+
+  it('revises a secret card that an older inbox stored, and keeps what it asks for', async () => {
+    const storage = new MemoryStorage();
+    const inbox = new Inbox(storage);
+    const { publicKey } = await newSealKeys();
+    const old = inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Paste the key', text: 'For the deploy.' });
+    storage.put('cards', 'old', { ...old, kind: 'secret', secret: { name: 'OLD_KEY', publicKey } });
+    const patched = inbox.patchCard(agent, 'old', [{ old: 'deploy', new: 'staging deploy' }], 'text');
+    assert.equal(patched.kind, 'secret');
+    assert.equal(patched.secret?.name, 'OLD_KEY');
+    assert.equal(patched.text, 'For the staging deploy.');
+  });
+
   it('reads SecretInput in a string as text, not as a field', () => {
     const inbox = new Inbox(new MemoryStorage());
     const card = inbox.postCard(agent, { agent: 's1', title: 'Docs', body: 'root = Card([t])\nt = TextContent("Write SecretInput(\\"X\\", \\"\\") to ask.")' });

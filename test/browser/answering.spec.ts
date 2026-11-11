@@ -84,6 +84,19 @@ test('a secret is sealed in the browser, never saved in a draft, and only the as
   expect(await secrets.receive(ev.card, ev.answer)).toMatch(/It is in .*DEMO_TOKEN/);
 });
 
+test('a dismissed card shows its secret field empty when reopened, since the value it showed is gone', async ({ page }) => {
+  await askSecret(new SecretRequests(), { agent: 's-secret-dismiss', name: 'DISMISS_TOKEN', title: 'Token to drop', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Token to drop' }).click();
+  await page.getByLabel('DISMISS_TOKEN').fill('typed-then-dismissed');
+  await page.locator('.focus-card .openui-buttons .ib-titled').getByRole('button', { name: 'Dismiss without telling the agent' }).click();
+  await page.locator('nav.queue .q.dim', { hasText: 'Token to drop' }).click();
+  await expect(page.locator('.closed-line .tag')).toHaveText('Dismissed');
+  const show = page.getByRole('button', { name: 'Show card' });
+  if (await show.isVisible()) await show.click();
+  await expect(page.getByLabel('DISMISS_TOKEN')).toHaveValue('');
+});
+
 test('a secret field sits beside the other questions of a card', async ({ page }) => {
   const secrets = new SecretRequests();
   const sealing = await secrets.prepare([

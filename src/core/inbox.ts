@@ -506,9 +506,10 @@ export class Inbox {
 
     const kind = input.kind ?? 'ask';
     if (kind === 'system' && caller.token !== '') throw new InboxError(400, 'a system card from a client asks the inbox for something: send system.type subscribe or unsubscribe');
-    if (kind === 'secret') throw new InboxError(400, 'the secret card kind was removed. Place the secret widget in the card body instead: key = widget secret {"name": "API_KEY"}. The card_post tool fills its public key. A session that started before this change must restart to load that tool');
-    const now = this.now();
+    // A secret card that an older inbox stored still takes revisions. A new one is refused.
     const before = this.store.get<Card>('cards', id);
+    if (kind === 'secret' && before?.kind !== 'secret') throw new InboxError(400, 'the secret card kind was removed. Place the secret widget in the card body instead: key = widget secret {"name": "API_KEY"}. The card_post tool fills its public key. A session that started before this change must restart to load that tool');
+    const now = this.now();
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
     // A revision keeps what herdr answered about a pane it does not change, since only herdr sets a place.
     const approvals = this.cleanApprovals(input.approvals, kind, places)?.map((a, i) => {
@@ -568,6 +569,7 @@ export class Inbox {
       approvals,
       dialog: input.dialog === true ? true : undefined,
       screen: input.screen,
+      secret: kind === 'secret' ? before?.secret : undefined,
       secrets: secrets.length ? secrets : undefined,
       html: input.html,
       attachments: attachments?.length ? attachments : undefined,
@@ -614,7 +616,7 @@ export class Inbox {
     }
     this.emit({ type: 'change', card: id });
     // Agent cards go through the card.created hook before the person sees them.
-    if (kind === 'ask' && caller.token !== '') return this.requestTriage(card);
+    if ((kind === 'ask' || kind === 'secret') && caller.token !== '') return this.requestTriage(card);
     return card;
   }
 
