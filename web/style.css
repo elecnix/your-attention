@@ -31,6 +31,16 @@
   .pasted-remove { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--ink); font: inherit; line-height: 1; cursor: pointer; }
   .notify { display: inline-flex; align-items: center; gap: 6px; font-size: calc(13px * var(--text-scale)); color: var(--muted); cursor: pointer; }
   .notify input { accent-color: var(--accent); }
+  /* The search field is as quiet as the other bar controls: small, hairline outline, no fill, muted until it has focus. */
+  .bar-search { flex: 0 1 190px; min-width: 110px; margin-left: auto; height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale)); transition: border-color .15s; }
+  .bar-search::placeholder { color: var(--muted); }
+  .bar-search:hover { border-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+  .bar-search:focus-visible { outline: none; border-color: var(--accent); }
+  .bar h1 { margin-right: 0; }
+  .queue mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; }
+  .q .snippet { display: block; margin-top: 2px; color: var(--muted); font-size: calc(12px * var(--text-scale)); }
+  .q .snippet-label { text-transform: uppercase; letter-spacing: .05em; font-size: calc(11px * var(--text-scale)); }
+  .search-count { margin: 4px 8px 0; color: var(--muted); font-size: calc(12px * var(--text-scale)); }
   .repo { display: inline-flex; color: var(--muted); }
   .usage-notice { margin: 16px 16px 0; padding: 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--info); border-radius: 8px; background: var(--panel); font-size: calc(14px * var(--text-scale)); }
   .usage-notice p { margin: 0 0 8px; }
@@ -347,6 +357,7 @@
     .status-pill { order: 1; }
     .phone, .devices-open, .repo { order: 1; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
     .bar-inner::after { content: ""; order: 2; flex-basis: 100%; height: 0; }
+    .bar-search { order: 4; flex: 1 1 100%; margin: 6px 0 4px; height: 36px; font-size: 16px; }
     .notify { order: 3; min-height: 40px; }
     .notify input { width: 20px; height: 20px; }
     /* Connected shows as its dot alone; a lost connection keeps its words. */
