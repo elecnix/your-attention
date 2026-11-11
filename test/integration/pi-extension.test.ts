@@ -42,7 +42,7 @@ const state = async () => (await h.stored()) as { states: Record<string, string>
 describe('the pi extension', () => {
   it('registers the card tools and connects on session start', async () => {
     yourAttention(pi as never);
-    assert.deepEqual([...tools.keys()].sort(), ['card_ask_secret', 'card_close', 'card_guidance', 'card_patch', 'card_post', 'card_search', 'card_status', 'card_tags', 'card_template_save', 'card_widget_save']);
+    assert.deepEqual([...tools.keys()].sort(), ['card_close', 'card_guidance', 'card_patch', 'card_post', 'card_search', 'card_status', 'card_tags', 'card_template_save', 'card_widget_save']);
     await handlers.get('session_start')?.({}, ctx);
     await until(async () => (await state()).presence['pi:pi-session-1']?.online);
   });
@@ -59,10 +59,12 @@ describe('the pi extension', () => {
   });
 
   it('opens a sealed secret into a private file, and tells the agent only the path', async () => {
-    const res = await tools.get('card_ask_secret')!.execute('call-s', { name: 'PI_KEY', title: 'Need the pi key' }, undefined, undefined, ctx);
-    const id = /card (\S+)\./.exec(res.content[0]!.text)?.[1];
+    const res = await tools.get('card_post')!.execute('call-s', { id: 'pi-key', title: 'Need the pi key', body: 'root = Card([key])\nkey = widget secret {"name": "PI_KEY"}' }, undefined, undefined, ctx);
+    assert.match(res.content[0]!.text, /Posted card pi-key/);
+    const id = 'pi-key';
     const card = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === id);
-    await h.owner('POST', `/v1/cards/${id}/answer`, { values: { sealed: await seal(card!.secret!.publicKey, 'pi-value-not-real') } });
+    const publicKey = JSON.parse(JSON.parse(/SecretInput\("PI_KEY", ("(?:[^"\\]|\\.)*")\)/.exec(card!.body!)![1]!)) as JsonWebKey;
+    await h.owner('POST', `/v1/cards/${id}/answer`, { values: { PI_KEY: await seal(publicKey, 'pi-value-not-real') } });
     const msg = await until(() => sent.find((m) => m.text.includes(String(id))));
     assert.doesNotMatch(msg.text, /pi-value-not-real/);
     const file = /It is in (\S+), which/.exec(msg.text)?.[1];

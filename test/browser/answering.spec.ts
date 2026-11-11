@@ -1,11 +1,20 @@
 import { expect, test } from '@playwright/test';
-import { seal } from '../../web/sealed.js';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
+import type { NewCard } from '../../src/core/types.ts';
 import { startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
 test.beforeAll(async () => { inbox = await startInbox(); });
 test.afterAll(async () => { await inbox.close(); });
+
+/** Post a card whose body places the secret widget, as card_post does: the key pair stays in `secrets`. */
+async function askSecret(secrets: SecretRequests, card: Omit<NewCard, 'body'> & { name: string }): Promise<string> {
+  const { name, ...rest } = card;
+  const sealing = await secrets.prepare(`root = Card([key])\nkey = widget secret ${JSON.stringify({ name })}`);
+  const posted = await inbox.agent.post({ ...rest, body: sealing.body });
+  sealing.keep(posted.id);
+  return posted.id;
+}
 
 test('the person picks an option, adds a comment, and the agent receives both at once', async ({ page }) => {
   const heard = inbox.listen('s-answer');
@@ -56,21 +65,94 @@ test('a card the agent closes while you read it collapses to its outcome', async
   await expect(page.locator('.collapse')).toHaveCSS('opacity', '0');
 });
 
-test('a secret is sealed in the browser, and only the asking session opens it', async ({ page }) => {
+test('a secret is sealed in the browser, never saved in a draft, and only the asking session opens it', async ({ page }) => {
   const secrets = new SecretRequests();
-  const id = await secrets.ask(inbox.agent, { agent: 's-secret', name: 'DEMO_TOKEN', title: 'Need the demo token', priority: 'now' });
+  await askSecret(secrets, { agent: 's-secret', name: 'DEMO_TOKEN', title: 'Need the demo token', priority: 'now' });
   const heard = inbox.listen('s-secret');
   await inbox.open(page);
   await page.locator('.q', { hasText: 'Need the demo token' }).click();
-  await page.locator('input[type=password]').fill('typed-in-the-browser');
-  await page.getByRole('button', { name: 'Send sealed' }).click();
+  await page.getByLabel('DEMO_TOKEN').fill('typed-in-the-browser');
+  await page.locator('textarea').fill('The staging token.');
+  const saved = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
+  expect(saved).not.toContain('typed-in-the-browser');
+  await page.getByRole('button', { name: 'Send answer' }).click();
   await expect.poll(() => heard.events.find((e) => e.type === 'answer')).toBeTruthy();
   const ev = heard.events.find((e) => e.type === 'answer');
   if (ev?.type !== 'answer') throw new Error('no answer');
   expect(JSON.stringify(ev.answer)).not.toContain('typed-in-the-browser');
+  expect(ev.answer.comment).toBe('The staging token.');
   expect(await secrets.receive(ev.card, ev.answer)).toMatch(/It is in .*DEMO_TOKEN/);
-  void id;
-  void seal;
+});
+
+test('a dismissed card shows its secret field empty when reopened, since the value it showed is gone', async ({ page }) => {
+  await askSecret(new SecretRequests(), { agent: 's-secret-dismiss', name: 'DISMISS_TOKEN', title: 'Token to drop', priority: 'now' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Token to drop' }).click();
+  await page.getByLabel('DISMISS_TOKEN').fill('typed-then-dismissed');
+  await page.locator('.focus-card .openui-buttons .ib-titled').getByRole('button', { name: 'Dismiss without telling the agent' }).click();
+  await page.locator('nav.queue .q.dim', { hasText: 'Token to drop' }).click();
+  await expect(page.locator('.closed-line .tag')).toHaveText('Dismissed');
+  const show = page.getByRole('button', { name: 'Show card' });
+  if (await show.isVisible()) await show.click();
+  await expect(page.getByLabel('DISMISS_TOKEN')).toHaveValue('');
+});
+
+test('a secret that cannot be sealed sends nothing, and the field says why', async ({ page }) => {
+  // The inbox takes this key, an RSA key in form, but its modulus is no number Web Crypto imports.
+  const bad = JSON.stringify(JSON.stringify({ kty: 'RSA', n: 'x', e: 'AQAB' }));
+  await inbox.agent.post({ agent: 's-secret-bad', title: 'Key with a bad public key', priority: 'now', body: `root = Card([k])\nk = Form("k", kb, [kf])\nkb = Buttons([])\nkf = FormControl("BAD_KEY", SecretInput("BAD_KEY", ${bad}))` });
+  const heard = inbox.listen('s-secret-bad');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Key with a bad public key' }).click();
+  await page.getByLabel('BAD_KEY').fill('never-sent');
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect(page.getByRole('alert')).toContainText('BAD_KEY could not be sealed');
+  await page.waitForTimeout(500);
+  expect(heard.events.filter((e) => e.type === 'answer')).toEqual([]);
+});
+
+test('a secret typed in a field that a revision renamed is neither sealed nor sent', async ({ page }) => {
+  const secrets = new SecretRequests();
+  const id = await askSecret(secrets, { agent: 's-secret-rename', name: 'TOKEN', title: 'Token that gets renamed', priority: 'now' });
+  const heard = inbox.listen('s-secret-rename');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Token that gets renamed' }).click();
+  await page.getByLabel('TOKEN', { exact: true }).fill('typed-under-the-old-name');
+  const sealing = await secrets.prepare('root = Card([key])\nkey = widget secret {"name": "TOKEN2"}');
+  await inbox.agent.post({ id, agent: 's-secret-rename', title: 'Token that gets renamed', priority: 'now', body: sealing.body });
+  sealing.keep(id);
+  await expect(page.getByLabel('TOKEN2', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(() => heard.events.find((e) => e.type === 'answer')).toBeTruthy();
+  const ev = heard.events.find((e) => e.type === 'answer');
+  if (ev?.type !== 'answer') throw new Error('no answer');
+  expect(Object.keys(ev.answer.values)).toEqual([]);
+});
+
+test('a secret field sits beside the other questions of a card', async ({ page }) => {
+  const secrets = new SecretRequests();
+  const sealing = await secrets.prepare([
+    'root = Card([intro, key, pick])',
+    'intro = TextContent("This agent deploys the preview.")',
+    'key = widget secret {"name": "PREVIEW_TOKEN"}',
+    'pick = Form("pick", none, [where])',
+    'none = Buttons([])',
+    'where = FormControl("Where?", RadioGroup("where", [RadioItem("Staging", "", "staging"), RadioItem("Production", "", "prod")]))',
+  ].join('\n'));
+  const posted = await inbox.agent.post({ agent: 's-secret-mixed', title: 'Deploy the preview', priority: 'now', body: sealing.body });
+  sealing.keep(posted.id);
+  const heard = inbox.listen('s-secret-mixed');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Deploy the preview' }).click();
+  await page.getByLabel('PREVIEW_TOKEN').fill('preview-token-not-real');
+  await page.getByText('Staging', { exact: true }).click();
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(() => heard.events.find((e) => e.type === 'answer')).toBeTruthy();
+  const ev = heard.events.find((e) => e.type === 'answer');
+  if (ev?.type !== 'answer') throw new Error('no answer');
+  expect(ev.answer.values['where']).toBe('staging');
+  expect(JSON.stringify(ev.answer)).not.toContain('preview-token-not-real');
+  expect(await secrets.receive(ev.card, ev.answer)).toMatch(/It is in .*PREVIEW_TOKEN/);
 });
 
 test('an HTML card stays hidden until the owner allows it, then answers from its sandbox', async ({ page }) => {
@@ -220,8 +302,7 @@ test('an option shows its explanation inside its box, and a click on the explana
 });
 
 test('a secret request reads its text as Markdown, as every other card does', async ({ page }) => {
-  const secrets = new SecretRequests();
-  await secrets.ask(inbox.agent, { agent: 's-secret-md', name: 'API_KEY', title: 'Paste the key', priority: 'now',
+  await askSecret(new SecretRequests(), { agent: 's-secret-md', name: 'API_KEY', title: 'Paste the key', priority: 'now',
     text: 'Use the **production** key.\n\nWith it, I will:\n1. Create the secret.\n2. Set `KEY_ARN`.' });
   await inbox.open(page);
   await page.locator('.q', { hasText: 'Paste the key' }).click();
@@ -233,8 +314,7 @@ test('a secret request reads its text as Markdown, as every other card does', as
 });
 
 test('a secret field shows a key icon at its left, before the typed value', async ({ page }) => {
-  const secrets = new SecretRequests();
-  await secrets.ask(inbox.agent, { agent: 's-key-icon', name: 'KEY_ICON_TOKEN', title: 'Key icon secret', priority: 'now' });
+  await askSecret(new SecretRequests(), { agent: 's-key-icon', name: 'KEY_ICON_TOKEN', title: 'Key icon secret', priority: 'now' });
   await inbox.open(page);
   await page.locator('.q', { hasText: 'Key icon secret' }).click();
   const icon = page.locator('.secret .secret-field svg.key-icon');

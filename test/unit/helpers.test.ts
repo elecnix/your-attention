@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
+import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { SqliteStorage } from '../../src/adapters/sqlite.ts';
 import { describeAnswer } from '../../src/client.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
@@ -90,7 +91,7 @@ describe('FileBlobs', () => {
 describe('card tools', () => {
   it('reports an argument the tool does not take', async () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
-    const ctx = { inbox: {} as never, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' };
+    const ctx = { inbox: {} as never, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' };
     await assert.rejects(runTool(ctx, 'card_guidance', { text: 'x' }), /card_guidance does not take text\. It takes propose/);
   });
 
@@ -109,7 +110,7 @@ describe('card tools', () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     let posted: Record<string, unknown> = {};
     const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
-    await runTool({ inbox, secrets: {} as never, agent: 's1', origin: async () => { throw new Error('no transcript'); }, arrival: 'as a test' }, 'card_post', { title: 'q' });
+    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => { throw new Error('no transcript'); }, arrival: 'as a test' }, 'card_post', { title: 'q' });
     assert.equal(posted['title'], 'q');
     assert.equal(posted['origin'], undefined);
   });
@@ -119,7 +120,7 @@ describe('card tools', () => {
     let posted: Record<string, unknown> = {};
     const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
     const origin = async () => ({ harness: 'claude-code', herdrWorkspace: 'DevEx', herdrTab: 'login fix' });
-    await runTool({ inbox, secrets: {} as never, agent: 's1', origin, arrival: 'as a test' }, 'card_post', { title: 'q', from: 'the release agent' });
+    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin, arrival: 'as a test' }, 'card_post', { title: 'q', from: 'the release agent' });
     assert.equal(posted['from'], 'the release agent');
     assert.deepEqual(posted['origin'], { harness: 'claude-code', herdrWorkspace: 'DevEx', herdrTab: 'login fix' });
   });
@@ -128,7 +129,7 @@ describe('card tools', () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     let posted: Record<string, unknown> = {};
     const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
-    await runTool({ inbox, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post',
+    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post',
       { title: 'q', options: [{ label: 'Close both', description: 'I close **#2671**.' }, 'Keep it', null] });
     assert.deepEqual(posted['options'], [{ id: 'o1', label: 'Close both', description: 'I close **#2671**.' }, { id: 'o2', label: 'Keep it' }, { id: 'o3', label: '' }]);
   });
@@ -137,7 +138,7 @@ describe('card tools', () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     let posted: Record<string, unknown> = {};
     const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
-    await runTool({ inbox, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post',
+    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post',
       { title: 'q', recommendation: 'One file.', options: [{ label: 'SQLite', recommended: true }, { label: 'Postgres', recommended: 'yes' }] });
     assert.deepEqual(posted['options'], [{ id: 'o1', label: 'SQLite', recommended: true }, { id: 'o2', label: 'Postgres' }]);
   });

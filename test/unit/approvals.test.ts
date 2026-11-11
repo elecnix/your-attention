@@ -42,9 +42,9 @@ describe('approvals on a card', () => {
     assert.throws(() => inboxWith().postCard(agent, { agent: 's1', title: 'Push?', approvals: [approval] }), (e: Error & { status?: number }) => e.status === 400 && /approvals/.test(e.message));
   });
 
-  it('is refused on a secret card', () => {
+  it('is refused on a card that is not an ask card', () => {
     const inbox = inboxWith(stub());
-    assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Key', kind: 'secret', secret: { name: 'K', publicKey: { kty: 'RSA' } }, approvals: [approval] }), /approvals/);
+    assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Blocked', kind: 'blocked', approvals: [approval] }), /approvals/);
   });
 
   it('names the pane\'s agent and tab, which the inbox looks up and an agent cannot set', async () => {

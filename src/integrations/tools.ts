@@ -6,6 +6,11 @@ export interface CardTool {
   schema: Record<string, unknown>;
 }
 
+/** Tools an agent may still call from an older tool list, each with the error that names what replaces it. */
+export const removedTools: Record<string, string> = {
+  card_ask_secret: 'card_ask_secret was removed. Ask for a secret with card_post: place the secret widget in the body, as `key = widget secret {"name": "OLLAMA_API_KEY"}`. card_post fills its public key, and the answer names a file that holds the value.',
+};
+
 export const cardTools: CardTool[] = [
   {
     name: 'card_post',
@@ -49,6 +54,7 @@ export const cardTools: CardTool[] = [
           'Questions with options and text need no body: use questions. When a question needs a table or a widget beside it, give the body its own forms, between TextContent and Table statements. Give each form `Buttons([])`. The page adds a comment box, Send answer and Skip below every card, and one send carries every form, so add no general comment field or send button of your own. When you ask several questions, give each one its own short comment field beside it, so the person can say why for that question alone.',
           'Fields: FormControl(label, input) around RadioGroup(name, [RadioItem(label, "", value)]), CheckBoxGroup(name, [CheckBoxItem(label, "", name)]), Select(name, [SelectItem(value, label)]), Input(name), TextArea(name), Slider(name, "discrete", min, max, step, [start], label). A slider shows its name when it has no label. SwitchGroup(name, [SwitchItem(label, "", name)]) goes in a form without a FormControl. Use a distinct name for each field: the answer gives each value by its field name.',
           'TextContent reads Markdown, so a herdr session link works there too: TextContent("Blocked: [release agent](https://herdr.invalid/v1/pane/w7:p2)").',
+          'To ask for a secret, such as an API key, place the built-in secret widget: key = widget secret {"name": "OLLAMA_API_KEY"}. This tool fills its public key and keeps the private key in this session. The person\'s browser seals the value, and the answer names a file that holds it: use the file inside a command and never print it.',
           'Mermaid(source) draws a diagram from Mermaid source given as a string: flow = Mermaid("flowchart TD\\n  A --> B"). The built-in widget places the same: flow = widget mermaid {"source": "flowchart TD\\n  A --> B"}. The inbox parses each diagram when you post or patch, and answers 400 with mermaid\'s error for one that does not parse.',
           'Example:\nroot = Card([intro, risks, pr12])\nintro = TextContent("#12 adds retries to the uploader.")\nrisks = Table([Col("Risk", ["Duplicate uploads"]), Col("Likelihood", ["low"])])\npr12 = Form("pr12", none, [merge, note12])\nnone = Buttons([])\nmerge = FormControl("Merge #12?", RadioGroup("merge12", [RadioItem("Merge it", "", "yes"), RadioItem("Wait", "", "no")]))\nnote12 = FormControl("Comment on #12", Input("note12", "Optional"))',
         ].join(' ') },
@@ -118,20 +124,6 @@ export const cardTools: CardTool[] = [
     name: 'card_guidance',
     description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it, or rejects it. Their answer and comment come back to you, so you can revise the text and propose again.',
     schema: { type: 'object', properties: { propose: { type: 'string', description: 'The new guidance text. Leave it out to read the current guidance.' } } },
-  },
-  {
-    name: 'card_ask_secret',
-    description: 'Ask the person for a secret, such as an API key, without it ever entering the conversation. Their browser encrypts it for this session only. The answer arrives later with the path of a file that contains the value: use the file inside a command and never print it.',
-    schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'The variable name for the value, such as OLLAMA_API_KEY.' },
-        title: { type: 'string', description: 'The request, in one line.' },
-        text: { type: 'string', description: 'Why this agent needs it, and what it does with it. On the card, "you" is the person: write about yourself as "this agent".' },
-        priority: { type: 'string', enum: ['now', 'soon', 'later'] },
-      },
-      required: ['name', 'title'],
-    },
   },
   {
     name: 'card_close',

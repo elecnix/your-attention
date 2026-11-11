@@ -2,6 +2,7 @@
 // the inbox checks it, and the answer the agent reads.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { describeAnswer } from '../../src/client.ts';
 import { Inbox, InboxError } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
@@ -19,7 +20,7 @@ const THREE = [
 async function post(args: Record<string, unknown>): Promise<NewCard> {
   let posted: NewCard | undefined;
   const inbox = { post: async (c: NewCard) => { posted = c; return { id: 'c1' }; } } as never;
-  await runTool({ inbox, secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', args);
+  await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', args);
   assert.ok(posted);
   return posted;
 }

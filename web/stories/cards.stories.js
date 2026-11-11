@@ -1,8 +1,8 @@
-import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, SecretForm } from '../components.js';
+import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText } from '../components.js';
 import { h } from '../env.js';
 import { installPaste } from '../paste-images.js';
 import { PNG, card, dataUrl, mount } from './render.js';
-import { expandWidgets } from '../../src/core/widgets.ts';
+import { BUILTIN_WIDGETS, expandWidgets } from '../../src/core/widgets.ts';
 import PULL_REQUEST from '../../examples/widgets/pull-request.openui?raw';
 
 export default { title: 'Cards' };
@@ -51,7 +51,17 @@ export const WhatChanged = {
   render: () => mount(h(Changes, { card: card({ text: 'Use SQLite with FTS5 for storage.', version: 2, history: [{ version: 1, title: 'Store sessions in SQLite or Postgres?', text: 'Use SQLite for storage.', at: Date.now() - 60000 }] }) })),
 };
 
-export const Secret = { render: () => mount(h(SecretForm, { card: card({ kind: 'secret', title: 'Need the demo token', secret: { name: 'DEMO_TOKEN', publicKey: { kty: 'RSA' } } }), onSent: () => {}, onSkip: () => {} })) };
+// The secret widget, placed beside a question, as the inbox expands it. The key is a stand-in: the story never seals.
+const secretWidget = BUILTIN_WIDGETS.find((w) => w.name === 'secret').versions[0];
+const secretBody = expandWidgets([
+  'root = Card([intro, key, pick])',
+  'intro = TextContent("This agent deploys the preview with the token.")',
+  `key = widget secret ${JSON.stringify({ name: 'DEMO_TOKEN', publicKey: JSON.stringify({ kty: 'RSA', n: 'AQAB', e: 'AQAB' }) })}`,
+  'pick = Form("pick", none, [where])',
+  'none = Buttons([])',
+  'where = FormControl("Where?", RadioGroup("where", [RadioItem("Staging", "", "staging"), RadioItem("Production", "", "prod")]))',
+].join('\n'), () => ({ name: 'secret', ...secretWidget })).body;
+export const Secret = { render: () => mount(view(card({ title: 'Need the demo token', body: secretBody, secrets: ['DEMO_TOKEN'] }))) };
 
 export const HtmlAllowed = { render: () => mount(h(HtmlCard, { card: card({ html: '<p style="font:16px sans-serif">Pick one:</p><button onclick="yourAttention.answer({colour:\'blue\'})">Blue</button>' }), allowed: true, onAnswer: () => {} })) };
 

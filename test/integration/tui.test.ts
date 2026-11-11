@@ -163,12 +163,13 @@ describe('your-attention tui', () => {
 
   it('seals a secret in the client, so the inbox stores only what the agent key opens, and never shows the value', async () => {
     const keys = await newSealKeys();
-    await post({ id: 'secret', agent: 's-secret', kind: 'secret', title: 'The deploy key', priority: 'now', secret: { name: 'DEPLOY_KEY', publicKey: keys.publicKey } });
+    const body = `root = Card([key])\nkey = widget secret ${JSON.stringify({ name: 'DEPLOY_KEY', publicKey: JSON.stringify(keys.publicKey) })}`;
+    await post({ id: 'secret', agent: 's-secret', title: 'The deploy key', priority: 'now', body });
     const ev = listen('s-secret');
     const t = tui();
     const row = await t.waitFor('The deploy key');
     t.click(row.x, row.y);
-    await t.waitFor('[ Send sealed ]');
+    await t.waitFor('[ Send answer ]');
     t.send('\r');
     t.send('sk-test-123');
     await t.waitFor('•••••••••••');
@@ -176,7 +177,7 @@ describe('your-attention tui', () => {
     t.send('\x13');
     const a = await ev.answer();
     assert.ok(a.type === 'answer');
-    assert.equal(await openSealed(keys.privateKey, a.answer.values['sealed'] as Sealed), 'sk-test-123');
+    assert.equal(await openSealed(keys.privateKey, a.answer.values['DEPLOY_KEY'] as Sealed), 'sk-test-123');
     ev.stop();
     await t.stop();
   });

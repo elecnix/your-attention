@@ -8,6 +8,7 @@ import { after, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
 import { serve } from '../../src/node/server.ts';
 import { runTool, type ToolContext } from '../../src/integrations/run-tool.ts';
+import { SecretRequests } from '../../src/integrations/secrets.ts';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-sent-edit-'));
 const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report', blocked: 'a test inbox sends nothing' } });
@@ -43,7 +44,7 @@ describe('revising a sent card', () => {
   });
 
   it('passes the warning to the agent in the tool reply', async () => {
-    const ctx = { inbox: agent, agent: 's1', arrival: 'in this session', origin: async () => undefined } as unknown as ToolContext;
+    const ctx: ToolContext = { inbox: agent, secrets: new SecretRequests(), agent: 's1', arrival: 'in this session', origin: async () => undefined };
     await runTool(ctx, 'card_post', { id: 'c3', title: 'Rename it?' });
     await owner.answer('c3', { comment: 'No.' });
     const reply = await runTool(ctx, 'card_patch', { card_id: 'c3', edits: [{ old: 'Rename', new: 'Really rename' }], field: 'title' });

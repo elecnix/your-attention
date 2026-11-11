@@ -1,8 +1,8 @@
 // The card on screen, drawn as the page draws it: its meta line, where it comes from, the agent's replies, your
 // answer, the title, the text as Markdown, the recommendation, the files, what changed, the form, and the receipt.
 // A recommendation that names an option shows inside that option instead.
-// Each interactive part is a Tab stop. Secret, broadcast and HTML cards get forms in OpenUI Lang too, so one
-// renderer draws every card.
+// Each interactive part is a Tab stop. Broadcast and HTML cards get forms in OpenUI Lang too, so one renderer draws
+// every card.
 import { answerValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, questionRecommendations, recommendedOptions } from '../../web/answers.js';
 import { cardAge } from '../../web/age.js';
 import { CLOSED_LABEL, STATE_LABEL, agentName, presenceOf, type InboxState, type Queue } from '../../web/queue.js';
@@ -30,18 +30,9 @@ export interface CardViewHost {
   now(): number;
 }
 
-/** OpenUI Lang for the cards the page draws with its own components: secret, broadcast and HTML cards. */
+/** OpenUI Lang for the cards the page draws with its own components: broadcast and HTML cards. */
 export function terminalSource(c: Card, cards: CardSummary[], online: string[] = []): string {
   const buttons = (list: [string, string, string][]) => `b = Buttons([${list.map(([label, msg, variant]) => `Button(${J(label)}, @ToAssistant(${J(msg)}), ${J(variant)})`).join(', ')}], "row")`;
-  if (c.kind === 'secret' && c.secret) {
-    return [
-      'root = Card([f])',
-      'f = Form("secret", b, [fv, fc])',
-      `fv = FormControl(${J(c.secret.name)}, Input("value", "", "password"))`,
-      'fc = FormControl("Comment", TextArea("comment", "Anything to add?", 2))',
-      buttons([['Send sealed', 'send sealed', 'primary'], ['Decline', 'decline', 'secondary'], ['Skip for now', 'skip', 'secondary']]),
-    ].join('\n');
-  }
   if (c.broadcast && !c.closed) {
     // The agents online now, from live presence, as the page lists them.
     const agents = online;
@@ -84,6 +75,11 @@ export class CardView {
   readonly store = new FormStore();
   readonly ui = new Map<string, unknown>();
   readonly errors = new Map<string, string>();
+  /** The public key of each secret field on the card, by field name, as the last draw found them. */
+  readonly secrets = new Map<string, string>();
+  /** Every field this view ever drew as a secret. The store keeps what was typed there after a revision drops or
+   * renames the field, and that plain text must never leave, sealed or not. */
+  private readonly everSecret = new Set<string>();
   focus: string | undefined;
   /** Where the focus goes at the first draw, when the card was entered before it had stops. */
   private pendingFocus: 'first' | 'last' | undefined;
@@ -102,6 +98,28 @@ export class CardView {
   answer(): { values: Record<string, unknown>; comment: string } {
     const { values, comment } = formValues(this.store.data);
     return { values: answerValues(this.card, values), comment };
+  }
+
+  /** The answer to send: each secret field sealed with its public key, and an empty one left out. */
+  async sealedAnswer(): Promise<{ values: Record<string, unknown>; comment: string }> {
+    const { values, comment } = this.answer();
+    for (const name of this.everSecret) {
+      const typed = values[name];
+      delete values[name];
+      const key = this.secrets.get(name);
+      if (key !== undefined && typeof typed === 'string' && typed) {
+        const { seal } = await import('../../web/sealed.js');
+        values[name] = await seal(JSON.parse(key) as JsonWebKey, typed);
+      }
+    }
+    return { values, comment };
+  }
+
+  /** What a dismissal records: the answer without the secret fields, which a dismissal never seals. */
+  draft(): { values: Record<string, unknown>; comment: string } {
+    const { values, comment } = this.answer();
+    for (const name of this.everSecret) delete values[name];
+    return { values, comment };
   }
 
   /** The Tab stops, in order. */
@@ -177,6 +195,8 @@ export class CardView {
     const { s: st, g } = theme;
     const doc = new Doc(width);
     this.widgets = new Map();
+    // A revision may drop or rename a secret field, so the draw finds the fields again.
+    this.secrets.clear();
     // Each link with the line its paragraph starts on, so Tab scrolls to the link.
     const links: { t: string; line: number }[] = [];
     const md: MdContext = {
@@ -294,7 +314,7 @@ export class CardView {
       doc.gap();
     }
     const ctx: BodyContext = {
-      theme, md, store: this.store, ui: this.ui, errors: this.errors, focused: this.focus, widgets: this.widgets,
+      theme, md, store: this.store, ui: this.ui, errors: this.errors, focused: this.focus, widgets: this.widgets, secrets: this.secrets,
       address: this.host.address(card.id),
       onAction: (action) => this.host.act(this, action),
       recommended: {
@@ -309,6 +329,7 @@ export class CardView {
     else {
       this.renderer = new BodyRenderer(doc, ctx);
       this.renderer.render(result);
+      for (const name of this.secrets.keys()) this.everSecret.add(name);
       linkStops();
     }
 

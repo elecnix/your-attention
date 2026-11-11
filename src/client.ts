@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError } from './core/inbox.ts';
+import { isSealed } from './core/sealed.ts';
 import type { AgentEvent, Answer, Card, CloseKind, DefaultTags, DefaultTagsWrite, Guidance, NewCard, PublicSubscription, TagCount, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
@@ -423,8 +424,6 @@ export function describeReturned(ev: Extract<AgentEvent, { type: 'returned' }>):
 }
 
 export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]): string {
-  // A sealed secret is never written out: the integration opens it.
-  if (card.kind === 'secret') return answer.comment ? `(a sealed secret)\nComment: ${answer.comment}` : '(a sealed secret)';
   const lines: string[] = [];
   if (card.questions?.length) lines.push(...questionLines(card, answer.values));
   card.approvals?.forEach((a, i) => {
@@ -439,6 +438,8 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
   for (const [k, v] of Object.entries(answer.values)) {
     if (card.questions?.length && /^q\d+(_comment)?$/.test(k)) continue;
     if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;
+    // A sealed secret is never written out: the integration opens it into a file and names the file.
+    if (isSealed(v)) { lines.push(`${k}: (sealed)`); continue; }
     // A check box or switch group answers with each item on or off, by the item names the agent gave.
     const on = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => (v as Record<string, unknown>)[x]) : undefined;
     const label = on ? on.join(', ') || '(none turned on)'

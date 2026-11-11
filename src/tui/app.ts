@@ -28,7 +28,7 @@ export interface TuiOptions {
 }
 
 /** The buttons Ctrl+Enter and Ctrl+S press, in the order the page's cards offer them. */
-const SEND_BUTTONS = ['button:Send answer', 'button:Press it in the session', 'button:Send sealed', 'button:Approve and send'];
+const SEND_BUTTONS = ['button:Send answer', 'button:Press it in the session', 'button:Approve and send'];
 
 export async function runTui(opts: TuiOptions): Promise<number> {
   const found = ownerConfig(opts.env);
@@ -140,27 +140,18 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       return;
     }
     let body: { values: Record<string, unknown>; comment: string; version?: number };
-    if (c.kind === 'secret' && c.secret) {
-      const comment = String(view.store.get('secret', 'comment') ?? '').trim();
-      if (msg === 'decline') body = { values: {}, comment, version: c.version };
-      else {
-        const value = String(view.store.get('secret', 'value') ?? '');
-        if (!value) { view.notice = { text: 'Type the value first, or press Decline.', style: 'warn' }; schedule(); return; }
-        try {
-          const { seal } = await import('../../web/sealed.js');
-          body = { values: { sealed: await seal(c.secret.publicKey, value) }, comment, version: c.version };
-        } catch (e) {
-          view.notice = { text: `The value could not be sealed: ${(e as Error).message}`, style: 'warn' };
-          schedule();
-          return;
-        }
-      }
-    } else if (c.broadcast && !c.closed) {
+    if (c.broadcast && !c.closed) {
       const picked = (view.store.get('broadcast', 'agents') ?? {}) as Record<string, boolean>;
       const comment = String(view.store.get('broadcast', 'comment') ?? '').trim();
       body = { values: { choice: msg === 'approve' ? 'approve' : 'reject', agents: (m.state ? onlineAgents(m.state) : []).filter((a) => picked[a] ?? true) }, comment };
     } else {
-      body = { ...view.answer(), version: c.version };
+      try {
+        body = { ...(await view.sealedAnswer()), version: c.version };
+      } catch (e) {
+        view.notice = { text: `The secret could not be sealed: ${(e as Error).message}`, style: 'warn' };
+        schedule();
+        return;
+      }
     }
     try {
       await api.post(`/v1/cards/${encodeURIComponent(c.id)}/answer`, body);
@@ -194,11 +185,9 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     const c = m.current;
     if (!c || c.closed) return;
     const view = m.view;
-    const draft = c.kind === 'secret'
-      ? { values: {}, comment: String(view?.store.get('secret', 'comment') ?? '').trim() }
-      : view?.card.broadcast
+    const draft = view?.card.broadcast
         ? { values: {}, comment: String(view?.store.get('broadcast', 'comment') ?? '').trim() }
-        : view ? view.answer() : { values: {}, comment: '' };
+        : view ? view.draft() : { values: {}, comment: '' };
     try {
       await api.post(`/v1/cards/${encodeURIComponent(c.id)}/dismiss`, draft);
     } catch (e) {
