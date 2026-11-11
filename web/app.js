@@ -385,7 +385,7 @@ export function App() {
   const terms = searchTerms(query);
   const matches = new Map();
   if (terms.length) for (const c of state.cards) { const m = matchCard(terms, c, details.get(c)); if (m) matches.set(c.id, m); }
-  const { checking, pinned: pinnedGroups, outbox, sent, groups, order, hidden } = terms.length
+  const { checking, pinned: pinnedGroups, outbox, sent, groups, order } = terms.length
     ? buildQueue({ ...state, cards: state.cards.filter((c) => matches.has(c.id)) }, groupBy, tagPins, collapsedGroups)
     : all;
   const visible = state.cards;
@@ -396,7 +396,8 @@ export function App() {
   if (icon && icon.getAttribute('href') !== iconHref) icon.setAttribute('href', iconHref);
   const pinned = pending.find((c) => c.id === pinnedRef.current);
   // A card in a collapsed group stays out of sight until the person picks it, so the queue opens a group's first card only.
-  const firstInSight = (cards) => cards.find((c) => !hidden.has(c.id));
+  // The groups the person collapsed decide this, so the whole inbox's hidden set applies, never the search's.
+  const firstInSight = (cards) => cards.find((c) => !all.hidden.has(c.id));
   const lastVisit = firstInSight(pending.filter((c) => c.id === lastVisitRef.current));
   const shown = cleared ? null : byId[focus] || pinned || lastVisit || firstInSight(pending) || null;
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
@@ -520,7 +521,7 @@ export function App() {
   let main;
   if (!current) {
     // Every waiting card can sit out of sight in a collapsed group, so the pane says that instead of reporting an empty inbox.
-    const allHidden = pending.length > 0 && pending.every((c) => hidden.has(c.id));
+    const allHidden = pending.length > 0 && pending.every((c) => all.hidden.has(c.id));
     main = h('div', { className: 'focus-card done' },
       cleared && pending.length ? 'No card selected. Pick a card from the list.'
         : allHidden ? 'Every waiting card is in a collapsed group. Open the group in the list to see its cards.'

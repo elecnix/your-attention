@@ -67,4 +67,9 @@ describe('highlight', () => {
     assert.deepEqual(highlightParts('plain', []), [{ text: 'plain', hit: false }]);
     assert.deepEqual(highlightParts('plain', ['zzz']), [{ text: 'plain', hit: false }]);
   });
+  it('marks the right characters after a letter whose lowercase is longer', () => {
+    assert.deepEqual(highlightParts('İstanbul Fix', ['fix']), [{ text: 'İstanbul ', hit: false }, { text: 'Fix', hit: true }]);
+    const hit = find('office', card({ text: 'İstanbul office' }))?.snippet;
+    assert.equal(hit?.hit, 'office');
+  });
 });

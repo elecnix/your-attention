@@ -104,3 +104,20 @@ test('Escape clears the field and returns focus to where it was', async ({ page 
   await expect(comment).toHaveValue('half a thought');
   expect((await titles(page)).length).toBe(4);
 });
+
+test('a search keeps saying so when every waiting card sits in a collapsed group', async ({ page }) => {
+  const own = await startInbox();
+  try {
+    await own.agent.post({ id: 'cg-a', agent: 's-cg', title: 'Urgent alpha question', priority: 'now' });
+    await own.agent.post({ id: 'cg-b', agent: 's-cg', title: 'Calm bravo question', priority: 'soon' });
+    await own.open(page);
+    await page.locator('.queue h3 .fold', { hasText: /waiting for you/i }).click();
+    // A fresh visit with nothing open: the collapsed groups hide every waiting card.
+    await page.goto('about:blank');
+    await page.goto(own.server.url);
+    await expect(page.locator('.focus-card')).toContainText('Every waiting card is in a collapsed group');
+    await search(page).fill('bravo');
+    await expect(page.locator('.queue [role=status]')).toHaveText('1 card matches');
+    await expect(page.locator('.focus-card')).toContainText('Every waiting card is in a collapsed group');
+  } finally { await own.close(); }
+});

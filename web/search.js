@@ -2,8 +2,12 @@
 // whole card and answer where the page has fetched them. It never asks the inbox for anything. Matching is case-insensitive
 // substring, and a card matches when every word of the query is somewhere in it.
 
+// Lowercase a text without changing its length, so a position found in the folded text is the same position in the original.
+// A letter whose lowercase is longer, such as İ, stays as it is.
+const fold = (text) => Array.from(String(text), (ch) => { const l = ch.toLowerCase(); return l.length === ch.length ? l : ch; }).join('');
+
 /** The words of a query: lowercase, split on spaces. A blank query has none. */
-export const searchTerms = (query) => String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+export const searchTerms = (query) => fold(query || '').split(/\s+/).filter(Boolean);
 
 const flat = (v) => (Array.isArray(v) ? v.map(flat).join(' ') : typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
 
@@ -32,7 +36,7 @@ function fieldsOf(summary, detail) {
 
 const around = (label, text, term) => {
   const one = text.replace(/\s+/g, ' ');
-  const at = one.toLowerCase().indexOf(term);
+  const at = fold(one).indexOf(term);
   const start = Math.max(0, at - 30);
   const end = at + term.length;
   return { label, before: (start > 0 ? '…' : '') + one.slice(start, at), hit: one.slice(at, end), after: one.slice(end, end + 60) + (end + 60 < one.length ? '…' : '') };
@@ -42,7 +46,7 @@ const around = (label, text, term) => {
 export function matchCard(terms, summary, detail) {
   if (!terms.length) return {};
   const fields = fieldsOf(summary, detail).map(([label, text]) => [label, String(text || '')]);
-  const lower = fields.map(([, text]) => text.toLowerCase());
+  const lower = fields.map(([, text]) => fold(text));
   const all = lower.join('\n');
   if (!terms.every((t) => all.includes(t))) return null;
   if (lower[0].includes(terms[0])) return {};
@@ -54,7 +58,7 @@ export function matchCard(terms, summary, detail) {
 export function highlightParts(text, terms) {
   const t = String(text);
   if (!terms.length) return [{ text: t, hit: false }];
-  const lower = t.toLowerCase();
+  const lower = fold(t);
   const marked = new Array(t.length).fill(false);
   for (const term of terms) for (let at = lower.indexOf(term); at >= 0; at = lower.indexOf(term, at + term.length)) marked.fill(true, at, at + term.length);
   const parts = [];
