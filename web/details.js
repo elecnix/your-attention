@@ -50,7 +50,7 @@ export function linkLookup(load, changed) {
       // Asked once: an id stays pending until the answer, so the next draw asks for nothing again.
       for (const id of ask) found.set(id, undefined);
       Promise.resolve().then(() => load(ask)).then(
-        (cards) => { for (const id of ask) found.set(id, cards[id] ?? null); },
+        (cards) => { for (const id of ask) found.set(id, Object.hasOwn(cards, id) ? cards[id] : null); },
         // A failed request is not asked again until the page reloads, so a broken lookup cannot loop; the links show their ids.
         () => { for (const id of ask) found.set(id, null); },
       ).finally(changed);

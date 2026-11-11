@@ -1444,13 +1444,14 @@ export class Inbox {
    * A cleared card leaves the state but stays stored until the purge, so its links still name it. Ids it never stored are left out. */
   linkedCards(caller: Caller, ids: string[]): Record<string, { title: string; preview?: string; archivedAt?: number }> {
     if (ids.length > MAX_LOOKUP) throw new InboxError(400, `name at most ${MAX_LOOKUP} card ids`);
-    const out: Record<string, { title: string; preview?: string; archivedAt?: number }> = {};
+    const out: [string, { title: string; preview?: string; archivedAt?: number }][] = [];
     for (const id of ids) {
       const card = this.store.get<Card>('cards', id);
       if (!card || (caller.role !== 'owner' && card.token !== caller.token)) continue;
-      out[id] = { title: card.title, ...(card.text ? { preview: card.text.slice(0, 300) } : {}), ...(card.archivedAt ? { archivedAt: card.archivedAt } : {}) };
+      out.push([id, { title: card.title, ...(card.text ? { preview: card.text.slice(0, 300) } : {}), ...(card.archivedAt ? { archivedAt: card.archivedAt } : {}) }]);
     }
-    return out;
+    // fromEntries makes every id an own key, even one named like an Object property.
+    return Object.fromEntries(out);
   }
 
   private owned(caller: Caller, id: string): Card {

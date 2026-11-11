@@ -18,6 +18,14 @@ describe('the card link lookup', () => {
     assert.equal(lookup.get('b'), null);
   });
 
+  it('reads only the ids the inbox answered, never a name inherited from Object', async () => {
+    const lookup = linkLookup(async () => ({}), () => {});
+    lookup.want(['toString', 'constructor']);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(lookup.get('toString'), null);
+    assert.equal(lookup.get('constructor'), null);
+  });
+
   it('does not ask again after a failed request, however often the page draws', async () => {
     let calls = 0;
     let lookup: ReturnType<typeof linkLookup>;
