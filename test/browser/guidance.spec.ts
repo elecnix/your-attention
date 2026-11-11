@@ -117,3 +117,19 @@ test('one toggle unticks every agent, a newcomer joins unticked, and the toggle 
   await page.getByRole('button', { name: 'Approve and send' }).click();
   await expect.poll(async () => (await inbox.state()).answers[card.id]?.values['agents']).toEqual(['s-b']);
 });
+
+test('unticking every agent by hand also makes a newcomer join unticked', async ({ page }) => {
+  const presence = async () => ((await inbox.state()) as unknown as { presence: Record<string, { online: boolean }> }).presence;
+  ['s-x', 's-y'].map((a) => inbox.listen(a));
+  await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => /^s-[xy]$/.test(a) && p.online).length).toBe(2);
+  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', 's-x');
+  await inbox.open(page);
+  const agents = page.locator('.broadcast .agents');
+  await agents.locator('.agent', { hasText: 's-x' }).locator('input').uncheck();
+  await agents.locator('.agent', { hasText: 's-y' }).locator('input').uncheck();
+  inbox.listen('s-z');
+  await expect(agents.locator('.agent input[type=checkbox]')).toHaveCount(3, { timeout: 10_000 });
+  await expect(agents.locator('.agent input[type=checkbox]:checked')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Approve and send' }).click();
+  await expect.poll(async () => (await inbox.state()).answers[card.id]?.values['agents']).toEqual([]);
+});

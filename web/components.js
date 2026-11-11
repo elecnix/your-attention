@@ -619,6 +619,13 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
   const [flipped, setFlipped] = React.useState(() => new Set());
   const ticked = (a) => allOn !== flipped.has(a);
   const picked = online.filter(ticked);
+  // Ticking or unticking the last agent by hand sets the mode as the All agents box would, so a newcomer joins the same way.
+  const toggle = (a) => {
+    const n = new Set(flipped);
+    n.has(a) ? n.delete(a) : n.add(a);
+    const count = online.filter((x) => allOn !== n.has(x)).length;
+    if (count === 0 || count === online.length) { setAllOn(count > 0); setFlipped(new Set()); } else setFlipped(n);
+  };
   const allRef = React.useRef(null);
   React.useEffect(() => { if (allRef.current) allRef.current.indeterminate = picked.length > 0 && picked.length < online.length; });
   // The comment draft belongs to the card, as on an HTML card.
@@ -668,7 +675,7 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
       online.length > 1 && h('label', { className: 'all' },
         h('input', { type: 'checkbox', ref: allRef, checked: picked.length === online.length, onChange: () => { setAllOn(picked.length < online.length); setFlipped(new Set()); } }), 'All agents'),
       online.map((a) => h('label', { key: a, className: 'agent' },
-        h('input', { type: 'checkbox', checked: ticked(a), onChange: () => setFlipped((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards))),
+        h('input', { type: 'checkbox', checked: ticked(a), onChange: () => toggle(a) }), agentName(a, cards))),
       h('span', { className: 'hint' }, 'Offline agents get the new guidance when they reconnect, or when they call card_guidance.')),
     h('div', { className: 'html-answer' },
       h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: b.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
