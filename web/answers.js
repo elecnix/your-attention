@@ -357,6 +357,8 @@ export function describe(card, a) {
     const label = (f && f.label) || (f && Object.keys(f.choices).length ? '' : k);
     return label ? `${label}: ${shown}` : shown;
   });
+  // A secret card an older inbox stored, answered without a value, declined the request.
+  if (card.kind === 'secret' && card.secret && !isSealedValue(values.sealed)) picks.unshift(`${card.secret.name}: Declined`);
   return [...asked, ...picks, a.comment && (asked.length ? `Comment: ${a.comment}` : a.comment)].filter(Boolean).join('\n') || 'Empty answer';
 }
 

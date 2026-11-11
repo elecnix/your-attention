@@ -34,7 +34,7 @@ export class SecretRequests {
         lines.push(`The person sent ${name} on card ${card.id}, but this session no longer has the key to open it. Ask again: post a new card that places the secret widget.`);
         continue;
       }
-      const file = secretFile(card.agent, name);
+      const file = secretFile(card.agent, card.id, name);
       writePrivate(file, value);
       lines.push(`The person sent ${name} on card ${card.id}. It is in ${file}, which only this user can read. Use it inside a command, such as "$(cat '${file}')", and never print it or write it into the conversation. Delete the file when you no longer need it.`);
     }
@@ -49,7 +49,9 @@ export class SecretRequests {
   }
 }
 
-/** Where the secret `name` for `agent` is written. */
-export function secretFile(agent: string, name: string): string {
-  return path.join(homeDir(), 'secrets', agent.replace(/[^\w.-]/g, '_'), name);
+/** Where the secret `name` from card `card` for `agent` is written. Each card has its own folder, so two cards that
+ * ask for the same name keep two files. */
+export function secretFile(agent: string, card: string, name: string): string {
+  // A card id may hold a colon or be all dots, so its folder takes a prefix and the id percent-encoded.
+  return path.join(homeDir(), 'secrets', agent.replace(/[^\w.-]/g, '_'), `card-${encodeURIComponent(card).replace(/\./g, '%2E')}`, name);
 }

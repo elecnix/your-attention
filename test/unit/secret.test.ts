@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { Inbox, type Caller } from '../../src/core/inbox.ts';
-import { isSealed, newSealKeys, openSealed } from '../../src/core/sealed.ts';
+import { isSealed, newSealKeys, openSealed, secretInputs } from '../../src/core/sealed.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import { describeAnswer } from '../../src/client.ts';
 import { runTool } from '../../src/integrations/run-tool.ts';
@@ -94,6 +94,15 @@ describe('the secret widget', () => {
     assert.equal(patched.text, 'For the staging deploy.');
   });
 
+  it('reads fences as the OpenUI parser does: a fence in a single-quoted string hides the body from both', async () => {
+    const { createParser } = await import('@openuidev/lang-core');
+    const { LIBRARY } = await import('../../src/adapters/openui-library.ts');
+    const keys = await newSealKeys();
+    const body = `root = Card([k, intro])\nk = Form("k", b, [f])\nb = Buttons([])\nf = FormControl("API_KEY", SecretInput("API_KEY", ${JSON.stringify(JSON.stringify(keys.publicKey))}))\nintro = TextContent('see \`\`\` above')`;
+    assert.equal(createParser(LIBRARY as never, 'root').parse(body).root, null, 'the page draws no field from this body');
+    assert.deepEqual(secretInputs(body), []);
+  });
+
   it('reads SecretInput in a string as text, not as a field', () => {
     const inbox = new Inbox(new MemoryStorage());
     const card = inbox.postCard(agent, { agent: 's1', title: 'Docs', body: 'root = Card([t])\nt = TextContent("Write SecretInput(\\"X\\", \\"\\") to ask.")' });
@@ -178,11 +187,33 @@ describe('the integration side of the secret widget', () => {
     const text = await secrets.receive(card, answer);
     assert.doesNotMatch(text, /demo-value-not-real/);
     const file = /It is in (\S+), which/.exec(text)?.[1];
-    assert.equal(file, path.join(home, 'secrets', 's1', 'DEMO_KEY'));
+    assert.equal(file, path.join(home, 'secrets', 's1', 'card-k1', 'DEMO_KEY'));
     assert.equal(fs.readFileSync(String(file), 'utf8'), 'demo-value-not-real');
     if (process.platform !== 'win32') assert.equal(fs.statSync(String(file)).mode & 0o777, 0o600);
     const empty = await inbox.answer('k1', { values: {}, comment: 'Not now.' });
     assert.match(await secrets.receive(card, empty), /did not send DEMO_KEY/);
+  });
+
+  it('writes the same secret name from two cards to two files', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const secrets = new SecretRequests();
+    const ctx = { inbox: client(inbox), secrets, agent: 's2', origin: async () => undefined, arrival: 'later' };
+    const files: string[] = [];
+    for (const [id, value] of [['a1', 'first-not-real'], ['a2', 'second-not-real']] as const) {
+      await runTool(ctx, 'card_post', { id, title: 'Key?', body: 'root = Card([key])\nkey = widget secret {"name": "SAME_KEY"}' });
+      const card = inbox.getCard(id);
+      const publicKey = JSON.parse(JSON.parse(/SecretInput\("SAME_KEY", ("(?:[^"\\]|\\.)*")\)/.exec(card.body ?? '')![1]!));
+      const answer = await inbox.answer(id, { values: { SAME_KEY: await seal(publicKey, value) } });
+      files.push(String(/It is in (\S+), which/.exec(await secrets.receive(card, answer))?.[1]));
+    }
+    assert.notEqual(files[0], files[1]);
+    assert.equal(fs.readFileSync(files[0]!, 'utf8'), 'first-not-real');
+    assert.equal(fs.readFileSync(files[1]!, 'utf8'), 'second-not-real');
+  });
+
+  it('answers a tool name that an object inherits as an unknown tool', async () => {
+    const ctx = { inbox: client(new Inbox(new MemoryStorage())), secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'later' };
+    await assert.rejects(runTool(ctx, 'toString', {}), /^Error: unknown tool toString$/);
   });
 
   it('answers an old card_ask_secret call with the widget that replaces it', async () => {

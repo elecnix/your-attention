@@ -52,7 +52,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
   const { inbox, agent } = ctx;
   // Where the session runs only labels the card, so a failed lookup posts the card without it.
   const origin = (): Promise<Origin | undefined> => ctx.origin().catch(() => undefined);
-  const removed = removedTools[name];
+  const removed = Object.hasOwn(removedTools, name) ? removedTools[name] : undefined;
   if (removed) throw new Error(removed);
   // An argument the tool does not take is a mistake to report, not to drop.
   const known = cardTools.find((t) => t.name === name)?.schema['properties'] as Record<string, unknown> | undefined;

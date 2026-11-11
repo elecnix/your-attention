@@ -193,6 +193,12 @@ describe('the card pane', () => {
     assert.equal(await openSealed(keys.privateKey, sent.values['sealed'] as never), 'abc');
   });
 
+  it('describes a stored secret card answered without a value as declined', () => {
+    const legacy = card({ id: 'old', title: 'Key', kind: 'secret', secret: { name: 'OLD_KEY', publicKey: { kty: 'RSA', n: 'x', e: 'AQAB' } } });
+    assert.equal(describeAnswer(legacy, { values: {}, comment: '' } as never), 'OLD_KEY: Declined');
+    assert.equal(describeAnswer(legacy, { values: { sealed: { alg: 'RSA-OAEP-256+A256GCM', key: 'k', iv: 'i', data: 'd' } }, comment: '' } as never), 'OLD_KEY: Sent sealed');
+  });
+
   it('builds broadcast and HTML cards from forms of its own, and blocked cards from the page source', () => {
     const html = setup(card({ id: 'h', title: 'HTML', html: '<b>x</b>' }));
     assert.match(html.text(), /brings its own HTML[\s\S]*#card=h[\s\S]*\[ Send answer \]/);
