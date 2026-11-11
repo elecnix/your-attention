@@ -87,12 +87,51 @@ test('the card lists only the agents online now, all ticked, out of many that co
   await inbox.open(page);
   const agents = page.locator('.broadcast .agents');
   await expect(agents.locator('legend')).toHaveText('Send to 3 online agents');
-  await expect(agents.locator('input[type=checkbox]')).toHaveCount(3);
-  await expect(agents.locator('input[type=checkbox]:checked')).toHaveCount(3);
+  await expect(agents.locator('.agent input[type=checkbox]')).toHaveCount(3);
+  await expect(agents.locator('.agent input[type=checkbox]:checked')).toHaveCount(3);
   await expect(agents).toContainText('Offline agents get the new guidance when they reconnect, or when they call card_guidance.');
   await expect(agents).not.toContainText('s-gone-');
   online[2]!.stop();
   await expect(agents.locator('legend')).toHaveText('Send to 2 online agents', { timeout: 10_000 });
   await page.getByRole('button', { name: 'Approve and send' }).click();
   await expect.poll(async () => (await inbox.state()).answers[card.id]?.values['agents']).toEqual(['s-on-1', 's-on-2']);
+});
+
+test('one toggle unticks every agent, a newcomer joins unticked, and the toggle shows a partial pick', async ({ page }) => {
+  const presence = async () => ((await inbox.state()) as unknown as { presence: Record<string, { online: boolean }> }).presence;
+  ['s-a', 's-b', 's-c'].map((a) => inbox.listen(a));
+  await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => /^s-[abc]$/.test(a) && p.online).length).toBe(3);
+  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', 's-a');
+  await inbox.open(page);
+  const agents = page.locator('.broadcast .agents');
+  const all = agents.getByRole('checkbox', { name: 'All agents' });
+  await expect(all).toBeChecked();
+  // The box heads the list, heavier than the agent rows under it.
+  expect(Number(await agents.locator('.all').evaluate((e) => getComputedStyle(e).fontWeight))).toBeGreaterThanOrEqual(600);
+  await all.uncheck();
+  await expect(agents.locator('.agent input[type=checkbox]:checked')).toHaveCount(0);
+  // An agent that comes online after the person unticked them all joins unticked too.
+  inbox.listen('s-d');
+  await expect(agents.locator('.agent input[type=checkbox]')).toHaveCount(4, { timeout: 10_000 });
+  await expect(agents.locator('.agent input[type=checkbox]:checked')).toHaveCount(0);
+  await agents.locator('.agent', { hasText: 's-b' }).locator('input').check();
+  expect(await all.evaluate((e) => (e as HTMLInputElement).indeterminate)).toBe(true);
+  await page.getByRole('button', { name: 'Approve and send' }).click();
+  await expect.poll(async () => (await inbox.state()).answers[card.id]?.values['agents']).toEqual(['s-b']);
+});
+
+test('unticking every agent by hand also makes a newcomer join unticked', async ({ page }) => {
+  const presence = async () => ((await inbox.state()) as unknown as { presence: Record<string, { online: boolean }> }).presence;
+  ['s-x', 's-y'].map((a) => inbox.listen(a));
+  await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => /^s-[xy]$/.test(a) && p.online).length).toBe(2);
+  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', 's-x');
+  await inbox.open(page);
+  const agents = page.locator('.broadcast .agents');
+  await agents.locator('.agent', { hasText: 's-x' }).locator('input').uncheck();
+  await agents.locator('.agent', { hasText: 's-y' }).locator('input').uncheck();
+  inbox.listen('s-z');
+  await expect(agents.locator('.agent input[type=checkbox]')).toHaveCount(3, { timeout: 10_000 });
+  await expect(agents.locator('.agent input[type=checkbox]:checked')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Approve and send' }).click();
+  await expect.poll(async () => (await inbox.state()).answers[card.id]?.values['agents']).toEqual([]);
 });
