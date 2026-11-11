@@ -157,6 +157,19 @@ describe('the secret widget', () => {
     assert.deepEqual(ev?.answer.values, { note: 'n' });
   });
 
+  it('sends a changed answer to hooks without the sealed value of the answer before it', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const seen: { hook?: string; answer?: { values: Record<string, unknown>; previous: { values: Record<string, unknown> }[] } }[] = [];
+    inbox.connectExtension({ token: 'te', role: 'extension' }, { name: 'watch', hooks: ['answer.saved'] }, (ev) => seen.push(ev as never));
+    const { keys, body } = await secretBody();
+    inbox.postCard(owner, { id: 'k1', agent: 's1', title: 'Key?', body });
+    await inbox.answer('k1', { values: { API_KEY: await seal(keys.publicKey, 'v'), note: 'first' } });
+    await inbox.answer('k1', { values: { note: 'second' } });
+    const last = seen.filter((e) => e.hook === 'answer.saved').at(-1);
+    assert.deepEqual(last?.answer?.previous.map((p) => p.values), [{ note: 'first' }]);
+    assert.doesNotMatch(JSON.stringify(last?.answer), /A256GCM/);
+  });
+
   it('describes a sealed value to the agent without its ciphertext', async () => {
     const keys = await newSealKeys();
     const sealed = await seal(keys.publicKey, 'v');

@@ -164,10 +164,16 @@ describe('answer webhooks', () => {
 
   it('never makes a second call while one runs, even when the person force-sends the answer', async () => {
     let release: () => void = () => {};
+    let called: () => void = () => {};
+    const firstCall = new Promise<void>((r) => { called = r; });
     const sent: string[] = [];
     let t = 1_000_000;
     const fetcher = (async (_u: string | URL | Request, init?: RequestInit) => {
       sent.push(String(init?.body));
+      // Only the first call waits for release. A second call, the bug this test looks for, answers at once, so the
+      // test fails on the count instead of waiting forever.
+      if (sent.length > 1) return new Response(null, { status: 200 });
+      called();
       await new Promise<void>((r) => { release = r; });
       return new Response(null, { status: 200 });
     }) as typeof fetch;
@@ -177,10 +183,13 @@ describe('answer webhooks', () => {
     await inbox.answer(r.card.id, { values: { choice: 'approve' } });
     inbox.postCard(agent, { id: 'c1', agent: 'cli:deploy', title: 'q' });
     await inbox.answer('c1', {});
-    await new Promise((r) => setImmediate(r));
+    // The call signs its body first, which Web Crypto finishes on another thread, so wait for the call itself.
+    await firstCall;
     t += 1000;
+    const running = new Set(inbox.deliveries);
     inbox.force('c1');
-    await new Promise((r) => setImmediate(r));
+    // The force runs a delivery pass of its own. Once that pass ends, any second call it made has been made.
+    await Promise.all([...inbox.deliveries].filter((p) => !running.has(p)));
     assert.equal(sent.length, 1, 'the running call holds its lease');
     release();
     while (inbox.deliveries.size) await Promise.all([...inbox.deliveries]);

@@ -162,9 +162,11 @@ export function sealedFields(card: Pick<Card, 'kind' | 'secrets'>): string[] {
   return card.secrets ?? (card.kind === 'secret' ? ['sealed'] : []);
 }
 
-/** The answer without its sealed fields, for every reader except the agent stream: hooks and webhooks hold no key. */
+/** The answer without its sealed fields, nor those of the answers before it, for every reader except the agent stream:
+ * hooks and webhooks hold no key. */
 export function withoutSealed(card: Pick<Card, 'kind' | 'secrets'>, answer: Answer): Answer {
   const fields = sealedFields(card);
-  if (!fields.some((f) => f in answer.values)) return answer;
-  return { ...answer, values: Object.fromEntries(Object.entries(answer.values).filter(([k]) => !fields.includes(k))) };
+  if (!fields.length) return answer;
+  const strip = (values: Record<string, unknown>) => Object.fromEntries(Object.entries(values).filter(([k]) => !fields.includes(k)));
+  return { ...answer, values: strip(answer.values), previous: (answer.previous ?? []).map((p) => ({ ...p, values: strip(p.values ?? {}) })) };
 }
