@@ -5,11 +5,11 @@ import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { copyText, installCopy } from './copy.js';
-import { DISMISS, answerValues, approvalPlace, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
+import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
-export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions };
+export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions, secretFieldsOf };
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 // Code on every card copies with a click, on the page and in each story.
@@ -281,11 +281,17 @@ export function DismissButton({ onClick }) {
 // The inbox then stores only ciphertext.
 const SecretScope = React.createContext('');
 const typedSecrets = new Map(); // card id -> Map(field name -> {publicKey, value})
+const sealFailures = new Map(); // card id -> Map(field name -> why it could not be sealed)
+const secretWatchers = new Set();
+const secretsChanged = () => { for (const f of secretWatchers) f(); };
 function SecretInput({ props }) {
   const card = React.useContext(SecretScope);
   const name = String(props.name ?? '');
   const publicKey = String(props.publicKey ?? '');
   const [value, setValue] = React.useState(() => typedSecrets.get(card)?.get(name)?.value ?? '');
+  const [, redraw] = React.useState(0);
+  React.useEffect(() => { const f = () => redraw((n) => n + 1); secretWatchers.add(f); return () => { secretWatchers.delete(f); }; }, []);
+  const failure = sealFailures.get(card)?.get(name);
   // A revision of the card brings a new key: a value typed before it seals with the new one.
   React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.publicKey = publicKey; }, [card, name, publicKey]);
   if (!window.isSecureContext || !crypto.subtle) {
@@ -293,6 +299,7 @@ function SecretInput({ props }) {
   }
   const change = (next) => {
     setValue(next);
+    if (sealFailures.get(card)?.delete(name)) secretsChanged();
     const fields = typedSecrets.get(card) ?? new Map();
     if (next) fields.set(name, { publicKey, value: next });
     else fields.delete(name);
@@ -302,20 +309,37 @@ function SecretInput({ props }) {
     h('span', { className: 'secret-field' },
       h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
       h('input', { type: 'password', name, 'aria-label': name, autoComplete: 'off', spellCheck: false, value, onChange: (e) => change(e.target.value) })),
+    failure && h('div', { className: 'note warn', role: 'alert' }, `${name} could not be sealed, so nothing was sent: ${failure}. Ask the agent to post the card again.`),
     h('span', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the agent gets a file path, never the value.'));
 }
 
-/** The secrets typed on a card, each sealed with the public key its field shows, by field name. */
-export async function sealSecrets(card) {
-  const fields = [...(typedSecrets.get(card) ?? new Map())];
-  if (!fields.length) return {};
-  const { seal } = await import(`${BASE}sealed.js`);
-  return Object.fromEntries(await Promise.all(fields.map(async ([name, f]) => [name, await seal(JSON.parse(f.publicKey), f.value)])));
+/** The secrets typed on a card, each sealed with the public key its field shows, by field name. `names` lists the
+ * card's secret fields now: a value typed in a field that a revision dropped or renamed is forgotten, never sent. It
+ * throws when a value cannot be sealed, and that field says why. */
+export async function sealSecrets(card, names) {
+  const typed = typedSecrets.get(card) ?? new Map();
+  for (const name of [...typed.keys()]) if (!names.includes(name)) typed.delete(name);
+  if (!typed.size) return {};
+  const failed = new Map();
+  const out = {};
+  let seal;
+  try { ({ seal } = await import(`${BASE}sealed.js`)); } catch (e) { for (const name of typed.keys()) failed.set(name, String(e.message || e)); }
+  if (seal) {
+    for (const [name, f] of typed) {
+      try { out[name] = await seal(JSON.parse(f.publicKey), f.value); } catch (e) { failed.set(name, String(e.message || e)); }
+    }
+  }
+  sealFailures.set(card, failed);
+  secretsChanged();
+  if (failed.size) throw new Error(`could not seal ${[...failed.keys()].join(', ')}`);
+  return out;
 }
 
 /** Drop what was typed in a card's secret fields, once the answer went or the card was dismissed. */
 export function forgetSecrets(card) {
   typedSecrets.delete(card);
+  sealFailures.delete(card);
+  secretsChanged();
 }
 
 // How long ago the agent sent the card, roughly. It moves on at each turn of the clock's minute.

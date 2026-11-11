@@ -1519,6 +1519,7 @@ export class Inbox {
     const delivery = input.delivery ?? 'default';
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
     const values = input.values && typeof input.values === 'object' ? { ...input.values } : {};
+    if (input.images !== undefined && !Array.isArray(input.images)) throw new InboxError(400, 'images must be a list');
     // A secret field takes only a sealed value, so plain text never reaches storage. An empty one declines.
     for (const field of sealedFields(posted)) {
       // An own property only: a field named like an inherited one, such as constructor, is empty when the answer leaves it out.

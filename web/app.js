@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, forgetSecrets, sealSecrets, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup } from './details.js';
 
@@ -427,7 +427,10 @@ export function App() {
     const { values: picked, comment } = formValues(ev.formState);
     if (ev.humanFriendlyMessage === 'dismiss') return dismiss(c, answerValues(c, picked), comment);
     if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
-    const values = { ...answerValues(c, picked), ...(await sealSecrets(c.id)), ...approvalValues(c, picksOf(c)) };
+    let sealed;
+    // A secret that cannot be sealed stops the answer, and its field says why: the person typed it to send it.
+    try { sealed = await sealSecrets(c.id, secretFieldsOf(c)); } catch { return; }
+    const values = { ...answerValues(c, picked), ...sealed, ...approvalValues(c, picksOf(c)) };
     const images = pastedImages.payload(c.id);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
     clearPasted(c.id);

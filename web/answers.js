@@ -332,6 +332,10 @@ export function formValues(formState) {
   return { values, comment };
 }
 
+/** The fields of a card that take only a sealed value, as the inbox's sealedFields reads them: the card's `secrets`, or
+ * `sealed` on a secret card that an older inbox stored. */
+export const secretFieldsOf = (c) => c.secrets ?? (c.kind === 'secret' && c.secret ? ['sealed'] : []);
+
 /** Whether an answer value is a secret the page sealed. */
 const isSealedValue = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.alg === 'string' && typeof v.data === 'string';
 

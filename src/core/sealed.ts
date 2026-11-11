@@ -151,7 +151,7 @@ export function secretInputs(body: string): string[] {
     let jwk: Record<string, unknown>;
     try { jwk = JSON.parse(key) as Record<string, unknown>; } catch { throw new InboxError(400, `secret ${name}: the public key must be an RSA key as JSON Web Key text`); }
     if (!jwk || typeof jwk !== 'object' || jwk['kty'] !== 'RSA' || typeof jwk['n'] !== 'string' || typeof jwk['e'] !== 'string') throw new InboxError(400, `secret ${name}: the public key must be an RSA key as JSON Web Key text`);
-    if (PRIVATE_MEMBERS.some((k) => k in jwk)) throw new InboxError(400, `secret ${name}: the key is a private key. The private key never leaves the agent's session: place only the public key`);
+    if (PRIVATE_MEMBERS.some((k) => Object.hasOwn(jwk, k))) throw new InboxError(400, `secret ${name}: the key is a private key. The private key never leaves the agent's session: place only the public key`);
     names.push(name);
   }
   return names;

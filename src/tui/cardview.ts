@@ -77,6 +77,9 @@ export class CardView {
   readonly errors = new Map<string, string>();
   /** The public key of each secret field on the card, by field name, as the last draw found them. */
   readonly secrets = new Map<string, string>();
+  /** Every field this view ever drew as a secret. The store keeps what was typed there after a revision drops or
+   * renames the field, and that plain text must never leave, sealed or not. */
+  private readonly everSecret = new Set<string>();
   focus: string | undefined;
   /** Where the focus goes at the first draw, when the card was entered before it had stops. */
   private pendingFocus: 'first' | 'last' | undefined;
@@ -100,10 +103,11 @@ export class CardView {
   /** The answer to send: each secret field sealed with its public key, and an empty one left out. */
   async sealedAnswer(): Promise<{ values: Record<string, unknown>; comment: string }> {
     const { values, comment } = this.answer();
-    for (const [name, key] of this.secrets) {
+    for (const name of this.everSecret) {
       const typed = values[name];
       delete values[name];
-      if (typeof typed === 'string' && typed) {
+      const key = this.secrets.get(name);
+      if (key !== undefined && typeof typed === 'string' && typed) {
         const { seal } = await import('../../web/sealed.js');
         values[name] = await seal(JSON.parse(key) as JsonWebKey, typed);
       }
@@ -114,7 +118,7 @@ export class CardView {
   /** What a dismissal records: the answer without the secret fields, which a dismissal never seals. */
   draft(): { values: Record<string, unknown>; comment: string } {
     const { values, comment } = this.answer();
-    for (const name of this.secrets.keys()) delete values[name];
+    for (const name of this.everSecret) delete values[name];
     return { values, comment };
   }
 
@@ -191,6 +195,8 @@ export class CardView {
     const { s: st, g } = theme;
     const doc = new Doc(width);
     this.widgets = new Map();
+    // A revision may drop or rename a secret field, so the draw finds the fields again.
+    this.secrets.clear();
     // Each link with the line its paragraph starts on, so Tab scrolls to the link.
     const links: { t: string; line: number }[] = [];
     const md: MdContext = {
@@ -323,6 +329,7 @@ export class CardView {
     else {
       this.renderer = new BodyRenderer(doc, ctx);
       this.renderer.render(result);
+      for (const name of this.secrets.keys()) this.everSecret.add(name);
       linkStops();
     }
 

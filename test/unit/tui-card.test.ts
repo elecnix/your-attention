@@ -193,6 +193,20 @@ describe('the card pane', () => {
     assert.equal(await openSealed(keys.privateKey, sent.values['sealed'] as never), 'abc');
   });
 
+  it('neither seals nor sends a value typed in a secret field that a revision dropped or renamed', async () => {
+    const keys = await newSealKeys();
+    const k = JSON.stringify(JSON.stringify(keys.publicKey));
+    const field = (name: string) => `root = Card([key])\nkey = Form("f", kb, [kf])\nkb = Buttons([])\nkf = FormControl("${name}", SecretInput("${name}", ${k}))`;
+    const t = setup(card({ id: 'rev', title: 'Key', body: field('TOKEN'), secrets: ['TOKEN'] }));
+    t.focus('field:f/TOKEN'); t.type('typed-before-revision');
+    t.view.card = card({ id: 'rev', title: 'Key', version: 2, body: field('TOKEN2'), secrets: ['TOKEN2'] });
+    t.build();
+    const sent = await t.view.sealedAnswer();
+    assert.deepEqual(Object.keys(sent.values), []);
+    assert.doesNotMatch(JSON.stringify(sent), /typed-before-revision/);
+    assert.doesNotMatch(JSON.stringify(t.view.draft()), /typed-before-revision/);
+  });
+
   it('describes a stored secret card answered without a value as declined', () => {
     const legacy = card({ id: 'old', title: 'Key', kind: 'secret', secret: { name: 'OLD_KEY', publicKey: { kty: 'RSA', n: 'x', e: 'AQAB' } } });
     assert.equal(describeAnswer(legacy, { values: {}, comment: '' } as never), 'OLD_KEY: Declined');

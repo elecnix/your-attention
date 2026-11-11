@@ -97,6 +97,38 @@ test('a dismissed card shows its secret field empty when reopened, since the val
   await expect(page.getByLabel('DISMISS_TOKEN')).toHaveValue('');
 });
 
+test('a secret that cannot be sealed sends nothing, and the field says why', async ({ page }) => {
+  // The inbox takes this key, an RSA key in form, but its modulus is no number Web Crypto imports.
+  const bad = JSON.stringify(JSON.stringify({ kty: 'RSA', n: 'x', e: 'AQAB' }));
+  await inbox.agent.post({ agent: 's-secret-bad', title: 'Key with a bad public key', priority: 'now', body: `root = Card([k])\nk = Form("k", kb, [kf])\nkb = Buttons([])\nkf = FormControl("BAD_KEY", SecretInput("BAD_KEY", ${bad}))` });
+  const heard = inbox.listen('s-secret-bad');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Key with a bad public key' }).click();
+  await page.getByLabel('BAD_KEY').fill('never-sent');
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect(page.getByRole('alert')).toContainText('BAD_KEY could not be sealed');
+  await page.waitForTimeout(500);
+  expect(heard.events.filter((e) => e.type === 'answer')).toEqual([]);
+});
+
+test('a secret typed in a field that a revision renamed is neither sealed nor sent', async ({ page }) => {
+  const secrets = new SecretRequests();
+  const id = await askSecret(secrets, { agent: 's-secret-rename', name: 'TOKEN', title: 'Token that gets renamed', priority: 'now' });
+  const heard = inbox.listen('s-secret-rename');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Token that gets renamed' }).click();
+  await page.getByLabel('TOKEN', { exact: true }).fill('typed-under-the-old-name');
+  const sealing = await secrets.prepare('root = Card([key])\nkey = widget secret {"name": "TOKEN2"}');
+  await inbox.agent.post({ id, agent: 's-secret-rename', title: 'Token that gets renamed', priority: 'now', body: sealing.body });
+  sealing.keep(id);
+  await expect(page.getByLabel('TOKEN2', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(() => heard.events.find((e) => e.type === 'answer')).toBeTruthy();
+  const ev = heard.events.find((e) => e.type === 'answer');
+  if (ev?.type !== 'answer') throw new Error('no answer');
+  expect(Object.keys(ev.answer.values)).toEqual([]);
+});
+
 test('a secret field sits beside the other questions of a card', async ({ page }) => {
   const secrets = new SecretRequests();
   const sealing = await secrets.prepare([

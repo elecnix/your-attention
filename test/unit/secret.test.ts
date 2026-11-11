@@ -138,6 +138,13 @@ describe('the secret widget', () => {
     assert.equal(Object.hasOwn(a.values, 'constructor'), false);
   });
 
+  it('answers 400 to images that are not a list on a card with a secret field', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const { body } = await secretBody();
+    inbox.postCard(agent, { id: 'k3', agent: 's1', title: 'Key?', body });
+    await assert.rejects(inbox.answer('k3', { values: {}, images: {} as never }), (e: Error & { status?: number }) => e.status === 400 && /images must be a list/.test(e.message));
+  });
+
   it('keeps a secret field out of a dismissal\'s draft', async () => {
     const inbox = new Inbox(new MemoryStorage());
     const { body } = await secretBody();
@@ -205,6 +212,27 @@ describe('the integration side of the secret widget', () => {
     if (process.platform !== 'win32') assert.equal(fs.statSync(String(file)).mode & 0o777, 0o600);
     const empty = await inbox.answer('k1', { values: {}, comment: 'Not now.' });
     assert.match(await secrets.receive(card, empty), /did not send DEMO_KEY/);
+  });
+
+  it('tells the model when it cannot write the file, and never throws, so the answer stream goes on', async () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const secrets = new SecretRequests();
+    const ctx = { inbox: client(inbox), secrets, agent: 's3', origin: async () => undefined, arrival: 'later' };
+    await runTool(ctx, 'card_post', { id: 'w1', title: 'Key?', body: 'root = Card([key])\nkey = widget secret {"name": "W_KEY"}' });
+    const card = inbox.getCard('w1');
+    const publicKey = JSON.parse(JSON.parse(/SecretInput\("W_KEY", ("(?:[^"\\]|\\.)*")\)/.exec(card.body ?? '')![1]!));
+    const answer = await inbox.answer('w1', { values: { W_KEY: await seal(publicKey, 'unwritable-not-real') } });
+    // A home under a plain file: making the secrets folder fails.
+    const blocker = path.join(home, 'blocker');
+    fs.writeFileSync(blocker, '');
+    process.env['YOUR_ATTENTION_HOME'] = path.join(blocker, 'home');
+    try {
+      const text = await secrets.receive(card, answer);
+      assert.match(text, /The person sent W_KEY on card w1, but this session could not write it to a file: /);
+      assert.doesNotMatch(text, /unwritable-not-real/);
+    } finally {
+      process.env['YOUR_ATTENTION_HOME'] = home;
+    }
   });
 
   it('writes the same secret name from two cards to two files', async () => {

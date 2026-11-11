@@ -21,7 +21,8 @@ export class SecretRequests {
     return { ...filled, keep: (id) => this.keys.set(id, [privateKey, ...(this.keys.get(id) ?? [])].slice(0, 10)) };
   }
 
-  /** The lines for the model about each secret field of the card. They never contain a value. Empty for a card with none. */
+  /** The lines for the model about each secret field of the card. They never contain a value. Empty for a card with
+   * none. It never throws, since it runs inside the answer stream, and a failure there would stop the stream. */
   async receive(card: Card, answer: Answer): Promise<string> {
     const lines: string[] = [];
     for (const field of sealedFields(card)) {
@@ -35,7 +36,12 @@ export class SecretRequests {
         continue;
       }
       const file = secretFile(card.agent, card.id, name);
-      writePrivate(file, value);
+      try {
+        writePrivate(file, value);
+      } catch (e) {
+        lines.push(`The person sent ${name} on card ${card.id}, but this session could not write it to a file: ${(e as Error).message}. Ask again: post a new card that places the secret widget.`);
+        continue;
+      }
       lines.push(`The person sent ${name} on card ${card.id}. It is in ${file}, which only this user can read. Use it inside a command, such as "$(cat '${file}')", and never print it or write it into the conversation. Delete the file when you no longer need it.`);
     }
     return lines.join('\n');
