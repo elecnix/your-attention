@@ -613,7 +613,14 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
   // The agents online now, from live presence, every one ticked until the person unticks it: an agent that comes
   // online while the card is open joins ticked, and one that leaves drops off the list.
   const online = Object.values(presence).filter((p) => p.online && p.agent !== 'system').map((p) => p.agent).sort();
-  const [unticked, setUnticked] = React.useState(() => new Set());
+  // `flipped` holds the exceptions to `allOn`: the unticked agents while every agent starts ticked, and the ticked
+  // ones once the person has unticked them all, so an agent that comes online after that joins unticked.
+  const [allOn, setAllOn] = React.useState(true);
+  const [flipped, setFlipped] = React.useState(() => new Set());
+  const ticked = (a) => allOn !== flipped.has(a);
+  const picked = online.filter(ticked);
+  const allRef = React.useRef(null);
+  React.useEffect(() => { if (allRef.current) allRef.current.indeterminate = picked.length > 0 && picked.length < online.length; });
   // The comment draft belongs to the card, as on an HTML card.
   const draftKey = `draft:${card.id}:comment`;
   const [comment, setComment] = React.useState(() => store.get(draftKey) || '');
@@ -628,7 +635,7 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
   async function send(choice) {
     setError(null);
     try {
-      const res = await api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: online.filter((a) => !unticked.has(a)) }, comment: comment.trim() });
+      const res = await api(`${BASE}v1/cards/${card.id}/answer`, { values: { choice, agents: picked }, comment: comment.trim() });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.status);
       store.del(draftKey);
       onDone();
@@ -658,8 +665,10 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
     same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
     h('fieldset', { className: 'agents' },
       h('legend', null, `Send to ${online.length} online agent${online.length === 1 ? '' : 's'}`),
-      online.map((a) => h('label', { key: a },
-        h('input', { type: 'checkbox', checked: !unticked.has(a), onChange: () => setUnticked((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards))),
+      online.length > 1 && h('label', { className: 'all' },
+        h('input', { type: 'checkbox', ref: allRef, checked: picked.length === online.length, onChange: () => { setAllOn(picked.length < online.length); setFlipped(new Set()); } }), 'All agents'),
+      online.map((a) => h('label', { key: a, className: 'agent' },
+        h('input', { type: 'checkbox', checked: ticked(a), onChange: () => setFlipped((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; }) }), agentName(a, cards))),
       h('span', { className: 'hint' }, 'Offline agents get the new guidance when they reconnect, or when they call card_guidance.')),
     h('div', { className: 'html-answer' },
       h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: b.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
