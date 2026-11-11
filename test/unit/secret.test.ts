@@ -103,6 +103,17 @@ describe('the secret widget', () => {
     assert.deepEqual(secretInputs(body), []);
   });
 
+  it('reads a one-line fenced body as the OpenUI parser does: as empty, so neither draws a field', async () => {
+    const { createParser } = await import('@openuidev/lang-core');
+    const { LIBRARY } = await import('../../src/adapters/openui-library.ts');
+    const keys = await newSealKeys();
+    const body = `\`\`\`root = Card([Form("f", Buttons([]), [FormControl("A", SecretInput('A', ${JSON.stringify(JSON.stringify(keys.publicKey))}))])])`;
+    assert.equal(createParser(LIBRARY as never, 'root').parse(body).root, null, 'the page draws no field from this body');
+    assert.deepEqual(secretInputs(body), []);
+    assert.deepEqual(secretInputs(body.slice(3)), ['A'], 'without the fence, both read the field');
+    assert.notEqual(createParser(LIBRARY as never, 'root').parse(body.slice(3)).root, null);
+  });
+
   it('reads SecretInput in a string as text, not as a field', () => {
     const inbox = new Inbox(new MemoryStorage());
     const card = inbox.postCard(agent, { agent: 's1', title: 'Docs', body: 'root = Card([t])\nt = TextContent("Write SecretInput(\\"X\\", \\"\\") to ask.")' });

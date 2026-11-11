@@ -71,13 +71,8 @@ function fencedCode(input: string): string {
     blocks.push(input.slice(j, close === -1 ? undefined : close));
     i = close === -1 ? input.length : close + 3;
   }
-  if (blocks.length) return blocks.join('\n');
-  if (input.startsWith('```')) {
-    const body = input.slice(input.includes('\n') ? input.indexOf('\n') + 1 : 3);
-    const end = body.lastIndexOf('```');
-    return end === -1 ? body : body.slice(0, end);
-  }
-  return input;
+  // A body that starts with a fence always adds a block above, so lang-core's branch for that case never runs here.
+  return blocks.length ? blocks.join('\n') : input;
 }
 function withoutComments(input: string): string {
   let quote: string | false = false;
