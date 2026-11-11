@@ -6,6 +6,7 @@ import { clearPasted, installPaste, pastedImages } from './paste-images.js';
 import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup } from './details.js';
+import { highlightParts, matchCard, searchTerms } from './search.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -26,6 +27,11 @@ export function App() {
   linkedRef.current ??= linkLookup((ids) => fetch(`${BASE}v1/cards?ids=${ids.map(encodeURIComponent).join(',')}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`the inbox answered ${r.status}`)))).then((r) => r.cards), () => setLoaded((n) => n + 1));
   const linked = linkedRef.current;
   const [auth, setAuth] = React.useState('checking');
+  // The search field filters the queue in the browser, so it never asks the inbox for anything. Command+K (Control+K off a Mac) focuses it.
+  const [query, setQuery] = React.useState('');
+  const searchRef = React.useRef(null);
+  // Where focus was before the shortcut moved it, so Escape can give it back.
+  const beforeSearchRef = React.useRef(null);
   const [up, setUp] = React.useState(false);
   // When the last state request answered. The pill calls the inbox reconnecting while this stays fresh, and
   // unreachable only once even the plain requests stop arriving.
@@ -171,6 +177,22 @@ export function App() {
       if (!send) return;
       e.preventDefault();
       send.click();
+    };
+    document.addEventListener('keydown', key, true);
+    return () => document.removeEventListener('keydown', key, true);
+  }, []);
+
+  // Command+K on a Mac, Control+K elsewhere, focuses the search field from anywhere on the page, a field of the card included.
+  // The other modifier is left alone: Control+K on a Mac deletes to the end of the line in a text field.
+  React.useEffect(() => {
+    const key = (e) => {
+      if (e.key.toLowerCase() !== 'k' || (IS_MAC ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.isComposing) return;
+      const field = searchRef.current;
+      if (!field) return;
+      e.preventDefault();
+      if (document.activeElement !== field) beforeSearchRef.current = document.activeElement;
+      field.focus();
+      field.select();
     };
     document.addEventListener('keydown', key, true);
     return () => document.removeEventListener('keydown', key, true);
@@ -356,7 +378,16 @@ export function App() {
   if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
-  const { byId, st, levelOf, label, waiting, pending, checking, pinned: pinnedGroups, outbox, sent, tagKeys, dealt, groups, order, hidden } = buildQueue(state, groupBy, tagPins, collapsedGroups);
+  const all = buildQueue(state, groupBy, tagPins, collapsedGroups);
+  const { byId, st, levelOf, label, waiting, pending, tagKeys, dealt } = all;
+  // A search shows the cards that match, from the summaries and from every whole card the page has fetched. The counts that
+  // belong to the whole inbox, such as how many cards Clear removes, still come from the unfiltered queue.
+  const terms = searchTerms(query);
+  const matches = new Map();
+  if (terms.length) for (const c of state.cards) { const m = matchCard(terms, c, details.get(c)); if (m) matches.set(c.id, m); }
+  const { checking, pinned: pinnedGroups, outbox, sent, groups, order } = terms.length
+    ? buildQueue({ ...state, cards: state.cards.filter((c) => matches.has(c.id)) }, groupBy, tagPins, collapsedGroups)
+    : all;
   const visible = state.cards;
   const levels = state.levels || [];
   // The tab icon gets a red dot while a card waits for you.
@@ -365,7 +396,8 @@ export function App() {
   if (icon && icon.getAttribute('href') !== iconHref) icon.setAttribute('href', iconHref);
   const pinned = pending.find((c) => c.id === pinnedRef.current);
   // A card in a collapsed group stays out of sight until the person picks it, so the queue opens a group's first card only.
-  const firstInSight = (cards) => cards.find((c) => !hidden.has(c.id));
+  // The groups the person collapsed decide this, so the whole inbox's hidden set applies, never the search's.
+  const firstInSight = (cards) => cards.find((c) => !all.hidden.has(c.id));
   const lastVisit = firstInSight(pending.filter((c) => c.id === lastVisitRef.current));
   const shown = cleared ? null : byId[focus] || pinned || lastVisit || firstInSight(pending) || null;
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
@@ -439,6 +471,8 @@ export function App() {
     answered(c.id);
   }
 
+  // A text with each match of the search drawn as a <mark>.
+  const marked = (text) => (terms.length ? highlightParts(text, terms).map((p, i) => (p.hit ? h('mark', { key: i }, p.text) : p.text)) : text);
   const item = (c, dim) => {
     const s = st(c);
     const prio = h('span', { className: `prio small ${levelOf(c)}` }, label(levelOf(c)));
@@ -448,14 +482,17 @@ export function App() {
     const tip = s === 'closed' ? CLOSED_LABEL[c.closed.kind] : STATE_LABEL[s];
     // A raised hand takes the color of the card's priority level.
     const color = icon === hand ? (levels.find((l) => l.id === levelOf(c)) || {}).color : undefined;
+    const snippet = (matches.get(c.id) || {}).snippet;
     return h('button', { key: c.id, className: `q${current && current.id === c.id ? ' focus' : ''}${dim ? ' dim' : ''}`, onClick: () => open(c.id) },
-      h('span', { className: 't' }, c.title, fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio),
+      h('span', { className: 't' }, h('span', { className: 't-title' }, marked(c.title)), fresh[c.id] && h('span', { className: 'new' }, 'new'), waiting(s) && groupBy !== 'priority' && prio,
+        snippet && h('span', { className: 'snippet' }, h('span', { className: 'snippet-label' }, `${snippet.label}: `), snippet.before, h('mark', null, snippet.hit), snippet.after)),
       h(Icon, { name: icon, tip, cls: `s ${s}`, color }));
   };
   // A group heading is a button: a triangle at the left of its name opens or collapses the group, and a collapsed
   // group keeps its heading and its count while its cards hide.
   const group = (title, items, empty, cls, action, collapseId, key = title) => {
     const shut = !!collapseId && collapsedGroups.has(collapseId);
+    if (terms.length && !items.length) return null;
     return h(React.Fragment, { key },
       h('h3', { className: cls },
         collapseId
@@ -471,6 +508,7 @@ export function App() {
   // A tag key saved as Group by stays on offer after its last card leaves, so the choice still reads.
   const groupTags = groupBy.startsWith('tag:') && !tagKeys.includes(groupBy.slice(4)) ? [...tagKeys, groupBy.slice(4)] : tagKeys;
   const queue = h('nav', { className: 'queue' },
+    terms.length > 0 && h('div', { className: 'search-count', role: 'status' }, matches.size ? `${matches.size} card${matches.size === 1 ? '' : 's'} match${matches.size === 1 ? 'es' : ''}` : 'No card matches'),
     h('label', { className: 'group-by' }, 'Group by ',
       h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); savingGroupBy.current += 1; const mine = savingGroupBy.current; api(`${BASE}v1/settings`, { groupBy: e.target.value }, 'PUT').catch(() => {}).finally(() => { if (savingGroupBy.current === mine) savingGroupBy.current = 0; }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
@@ -488,7 +526,7 @@ export function App() {
   let main;
   if (!current) {
     // Every waiting card can sit out of sight in a collapsed group, so the pane says that instead of reporting an empty inbox.
-    const allHidden = pending.length > 0 && pending.every((c) => hidden.has(c.id));
+    const allHidden = pending.length > 0 && pending.every((c) => all.hidden.has(c.id));
     main = h('div', { className: 'focus-card done' },
       cleared && pending.length ? 'No card selected. Pick a card from the list.'
         : allHidden ? 'Every waiting card is in a collapsed group. Open the group in the list to see its cards.'
@@ -570,6 +608,21 @@ export function App() {
   return h(React.Fragment, null,
     h('div', { className: 'bar' }, h('div', { className: 'bar-inner' },
       h('h1', null, 'Your attention'),
+      h('input', {
+        ref: searchRef, type: 'search', className: 'bar-search', value: query, autoComplete: 'off', spellCheck: false,
+        'aria-label': 'Search cards', 'aria-keyshortcuts': IS_MAC ? 'Meta+K' : 'Control+K',
+        placeholder: IS_MAC ? 'Search  ⌘K' : 'Search  Ctrl+K',
+        onChange: (e) => setQuery(e.target.value),
+        onKeyDown: (e) => {
+          if (e.key !== 'Escape') return;
+          e.preventDefault();
+          e.stopPropagation();
+          setQuery('');
+          const back = beforeSearchRef.current;
+          beforeSearchRef.current = null;
+          if (back && back.isConnected && back !== document.body) back.focus(); else e.currentTarget.blur();
+        },
+      }),
       h(NotifyToggle),
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable')),
       h(DevicesLink),
@@ -594,6 +647,7 @@ export function App() {
 }
 
 const IDLE_RELOAD_MS = 3000;
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 // An inbox at a loopback, private network or .local address runs on a computer, where `your-attention open` signs in.
 const LAPTOP_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|\[f[cd][0-9a-f:]*\]|\[fe80:[0-9a-f:]*\]|[\w-]+\.local)$/i;
 

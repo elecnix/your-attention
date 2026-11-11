@@ -622,6 +622,16 @@ The client never runs an HTML card's scripts. For an HTML card, a chart or anoth
 
 `GET /v1/search?q=<words>` matches each word as a prefix, over card text and answer comments. The laptop build uses SQLite FTS5.
 
+### The search field in the page
+
+The page's bar has a search field that doesn't call the inbox. It reads the card summaries from `GET /v1/state`, and the whole card and answer of every card the page fetched from `GET /v1/cards/<id>`. Typing never fetches a card. An unfetched card matches on its summary alone.
+
+A query splits on spaces. A card matches when every word is a case-insensitive substring of one of its fields. `a.b(` matches those characters, since words have no pattern syntax. The fields are the title, the tags as `key: value`, the session name, the `from` name, the agent id, the status, the text, the recommendation, the options, the questions, the replies, the answer comment and values, and the outcome of a closed card. Before a card's first copy arrives, its text field is the start of the text from the summary.
+
+The queue lists the matching cards in the sections and groups it already has, and drops a section with no match. Above the list, a line counts the matches. Highlights mark a match in the title. A match elsewhere adds one line under the title, with the field's name and the text around the match. Clear still counts every answered or closed card, because it removes all of them. The open card stays on screen when the search hides it from the list, and Skip for now moves through the matching cards.
+
+Command+K on a Mac and Control+K elsewhere focus the field and select its text, from anywhere on the page. The open card's fields keep their text. The other modifier does nothing here, because Control+K deletes to the end of the line in a Mac text field. Escape clears the field and gives focus back. The terminal client has no search field yet.
+
 ## Discovery
 
 On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `v=1`, `id=<inbox id>`, `pair=/v1/pair`. `your-attention serve --no-mdns` turns the advertisement off.
