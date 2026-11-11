@@ -562,7 +562,12 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         // The reply names the tags the card took from the agent's defaults, so the agent knows what it inherited.
         return json({ ...withWarning(publicCard(card)), inheritedTags: inbox.inheritedTags(me, input) }, 201);
       }
-      if (method === 'GET' && !b) return json(inbox.listCards(me));
+      if (method === 'GET' && !b) {
+        // ?ids= looks up the cards a text links to, cleared ones included, in one request.
+        const ids = url.searchParams.get('ids');
+        if (ids !== null) return json({ cards: inbox.linkedCards(me, ids.split(',').filter(Boolean)) });
+        return json(inbox.listCards(me));
+      }
       if (!b) return json({ error: 'not found' }, 404);
       if (method === 'GET' && !c) {
         const card = inbox.getCard(b);

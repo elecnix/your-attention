@@ -9,3 +9,12 @@ export interface CardDetails {
   keep(ids: Set<string>): void;
 }
 export function cardDetails(load: (id: string) => Promise<CardDetail>, changed: () => void): CardDetails;
+
+/** One card from GET /v1/cards?ids=. */
+export interface LinkedCard { title: string; preview?: string; archivedAt?: number }
+export function linkIds(...texts: (string | null | undefined | false)[]): string[];
+export interface LinkLookup {
+  get(id: string): LinkedCard | null | undefined;
+  want(ids: string[]): void;
+}
+export function linkLookup(load: (ids: string[]) => Promise<Record<string, LinkedCard>>, changed: () => void): LinkLookup;

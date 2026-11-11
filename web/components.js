@@ -397,10 +397,16 @@ export function FileChip({ card, path }) {
 // A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
 // With a card id in `files`, a file: link is a chip that opens the file in a new tab, which the laptop inbox serves for that card only.
 // Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
-export function LinkedText({ text, byId, open, diagrams = true, files }) {
+// A link to a card the state leaves out shows what `lookup(id)` finds: a cleared card's title, or the id as plain text.
+export function LinkedText({ text, byId, open, diagrams = true, files, lookup = () => undefined }) {
   const cardLink = (id, key) => {
     const target = byId[id];
-    if (!target) return h('span', { key, className: 'dead-link', title: 'This card is not in the inbox' }, id);
+    if (!target) {
+      const other = lookup(id);
+      if (other && other.archivedAt) return h('span', { key, className: 'cleared-link', title: [`Cleared on ${new Date(other.archivedAt).toLocaleDateString()}`, other.preview].filter(Boolean).join('\n\n') }, other.title);
+      if (other) return h('span', { key, className: 'cleared-link', title: other.preview || other.title }, other.title);
+      return h('span', { key, className: 'unknown-link', title: other === null ? 'The inbox does not store this card' : '' }, id);
+    }
     // The state sends the start of each card's text as its preview.
     const preview = [target.title, target.preview ?? target.text].filter(Boolean).join('\n\n').slice(0, 400);
     return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
