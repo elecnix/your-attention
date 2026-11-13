@@ -84,6 +84,27 @@ test('a card an older inbox stored with no option ids still answers with the lab
   await expect(page.locator('.note.ok')).toContainText('Your answer: Stop');
 });
 
+test('a card stored without ids keeps its label answer when the agent patches it', async ({ page }) => {
+  // The inbox derives an id at post, so drop them the way a card stored before that change has none.
+  await inbox.agent.post({ id: 'patched', agent: 's-patched', title: 'Ship the release?', text: 'The build is green.', options: [{ label: 'Leave it' }, { label: 'Go ahead' }], priority: 'now' });
+  const store = (inbox.server.inbox as unknown as { store: Storage }).store;
+  const card = store.get<Card>('cards', 'patched')!;
+  store.put('cards', 'patched', { ...card, options: [{ label: 'Leave it' }, { label: 'Go ahead' }] });
+  await inbox.open(page);
+  await page.getByText('Go ahead', { exact: true }).click();
+  await page.getByRole('button', { name: 'Send answer' }).click();
+  await expect.poll(async () => (await inbox.state()).answers['patched']?.values).toEqual({ choice: 'Go ahead' });
+  // Open the card by its address, so the page shows it whatever the queue focuses.
+  await page.goto(`${inbox.server.url}/#card=patched`);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('Ship the release?');
+  await expect(page.locator('.note.ok')).toContainText('Your answer: Go ahead');
+  await inbox.agent.patch('patched', [{ old: 'build is', new: 'build is still' }]);
+  await expect.poll(async () => (await inbox.state()).cards.find((c) => c.id === 'patched')?.text).toContain('build is still');
+  // The stored card keeps its options without ids, and the label answer still shows on the card.
+  expect((await inbox.state()).cards.find((c) => c.id === 'patched')?.options?.map((o) => o.id)).toEqual([undefined, undefined]);
+  await expect(page.locator('.note.ok')).toContainText('Your answer: Go ahead');
+});
+
 test('an empty answer is allowed', async ({ page }) => {
   await inbox.agent.post({ id: 'empty', agent: 's-empty', title: 'Anything to add?' });
   await inbox.open(page);
