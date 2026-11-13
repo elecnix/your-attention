@@ -6,9 +6,7 @@ import { Inbox } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
 import { answerValues, describe as summary, optionValue } from '../../web/answers.js';
-import { agent } from './fixture.ts';
-
-const answer = (values: Record<string, unknown>): Answer => ({ card: 'c1', version: 1, values, comment: '', delivery: 'default', savedAt: 1, deliveredAt: null, readAt: null, forcedAt: null, previous: [] });
+import { agent, answered as answer } from './fixture.ts';
 
 const labelOnly = { id: 'c1', kind: 'ask', title: 'Proceed?', options: [{ label: 'Leave it' }, { label: 'Go ahead', recommended: true }] } as unknown as Card;
 

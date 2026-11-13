@@ -33,63 +33,43 @@ test('the person picks an option, adds a comment, and the agent receives both at
   await expect(page.locator('.queue')).toContainText('Outbox');
 });
 
-test('a card whose options carry only a label stores the pick', async ({ page }) => {
-  const heard = inbox.listen('s-labels');
-  await inbox.agent.post({ id: 'labels', agent: 's-labels', title: 'Ship the release?', text: 'The build is green.', recommendation: 'Go ahead.', options: [{ label: 'Leave it' }, { label: 'Go ahead' }], priority: 'now' });
-  await inbox.open(page);
-  await expect(page.locator('.card-title')).toHaveText('Ship the release?');
-  await page.getByText('Leave it', { exact: true }).click();
-  await page.getByRole('button', { name: 'Send answer' }).click();
-  await expect.poll(async () => (await inbox.state()).answers['labels']?.values).toEqual({ choice: 'leave-it' });
-  const ev = heard.events.find((e) => e.type === 'answer');
-  expect(ev?.type === 'answer' && ev.answer.values).toEqual({ choice: 'leave-it' });
-  await expect(page.locator('.queue')).toContainText('Outbox');
-  await page.locator('.q', { hasText: 'Ship the release?' }).click();
-  await expect(page.locator('.note.ok')).toContainText('Your answer: Leave it');
-});
+const store = () => (inbox.server.inbox as unknown as { store: Storage }).store;
 
-test('a card with a recommended option and no ids tags it and stores the pick', async ({ page }) => {
-  await inbox.agent.post({ id: 'recommended', agent: 's-recommended', title: 'Which branch?', text: 'Two branches are ready.', recommendation: 'Go ahead. The build passed.', options: [{ label: 'Stop here' }, { label: 'Go ahead', recommended: true }], priority: 'now' });
-  await inbox.open(page);
-  await expect(page.getByText('Recommended')).toBeVisible();
-  await page.getByText('Go ahead', { exact: true }).click();
-  await page.getByRole('button', { name: 'Send answer' }).click();
-  await expect.poll(async () => (await inbox.state()).answers['recommended']?.values).toEqual({ choice: 'go-ahead' });
-  await page.locator('.q', { hasText: 'Which branch?' }).click();
-  await expect(page.locator('.note.ok')).toContainText('Your answer: Go ahead');
-});
+/** Drop the ids the inbox derives at post, as a card stored before that change has none. */
+function stripOptionIds(id: string): void {
+  const card = store().get<Card>('cards', id)!;
+  store().put('cards', id, { ...card, options: card.options?.map(({ label, description, recommended }) => ({ label, description, recommended })) });
+}
 
-test('a multiple card whose options carry only a label stores every pick', async ({ page }) => {
-  await inbox.agent.post({ id: 'many', agent: 's-many', title: 'Which checks?', text: 'Pick any.', multiple: true, options: [{ label: 'Lint' }, { label: 'Tests' }, { label: 'Docs' }], priority: 'now' });
-  await inbox.open(page);
-  await page.getByText('Lint', { exact: true }).click();
-  await page.getByText('Docs', { exact: true }).click();
-  await page.getByRole('button', { name: 'Send answer' }).click();
-  await expect.poll(async () => (await inbox.state()).answers['many']?.values).toEqual({ choice: ['lint', 'docs'] });
-  await page.locator('.q', { hasText: 'Which checks?' }).click();
-  await expect(page.locator('.note.ok')).toContainText('Your answer: Lint, Docs');
-});
+/** A card whose options carry no ids: what each case picks, what the inbox stores, and the line the card shows. */
+const LABEL_ONLY = [
+  { id: 'labels', title: 'Ship the release?', text: 'The build is green.', recommendation: 'Go ahead.', options: [{ label: 'Leave it' }, { label: 'Go ahead' }], picks: ['Leave it'], stored: { choice: 'leave-it' }, banner: 'Leave it' },
+  { id: 'recommended', title: 'Which branch?', text: 'Two branches are ready.', recommendation: 'Go ahead. The build passed.', options: [{ label: 'Stop here' }, { label: 'Go ahead', recommended: true }], picks: ['Go ahead'], stored: { choice: 'go-ahead' }, banner: 'Go ahead', tagged: true },
+  { id: 'many', title: 'Which checks?', text: 'Pick any.', multiple: true, options: [{ label: 'Lint' }, { label: 'Tests' }, { label: 'Docs' }], picks: ['Lint', 'Docs'], stored: { choice: ['lint', 'docs'] }, banner: 'Lint, Docs' },
+  { id: 'stored', title: 'Keep going?', options: [{ label: 'Stop' }, { label: 'Keep going' }], picks: ['Stop'], stored: { choice: 'Stop' }, banner: 'Stop', stripIds: true },
+];
 
-test('a card an older inbox stored with no option ids still answers with the label', async ({ page }) => {
-  // The inbox assigns an id at post, so drop them the way a card stored before that change has none.
-  await inbox.agent.post({ id: 'stored', agent: 's-stored', title: 'Keep going?', options: [{ label: 'Stop' }, { label: 'Keep going' }], priority: 'now' });
-  const store = (inbox.server.inbox as unknown as { store: Storage }).store;
-  const card = store.get<Card>('cards', 'stored')!;
-  store.put('cards', 'stored', { ...card, options: [{ label: 'Stop' }, { label: 'Keep going' }] });
-  await inbox.open(page);
-  await page.getByText('Stop', { exact: true }).click();
-  await page.getByRole('button', { name: 'Send answer' }).click();
-  await expect.poll(async () => (await inbox.state()).answers['stored']?.values).toEqual({ choice: 'Stop' });
-  await page.locator('.q', { hasText: 'Keep going?' }).click();
-  await expect(page.locator('.note.ok')).toContainText('Your answer: Stop');
-});
+for (const { picks, stored, banner, tagged, stripIds, ...card } of LABEL_ONLY) {
+  test(`a card whose options carry only a label keeps the pick: ${card.id}`, async ({ page }) => {
+    const heard = inbox.listen(`s-${card.id}`);
+    await inbox.agent.post({ ...card, agent: `s-${card.id}`, priority: 'now' });
+    if (stripIds) stripOptionIds(card.id);
+    await inbox.open(page);
+    await expect(page.locator('.card-title')).toHaveText(card.title);
+    if (tagged) await expect(page.getByText('Recommended')).toBeVisible();
+    for (const label of picks) await page.getByText(label, { exact: true }).click();
+    await page.getByRole('button', { name: 'Send answer' }).click();
+    await expect.poll(async () => (await inbox.state()).answers[card.id]?.values).toEqual(stored);
+    const ev = heard.events.find((e) => e.type === 'answer');
+    expect(ev?.type === 'answer' && ev.answer.values).toEqual(stored);
+    await page.goto(`${inbox.server.url}/#card=${card.id}`);
+    await expect(page.locator('.note.ok')).toContainText(`Your answer: ${banner}`);
+  });
+}
 
 test('a card stored without ids keeps its label answer when the agent patches it', async ({ page }) => {
-  // The inbox derives an id at post, so drop them the way a card stored before that change has none.
   await inbox.agent.post({ id: 'patched', agent: 's-patched', title: 'Ship the release?', text: 'The build is green.', options: [{ label: 'Leave it' }, { label: 'Go ahead' }], priority: 'now' });
-  const store = (inbox.server.inbox as unknown as { store: Storage }).store;
-  const card = store.get<Card>('cards', 'patched')!;
-  store.put('cards', 'patched', { ...card, options: [{ label: 'Leave it' }, { label: 'Go ahead' }] });
+  stripOptionIds('patched');
   await inbox.open(page);
   await page.getByText('Go ahead', { exact: true }).click();
   await page.getByRole('button', { name: 'Send answer' }).click();
