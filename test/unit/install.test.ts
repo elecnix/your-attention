@@ -43,7 +43,7 @@ describe('your-attention install', () => {
   });
 
   it('says when this shell cannot see the command, and how to install it', () => {
-    const out = installReport(facts({ self: undefined })).join('\n');
+    const out = installReport(facts({ self: undefined, platform: 'linux' })).join('\n');
     assert.match(out, /^command: not on this PATH$/m, out);
     assert.match(out, /not about the machine/, out);
     assert.ok(out.includes('  brew install elecnix/tap/your-attention'), out);
@@ -52,11 +52,11 @@ describe('your-attention install', () => {
   });
 
   it('offers the source route when brew answers nowhere, and the brew route when it does', () => {
-    const noBrew = installReport(facts({ brew: false })).join('\n');
+    const noBrew = installReport(facts({ brew: false, platform: 'linux' })).join('\n');
     assert.ok(noBrew.includes('  your-attention install --from-source /path/to/your-attention'), noBrew);
     assert.ok(noBrew.includes('brew answers nowhere on this PATH'), noBrew);
     // The same route from a command this shell cannot see is a shell line, since it could not run itself.
-    const missing = installReport(facts({ self: undefined, brew: false })).join('\n');
+    const missing = installReport(facts({ self: undefined, brew: false, platform: 'linux' })).join('\n');
     assert.ok(missing.includes('  cd /path/to/your-attention && npm ci && npm link'), missing);
     const brew = installReport(facts()).join('\n');
     assert.ok(brew.includes('brew install elecnix/tap/your-attention'), brew);
