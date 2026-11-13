@@ -225,8 +225,15 @@ describe('a guidance card', () => {
   const current = 'Lead with the goal.\nGive two options.\nEnd with a recommendation.';
   const proposal = card({
     id: 'g', title: 'Send new card guidance to agents?', agent: 'system', kind: 'system', deliver: 'none',
-    broadcast: { text: 'Lead with the goal.\nGive three options.\nEnd with a recommendation.\nAttach a screenshot.', from: 's1', base: { version: 1, text: current } },
+    broadcast: { text: 'Lead with the goal.\nGive three options.\nEnd with a recommendation.\nAttach a screenshot.', message: 'Three cards in a row shipped without a screenshot.', from: 's1', base: { version: 1, text: current } },
   });
+  it('draws the proposing agent\'s message above the diff', () => {
+    const { text } = draw();
+    const t = text();
+    assert.match(t, /Three cards in a row shipped without a screenshot\./);
+    assert.ok(t.indexOf('Three cards in a row') < t.indexOf('Give three options'), t);
+  });
+
   const draw = (c: Card = proposal, presence: InboxState['presence'] = {}) => {
     const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 600_000 };
     const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence, states: { g: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], guidance: { text: current, version: 1, at: 0 } };

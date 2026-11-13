@@ -1379,9 +1379,17 @@ export class Inbox {
 
   /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. With `by`,
    * the answer and its comment go to the agent that proposed the text, which may acknowledge it or retract the card. */
-  proposeGuidance(text: string, by?: { caller: Caller; agent: string }): Card {
+  proposeGuidance(text: string, message: string, by?: { caller: Caller; agent: string }): Card {
     const clean = String(text ?? '').trim();
     if (!clean) throw new InboxError(400, 'text is required');
+    // The person reads the message to decide, so a proposal without one is refused rather than shown unexplained.
+    const why = String(message ?? '').trim();
+    if (!why) throw new InboxError(400, 'a guidance proposal needs a message: say what changed and why, for the person who approves it');
+    if (why.length > 2000) throw new InboxError(400, 'message must be at most 2000 characters');
+    // The widget catalog reaches agents beside the guidance text, and never inside it: a proposal carries only the text.
+    // Any complete catalog line counts, so a paste that drops the header is refused too.
+    const bullets = this.widgetCatalog().split('\n').slice(1).filter((l) => l.trim());
+    if (bullets.some((l) => clean.includes(l))) throw new InboxError(400, 'the proposal includes the widget catalog, which the inbox adds beside the guidance text and which is not part of it: propose the text without those lines');
     const from = by ? String(by.agent ?? '').trim() : '';
     if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
@@ -1390,7 +1398,7 @@ export class Inbox {
     const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`;
     // The card keeps no list of agents: the page lists the online ones from live presence when it draws the card, and
     // an offline agent reads the new version when it reconnects or calls card_guidance.
-    const broadcast = { text: clean, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
+    const broadcast = { text: clean, message: why, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
     // The stored card has the proposal in its text and in broadcast, and the guidance it starts from, so it is measured
     // whole before anything is stored. The margin covers the card's other fields, which stay under a kilobyte.
     const size = new TextEncoder().encode(JSON.stringify({ text: cardText, broadcast })).length + 2048;

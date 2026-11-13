@@ -133,7 +133,7 @@ describe('the batch of card model tools', () => {
   });
 
   it('tells the session about guidance the person approved', async () => {
-    const proposed = await mcp.callTool({ name: 'card_guidance', arguments: { propose: 'Attach a screenshot to every UI card.' } });
+    const proposed = await mcp.callTool({ name: 'card_guidance', arguments: { propose: 'Attach a screenshot to every UI card.', message: 'Adds the screenshot rule.' } });
     const id = /card (\S+)\./.exec(JSON.stringify(proposed.content))?.[1];
     await h.owner('POST', `/v1/cards/${id}/answer`, { values: { choice: 'approve' } });
     const note = await until(() => notes.find((n) => n.content.includes('Attach a screenshot')));

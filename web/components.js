@@ -694,6 +694,7 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
   }
   return h('div', { className: 'broadcast' },
     h('div', { className: 'field' }, `${b.from ? `${agentName(b.from, cards)} proposes` : 'Proposed'} changes to card guidance version ${current.version}`),
+    b.message && h('p', { className: 'broadcast-message' }, b.message),
     changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
     h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
     same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),

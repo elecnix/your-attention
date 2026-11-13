@@ -138,13 +138,31 @@ describe('priority levels', () => {
 });
 
 describe('guidance', () => {
+  it('refuses a proposal that carries the widget catalog, which reaches agents beside the text', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const catalog = inbox.widgetCatalog();
+    assert.ok(catalog, 'the inbox lists the built-in widgets');
+    assert.throws(() => inbox.proposeGuidance(`Always include a diff.\n\n${catalog}`, 'Says why.'), /widget catalog/);
+    // Without the header line, the bullet list alone is still the catalog.
+    assert.throws(() => inbox.proposeGuidance(`Always include a diff.\n\n${catalog.split('\n').slice(1).join('\n')}`, 'Says why.'), /widget catalog/);
+    assert.ok(inbox.proposeGuidance('Always include a diff.\n\nUse `widget secret` for keys.', 'Says why.'));
+  });
+
+  it('refuses a proposal with no message, and keeps the message on the card', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    assert.throws(() => inbox.proposeGuidance('Always include a diff.', ''), /message/);
+    assert.throws(() => inbox.proposeGuidance('Always include a diff.', '   '), /message/);
+    const card = inbox.proposeGuidance('Always include a diff.', '  Four cards shipped without a diff, so this makes it a rule.  ');
+    assert.equal(card.broadcast?.message, 'Four cards shipped without a diff, so this makes it a rule.');
+  });
+
   it('sends approved guidance to the agents the person picked, and to nobody else', async () => {
     const { inbox, agent } = setup();
     const a: AgentEvent[] = [];
     const b: AgentEvent[] = [];
     inbox.connect(agent, 's1', (e) => a.push(e));
     inbox.connect(agent, 's2', (e) => b.push(e));
-    const card = inbox.proposeGuidance('Always include a diff.');
+    const card = inbox.proposeGuidance('Always include a diff.', 'Adds a rule the last four cards needed.');
     assert.equal(card.broadcast?.agents, undefined, 'the page lists the online agents from live presence');
     assert.equal(inbox.guidance().version, DEFAULT_GUIDANCE_VERSION, 'nothing changes before approval');
     await inbox.answer(card.id, { values: { choice: 'approve', agents: ['s1'] } });
@@ -155,7 +173,7 @@ describe('guidance', () => {
 
   it('leaves guidance as it was when the person rejects it', async () => {
     const { inbox } = setup();
-    const card = inbox.proposeGuidance('Never mind.');
+    const card = inbox.proposeGuidance('Never mind.', 'Adds a rule the last four cards needed.');
     await inbox.answer(card.id, { values: { choice: 'reject' } });
     assert.equal(inbox.guidance().version, DEFAULT_GUIDANCE_VERSION);
     assert.equal(inbox.getCard(card.id).closed?.kind, 'resolved');
@@ -164,7 +182,7 @@ describe('guidance', () => {
   it('records the proposing agent and the guidance the proposal starts from', () => {
     const { inbox, agent } = setup();
     const before = inbox.guidance();
-    const card = inbox.proposeGuidance('Always include a diff.', { caller: agent, agent: 's1' });
+    const card = inbox.proposeGuidance('Always include a diff.', 'Adds a rule the last four cards needed.', { caller: agent, agent: 's1' });
     assert.equal(card.broadcast?.from, 's1');
     assert.deepEqual(card.broadcast?.base, { version: before.version, text: before.text });
     assert.throws(() => inbox.patchCard(agent, card.id, [{ old: 'diff', new: 'table' }]), (e: unknown) => e instanceof InboxError && e.status === 403);
@@ -175,7 +193,7 @@ describe('guidance', () => {
     const { inbox, agent } = setup();
     const heard: AgentEvent[] = [];
     inbox.connect(agent, 's1', (e) => heard.push(e));
-    const card = inbox.proposeGuidance('Always include a diff.', { caller: agent, agent: 's1' });
+    const card = inbox.proposeGuidance('Always include a diff.', 'Adds a rule the last four cards needed.', { caller: agent, agent: 's1' });
     await inbox.answer(card.id, { values: { choice: 'approve', agents: [] }, comment: 'Keep it short next time.' });
     assert.equal(inbox.guidance().text, 'Always include a diff.');
     const ev = heard.find((e) => e.type === 'answer');
@@ -188,7 +206,7 @@ describe('guidance', () => {
 
   it('delivers a rejection and its comment to a proposing agent that connects later', async () => {
     const { inbox, agent } = setup();
-    const card = inbox.proposeGuidance('Never mind.', { caller: agent, agent: 's1' });
+    const card = inbox.proposeGuidance('Never mind.', 'Adds a rule the last four cards needed.', { caller: agent, agent: 's1' });
     await inbox.answer(card.id, { values: { choice: 'reject' }, comment: 'Too vague.' });
     const heard: AgentEvent[] = [];
     inbox.connect(agent, 's1', (e) => heard.push(e));
@@ -200,7 +218,7 @@ describe('guidance', () => {
 
   it('lists a guidance answer for an offline proposer in dead letters, and a successor session claims it', async () => {
     const { inbox, agent } = setup();
-    const card = inbox.proposeGuidance('Never mind.', { caller: agent, agent: 's1' });
+    const card = inbox.proposeGuidance('Never mind.', 'Adds a rule the last four cards needed.', { caller: agent, agent: 's1' });
     await inbox.answer(card.id, { values: { choice: 'reject' }, comment: 'Too vague.' });
     assert.deepEqual(inbox.deadLetters().map((d) => d.card.id), [card.id]);
     const heard: AgentEvent[] = [];
@@ -222,7 +240,7 @@ describe('guidance', () => {
     inbox.sweep();
     const heard: Record<string, AgentEvent[]> = { s1: [], s2: [], s3: [] };
     for (const a of ['s1', 's2', 's3']) inbox.connect(agent, a, (e) => heard[a]!.push(e));
-    const card = inbox.proposeGuidance('Always include a diff.', { caller: agent, agent: 's1' });
+    const card = inbox.proposeGuidance('Always include a diff.', 'Adds a rule the last four cards needed.', { caller: agent, agent: 's1' });
     assert.equal(inbox.getCard(card.id).broadcast?.agents, undefined, 'the stored card keeps no list of agents');
     await inbox.answer(card.id, { values: { choice: 'approve', agents: ['s1', 's2', 'gone-0'] } });
     assert.deepEqual(Object.entries(heard).map(([a, evs]) => [a, evs.filter((e) => e.type === 'guidance').length]), [['s1', 1], ['s2', 1], ['s3', 0]]);
@@ -232,7 +250,7 @@ describe('guidance', () => {
   it('sends approved guidance to every connected agent when the answer names none', async () => {
     const { inbox, agent } = setup();
     const heard: AgentEvent[] = [];
-    const card = inbox.proposeGuidance('Always include a diff.');
+    const card = inbox.proposeGuidance('Always include a diff.', 'Adds a rule the last four cards needed.');
     inbox.connect(agent, 'late', (e) => heard.push(e));
     await inbox.answer(card.id, { values: { choice: 'approve' } });
     assert.equal(heard.filter((e) => e.type === 'guidance').length, 1);
@@ -241,15 +259,15 @@ describe('guidance', () => {
   it('refuses a proposal whose card would pass the card size limit, and stores nothing', () => {
     const { inbox, agent } = setup();
     const before = inbox.state().cards.length;
-    assert.throws(() => inbox.proposeGuidance('x'.repeat(MAX_CARD_BYTES * 0.6), { caller: agent, agent: 's1' }), (e: unknown) => e instanceof InboxError && e.status === 413);
+    assert.throws(() => inbox.proposeGuidance('x'.repeat(MAX_CARD_BYTES * 0.6), 'Adds a rule the last four cards needed.', { caller: agent, agent: 's1' }), (e: unknown) => e instanceof InboxError && e.status === 413);
     assert.equal(inbox.state().cards.length, before);
-    const fits = inbox.proposeGuidance('x'.repeat(MAX_CARD_BYTES * 0.4), { caller: agent, agent: 's1' });
+    const fits = inbox.proposeGuidance('x'.repeat(MAX_CARD_BYTES * 0.4), 'Adds a rule the last four cards needed.', { caller: agent, agent: 's1' });
     assert.ok(new TextEncoder().encode(JSON.stringify(inbox.getCard(fits.id))).length <= MAX_CARD_BYTES);
   });
 
   it('counts an unacknowledged guidance answer as unread for the proposing agent, until it acknowledges it', async () => {
     const { inbox, agent } = setup();
-    const card = inbox.proposeGuidance('Never mind.', { caller: agent, agent: 's1' });
+    const card = inbox.proposeGuidance('Never mind.', 'Adds a rule the last four cards needed.', { caller: agent, agent: 's1' });
     await inbox.answer(card.id, { values: { choice: 'reject' }, comment: 'Too vague.' });
     assert.deepEqual(inbox.unread(agent, 's1'), { unread: 1, cards: [card.id] });
     assert.deepEqual(inbox.unread(agent, 'system'), { unread: 0, cards: [] });
@@ -260,7 +278,7 @@ describe('guidance', () => {
   it('keeps the proposing agent token out of the card that clients read', () => {
     const { inbox } = setup();
     const caller: Caller = { token: 'proposer-token-id', role: 'agent' };
-    const card = inbox.proposeGuidance('Always include a diff.', { caller, agent: 's1' });
+    const card = inbox.proposeGuidance('Always include a diff.', 'Adds a rule the last four cards needed.', { caller, agent: 's1' });
     assert.equal(publicCard(card).token, undefined);
     assert.equal(JSON.stringify(inbox.state().cards).includes(caller.token), false);
   });

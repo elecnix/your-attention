@@ -259,6 +259,7 @@
   .broadcast .guidance-diff mark { color: inherit; border-radius: 3px; padding: 0 2px; }
   .broadcast .guidance-diff .del mark { background: var(--bad-bg); }
   .broadcast .guidance-diff .add mark { background: var(--ok-bg); }
+  .broadcast .broadcast-message { margin: 8px 0 0; white-space: pre-wrap; font-size: calc(14px * var(--text-scale)); }
   .broadcast .agents { display: grid; gap: 4px; margin: 8px 0; padding: 0; border: 0; font-size: calc(14px * var(--text-scale)); }
   .broadcast .agents legend { font-weight: 600 !important; padding: 0; margin-bottom: 4px; }
   .broadcast .agents .all { font-weight: 600 !important; border-bottom: 1px solid var(--line); padding-bottom: 4px; }

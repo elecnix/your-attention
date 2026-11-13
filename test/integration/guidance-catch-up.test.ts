@@ -17,7 +17,7 @@ describe('guidance for an agent that was offline', () => {
     await until(() => first.events.find((e) => e.type === 'hello'));
     first.stop();
     await first.ended;
-    const card = await client.proposeGuidance('Always attach a screenshot.', 's-other');
+    const card = await client.proposeGuidance('Always attach a screenshot.', { message: 'Adds a rule the last four cards needed.', agent: 's-other' });
     await h.owner('POST', `/v1/cards/${card.id}/answer`, { values: { choice: 'approve', agents: [] } });
     const second = h.listen(client, 's-away');
     const ev = await until(() => second.events.find((e) => e.type === 'guidance'));

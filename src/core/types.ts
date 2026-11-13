@@ -292,7 +292,7 @@ export interface Card {
   /** On a system card that proposes new guidance: the text, the agent that proposed it, which receives the answer, and
    * the guidance the proposal starts from, so the card can say when it changed since. `agents` is on cards stored
    * before the page listed the online agents from live presence, and nothing reads it. */
-  broadcast?: { text: string; agents?: string[]; from?: string; base?: { version: number; text: string } };
+  broadcast?: { text: string; message?: string; agents?: string[]; from?: string; base?: { version: number; text: string } };
   /** On a system card that asks to send an agent's answers to a webhook: the id of that subscription. */
   subscription?: string;
   origin?: Origin;
