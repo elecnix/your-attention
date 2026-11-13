@@ -82,7 +82,7 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   // now and the card after an answer pass over them, while a card opened by a link still opens.
   const hidden = new Set(Object.keys(groupOf).filter((id) => collapsed.has(groupOf[id])));
   const order = [
-    ...systems,
+    ...(collapsed.has(SECTION_ID.system) ? [] : systems),
     ...pinned.flatMap((p) => (collapsed.has(p.id) ? [] : p.items)),
     ...groups.flatMap(([, items, , id]) => (collapsed.has(id) ? [] : items)),
   ];
