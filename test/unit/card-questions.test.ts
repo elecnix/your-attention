@@ -6,10 +6,10 @@ import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { describeAnswer } from '../../src/client.ts';
 import { Inbox, InboxError } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
-import type { Answer, Card, NewCard } from '../../src/core/types.ts';
+import type { Card, NewCard } from '../../src/core/types.ts';
 import { runTool } from '../../src/integrations/run-tool.ts';
 import { answerValues, cardSource, describe as summary, questionRecommendations } from '../../web/answers.js';
-import { agent } from './fixture.ts';
+import { agent, answered as answer } from './fixture.ts';
 
 const THREE = [
   { question: 'Which database?', header: 'Database', text: 'The service stores **one table** of jobs.', options: [{ label: 'SQLite', description: 'One file next to the binary.', recommended: true }, { label: 'Postgres' }] },
@@ -24,8 +24,6 @@ async function post(args: Record<string, unknown>): Promise<NewCard> {
   assert.ok(posted);
   return posted;
 }
-
-const answer = (values: Record<string, unknown>, comment = ''): Answer => ({ card: 'c1', version: 1, values, comment, delivery: 'default', savedAt: 1, deliveredAt: null, readAt: null, forcedAt: null, previous: [] });
 
 describe('a card with questions', () => {
   it('posts each question with its text, its options and the options it recommends, and the inbox stores them', async () => {

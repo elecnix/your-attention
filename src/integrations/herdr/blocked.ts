@@ -12,6 +12,7 @@ import { Client, loadConfig } from '../../client.ts';
 import { randomId } from '../../core/crypto.ts';
 import type { Answer, Card, NewCard } from '../../core/types.ts';
 import { parseDialog, type Dialog } from './dialog.ts';
+import { optionId } from '../../../web/answers.js';
 import { herdrPlace } from './place.ts';
 
 const POLL_MS = Number(process.env['HERDR_BLOCKED_POLL_MS'] ?? 2000);
@@ -41,14 +42,24 @@ export function trimScreen(raw: string): string {
 }
 
 
+/** Whether a dialog's choices are the card's options, in the same order: each label, and the key when the card gives
+ * an id, since the sidecar builds an option as `o<key>`. A card whose options carry only a label, posted by an agent
+ * or stored before ids, matches on the labels alone. */
+function sameChoices(dialog: Dialog, card: Card): boolean {
+  const offered = card.options ?? [];
+  return dialog.options.length === offered.length && dialog.options.every((d, i) => {
+    const o = offered[i]!;
+    return o.label === d.label && (o.id === undefined || optionId(o) === `o${d.key}`);
+  });
+}
+
 /** Whether the pane's screen shows the dialog the card offers: the card's choices, and the same lines above them.
  * The card keeps its screen trimmed, so the pane's screen is trimmed the same way before both are read.
  * The lines above count: the same choices for another command are another question. */
-function matchesCard(raw: string, card: Card): boolean {
-  const offered = (card.options ?? []).map((o) => ({ key: o.id.slice(1), label: o.label }));
+export function matchesCard(raw: string, card: Card): boolean {
   const now = parseDialog(trimScreen(raw));
   const then = parseDialog(card.screen ?? '');
-  return !!now && !!then && JSON.stringify(now.options) === JSON.stringify(offered) && JSON.stringify(then.options) === JSON.stringify(offered)
+  return !!now && !!then && sameChoices(now, card) && sameChoices(then, card)
     && JSON.stringify(now.context) === JSON.stringify(then.context);
 }
 
@@ -154,7 +165,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
     async answered(card, answer) {
       const pane = card.origin?.herdrPane;
       if (!pane || !/^[\w:]+$/.test(pane)) return;
-      const label = card.options?.find((o) => o.id === answer.values['choice'])?.label;
+      const label = card.options?.find((o) => (o.id ?? o.label) === answer.values['choice'])?.label;
       const refuse = async (why: string): Promise<void> => {
         await inbox.ack(card.id).catch(() => {});
         await inbox.close(card.id, 'resolved', why).catch(() => {});

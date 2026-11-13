@@ -16,7 +16,10 @@ export type Delivery = 'default' | 'steer' | 'followUp' | 'force';
 export type Role = 'owner' | 'agent' | 'extension';
 
 export interface Option {
-  id: string;
+  /** The id a pick names in the answer. An agent may post an option with only a label, which the `card_post` tool
+   * documents, so the inbox derives the id from the label at post and at patch. A card stored before that keeps none,
+   * and the page and the terminal client name such an option by its label. */
+  id?: string;
   label: string;
   description?: string;
   /** The option the agent recommends. The page tags it and shows the card's recommendation inside it. One at most, unless the card takes `multiple`. */

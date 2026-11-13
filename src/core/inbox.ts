@@ -15,7 +15,7 @@ import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -511,6 +511,9 @@ export class Inbox {
     if (kind === 'secret' && before?.kind !== 'secret') throw new InboxError(400, 'the secret card kind was removed. Place the secret widget in the card body instead: key = widget secret {"name": "API_KEY"}. The card_post tool fills its public key. A session that started before this change must restart to load that tool');
     const now = this.now();
     if (before && before.token !== caller.token && caller.role !== 'owner') throw new InboxError(403, 'another client owns this card');
+    // A card that carries an answer or a draft already names an option by its label. An id derived now would leave
+    // that pick pointing at no option, so the card keeps its options as they are.
+    const picked = !!this.store.get<Answer>('answers', id) || !!before?.closed?.draft;
     // A revision keeps what herdr answered about a pane it does not change, since only herdr sets a place.
     const approvals = this.cleanApprovals(input.approvals, kind, places)?.map((a, i) => {
       const kept = a.place ?? (before?.approvals?.[i]?.pane === a.pane ? before.approvals[i].place : undefined);
@@ -563,7 +566,7 @@ export class Inbox {
       text: input.text,
       recommendation: input.recommendation,
       body,
-      options: input.options,
+      options: picked ? withKeptOptionIds(input.options, before) : withOptionIds(input.options),
       multiple: input.multiple,
       questions: input.questions,
       approvals,
@@ -2267,6 +2270,43 @@ function markDialogCards(store: Storage): void {
     if (c.dialog === undefined && c.questions?.length && c.origin?.harness === 'claude-code' && /^ask-[0-9a-f]{8}$/.test(c.id)) store.put('cards', c.id, { ...c, dialog: true });
   }
   store.put('meta', 'dialog-marked', true);
+}
+
+/**
+ * Each option with an id, as a stored card always carries one. `card_post` documents an option as `{label, description,
+ * recommended}` and an agent may also post a plain label, so the inbox derives an id from the label when the post has
+ * none: the label in lowercase, each run of other characters as one dash, and a number when two options share a label.
+ * An id the agent gave stays as it is, and a derived id steps around every id the card already carries, so the ids
+ * are unique. A card that carries an answer or a draft gets none: its pick names a label.
+ */
+/**
+ * The same options for a card that carries an answer or a draft, which keeps the identity its pick names. No id is
+ * derived here, and an option whose label a stored option had keeps that option's id, so a re-post that resends the
+ * labels keeps the pick resolving.
+ */
+function withKeptOptionIds(options: Option[] | undefined, before: Card | undefined): Option[] | undefined {
+  if (!Array.isArray(options) || !before?.options) return options;
+  const byLabel = new Map(before.options.filter((o) => o && typeof o.id === 'string' && o.id).map((o) => [o.label, o.id!]));
+  return options.map((o) => {
+    if (!o || typeof o !== 'object' || (typeof o.id === 'string' && o.id)) return o;
+    const id = byLabel.get(o.label);
+    return id ? { ...o, id } : o;
+  });
+}
+
+function withOptionIds(options: Option[] | undefined): Option[] | undefined {
+  if (!Array.isArray(options)) return options;
+  const taken = new Set<string>();
+  for (const o of options) if (o && typeof o === 'object' && typeof o.id === 'string' && o.id) taken.add(o.id);
+  return options.map((o, i) => {
+    if (!o || typeof o !== 'object' || (typeof o.id === 'string' && o.id)) return o;
+    const label = typeof o.label === 'string' ? o.label : '';
+    const base = (label.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join('-').slice(0, 60) || `option-${index(i)}`;
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+    taken.add(id);
+    return { ...o, id };
+  });
 }
 
 /** The page draws each question from these fields, and the answer picks an option by its label, so two options with one label could not be told apart. */

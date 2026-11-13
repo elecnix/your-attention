@@ -444,7 +444,7 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
     const on = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => (v as Record<string, unknown>)[x]) : undefined;
     const label = on ? on.join(', ') || '(none turned on)'
       : k === 'choice' && card.options
-        ? [v].flat().map((x) => card.options?.find((o) => o.id === x)?.label ?? String(x)).join(', ')
+        ? [v].flat().map((x) => card.options?.find((o) => (o.id ?? o.label) === x)?.label ?? String(x)).join(', ')
         : [v].flat().join(', ');
     lines.push(`${k}: ${label}`);
   }
