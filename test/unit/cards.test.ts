@@ -31,6 +31,19 @@ describe('patch edits', () => {
     assert.throws(() => inbox.patchCard(agent, 'c1', [{ old: 'a', new: 'b' }], 'secret'), /field must be/);
   });
 
+  it('refuses an edit that replaces text with itself, so a probe is not a revision', () => {
+    // A session probing which text the card holds sent old == new, and the card moved to v3 and told the person it
+    // changed. The probe told it nothing the card could not answer by reading history.
+    const { inbox, agent } = setup();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Spec', text: 'Le compte paie 1,25 %.' });
+    assert.throws(() => inbox.patchCard(agent, 'c1', [{ old: 'Le compte paie', new: 'Le compte paie' }]), /changes nothing/);
+    const card = inbox.getCard('c1');
+    assert.equal(card.version, 1);
+    assert.equal(card.history, undefined);
+    // A real edit still works, and an empty old text still fills an empty field.
+    assert.equal(inbox.patchCard(agent, 'c1', [{ old: '1,25', new: '1,75' }]).version, 2);
+  });
+
   it('keeps at most 20 earlier versions', () => {
     const { inbox, agent } = setup();
     for (let i = 0; i < 25; i++) inbox.postCard(agent, { id: 'c1', agent: 's1', title: `v${i}` });
@@ -681,5 +694,22 @@ describe('who a card is from', () => {
     const origin = { harness: 'claude-code', herdrWorkspace: 'first mate', herdrTab: 'w'.repeat(500), extra: 'dropped', name: 7 } as never;
     const card = inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q', origin });
     assert.deepEqual(card.origin, { harness: 'claude-code', herdrWorkspace: 'first mate', herdrTab: 'w'.repeat(200), name: '7' });
+  });
+});
+
+describe('card_read', () => {
+  it('returns the stored text, the version and the earlier-version count', async () => {
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    const { SecretRequests } = await import('../../src/integrations/secrets.ts');
+    const { Client } = await import('../../src/client.ts');
+    const { inbox, agent } = setup();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Plan', text: '- **Le « 5 % » n\'existe plus.**' });
+    inbox.patchCard(agent, 'c1', [{ old: '5 %', new: '4 %' }]);
+    const ctx = { inbox: {} as unknown as InstanceType<typeof Client>, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' as const };
+    // The tool asks the inbox it was given; the unit store answers through the same client surface.
+    const read = await runTool({ ...ctx, inbox: { get: async (id: string) => ({ card: inbox.getCard(id), state: 'open' }) } as never }, 'card_read', { card_id: 'c1' });
+    assert.match(read, /version 2, state open/);
+    assert.match(read, /text \(\d+ chars\):\n- \*\*Le « 4 % » n'existe plus\.\*\*/);
+    assert.match(read, /earlier version|No earlier version/);
   });
 });

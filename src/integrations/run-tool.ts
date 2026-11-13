@@ -96,6 +96,20 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']));
       return `Card ${card.id} is now version ${card.version}.${card.warning ? ` Warning: ${card.warning}` : ''}`;
     }
+    case 'card_read': {
+      const [id] = [String(args['card_id'])];
+      const { card, state } = await inbox.get(id);
+      const versions = card.history?.length ?? 0;
+      const fields = ['text', 'body', 'html', 'title', 'recommendation'] as const;
+      const shown = fields
+        .filter((f) => card[f] !== undefined)
+        .map((f) => `${f} (${String(card[f]).length} chars):\n${card[f]}`);
+      return [
+        `Card ${card.id}, version ${card.version}, state ${state}.${card.status ? ` Status: ${card.status}` : ''}`,
+        ...shown,
+        versions ? `${versions} earlier version${versions === 1 ? '' : 's'} exist; card_patch edits the text above.` : 'No earlier version; card_patch edits the text above.',
+      ].join('\n\n');
+    }
     case 'card_status':
       await inbox.status(String(args['card_id']), String(args['status'] ?? ''));
       return 'Set.';

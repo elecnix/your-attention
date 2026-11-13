@@ -90,6 +90,11 @@ export const cardTools: CardTool[] = [
     },
   },
   {
+    name: 'card_read',
+    description: 'Read one of your cards as the inbox stores it: the current title, text, body or html, status, version, and how many earlier versions exist. card_patch matches against exactly this text, so read the card before patching it instead of trusting the payload you remember sending.',
+    schema: { type: 'object', properties: { card_id: { type: 'string' } }, required: ['card_id'] },
+  },
+  {
     name: 'card_status',
     description: 'Show a short state on one of your cards, such as "waiting on CI". An empty status clears it.',
     schema: { type: 'object', properties: { card_id: { type: 'string' }, status: { type: 'string' } }, required: ['card_id', 'status'] },

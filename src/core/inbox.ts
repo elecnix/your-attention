@@ -1134,8 +1134,20 @@ export class Inbox {
       const old = String(e?.old ?? '');
       // An empty old text fills a field that is empty.
       if (!old && !text) { text = String(e.new ?? ''); continue; }
+      // A patch that replaces text with itself changes nothing, so it is a mistake rather than a revision: accepting it
+      // bumped the version, told the person their card changed, and made a "did this text survive?" probe look like an
+      // edit.
+      if (old && String(e.new ?? '') === old) throw new InboxError(400, `edit ${i + 1}: new is identical to old, so it changes nothing`);
       const count = old ? text.split(old).length - 1 : 0;
-      if (count !== 1) throw new InboxError(409, `edit ${i + 1}: the old text occurs ${count} times in ${f}, and it must occur once`);
+      if (count !== 1) {
+        // A count alone leaves the agent guessing at text it cannot see. Naming the closest stored lines lets it patch
+        // from the real text instead of from the payload it remembers sending.
+        const near = count === 0 ? nearestLines(text, old) : [];
+        const hint = near.length
+          ? `; the closest stored lines are ${near.map((l) => JSON.stringify(l)).join(', ')}`
+          : count === 0 ? '; no stored line shares a word with it, so read the card and take the text from there' : '';
+        throw new InboxError(409, `edit ${i + 1}: the old text occurs ${count} times in ${f}, and it must occur once${hint}`);
+      }
       text = text.replace(old, () => String(e.new ?? ''));
     }
     const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, widgets: _w, responses: _rs, ...rest } = card;
@@ -2436,4 +2448,16 @@ export function publicCard(card: Card): Card {
   if (!rest.closed?.draft) return rest;
   const { kind, outcome, at } = rest.closed;
   return { ...rest, closed: { kind, outcome, at } };
+}
+
+/** The stored lines that share the most words with a text that matched nothing, so an error can name what is there. */
+function nearestLines(text: string, old: string): string[] {
+  const words = [...new Set(old.toLowerCase().split(/\s+/).filter((w) => w.length >= 3))].slice(0, 8);
+  if (!words.length) return [];
+  return text.split('\n')
+    .map((line) => ({ line: line.trim(), score: words.filter((w) => line.toLowerCase().includes(w)).length }))
+    .filter((c) => c.line !== '' && c.score > 0)
+    .sort((a, b) => b.score - a.score || b.line.length - a.line.length)
+    .slice(0, 3)
+    .map((c) => c.line.slice(0, 180));
 }
