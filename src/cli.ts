@@ -24,6 +24,8 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   reset --yes                                         remove every card, answer and file; tokens and templates stay
   login-url                                           print a sign-in link that works once, like open --link
   pin status|set|reset|clear                          read, set, reset or remove the PIN that each browser tab types
+  install [--from-source PATH]                        print the exact commands that connect this machine's harnesses, and ask nothing
+  install --help <harness>                            the full recipe for one harness, even when it is not installed
   discover [--seconds 3]                              list inboxes on the LAN
   pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
   post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
@@ -460,6 +462,26 @@ switch (command) {
     if ((!process.stdin.isTTY || !process.stdout.isTTY) && !process.env['YOUR_ATTENTION_TUI_SIZE']) fail('your-attention tui needs a terminal for its input and its output.');
     const { runTui } = await import('./tui/app.ts');
     process.exit(await runTui({ env: process.env, io: { input: process.stdin, output: process.stdout }, mono: values.mono, ascii: values.ascii }));
+  }
+  case 'install': {
+    // An agent reads this, so nothing here prompts: every line it needs to run comes out as one command.
+    const { values } = parseArgs({ args: rest, options: { help: { type: 'string' }, 'from-source': { type: 'string' } }, allowPositionals: true });
+    const { HARNESSES, detect, installHelp, installReport, which } = await import('./node/install.ts');
+    const pathEnv = process.env['PATH'];
+    const facts = {
+      found: detect(pathEnv),
+      brew: which('brew', pathEnv) !== undefined,
+      self: which('your-attention', pathEnv),
+      ...(values['from-source'] ? { fromSource: values['from-source'] } : {}),
+    };
+    if (values.help !== undefined) {
+      const lines = installHelp(values.help, facts);
+      if (!lines) fail(`Unknown harness: ${values.help}. Known ones: ${HARNESSES.map((h) => h.name).join(', ')}.`);
+      console.log(lines.join('\n'));
+      break;
+    }
+    console.log(installReport(facts).join('\n'));
+    break;
   }
   case 'discover': {
     const { values } = parseArgs({ args: rest, options: { seconds: { type: 'string', default: '3' } } });
