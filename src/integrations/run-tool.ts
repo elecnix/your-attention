@@ -109,13 +109,16 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
     }
     case 'card_guidance': {
       if (args['propose']) {
-        const card = await inbox.proposeGuidance(String(args['propose']), agent);
+        const card = await inbox.proposeGuidance(String(args['propose']), String(args['message'] ?? ''), agent);
         return `Proposed the guidance on card ${card.id}. It changes only if the person approves it. The answer and the person's comment arrive ${ctx.arrival}.`;
       }
       const g = await inbox.guidance();
       // The tags other cards set go last, one line per key, so the agent reuses a value instead of inventing one.
       const tags = (g.tags ?? []).map((t) => `\`${t.key}\` = ${t.values.map((v) => `${v.value} (${v.count})`).join(', ')}.`);
-      return `Card guidance, version ${g.version}:\n${g.text}${g.widgets ? `\n\n${g.widgets}` : ''}${tags.length ? `\n\nTags in use:\n${tags.join('\n')}` : ''}`;
+      // The catalog and the tag lines are added by this answer, not part of the guidance, so a proposal that rewrites the
+      // whole text knows where the text ends and leaves them out.
+      const extra = g.widgets ? `\n\nNot part of the guidance text, added to this answer: the widget catalog.\n${g.widgets}` : '';
+      return `Card guidance, version ${g.version}:\n${g.text}${extra}${tags.length ? `\n\nNot part of the guidance text either, tag values in use:\n${tags.join('\n')}` : ''}`;
     }
     case 'card_tags': {
       // A call that sends nothing reads the defaults back, which is what an agent does after a compaction.

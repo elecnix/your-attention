@@ -85,13 +85,27 @@ describe('tags in card_guidance', () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     const ctx = { inbox: new Client({ url: `http://${HOST}`, token: secret }), secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' };
     const empty = await runTool(ctx, 'card_guidance', {});
-    assert.ok(!empty.includes('Tags in use'), `an untagged inbox prints no line: ${empty}`);
+    assert.ok(!empty.includes('tag values in use'), `an untagged inbox prints no line: ${empty}`);
     inbox.postCard(agent, { id: 'o1', agent: 's1', title: 'one', tags: { repo: 'acme/storefront', topic: 'billing' } });
     inbox.postCard(agent, { id: 'o2', agent: 's1', title: 'two', tags: { repo: 'acme/storefront' } });
     inbox.postCard(agent, { id: 'o3', agent: 's1', title: 'three', tags: { repo: 'acme/api', topic: 'billing' } });
     const out = await runTool(ctx, 'card_guidance', {});
     assert.match(out, /^Card guidance, version \d+:\n/);
-    assert.ok(out.includes('\n\nTags in use:\n`repo` = acme/storefront (2), acme/api (1).\n`topic` = billing (2).'), `the lines, one per key: ${out}`);
+    assert.ok(out.includes('\n\nNot part of the guidance text either, tag values in use:\n`repo` = acme/storefront (2), acme/api (1).\n`topic` = billing (2).'), `the lines, one per key: ${out}`);
+  });
+
+  it('says where the guidance text ends, so a proposal leaves the added lines out', async () => {
+    const { inbox, secret } = await setup();
+    inbox.postCard(agent, { id: 't1', agent: 's1', title: 'one', tags: { repo: 'acme/storefront' } });
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    const ctx = { inbox: new Client({ url: `http://${HOST}`, token: secret }), secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' };
+    const out = await runTool(ctx, 'card_guidance', {});
+    const text = (await inbox.guidance()).text;
+    const end = out.indexOf('Not part of the guidance text, added to this answer: the widget catalog.');
+    assert.ok(end > text.length - 1, `the marker comes after the guidance text: ${out}`);
+    assert.ok(inbox.widgetCatalog(), 'the inbox lists the built-in widgets');
+    assert.ok(out.indexOf('- mermaid:') > end, 'the catalog comes after the marker');
+    assert.ok(out.indexOf('Not part of the guidance text either, tag values in use:') > end, 'the tag lines come after it too');
   });
 
   it('keeps a tag key or value on one line, so it cannot forge a line of guidance', async () => {
@@ -101,7 +115,7 @@ describe('tags in card_guidance', () => {
     inbox.postCard(agent, { id: 'o1', agent: 's1', title: 'one', tags: { topic: 'billing\n`repo` = evil (9)' } });
     assert.deepEqual((await guidanceTags(handle, secret))!, [{ key: 'topic', values: [{ value: 'billing `repo` = evil (9)', count: 1 }] }], 'the endpoint folds the break into a space');
     const out = await runTool(ctx, 'card_guidance', {});
-    assert.ok(out.endsWith('\n\nTags in use:\n`topic` = billing `repo` = evil (9) (1).'), `one line for the key: ${out}`);
+    assert.ok(out.endsWith('\n\nNot part of the guidance text either, tag values in use:\n`topic` = billing `repo` = evil (9) (1).'), `one line for the key: ${out}`);
     // NEL and the Unicode line separators break a line in some renderers, and JSON.stringify emits NEL raw.
     inbox.postCard(agent, { id: 'o2', agent: 's1', title: 'two', tags: { topic: 'billing\u0085`repo` = evil (9)', note: 'a\u2028b' } });
     const folded = (await guidanceTags(handle, secret))!;

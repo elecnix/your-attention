@@ -188,7 +188,7 @@ describe('http routes for the card model', () => {
     const card = ((await proposed.json()) as { proposed: { id: string } }).proposed;
     await call('POST', `/v1/cards/${card.id}/answer`, { token: owner, body: { values: { choice: 'approve' } } });
     assert.equal(((await (await call('GET', '/v1/priorities', { token: agent })).json()) as unknown[]).length, 2);
-    const guidance = await call('POST', '/v1/guidance', { token: agent, body: { text: 'Show diffs.', agent: 's1' } });
+    const guidance = await call('POST', '/v1/guidance', { token: agent, body: { text: 'Show diffs.', message: 'Adds the diff rule.', agent: 's1' } });
     assert.equal(guidance.status, 201);
     const broadcast = ((await guidance.json()) as { broadcast: { from?: string }; token?: string });
     assert.equal(broadcast.broadcast.from, 's1', 'the card records the agent that proposed the text');
