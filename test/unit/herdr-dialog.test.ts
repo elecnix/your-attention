@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { matchesCard, trimScreen } from '../../src/integrations/herdr/blocked.ts';
 import { parseDialog } from '../../src/integrations/herdr/dialog.ts';
+import type { Card } from '../../src/core/types.ts';
 
 const CLAUDE_PERMISSION = `
  Bash command
@@ -91,5 +93,27 @@ describe('reading a dialog from an agent screen', () => {
     assert.equal(parseDialog('Thinking…\n> '), undefined);
     assert.equal(parseDialog('Steps:\n1. Build it\nDone.'), undefined);
     assert.equal(parseDialog('Steps:\n1. Build\n3. Test'), undefined, 'numbers that skip are a list, not a dialog');
+  });
+});
+
+describe('matching a blocked card to the dialog on its pane', () => {
+  const card = (over: Partial<Card> = {}): Card => ({
+    id: 'b1', agent: 's1', kind: 'blocked', title: 'Which database?', priority: 'now', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, replies: [], screen: trimScreen(CLAUDE_QUESTION), ...over,
+  });
+  const choices = [{ key: '1', label: 'SQLite' }, { key: '2', label: 'Postgres' }];
+
+  it('matches the card the sidecar posts, which gives each option the key as its id', () => {
+    assert.equal(matchesCard(CLAUDE_QUESTION, card({ options: choices.map((o) => ({ id: `o${o.key}`, label: o.label })) })), true);
+  });
+
+  it('matches a card whose options carry only a label', () => {
+    assert.equal(matchesCard(CLAUDE_QUESTION, card({ options: choices.map((o) => ({ label: o.label })) })), true);
+  });
+
+  it('refuses another dialog, a relabeled choice, and an id that names another key', () => {
+    assert.equal(matchesCard(CLAUDE_PERMISSION, card({ options: choices.map((o) => ({ label: o.label })) })), false);
+    assert.equal(matchesCard(CLAUDE_QUESTION, card({ options: [{ label: 'SQLite' }, { label: 'MariaDB' }] })), false);
+    assert.equal(matchesCard(CLAUDE_QUESTION, card({ options: [{ id: 'o2', label: 'SQLite' }, { id: 'o1', label: 'Postgres' }] })), false);
+    assert.equal(matchesCard(CLAUDE_QUESTION, card({ options: [{ label: 'SQLite' }] })), false);
   });
 });

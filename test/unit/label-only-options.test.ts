@@ -65,6 +65,21 @@ describe('an id derived beside the ids a card already carries', () => {
     assert.equal(card.options![4]!.id, 'go-ahead');
     assert.deepEqual(ids.slice(0, 2), ['go-ahead-2', 'go-ahead-3']);
   });
+
+  it('gives no dash at either end of the label, and numbers past an id a label already took', () => {
+    const ids = (labels: string[]): (string | undefined)[] => {
+      const inbox = new Inbox(new MemoryStorage(), () => 1);
+      return inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q', options: labels.map((label) => ({ label })) }).options!.map((o) => o.id);
+    };
+    // A run of other characters at either end, or inside, gives one dash, and none at an end.
+    assert.deepEqual(ids(['!Go-ahead!']), ['go-ahead']);
+    assert.deepEqual(ids(['Go  --  ahead']), ['go-ahead']);
+    // A label that spells a numbered id takes it, so the next id adds a dash and the next free number to its own base.
+    assert.deepEqual(ids(['Go ahead', 'Go ahead', 'Go ahead 2']), ['go-ahead', 'go-ahead-2', 'go-ahead-2-2']);
+    // The first 60 characters, and an empty label by the option's position.
+    assert.deepEqual(ids(['x'.repeat(80)]), ['x'.repeat(60)]);
+    assert.deepEqual(ids(['', 'Ok']), ['option-1', 'ok']);
+  });
 });
 
 describe('a card that already carries an answer', () => {
