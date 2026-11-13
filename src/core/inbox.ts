@@ -15,7 +15,7 @@ import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -563,7 +563,7 @@ export class Inbox {
       text: input.text,
       recommendation: input.recommendation,
       body,
-      options: input.options,
+      options: withOptionIds(input.options),
       multiple: input.multiple,
       questions: input.questions,
       approvals,
@@ -2267,6 +2267,27 @@ function markDialogCards(store: Storage): void {
     if (c.dialog === undefined && c.questions?.length && c.origin?.harness === 'claude-code' && /^ask-[0-9a-f]{8}$/.test(c.id)) store.put('cards', c.id, { ...c, dialog: true });
   }
   store.put('meta', 'dialog-marked', true);
+}
+
+/**
+ * Each option with an id, as a stored card always carries one. `card_post` documents an option as `{label, description,
+ * recommended}` and an agent may also post a plain label, so the inbox derives an id from the label when the post has
+ * none: the label in lowercase, each run of other characters as one dash, and a number when two options share a label.
+ * An id the agent gave stays as it is, so a revision and a patch keep the ids the stored card already has.
+ */
+function withOptionIds(options: Option[] | undefined): Option[] | undefined {
+  if (!Array.isArray(options)) return options;
+  const taken = new Set<string>();
+  for (const o of options) if (o && typeof o === 'object' && typeof o.id === 'string' && o.id) taken.add(o.id);
+  return options.map((o, i) => {
+    if (!o || typeof o !== 'object' || (typeof o.id === 'string' && o.id)) return o;
+    const label = typeof o.label === 'string' ? o.label : '';
+    const base = (label.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join('-').slice(0, 60) || `option-${index(i)}`;
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+    taken.add(id);
+    return { ...o, id };
+  });
 }
 
 /** The page draws each question from these fields, and the answer picks an option by its label, so two options with one label could not be told apart. */

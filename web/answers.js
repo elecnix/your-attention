@@ -181,8 +181,11 @@ function fieldLabels(source) {
   return fields;
 }
 
-// A pick names the option's id and its label, so a pick stays only while the revised card still offers that option.
-export const optionValue = (o) => `${o.id}:${o.label}`;
+// The name a pick and the page's lookups use for an option: its id, or its label when the card has none, as a card
+// stored before the inbox gave every option an id does.
+export const optionId = (o) => o.id ?? o.label;
+// A pick names the option and its label both, so a pick stays only while the revised card still offers that option.
+export const optionValue = (o) => `${optionId(o)}:${o.label}`;
 
 const keepsOwnForm = (c) => !!c.body && (/\bForm\(/.test(c.body) || (!c.options?.length && !c.questions?.length));
 // The page draws a card's options as boxes unless the card brings its own HTML, form or kind of form.
@@ -231,14 +234,14 @@ export function recommendationRest(recommendation, label) {
  */
 export function recommendedOptions(c) {
   if (!drawsOptions(c)) return { ids: [], inside: false, text: '' };
-  let ids = c.options.filter((o) => o.recommended === true).map((o) => o.id);
+  let ids = c.options.filter((o) => o.recommended === true).map(optionId);
   if (!ids.length && c.recommendation) {
     const best = c.options.filter((o) => recommendationNames(c.recommendation, o.label)).sort((a, b) => plain(b.label).length - plain(a.label).length)[0];
-    if (best) ids = [best.id];
+    if (best) ids = [optionId(best)];
   }
   const inside = ids.length === 1 && !!c.recommendation;
   // Inside the option, the recommendation drops the option's label, so the box says the pick once.
-  const text = inside ? recommendationRest(c.recommendation, c.options.find((o) => o.id === ids[0]).label) : '';
+  const text = inside ? recommendationRest(c.recommendation, c.options.find((o) => optionId(o) === ids[0]).label) : '';
   return { ids, inside, text };
 }
 
@@ -281,7 +284,7 @@ export function answerValues(card, values) {
     else if (picked.length) out[key] = picked[0];
     else delete out[key];
   };
-  keep('choice', new Map((card.options || []).map((o) => [optionValue(o), o.id])));
+  keep('choice', new Map((card.options || []).map((o) => [optionValue(o), optionId(o)])));
   // A question without options takes its answer as text, and an empty comment says nothing.
   (card.questions || []).forEach((q, i) => {
     if (q.options?.length) keep(`q${i}`, new Map(q.options.map((o) => [o.label, o.label])));
@@ -346,7 +349,7 @@ export function describe(card, a) {
   const asked = card.questions?.length ? questionLines(card, values) : [];
   const picks = Object.entries(values).map(([k, v]) => {
     const list = [].concat(v);
-    if (k === 'choice' && card.options) return list.map((x) => (card.options.find((o) => o.id === x) || {}).label || x).join(', ');
+    if (k === 'choice' && card.options) return list.map((x) => (card.options.find((o) => optionId(o) === x) || {}).label || x).join(', ');
     const ai = /^approval_(\d+)$/.exec(k);
     if (ai && card.approvals) { const ap = card.approvals[Number(ai[1])]; return v === true && ap ? `Approved: ${ap.label || ap.text}` : ''; }
     if (asked.length && QUESTION_FIELD.test(k)) return '';

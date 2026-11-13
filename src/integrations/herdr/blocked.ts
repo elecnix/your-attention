@@ -45,7 +45,7 @@ export function trimScreen(raw: string): string {
  * The card keeps its screen trimmed, so the pane's screen is trimmed the same way before both are read.
  * The lines above count: the same choices for another command are another question. */
 function matchesCard(raw: string, card: Card): boolean {
-  const offered = (card.options ?? []).map((o) => ({ key: o.id.slice(1), label: o.label }));
+  const offered = (card.options ?? []).map((o) => ({ key: o.id?.slice(1), label: o.label }));
   const now = parseDialog(trimScreen(raw));
   const then = parseDialog(card.screen ?? '');
   return !!now && !!then && JSON.stringify(now.options) === JSON.stringify(offered) && JSON.stringify(then.options) === JSON.stringify(offered)
@@ -154,7 +154,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
     async answered(card, answer) {
       const pane = card.origin?.herdrPane;
       if (!pane || !/^[\w:]+$/.test(pane)) return;
-      const label = card.options?.find((o) => o.id === answer.values['choice'])?.label;
+      const label = card.options?.find((o) => (o.id ?? o.label) === answer.values['choice'])?.label;
       const refuse = async (why: string): Promise<void> => {
         await inbox.ack(card.id).catch(() => {});
         await inbox.close(card.id, 'resolved', why).catch(() => {});

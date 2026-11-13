@@ -5,7 +5,7 @@ import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { copyText, installCopy } from './copy.js';
-import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
+import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
@@ -220,7 +220,7 @@ export function CardView({ draftKey, card, onAction, recommendationText }) {
       : null;
   // `recommendationText` draws a recommendation as the page does, for the option it recommends.
   const { ids, text } = recommendedOptions(card);
-  const values = (card.options || []).filter((o) => ids.includes(o.id)).map(optionValue);
+  const values = (card.options || []).filter((o) => ids.includes(optionId(o))).map(optionValue);
   const rec = Object.fromEntries(Object.entries(questionRecommendations(card)).map(([name, labels]) => [name, { values: labels, note: null }]));
   if (values.length) rec.choice = { values, note: text && recommendationText ? recommendationText(text) : null };
   return h(React.Fragment, null, checker, h(SecretScope.Provider, { value: card.id }, h(Recommended.Provider, { value: rec },
