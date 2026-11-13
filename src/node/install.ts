@@ -81,6 +81,8 @@ export interface InstallFacts {
   self: string | undefined;
   /** The checkout the person named with --from-source. */
   fromSource?: string;
+  /** The platform whose shell reads the printed lines, so a Windows drive change gets its own form. */
+  platform?: NodeJS.Platform;
 }
 
 /** The names a program can answer to on this platform: an npm install on Windows writes a `.cmd` shim beside the name. */
@@ -116,12 +118,15 @@ export function detect(pathEnv: string | undefined, exists: (file: string) => bo
 
 /** How the command itself gets onto PATH, which is what an agent started from a non-interactive shell needs first. */
 export function installRoutes(facts: InstallFacts): string[] {
+  const platform = facts.platform ?? process.platform;
+  // cmd.exe changes drive only with /d, so a checkout on D: from a shell on C: would stay put without it.
+  const cd = platform === 'win32' ? 'cd /d ' : 'cd ';
   // A command that is missing cannot be told to install itself, so its own route is the shell line instead.
   const bySource = facts.fromSource
-    ? [`  cd ${shellWord(facts.fromSource)} && npm ci && npm link`]
+    ? [`  ${cd}${shellWord(facts.fromSource, platform)} && npm ci && npm link`]
     : facts.self
       ? ['  your-attention install --from-source /path/to/your-attention']
-      : ['  cd /path/to/your-attention && npm ci && npm link'];
+      : [`  ${cd}/path/to/your-attention && npm ci && npm link`];
   if (facts.brew) {
     return [
       'Install the command with Homebrew, which answers on this PATH:',

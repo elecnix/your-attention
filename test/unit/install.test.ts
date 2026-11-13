@@ -89,8 +89,11 @@ describe('your-attention install', () => {
     assert.equal(shellWord("/a'b", 'linux'), "'/a'\\''b'");
     // cmd.exe reads double quotes and not single ones, so Windows gets that pair.
     assert.equal(shellWord('/a b/c', 'win32'), '"a b/c"'.replace('a', '/a'));
-    const out = installReport(facts({ fromSource: '/a b/your-attention' })).join('\n');
-    assert.ok(out.includes("cd '/a b/your-attention' && npm ci && npm link"), out);
+    const out = installReport(facts({ fromSource: '/a b/your-attention', platform: 'linux' })).join('\n');
+    assert.ok(out.includes(`cd ${shellWord('/a b/your-attention', 'linux')} && npm ci && npm link`), out);
+    // cmd.exe changes drive with /d, and a checkout on another drive needs it.
+    const win = installReport(facts({ fromSource: 'D:\\repo', platform: 'win32' })).join('\n');
+    assert.ok(win.includes(`cd /d ${shellWord('D:\\repo', 'win32')} && npm ci && npm link`), win);
   });
 
   it('finds a binary without running anything, and reports the first directory that has it', () => {

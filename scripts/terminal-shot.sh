@@ -35,9 +35,11 @@ cleanup() { tmux -u -f /dev/null -S "$socket" kill-server 2>/dev/null || true; r
 dir=$(mktemp -d)
 trap cleanup EXIT
 
-# sleep keeps the pane open after the command exits, so its last screen is still there to capture.
+# Each word goes through printf %q, so a space or a quote in the command reaches the pane as one word. sleep keeps the
+# pane open after the command exits, so its last screen is still there to capture.
+words=$(printf '%q ' "$@")
 tmux -u -f /dev/null -S "$socket" new-session -d -s "$session" -x "$cols" -y "$rows" \
-  "sh -c '$*; echo \"[exited \$?]\"; sleep 600'"
+  sh -c "$words; echo \"[exited \$?]\"; sleep 600"
 
 # Wait for the exit marker, then for the screen to stop changing, so the capture does not race a redraw.
 for _ in $(seq 1 600); do
