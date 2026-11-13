@@ -470,11 +470,17 @@ switch (command) {
     const helpAt = rest.indexOf('--help');
     const next = helpAt < 0 ? undefined : rest[helpAt + 1];
     const bareHelp = helpAt >= 0 && (next === undefined || next.startsWith('-'));
-    const { values } = parseArgs({
-      args: bareHelp ? rest.filter((a) => a !== '--help') : rest,
-      options: { help: { type: 'string' }, 'from-source': { type: 'string' } },
-      allowPositionals: true,
-    });
+    let values: { help?: string; 'from-source'?: string };
+    try {
+      ({ values } = parseArgs({
+        args: bareHelp ? rest.filter((a) => a !== '--help') : rest,
+        options: { help: { type: 'string' }, 'from-source': { type: 'string' } },
+        allowPositionals: true,
+      }));
+    } catch (e) {
+      // An option without its value is a usage mistake, and a reader of this command is an agent: one clear line.
+      fail(`install: ${(e as Error).message}. Usage: your-attention install [--from-source PATH], or install --help <harness>.`);
+    }
     const { HARNESSES, detect, installHelp, installReport, which } = await import('./node/install.ts');
     const pathEnv = process.env['PATH'];
     const facts = {

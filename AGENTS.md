@@ -198,8 +198,12 @@ Size the pane wider than every line the command prints, so no word wraps mid-lin
 
 ```sh
 repo_id=$(gh api repos/OWNER/REPO --jq .id)
+header=$(mktemp)
+chmod 600 "$header"
+printf 'Authorization: Bearer %s\n' "$(gh auth token)" > "$header"
 curl -sS -X POST "https://uploads.github.com/user-attachments/assets?name=shot.png&content_type=image/png&repository_id=$repo_id" \
-  -H "Authorization: Bearer $(gh auth token)" -H "Accept: application/json" --data-binary @shot.png
+  -H @"$header" -H "Accept: application/json" --data-binary @shot.png
+rm -f "$header"
 ```
 
 A GitHub Actions token is refused by that endpoint, so upload with a user token. Attach the picture to the pull request it belongs to before marking it ready, because a reviewer opens the body when the merge comes up.

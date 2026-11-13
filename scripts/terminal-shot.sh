@@ -21,6 +21,8 @@ while getopts 'W:H:o:' opt; do
   esac
 done
 shift $((OPTIND - 1))
+# Checked before $1 is read: with set -u, an empty argument list aborts on the test itself.
+[ "$#" -gt 0 ] || { echo "usage: $0 -o shot.png -- command..." >&2; exit 2; }
 [ "$1" = '--' ] && shift
 [ "$#" -gt 0 ] || { echo "usage: $0 -o shot.png -- command..." >&2; exit 2; }
 
