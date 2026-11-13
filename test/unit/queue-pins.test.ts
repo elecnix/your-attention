@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { summarize } from '../../src/core/summary.ts';
 import type { Card } from '../../src/core/types.ts';
-import { buildQueue, type InboxState } from '../../web/queue.js';
+import { buildQueue, SECTION_ID, type InboxState } from '../../web/queue.js';
 
 const card = (id: string, tags: Record<string, string>, extra: Partial<Card> = {}): Card => ({ id, agent: 'a', kind: 'ask', title: `Card ${id}`, priority: 'now', deliver: 'stream', version: 1, createdAt: id.charCodeAt(0), updatedAt: 1, replies: [], tags, ...extra });
 
@@ -42,5 +42,30 @@ describe('pinned tag values', () => {
     const q = buildQueue(state(cards), 'tag:topic', [['topic', 'billing']]);
     assert.deepEqual(ids(q.pinned[0]?.items ?? []), ['a', 'b']);
     assert.deepEqual(q.groups.map(([title, items, tag]) => [title, ids(items), tag]), [['search', ['c'], ['topic', 'search']], ['No topic', ['d', 'e'], undefined]]);
+  });
+});
+
+describe('system cards', () => {
+  const withSystem = [...cards, card('s', { repo: 'acme/api' }, { kind: 'system', agent: 'system' })];
+
+  it('sits above the pinned groups, even with the tag a pin matches, in the order and on the page', () => {
+    const q = buildQueue(state(withSystem), 'none', [['repo', 'acme/api']]);
+    assert.deepEqual(ids(q.systems), ['s']);
+    assert.deepEqual(q.pinned.map((p) => ids(p.items)), [['a', 'd']]);
+    assert.deepEqual(ids(q.order).slice(0, 1), ['s']);
+  });
+
+  it('leaves the queue order when the person collapses its section', () => {
+    const q = buildQueue(state(withSystem), 'none', [['repo', 'acme/api']], new Set([SECTION_ID.system]));
+    assert.deepEqual(ids(q.systems), ['s'], 'the section keeps its cards, for the count');
+    assert.ok(!ids(q.order).includes('s'), 'its cards leave the order, as a collapsed group does');
+    assert.deepEqual(ids(q.order).slice(0, 2), ['a', 'd']);
+  });
+
+  it('keeps its place when the rest of the queue is grouped or searched', () => {
+    const q = buildQueue(state(withSystem), 'tag:repo', [['topic', 'billing']]);
+    assert.deepEqual(ids(q.systems), ['s']);
+    assert.ok(!q.groups.some(([, items]) => ids(items).includes('s')), 'not inside a group');
+    assert.equal(q.order[0]!.id, 's');
   });
 });

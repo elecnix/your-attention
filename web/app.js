@@ -385,7 +385,7 @@ export function App() {
   const terms = searchTerms(query);
   const matches = new Map();
   if (terms.length) for (const c of state.cards) { const m = matchCard(terms, c, details.get(c)); if (m) matches.set(c.id, m); }
-  const { checking, pinned: pinnedGroups, outbox, sent, groups, order } = terms.length
+  const { systems, checking, pinned: pinnedGroups, outbox, sent, groups, order } = terms.length
     ? buildQueue({ ...state, cards: state.cards.filter((c) => matches.has(c.id)) }, groupBy, tagPins, collapsedGroups)
     : all;
   const visible = state.cards;
@@ -513,6 +513,7 @@ export function App() {
       h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); savingGroupBy.current += 1; const mine = savingGroupBy.current; api(`${BASE}v1/settings`, { groupBy: e.target.value }, 'PUT').catch(() => {}).finally(() => { if (savingGroupBy.current === mine) savingGroupBy.current = 0; }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
+    systems.length > 0 && group('Needs your approval', systems, '', 'system', undefined, SECTION_ID.system),
     pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
     groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),
     checking.length > 0 && group('Being checked by triage', checking, '', undefined, undefined, SECTION_ID.checking),

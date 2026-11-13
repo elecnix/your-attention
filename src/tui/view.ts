@@ -104,6 +104,8 @@ export function listRows(m: Model, width: number): Row[] {
     for (const c of cards) rows.push(cardRow(m, c, width, sent));
   };
   const waitingGroups = q.groups;
+  // The inbox's own cards come first, above every pinned group, as on the page.
+  if (q.systems.length) section('Needs your approval', q.systems, '', false, SECTION_ID.system);
   // Each pinned tag value gets its own group at the top, under every Group by choice, as on the page.
   for (const p of q.pinned) section(`${p.key}: ${p.value}`, p.items, 'Nothing waiting', false);
   if (waitingGroups.length) for (const [title, cards, , id] of waitingGroups) section(title, cards, 'Nothing waiting', false, id);
