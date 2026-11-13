@@ -60,11 +60,21 @@ test('an image dropped on a comment box shows a thumbnail and reaches the agent 
 });
 
 for (const how of ['paste', 'drop'] as const) {
-  test(`a ${how === 'paste' ? 'pasted' : 'dropped'} file that is not an image is refused with a message`, async ({ page }) => {
-    const card = await openCard(page, `pi-${how}`, how === 'paste' ? 'Paste a PDF' : 'Drop a PDF');
-    await putFiles(page, '.focus-card textarea', [{ type: 'application/pdf', name: 'a.pdf', body: 'JVBERi0=' }], how);
-    await expect(card.locator('[role=alert]')).toContainText('PNG, JPEG, GIF or WebP');
+  test(`a ${how === 'paste' ? 'pasted' : 'dropped'} file the answer cannot carry is refused with a message`, async ({ page }) => {
+    const card = await openCard(page, `pi-${how}`, how === 'paste' ? 'Paste a zip' : 'Drop a zip');
+    await putFiles(page, '.focus-card textarea', [{ type: 'application/zip', name: 'a.zip', body: 'UEsFBg==' }], how);
+    await expect(card.locator('[role=alert]')).toContainText('PNG, JPEG, GIF or WebP images, or a PDF');
     await expect(card.locator('.pasted-thumb')).toHaveCount(0);
+  });
+
+  test(`a ${how === 'paste' ? 'pasted' : 'dropped'} PDF is kept, shows its name, and reaches the agent`, async ({ page }) => {
+    const listening = inbox.listen(`s-pdf-${how}`);
+    const card = await openCard(page, `pdf-${how}`, `Attach a statement, ${how}`);
+    await putFiles(page, '.focus-card textarea', [{ type: 'application/pdf', name: 'statement.pdf', body: 'JVBERi0=' }], how);
+    // A PDF is not an image, so the strip shows its name rather than a broken picture.
+    await expect(card.locator('.pasted-thumb .pasted-file')).toHaveText('statement.pdf');
+    await expect(card.locator('.pasted-thumb img')).toHaveCount(0);
+    expect(await sendAnswer(card, listening)).toEqual(['statement.pdf']);
   });
 }
 
