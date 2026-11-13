@@ -109,7 +109,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
     }
     case 'card_guidance': {
       if (args['propose']) {
-        const card = await inbox.proposeGuidance(String(args['propose']), String(args['message'] ?? ''), agent);
+        const card = await inbox.proposeGuidance(String(args['propose']), { message: String(args['message'] ?? ''), ...(agent ? { agent } : {}) });
         return `Proposed the guidance on card ${card.id}. It changes only if the person approves it. The answer and the person's comment arrive ${ctx.arrival}.`;
       }
       const g = await inbox.guidance();

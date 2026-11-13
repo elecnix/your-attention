@@ -1387,8 +1387,9 @@ export class Inbox {
     if (!why) throw new InboxError(400, 'a guidance proposal needs a message: say what changed and why, for the person who approves it');
     if (why.length > 2000) throw new InboxError(400, 'message must be at most 2000 characters');
     // The widget catalog reaches agents beside the guidance text, and never inside it: a proposal carries only the text.
-    const catalog = this.widgetCatalog();
-    if (catalog && clean.includes(catalog)) throw new InboxError(400, 'the proposal includes the widget catalog, which the inbox adds beside the guidance text and which is not part of it: propose the text without those lines');
+    // Any complete catalog line counts, so a paste that drops the header is refused too.
+    const bullets = this.widgetCatalog().split('\n').slice(1).filter((l) => l.trim());
+    if (bullets.some((l) => clean.includes(l))) throw new InboxError(400, 'the proposal includes the widget catalog, which the inbox adds beside the guidance text and which is not part of it: propose the text without those lines');
     const from = by ? String(by.agent ?? '').trim() : '';
     if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');

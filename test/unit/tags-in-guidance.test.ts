@@ -102,7 +102,7 @@ describe('tags in card_guidance', () => {
     const out = await runTool(ctx, 'card_guidance', {});
     const text = (await inbox.guidance()).text;
     const end = out.indexOf('Not part of the guidance text, added to this answer: the widget catalog.');
-    assert.ok(end > text.length - 1, `the marker comes after the guidance text: ${out}`);
+    assert.ok(end >= out.indexOf(text) + text.length, `the marker comes after the guidance text: ${out}`);
     assert.ok(inbox.widgetCatalog(), 'the inbox lists the built-in widgets');
     assert.ok(out.indexOf('- mermaid:') > end, 'the catalog comes after the marker');
     assert.ok(out.indexOf('Not part of the guidance text either, tag values in use:') > end, 'the tag lines come after it too');

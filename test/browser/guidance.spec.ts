@@ -23,7 +23,7 @@ async function proposal(): Promise<{ edited: string; word: string; added: string
 
 test('a guidance card shows one added line, one changed line with its word marked, and hides the unchanged lines', async ({ page }) => {
   const p = await proposal();
-  await inbox.agent.proposeGuidance(p.text, 'Adds a rule the last four cards needed.', 's-guide');
+  await inbox.agent.proposeGuidance(p.text, { message: 'Adds a rule the last four cards needed.', agent: 's-guide' });
   await inbox.open(page);
   await expect(page.locator('.card-title')).toHaveText('Send new card guidance to agents?');
   const diff = page.locator('.guidance-diff');
@@ -41,7 +41,7 @@ test('a guidance card shows one added line, one changed line with its word marke
 test('a comment and Reject go to the agent that proposed the guidance', async ({ page }) => {
   const heard = inbox.listen('s-guide');
   const p = await proposal();
-  const card = await inbox.agent.proposeGuidance(p.text, 'Adds a rule the last four cards needed.', 's-guide');
+  const card = await inbox.agent.proposeGuidance(p.text, { message: 'Adds a rule the last four cards needed.', agent: 's-guide' });
   await inbox.open(page);
   await expect(page.locator('.card-title')).toHaveText('Send new card guidance to agents?');
   await page.getByLabel('Comment').fill('Name the widget instead of the screenshot.');
@@ -56,7 +56,7 @@ test('a comment and Reject go to the agent that proposed the guidance', async ({
 
 test('a guidance answer that fails keeps the comment and says why', async ({ page }) => {
   const p = await proposal();
-  await inbox.agent.proposeGuidance(p.text, 'Adds a rule the last four cards needed.', 's-guide');
+  await inbox.agent.proposeGuidance(p.text, { message: 'Adds a rule the last four cards needed.', agent: 's-guide' });
   await inbox.open(page);
   await page.route('**/v1/cards/*/answer', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'the inbox is restarting' }) }));
   await page.getByLabel('Comment').fill('Keep this comment.');
@@ -67,7 +67,7 @@ test('a guidance answer that fails keeps the comment and says why', async ({ pag
 });
 
 test('a proposal that matches the current guidance says so', async ({ page }) => {
-  await inbox.agent.proposeGuidance((await inbox.agent.guidance()).text, 'Adds a rule the last four cards needed.', 's-guide');
+  await inbox.agent.proposeGuidance((await inbox.agent.guidance()).text, { message: 'Adds a rule the last four cards needed.', agent: 's-guide' });
   await inbox.open(page);
   await expect(page.locator('.guidance-diff')).toContainText('The proposal matches the current guidance.');
 });
@@ -80,7 +80,7 @@ test('the card lists only the agents online now, all ticked, out of many that co
   await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => a.startsWith('s-gone-') && p.online).length, { timeout: 10_000 }).toBe(0);
   const online = ['s-on-1', 's-on-2', 's-on-3'].map((a) => inbox.listen(a));
   await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => a.startsWith('s-on-') && p.online).length).toBe(3);
-  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', 'Adds a rule the last four cards needed.', 's-on-1');
+  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', { message: 'Adds a rule the last four cards needed.', agent: 's-on-1' });
   const stored = (await inbox.state()).cards.find((c) => c.id === card.id);
   expect(stored?.broadcast?.agents).toBeUndefined();
   expect(JSON.stringify(stored)).not.toContain('s-gone-');
@@ -103,7 +103,7 @@ test('one toggle unticks every agent, a newcomer joins unticked, and the toggle 
   const presence = async () => ((await inbox.state()) as unknown as { presence: Record<string, { online: boolean }> }).presence;
   ['s-a', 's-b', 's-c'].map((a) => inbox.listen(a));
   await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => /^s-[abc]$/.test(a) && p.online).length).toBe(3);
-  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', 'Adds a rule the last four cards needed.', 's-a');
+  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', { message: 'Adds a rule the last four cards needed.', agent: 's-a' });
   await inbox.open(page);
   const agents = page.locator('.broadcast .agents');
   const all = agents.getByRole('checkbox', { name: 'All agents' });
@@ -126,7 +126,7 @@ test('unticking every agent by hand also makes a newcomer join unticked', async 
   const presence = async () => ((await inbox.state()) as unknown as { presence: Record<string, { online: boolean }> }).presence;
   ['s-x', 's-y'].map((a) => inbox.listen(a));
   await expect.poll(async () => Object.entries(await presence()).filter(([a, p]) => /^s-[xy]$/.test(a) && p.online).length).toBe(2);
-  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', 'Adds a rule the last four cards needed.', 's-x');
+  const card = await inbox.agent.proposeGuidance('Always attach a screenshot.', { message: 'Adds a rule the last four cards needed.', agent: 's-x' });
   await inbox.open(page);
   const agents = page.locator('.broadcast .agents');
   await agents.locator('.agent', { hasText: 's-x' }).locator('input').uncheck();

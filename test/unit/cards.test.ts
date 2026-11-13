@@ -143,6 +143,8 @@ describe('guidance', () => {
     const catalog = inbox.widgetCatalog();
     assert.ok(catalog, 'the inbox lists the built-in widgets');
     assert.throws(() => inbox.proposeGuidance(`Always include a diff.\n\n${catalog}`, 'Says why.'), /widget catalog/);
+    // Without the header line, the bullet list alone is still the catalog.
+    assert.throws(() => inbox.proposeGuidance(`Always include a diff.\n\n${catalog.split('\n').slice(1).join('\n')}`, 'Says why.'), /widget catalog/);
     assert.ok(inbox.proposeGuidance('Always include a diff.\n\nUse `widget secret` for keys.', 'Says why.'));
   });
 
