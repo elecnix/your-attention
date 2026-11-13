@@ -120,7 +120,11 @@ export const UNREAD_ID_LIMIT = 20;
 // The images of one answer share a byte budget, because the route reads a body of 16 MB and base64 costs four thirds:
 // ten images of 8 MB each would make a body no route accepts.
 export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
-const ANSWER_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+// The types an answer may carry: the images the page shows, and a PDF the person was asked about, which the page
+// opens in a new tab. Everything else stays out, since the answer arrives as a data: URL the inbox then serves back.
+const ANSWER_FILE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf']);
+/** The extension a file with no name gets, by type, so a stored PDF does not end in ".ation/pdf". */
+const ANSWER_FILE_EXTENSION: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'application/pdf': 'pdf' };
 /** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
 export const MIN_FILE_CHARGE = 64 * 1024;
 /** The largest card, as stored, without its files. */
@@ -1700,7 +1704,7 @@ export class Inbox {
     const decoded = input.map((f, i) => {
       if (!f || typeof f !== 'object' || !/^data:/.test(String(f.src ?? ''))) throw new InboxError(400, `image ${i + 1}: src must be a base64 data: URL`);
       const d = decodeDataUrl(i, f);
-      if (!ANSWER_IMAGE_TYPES.has(d.type)) throw new InboxError(400, `image ${i + 1}${f.name ? ` (${cleanName(f.name)})` : ''} is ${d.type}: an answer takes only PNG, JPEG, GIF or WebP images`);
+      if (!ANSWER_FILE_TYPES.has(d.type)) throw new InboxError(400, `file ${i + 1}${f.name ? ` (${cleanName(f.name)})` : ''} is ${d.type}: an answer takes PNG, JPEG, GIF or WebP images, or a PDF`);
       return d;
     });
     const bytes = decoded.reduce((n, d) => n + Math.max(d.bytes.length, MIN_FILE_CHARGE), 0);
@@ -1714,7 +1718,7 @@ export class Inbox {
     const settled = await Promise.allSettled(input.map(async (f, i): Promise<void> => {
       const d = decoded[i]!;
       const key = `${card.id}.a${i}.${randomId(6)}`;
-      const ref: Attachment = { id: key, name: cleanName(f.name) || `pasted-${i + 1}.${d.type.slice(6).replace('jpeg', 'jpg')}`, type: d.type, size: d.bytes.length, ...(f.field ? { field: String(f.field).slice(0, 80) } : {}) };
+      const ref: Attachment = { id: key, name: cleanName(f.name) || `pasted-${i + 1}.${ANSWER_FILE_EXTENSION[d.type] ?? 'bin'}`, type: d.type, size: d.bytes.length, ...(f.field ? { field: String(f.field).slice(0, 80) } : {}) };
       stored.push(ref);
       await this.blobs.put(key, d.bytes, d.type);
     }));

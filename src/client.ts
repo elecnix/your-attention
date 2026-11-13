@@ -449,10 +449,11 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
     lines.push(`${k}: ${label}`);
   }
   if (answer.comment) lines.push(`Comment: ${answer.comment}`);
-  // Pasted images are files: name each path, or say how many came when the integration has not saved them.
+  // Pasted files are stored and named by their path, or counted when the integration has not saved them.
   const images = answer.images ?? [];
-  if (imagePaths?.length) images.forEach((f, i) => lines.push(`Image${f.field ? ` pasted in ${f.field}` : ''}: ${imagePaths[i] ?? f.name}`));
-  else if (images.length) lines.push(`${images.length} pasted image${images.length === 1 ? '' : 's'}`);
+  const kind = (f: { type?: string }): string => (f.type === 'application/pdf' ? 'PDF' : 'Image');
+  if (imagePaths?.length) images.forEach((f, i) => lines.push(`${kind(f)}${f.field ? ` pasted in ${f.field}` : ''}: ${imagePaths[i] ?? f.name}`));
+  else if (images.length) lines.push(`${images.length} attachment${images.length === 1 ? '' : 's'}`);
   // Each widget on the card can add text for the agent, filled from this answer, such as what to do next.
   for (const r of answer.responses ?? []) lines.push('', r);
   return lines.join('\n') || 'An empty answer: the person sent nothing more.';

@@ -31,10 +31,10 @@ describe('images pasted into an answer', () => {
     assert.equal((await inbox.attachment({ token: 'o', role: 'owner' }, a.images![1]!.id!)).file.name, 'pasted-2.png');
   });
 
-  it('refuses a file that is not an image, and says which one', async () => {
+  it('refuses a file it cannot serve back, and says which one', async () => {
     const inbox = setup();
-    const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4').toString('base64')}`;
-    await assert.rejects(inbox.answer('c1', { images: [{ src: png }, { src: pdf, name: 'a.pdf' }] }), /image 2 \(a\.pdf\).*PNG, JPEG, GIF or WebP/);
+    const zip = `data:application/zip;base64,${Buffer.from('PK').toString('base64')}`;
+    await assert.rejects(inbox.answer('c1', { images: [{ src: png }, { src: zip, name: 'a.zip' }] }), /file 2 \(a\.zip\).*PNG, JPEG, GIF or WebP images, or a PDF/);
     await assert.rejects(inbox.answer('c1', { images: [{ src: 'https://example.com/a.png' }] }), /data: URL/);
   });
 
@@ -66,13 +66,43 @@ describe('images pasted into an answer', () => {
     assert.equal(((await res.json()) as { images: unknown[] }).images.length, 1);
   });
 
+  it('takes a PDF too through the answer route', async () => {
+    const inbox = setup();
+    const handle = createHandler(inbox, { heartbeatMs: 50 });
+    const owner = (await inbox.createToken('page', 'owner')).secret;
+    const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4 test').toString('base64')}`;
+    const ok = await handle(new Request('http://inbox.test/v1/cards/c1/answer', {
+      method: 'POST', headers: { authorization: `Bearer ${owner}` },
+      body: JSON.stringify({ images: [{ src: pdf, name: 'statement.pdf', field: 'comment' }] }),
+    }));
+    assert.equal(ok.status, 200);
+    const answer = (await ok.json()) as { images: { name: string; type: string }[] };
+    assert.equal(answer.images[0]?.type, 'application/pdf');
+    assert.equal(answer.images[0]?.name, 'statement.pdf');
+    const zip = `data:application/zip;base64,${Buffer.from('PK').toString('base64')}`;
+    const refused = await handle(new Request('http://inbox.test/v1/cards/c1/answer', {
+      method: 'POST', headers: { authorization: `Bearer ${owner}` },
+      body: JSON.stringify({ images: [{ src: zip, name: 'bundle.zip' }] }),
+    }));
+    assert.equal(refused.status, 400);
+    assert.match(((await refused.json()) as { error: string }).error, /bundle\.zip.*PNG, JPEG, GIF or WebP images, or a PDF/);
+  });
+
+  it('names a PDF it was given without a name, with the right extension', async () => {
+    const inbox = setup();
+    const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4').toString('base64')}`;
+    const answer = await inbox.answer('c1', { images: [{ src: pdf }] });
+    assert.equal(answer.images?.[0]?.name, 'pasted-1.pdf');
+    assert.equal(answer.images?.[0]?.type, 'application/pdf');
+  });
+
   it('tells the agent where each image is', () => {
     const c = { id: 'c1', agent: 's1', kind: 'ask', title: 'q', priority: 'soon', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, replies: [] } as Card;
     const a = { card: 'c1', version: 1, values: {}, comment: 'see', delivery: 'default', savedAt: 1, deliveredAt: null, readAt: null, forcedAt: null, previous: [],
       images: [{ id: 'i1', name: 'shot.png', type: 'image/png', field: 'comment' }, { id: 'i2', name: 'b.png', type: 'image/png' }] } as Answer;
     assert.equal(describeAnswer(c, a, ['/home/u/img/shot.png', '/home/u/img/b.png']),
       'Comment: see\nImage pasted in comment: /home/u/img/shot.png\nImage: /home/u/img/b.png');
-    assert.match(describeAnswer(c, a), /2 pasted images/);
+    assert.match(describeAnswer(c, a), /2 attachments/);
   });
 });
 
@@ -84,9 +114,10 @@ describe('paste handler', () => {
     assert.equal(imageFiles({ items: [items[0]] } as never).length, 0);
     assert.equal(imageFiles(null).length, 0);
   });
-  it('accepts the four image types and refuses the rest with a message', () => {
+  it('accepts the images and a PDF, and refuses the rest with a message', () => {
     for (const t of IMAGE_TYPES) assert.equal(checkImage(file(t)), null);
-    assert.match(checkImage(file('application/pdf', 5, 'a.pdf')) ?? '', /a\.pdf.*PNG, JPEG, GIF or WebP/);
+    assert.equal(checkImage(file('application/pdf', 5, 'a.pdf')), null, 'a PDF attached to an answer');
+    assert.match(checkImage(file('application/zip', 5, 'a.zip')) ?? '', /a\.zip.*PNG, JPEG, GIF or WebP images, or a PDF/);
     assert.match(checkImage(file('image/png', IMAGE_LIMIT_BYTES + 1, 'big.png')) ?? '', /big\.png.*8 MB/);
   });
 });
@@ -190,8 +221,8 @@ describe('what the agent reads about the images', () => {
     const card = { id: 'c1', title: 'Which one?', kind: 'question' } as unknown as Card;
     const answer = { comment: 'look', values: {}, images: [{ id: 'a1', name: 'one.png' }, { id: 'a2', name: 'two.png' }] } as unknown as Answer;
     // An empty list is truthy, so the count line is what runs here.
-    assert.match(describeAnswer(card, answer, []), /2 pasted images/);
-    assert.match(describeAnswer(card, answer), /2 pasted images/);
+    assert.match(describeAnswer(card, answer, []), /2 attachments/);
+    assert.match(describeAnswer(card, answer), /2 attachments/);
     assert.match(describeAnswer(card, answer, ['/tmp/one.png', '/tmp/two.png']), /Image: \/tmp\/one\.png\nImage: \/tmp\/two\.png/);
   });
 
