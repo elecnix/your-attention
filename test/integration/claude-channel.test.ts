@@ -36,7 +36,7 @@ after(async () => {
 describe('the Claude Code channel', () => {
   it('offers the card tools', async () => {
     const { tools } = await mcp.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_close', 'card_guidance', 'card_patch', 'card_post', 'card_search', 'card_status', 'card_tags', 'card_template_save', 'card_widget_save']);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ['card_close', 'card_guidance', 'card_patch', 'card_post', 'card_read', 'card_search', 'card_status', 'card_tags', 'card_template_save', 'card_widget_save']);
   });
 
   it('posts a card, pushes the answer into the session, and marks it read from the transcript', async () => {
