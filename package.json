@@ -66,5 +66,11 @@
   },
   "peerDependencies": {
     "typebox": "*"
+  },
+  "overrides": {
+    "hono": "^4.13.16",
+    "@ag-ui/core": {
+      "zod": "^4.6.7"
+    }
   }
 }
