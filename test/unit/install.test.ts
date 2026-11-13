@@ -94,12 +94,12 @@ describe('your-attention install', () => {
     const pathEnv = [one, two].join(path.delimiter);
     const piInTwo = path.join(two, 'pi');
     const seen: string[] = [];
-    const found = which('pi', pathEnv, (f) => { seen.push(f); return f === piInTwo; });
+    const found = which('pi', pathEnv, (f) => { seen.push(f); return f === piInTwo; }, 'linux');
     assert.equal(found, piInTwo);
     assert.deepEqual(seen, [path.join(one, 'pi'), piInTwo]);
-    assert.equal(which('pi', one, () => false), undefined);
+    assert.equal(which('pi', one, () => false, 'linux'), undefined);
     const claudeInOne = path.join(one, 'claude');
-    const harnesses = detect(pathEnv, (f) => f === claudeInOne);
+    const harnesses = detect(pathEnv, (f) => f === claudeInOne, 'linux');
     assert.equal(harnesses['claude'], claudeInOne);
     assert.equal(harnesses['pi'], undefined);
   });

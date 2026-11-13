@@ -106,9 +106,9 @@ export function shellWord(word: string): string {
 }
 
 /** The harness whose binary answers on this PATH, by name. */
-export function detect(pathEnv: string | undefined, exists: (file: string) => boolean = (f) => fs.existsSync(f)): Record<string, string | undefined> {
+export function detect(pathEnv: string | undefined, exists: (file: string) => boolean = (f) => fs.existsSync(f), platform: NodeJS.Platform = process.platform): Record<string, string | undefined> {
   const found: Record<string, string | undefined> = {};
-  for (const h of HARNESSES) found[h.name] = which(h.binary, pathEnv, exists);
+  for (const h of HARNESSES) found[h.name] = which(h.binary, pathEnv, exists, platform);
   return found;
 }
 
