@@ -76,9 +76,12 @@ describe('an id derived beside the ids a card already carries', () => {
     assert.deepEqual(ids(['Go  --  ahead']), ['go-ahead']);
     // A label that spells a numbered id takes it, so the next id adds a dash and the next free number to its own base.
     assert.deepEqual(ids(['Go ahead', 'Go ahead', 'Go ahead 2']), ['go-ahead', 'go-ahead-2', 'go-ahead-2-2']);
-    // The first 60 characters, and an empty label by the option's position.
+    // The first 60 characters of the joined result, and a cut can leave a dash at the end.
     assert.deepEqual(ids(['x'.repeat(80)]), ['x'.repeat(60)]);
-    assert.deepEqual(ids(['', 'Ok']), ['option-1', 'ok']);
+    assert.deepEqual(ids([`${'a'.repeat(59)} bcd`]), [`${'a'.repeat(59)}-`]);
+    // A label with no letters or digits takes the empty-label rule, by the option's position.
+    assert.deepEqual(ids(['!!!', 'Ok']), ['option-1', 'ok']);
+    assert.deepEqual(ids(['', '!!!']), ['option-1', 'option-2']);
   });
 });
 
@@ -105,6 +108,9 @@ describe('a card that already carries an answer', () => {
     const reposted = inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Ship the preview?', text: 'The preview build is ready.', options: [{ label: 'Leave it' }, { label: 'Go ahead' }, { label: 'Stop' }] });
     assert.deepEqual(reposted.options?.map((o) => o.id), [undefined, undefined, undefined]);
     assert.equal(summary(reposted, store.get<Answer>('answers', 'c1')!), 'Go ahead');
+
+    // The page gives the added option, which has no id, by its label in the stored choice.
+    assert.deepEqual(answerValues(reposted, { choice: optionValue(reposted.options![2]!) }), { choice: 'Stop' });
 
     // A re-post that renames a label drops the pick, as any relabel does, and derives no id either.
     const renamed = inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Ship the preview?', options: [{ label: 'Leave it' }, { label: 'Go ahead now' }] });
