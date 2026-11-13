@@ -1,6 +1,7 @@
 // `your-attention install` is read by an agent, so its output is a contract: one exact command per detected harness,
 // nothing that could be mistaken for a question, and the restart warning every harness needs.
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { HARNESSES, detect, installHelp, installReport, which, type InstallFacts } from '../../src/node/install.ts';
 
@@ -74,13 +75,19 @@ describe('your-attention install', () => {
   });
 
   it('finds a binary without running anything, and reports the first directory that has it', () => {
+    // The separator and the join come from the platform: a Windows PATH splits on ';' and joins with a backslash.
+    const one = path.join(path.sep, 'one');
+    const two = path.join(path.sep, 'two');
+    const pathEnv = [one, two].join(path.delimiter);
+    const piInTwo = path.join(two, 'pi');
     const seen: string[] = [];
-    const found = which('pi', ['/one', '/two'].join(':'), (f) => { seen.push(f); return f === '/two/pi'; });
-    assert.equal(found, '/two/pi');
-    assert.deepEqual(seen, ['/one/pi', '/two/pi']);
-    assert.equal(which('pi', '/one', () => false), undefined);
-    const harnesses = detect(':'.concat(['/one', '/two'].join(':')), (f) => f === '/one/claude');
-    assert.equal(harnesses['claude'], '/one/claude');
+    const found = which('pi', pathEnv, (f) => { seen.push(f); return f === piInTwo; });
+    assert.equal(found, piInTwo);
+    assert.deepEqual(seen, [path.join(one, 'pi'), piInTwo]);
+    assert.equal(which('pi', one, () => false), undefined);
+    const claudeInOne = path.join(one, 'claude');
+    const harnesses = detect(pathEnv, (f) => f === claudeInOne);
+    assert.equal(harnesses['claude'], claudeInOne);
     assert.equal(harnesses['pi'], undefined);
   });
 });
