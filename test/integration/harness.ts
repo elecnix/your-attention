@@ -114,7 +114,16 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
   try {
     // A server that fails to boot leaves no address, and this waits a few seconds for one. Either way the child and its
     // home must go, or a failed start leaks both for the rest of the run.
-    ({ url } = await until(() => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string } : undefined)));
+    ({ url } = await until(() => {
+      if (!fs.existsSync(file)) return undefined;
+      // The server creates the file and writes it in two steps, so a reader can catch it empty. That is a fact about
+      // this wait, not about the server: the next poll reads the whole file.
+      try {
+        return JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string };
+      } catch {
+        return undefined;
+      }
+    }));
   } catch (e) {
     await stopAndRemove(serve, home);
     throw e;
