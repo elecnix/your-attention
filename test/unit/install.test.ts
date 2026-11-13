@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { HARNESSES, detect, installHelp, installReport, which, type InstallFacts } from '../../src/node/install.ts';
+import { HARNESSES, candidates, detect, installHelp, installReport, shellWord, which, type InstallFacts } from '../../src/node/install.ts';
 
 const facts = (over: Partial<InstallFacts> = {}): InstallFacts => ({
   found: { claude: '/usr/local/bin/claude', pi: '/usr/local/bin/pi', opencode: undefined, codex: undefined, cline: undefined },
@@ -72,6 +72,19 @@ describe('your-attention install', () => {
     const out = installReport(facts({ found: Object.fromEntries(HARNESSES.map((h) => [h.name, `/usr/bin/${h.binary}`])) })).join('\n');
     for (const h of HARNESSES) assert.match(out, new RegExp(`^${h.name}: `, 'm'), out);
     assert.match(out, /^ {2}no plugin: Codex reaches the inbox/m, out);
+  });
+
+  it('finds a Windows shim, and quotes a path a shell would otherwise split', () => {
+    // An npm install on Windows writes your-attention.cmd beside the name, so the bare name finds nothing.
+    assert.deepEqual(candidates('pi', 'win32'), ['pi', 'pi.cmd', 'pi.exe', 'pi.bat']);
+    assert.deepEqual(candidates('pi', 'linux'), ['pi']);
+    const dir = path.join(path.sep, 'tools');
+    assert.equal(which('pi', dir, (f) => f === path.join(dir, 'pi.cmd'), 'win32'), path.join(dir, 'pi.cmd'));
+    // A path with a space or a quote must survive a copy into a shell.
+    assert.equal(shellWord('/a b/c'), "'/a b/c'");
+    assert.equal(shellWord("/a'b"), "'/a'\\''b'");
+    const out = installReport(facts({ fromSource: '/a b/your-attention' })).join('\n');
+    assert.ok(out.includes("cd '/a b/your-attention' && npm ci && npm link"), out);
   });
 
   it('finds a binary without running anything, and reports the first directory that has it', () => {

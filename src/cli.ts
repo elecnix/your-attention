@@ -465,7 +465,14 @@ switch (command) {
   }
   case 'install': {
     // An agent reads this, so nothing here prompts: every line it needs to run comes out as one command.
-    const { values } = parseArgs({ args: rest, options: { help: { type: 'string' }, 'from-source': { type: 'string' } }, allowPositionals: true });
+    // `--help` takes a harness name. On its own it means "show me the report", and parseArgs would throw on the
+    // missing value, so the bare form is answered before parsing.
+    const bareHelp = rest.includes('--help') && rest[rest.indexOf('--help') + 1] === undefined;
+    const { values } = parseArgs({
+      args: bareHelp ? rest.filter((a) => a !== '--help') : rest,
+      options: { help: { type: 'string' }, 'from-source': { type: 'string' } },
+      allowPositionals: true,
+    });
     const { HARNESSES, detect, installHelp, installReport, which } = await import('./node/install.ts');
     const pathEnv = process.env['PATH'];
     const facts = {

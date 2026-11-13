@@ -83,14 +83,26 @@ export interface InstallFacts {
   fromSource?: string;
 }
 
+/** The names a program can answer to on this platform: an npm install on Windows writes a `.cmd` shim beside the name. */
+export function candidates(binary: string, platform: NodeJS.Platform = process.platform): string[] {
+  return platform === 'win32' ? [binary, `${binary}.cmd`, `${binary}.exe`, `${binary}.bat`] : [binary];
+}
+
 /** The first file on this PATH with that name, or undefined when this shell has it nowhere. */
-export function which(binary: string, pathEnv: string | undefined, exists: (file: string) => boolean = (f) => fs.existsSync(f)): string | undefined {
+export function which(binary: string, pathEnv: string | undefined, exists: (file: string) => boolean = (f) => fs.existsSync(f), platform: NodeJS.Platform = process.platform): string | undefined {
   for (const dir of (pathEnv ?? '').split(path.delimiter)) {
     if (!dir) continue;
-    const file = path.join(dir, binary);
-    if (exists(file)) return file;
+    for (const name of candidates(binary, platform)) {
+      const file = path.join(dir, name);
+      if (exists(file)) return file;
+    }
   }
   return undefined;
+}
+
+/** One word a shell reads as a single word, so a path with a space or a quote survives being copied. */
+export function shellWord(word: string): string {
+  return `'${word.replace(/'/g, `'\\''`)}'`;
 }
 
 /** The harness whose binary answers on this PATH, by name. */
@@ -105,7 +117,7 @@ export function installRoutes(facts: InstallFacts): string[] {
   if (facts.fromSource) {
     return [
       `Install the command from the checkout you named:`,
-      `  cd ${facts.fromSource} && npm ci && npm link`,
+      `  cd ${shellWord(facts.fromSource)} && npm ci && npm link`,
     ];
   }
   if (facts.brew) {
