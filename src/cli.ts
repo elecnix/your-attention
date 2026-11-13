@@ -465,9 +465,11 @@ switch (command) {
   }
   case 'install': {
     // An agent reads this, so nothing here prompts: every line it needs to run comes out as one command.
-    // `--help` takes a harness name. On its own it means "show me the report", and parseArgs would throw on the
-    // missing value, so the bare form is answered before parsing.
-    const bareHelp = rest.includes('--help') && rest[rest.indexOf('--help') + 1] === undefined;
+    // `--help` takes a harness name. On its own it means "show me the report", and parseArgs would read the next
+    // flag as that missing value, so a `--help` followed by nothing or by another flag is answered before parsing.
+    const helpAt = rest.indexOf('--help');
+    const next = helpAt < 0 ? undefined : rest[helpAt + 1];
+    const bareHelp = helpAt >= 0 && (next === undefined || next.startsWith('-'));
     const { values } = parseArgs({
       args: bareHelp ? rest.filter((a) => a !== '--help') : rest,
       options: { help: { type: 'string' }, 'from-source': { type: 'string' } },

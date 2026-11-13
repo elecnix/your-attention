@@ -100,8 +100,10 @@ export function which(binary: string, pathEnv: string | undefined, exists: (file
   return undefined;
 }
 
-/** One word a shell reads as a single word, so a path with a space or a quote survives being copied. */
-export function shellWord(word: string): string {
+/** One word a shell reads as a single word, so a path with a space survives being copied. cmd.exe reads double
+ * quotes and not single ones, so the platform decides which pair goes around the word. */
+export function shellWord(word: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') return `"${word.replace(/"/g, '""')}"`;
   return `'${word.replace(/'/g, `'\\''`)}'`;
 }
 
@@ -114,25 +116,25 @@ export function detect(pathEnv: string | undefined, exists: (file: string) => bo
 
 /** How the command itself gets onto PATH, which is what an agent started from a non-interactive shell needs first. */
 export function installRoutes(facts: InstallFacts): string[] {
-  if (facts.fromSource) {
-    return [
-      `Install the command from the checkout you named:`,
-      `  cd ${shellWord(facts.fromSource)} && npm ci && npm link`,
-    ];
-  }
+  // A command that is missing cannot be told to install itself, so its own route is the shell line instead.
+  const bySource = facts.fromSource
+    ? [`  cd ${shellWord(facts.fromSource)} && npm ci && npm link`]
+    : facts.self
+      ? ['  your-attention install --from-source /path/to/your-attention']
+      : ['  cd /path/to/your-attention && npm ci && npm link'];
   if (facts.brew) {
     return [
       'Install the command with Homebrew, which answers on this PATH:',
       '  brew install elecnix/tap/your-attention',
-      'Without Homebrew, install from a checkout:',
-      '  your-attention install --from-source /path/to/your-attention',
+      'Or from a checkout:',
+      ...bySource,
     ];
   }
   return [
     'Install the command from a checkout, since brew answers nowhere on this PATH:',
-    '  your-attention install --from-source /path/to/your-attention',
-    'That runs: cd /path/to/your-attention && npm ci && npm link',
-    'With Homebrew installed: brew install elecnix/tap/your-attention',
+    ...bySource,
+    'Or with Homebrew installed:',
+    '  brew install elecnix/tap/your-attention',
   ];
 }
 

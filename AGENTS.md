@@ -183,4 +183,25 @@ When a check fails for a cause that is not yours, say so in the body.
 
 ## Pull requests
 
+A change a person can see needs a picture in the pull request body, because the picture is how a reviewer judges it.
+
+A change to the web interface needs a screenshot of the screen it changes, and of the screen before it when the layout moved. A diff of JavaScript says nothing about what the page draws.
+
+When a pull request changes what a terminal prints, put a terminal screenshot in the body. Take one with `scripts/terminal-shot.sh`, which runs the command in a tmux session of a fixed size and renders the capture to a PNG with the headless browser already on the machine. It needs tmux and a browser, and it doesn't call a service or a skill:
+
+```sh
+scripts/terminal-shot.sh -W 132 -H 28 -o install.png -- your-attention install
+scripts/terminal-shot.sh -W 132 -H 20 -o help.png -- your-attention install --help claude
+```
+
+Size the pane wider than every line the command prints, so no word wraps mid-line. Then upload the PNG and put it in the body:
+
+```sh
+repo_id=$(gh api repos/OWNER/REPO --jq .id)
+curl -sS -X POST "https://uploads.github.com/user-attachments/assets?name=shot.png&content_type=image/png&repository_id=$repo_id" \
+  -H "Authorization: Bearer $(gh auth token)" -H "Accept: application/json" --data-binary @shot.png
+```
+
+A GitHub Actions token is refused by that endpoint, so upload with a user token. Attach the picture to the pull request it belongs to before marking it ready, because a reviewer opens the body when the merge comes up.
+
 Open the pull request as a draft, and mark it ready once the checks above are green. Cite reviews each pull request and reads this file, so a change that breaks a principle in PRINCIPLES.md is a request to amend the principle in the same pull request.
