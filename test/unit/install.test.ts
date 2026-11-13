@@ -43,17 +43,21 @@ describe('your-attention install', () => {
   });
 
   it('says when this shell cannot see the command, and how to install it', () => {
-    const out = installReport(facts({ self: undefined })).join('\n');
+    const out = installReport(facts({ self: undefined, platform: 'linux' })).join('\n');
     assert.match(out, /^command: not on this PATH$/m, out);
     assert.match(out, /not about the machine/, out);
     assert.ok(out.includes('  brew install elecnix/tap/your-attention'), out);
-    assert.ok(out.includes('  your-attention install --from-source /path/to/your-attention'), out);
+    // The command is missing, so its own route is a shell line rather than a command it cannot answer.
+    assert.ok(out.includes('  cd /path/to/your-attention && npm ci && npm link'), out);
   });
 
   it('offers the source route when brew answers nowhere, and the brew route when it does', () => {
-    const noBrew = installReport(facts({ brew: false })).join('\n');
+    const noBrew = installReport(facts({ brew: false, platform: 'linux' })).join('\n');
     assert.ok(noBrew.includes('  your-attention install --from-source /path/to/your-attention'), noBrew);
     assert.ok(noBrew.includes('brew answers nowhere on this PATH'), noBrew);
+    // The same route from a command this shell cannot see is a shell line, since it could not run itself.
+    const missing = installReport(facts({ self: undefined, brew: false, platform: 'linux' })).join('\n');
+    assert.ok(missing.includes('  cd /path/to/your-attention && npm ci && npm link'), missing);
     const brew = installReport(facts()).join('\n');
     assert.ok(brew.includes('brew install elecnix/tap/your-attention'), brew);
   });
@@ -81,10 +85,15 @@ describe('your-attention install', () => {
     const dir = path.join(path.sep, 'tools');
     assert.equal(which('pi', dir, (f) => f === path.join(dir, 'pi.cmd'), 'win32'), path.join(dir, 'pi.cmd'));
     // A path with a space or a quote must survive a copy into a shell.
-    assert.equal(shellWord('/a b/c'), "'/a b/c'");
-    assert.equal(shellWord("/a'b"), "'/a'\\''b'");
-    const out = installReport(facts({ fromSource: '/a b/your-attention' })).join('\n');
-    assert.ok(out.includes("cd '/a b/your-attention' && npm ci && npm link"), out);
+    assert.equal(shellWord('/a b/c', 'linux'), "'/a b/c'");
+    assert.equal(shellWord("/a'b", 'linux'), "'/a'\\''b'");
+    // cmd.exe reads double quotes and not single ones, so Windows gets that pair.
+    assert.equal(shellWord('/a b/c', 'win32'), '"a b/c"'.replace('a', '/a'));
+    const out = installReport(facts({ fromSource: '/a b/your-attention', platform: 'linux' })).join('\n');
+    assert.ok(out.includes(`cd ${shellWord('/a b/your-attention', 'linux')} && npm ci && npm link`), out);
+    // cmd.exe changes drive with /d, and a checkout on another drive needs it.
+    const win = installReport(facts({ fromSource: 'D:\\repo', platform: 'win32' })).join('\n');
+    assert.ok(win.includes(`cd /d ${shellWord('D:\\repo', 'win32')} && npm ci && npm link`), win);
   });
 
   it('finds a binary without running anything, and reports the first directory that has it', () => {
