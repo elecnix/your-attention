@@ -6,9 +6,11 @@
 /** What keeps the page from drawing all of a body, one sentence each. Empty when the page draws it whole. */
 export function bodyFaults(body, parsed) {
   const { root, meta } = parsed;
+  // An empty body draws nothing and is not a fault: it is what a card without widgets has.
+  if (body.trim() === '') return [];
   const starts = statementStarts(body);
   // Any line that reads as a root statement counts, even one an unclosed string hides, so that error names the string.
-  if (!/^[ \t]*root[ \t]*=/m.test(body)) return ['the body has no `root = ...` statement. Put Markdown in text, and OpenUI Lang in body.'];
+  if (!/^[ \t]*root[ \t]*=/m.test(body)) return ['the body has no `root = ...` statement, and a body needs one: start it with `root = TextContent("...")`, or another component from the library. Put prose in text, and leave body out when the card has no widgets.'];
   const errors = [];
   if (meta.incomplete) {
     const last = starts[meta.statementCount - 1];

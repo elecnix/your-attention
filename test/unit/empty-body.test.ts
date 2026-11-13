@@ -7,7 +7,11 @@ import { MemoryStorage } from '../../src/core/storage.ts';
 import { bodyErrors } from '../../src/adapters/openui-body.ts';
 
 function setup() {
-  return { inbox: new Inbox(new MemoryStorage(), () => 1_000_000), agent: { token: 'ta', role: 'agent' } satisfies Caller };
+  // The laptop inbox refuses a body the page cannot draw; the unit store has to be told to, as server.ts does.
+  return {
+    inbox: new Inbox(new MemoryStorage(), () => 1_000_000, undefined, { checkBody: bodyErrors }),
+    agent: { token: 'ta', role: 'agent' } satisfies Caller,
+  };
 }
 
 describe('an empty card body', () => {
@@ -32,7 +36,10 @@ describe('an empty card body', () => {
     const { inbox, agent } = setup();
     assert.throws(
       () => inbox.postCard(agent, { id: 'c3', agent: 's1', title: 'Plan', body: 'TextContent("hi")' }),
-      (e: unknown) => e instanceof Error && /no `root = \.\.\.` statement/.test(e.message) && /root = /.test(e.message),
+      (e: unknown) => e instanceof Error
+        && /no `root = \.\.\.` statement, and a body needs one/.test(e.message)
+        && /root = TextContent/.test(e.message)
+        && /leave body out/.test(e.message),
     );
   });
 });

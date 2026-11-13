@@ -644,7 +644,9 @@ export class Inbox {
       body = fill(v.source, input.template.vars ?? {});
       template = { name: t.name, version: v.version };
     }
-    if (body === undefined) return { body, template };
+    // An empty body is no body: a client that fills a missing field with "", or an agent that sends body: "", means a
+    // card without widgets, and the body checks would otherwise refuse it for a root statement it has no reason to have.
+    if (body === undefined || String(body).trim() === '') return { body: undefined, template };
     const expanded = expandWidgets(String(body), (name, version) => this.widgetVersion(name, version));
     return { body: expanded.body, template, expanded };
   }
