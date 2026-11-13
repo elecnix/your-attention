@@ -92,3 +92,18 @@ test('a pinned group with nothing waiting keeps its heading, so the person can r
   await heading(page, 'topic: payroll').getByRole('button', { name: 'Unpin topic: payroll' }).click();
   await expect(heading(page, 'topic: payroll')).toHaveCount(0);
 });
+
+test('a system card sits above the pinned groups, under its own heading', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ pins: [['topic', 'billing']] });
+  await inbox.agent.proposeGuidance('Always attach a screenshot.', { message: 'Adds the screenshot rule.', agent: 's-tp' });
+  await inbox.open(page);
+  const names = (await headings(page)).map((n) => n.toLowerCase());
+  const system = names.findIndex((n) => n.includes('needs your approval'));
+  const pin = names.findIndex((n) => n.includes('topic: billing'));
+  expect(system).toBeGreaterThanOrEqual(0);
+  expect(system).toBeLessThan(pin);
+  // The approval card is the one under that heading.
+  const card = page.locator('.queue .q', { hasText: 'Send new card guidance to agents?' });
+  await expect(card).toBeVisible();
+  expect(await groupOf(page, 'Send new card guidance to agents?')).toContain('Needs your approval');
+});

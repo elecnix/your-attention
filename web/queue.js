@@ -4,7 +4,7 @@
 export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back to its agent', dismissed: 'Dismissed' };
 export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed' };
 /** The ids of the sections that every Group by choice shows, so a collapsed one keeps its state across the choices. */
-export const SECTION_ID = { checking: 'section: checking', outbox: 'section: outbox', sent: 'section: sent' };
+export const SECTION_ID = { system: 'section: system', checking: 'section: checking', outbox: 'section: outbox', sent: 'section: sent' };
 
 // A group's id is its kind and value, such as tag: topic: billing. The ':' and '%' of a part are escaped, because an
 // agent picks tag keys and values: without the escape, a tag named `section: outbox` would take the outbox's id.
@@ -42,10 +42,14 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
     .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
   const checking = visible.filter((c) => st(c) === 'in-triage');
   const tagOf = (c, key) => String((c.tags || {})[key] || '').trim();
-  // Each pinned value is a group at the top, and a card that matches two pins goes to the oldest one.
+  // The inbox's own cards come first, above every pinned group and every Group by choice, so an approval never waits
+  // behind a pin. A system card keeps out of the groups, even when it carries the tag a pin matches.
+  const systems = pending.filter((c) => c.kind === 'system');
+  const others = pending.filter((c) => c.kind !== 'system');
+  // Each pinned value is a group below them, and a card that matches two pins goes to the oldest one.
   const pinOf = (c) => pins.findIndex(([key, value]) => tagOf(c, key) === value);
-  const pinned = pins.map(([key, value], i) => ({ key, value, id: groupId('pin', key, value), items: pending.filter((c) => pinOf(c) === i) }));
-  const unpinned = pending.filter((c) => pinOf(c) < 0);
+  const pinned = pins.map(([key, value], i) => ({ key, value, id: groupId('pin', key, value), items: others.filter((c) => pinOf(c) === i) }));
+  const unpinned = others.filter((c) => pinOf(c) < 0);
   const sentAt = (c) => (c.closed ? c.closed.at : answers[c.id] ? answers[c.id].savedAt : 0);
   const outbox = visible.filter((c) => ['answered', 'delivered'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
   const sent = visible.filter((c) => ['read', 'closed'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
@@ -68,6 +72,7 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   // The group each card sits in, so a card that arrives knows whether its group is collapsed, and the terminal
   // client's key can collapse the group of the card on screen.
   const groupOf = {};
+  for (const c of systems) groupOf[c.id] = SECTION_ID.system;
   for (const p of pinned) for (const c of p.items) groupOf[c.id] = p.id;
   for (const [, items, , id] of groups) for (const c of items) groupOf[c.id] = id;
   for (const c of checking) groupOf[c.id] = SECTION_ID.checking;
@@ -77,10 +82,11 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   // now and the card after an answer pass over them, while a card opened by a link still opens.
   const hidden = new Set(Object.keys(groupOf).filter((id) => collapsed.has(groupOf[id])));
   const order = [
+    ...systems,
     ...pinned.flatMap((p) => (collapsed.has(p.id) ? [] : p.items)),
     ...groups.flatMap(([, items, , id]) => (collapsed.has(id) ? [] : items)),
   ];
-  return { byId, st, levelOf, label, waiting, pending, checking, pinned, outbox, sent, tagKeys, dealt, groups, groupOf, hidden, order };
+  return { byId, st, levelOf, label, waiting, pending, systems, checking, pinned, outbox, sent, tagKeys, dealt, groups, groupOf, hidden, order };
 }
 
 /** The card after `id` in queue order, wrapping around at the end. */

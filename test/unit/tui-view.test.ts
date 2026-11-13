@@ -5,6 +5,7 @@ import { before, describe, it } from 'node:test';
 import { buildQueue, type InboxState } from '../../web/queue.js';
 import type { Card } from '../../src/core/types.ts';
 import { loadParser } from '../../src/tui/body.ts';
+import { listRows } from '../../src/tui/view.ts';
 import { CardView } from '../../src/tui/cardview.ts';
 import type { Caps } from '../../src/tui/screen.ts';
 import { detectCaps, makeTheme } from '../../src/tui/theme.ts';
@@ -134,5 +135,19 @@ describe('Enter on a card whose fields have not loaded', () => {
     m.entering = { card: 'a', last: false };
     const rows = Array.from({ length: 30 }, (_, y) => drawFrame(m).grid.row(y));
     assert.ok(rows.some((r) => r.includes('Loading the card…')), rows.join('\n'));
+  });
+});
+
+describe('a system card in the list', () => {
+  it('gets its own section above the pinned groups', () => {
+    const cards = [card('a'), card('b'), card('sys', { kind: 'system', agent: 'system', tags: { topic: 'billing' } })];
+    const state: InboxState = { cards: cards.map((c) => summarize(c, undefined)), answers: {}, presence: {}, states: Object.fromEntries(cards.map((c) => [c.id, 'open'])), levels: [] };
+    const q = buildQueue(state, 'none', [['topic', 'billing']]);
+    const theme = makeTheme({ color: 0, unicode: true, hyperlinks: false });
+    const rows = listRows({ queue: q, state, theme, groupBy: 'none', collapsed: new Set(), fresh: new Set(), listCards: [], listHeight: 30, cardHeight: 20, cardLines: 20, listBox: { x: 0, w: 60 }, cardBox: { x: 60, w: 20 }, width: 80, height: 30 } as never, 60).map((r) => r.spans.map((sp) => sp.text).join(''));
+    const sys = rows.findIndex((r) => r.includes('Needs your approval'));
+    const pin = rows.findIndex((r) => r.includes('topic: billing'));
+    assert.ok(sys >= 0 && pin >= 0, rows.join('\n'));
+    assert.ok(sys < pin, `the system section comes first:\n${rows.join('\n')}`);
   });
 });

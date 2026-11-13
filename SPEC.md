@@ -421,7 +421,7 @@ An answer closes the card, and the inbox delivers it with the comment to the age
 
 - `allowHtml` lets a card carry its own HTML and scripts, in a sandboxed frame.
 - `groupBy` is the queue's grouping: `none`, `priority`, `agent`, or `tag:<key>` for any tag key a card has. It starts unset, and the queue groups by nothing.
-- `pins` lists the pinned tag values as `[key, value]` pairs, oldest first, at most 20. A pin puts each matching card in its own group at the top of the queue. It starts unset, so the queue doesn't show a pinned group.
+- `pins` lists the pinned tag values as `[key, value]` pairs, oldest first, at most 20. A pin puts each matching card in its own group at the top of the queue. It starts unset, so the queue doesn't show a pinned group. A system card, such as a guidance or priority proposal, sits above every pinned group under the heading **Needs your approval**, and it stays out of the pinned groups even when its tags match a pin.
 
 The inbox answers 400 for a value it cannot use, such as a `groupBy` of `week`, or for a pin that is not a tag key with its value. The terminal client reads the same two settings from `GET /v1/state`. It saves its **Group by** choice with `PUT /v1/settings`, and pressing `p` pins or unpins the value of the queue's tag in the open card.
 
