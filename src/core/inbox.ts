@@ -123,6 +123,8 @@ export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
 // The types an answer may carry: the images the page shows, and a PDF the person was asked about, which the page
 // opens in a new tab. Everything else stays out, since the answer arrives as a data: URL the inbox then serves back.
 const ANSWER_FILE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf']);
+/** The extension a file with no name gets, by type, so a stored PDF does not end in ".ation/pdf". */
+const ANSWER_FILE_EXTENSION: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'application/pdf': 'pdf' };
 /** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
 export const MIN_FILE_CHARGE = 64 * 1024;
 /** The largest card, as stored, without its files. */
@@ -1716,7 +1718,7 @@ export class Inbox {
     const settled = await Promise.allSettled(input.map(async (f, i): Promise<void> => {
       const d = decoded[i]!;
       const key = `${card.id}.a${i}.${randomId(6)}`;
-      const ref: Attachment = { id: key, name: cleanName(f.name) || `pasted-${i + 1}.${d.type.slice(6).replace('jpeg', 'jpg')}`, type: d.type, size: d.bytes.length, ...(f.field ? { field: String(f.field).slice(0, 80) } : {}) };
+      const ref: Attachment = { id: key, name: cleanName(f.name) || `pasted-${i + 1}.${ANSWER_FILE_EXTENSION[d.type] ?? 'bin'}`, type: d.type, size: d.bytes.length, ...(f.field ? { field: String(f.field).slice(0, 80) } : {}) };
       stored.push(ref);
       await this.blobs.put(key, d.bytes, d.type);
     }));

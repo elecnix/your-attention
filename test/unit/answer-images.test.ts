@@ -88,6 +88,14 @@ describe('images pasted into an answer', () => {
     assert.match(((await refused.json()) as { error: string }).error, /bundle\.zip.*PNG, JPEG, GIF or WebP images, or a PDF/);
   });
 
+  it('names a PDF it was given without a name, with the right extension', async () => {
+    const inbox = setup();
+    const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4').toString('base64')}`;
+    const answer = await inbox.answer('c1', { images: [{ src: pdf }] });
+    assert.equal(answer.images?.[0]?.name, 'pasted-1.pdf');
+    assert.equal(answer.images?.[0]?.type, 'application/pdf');
+  });
+
   it('tells the agent where each image is', () => {
     const c = { id: 'c1', agent: 's1', kind: 'ask', title: 'q', priority: 'soon', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, replies: [] } as Card;
     const a = { card: 'c1', version: 1, values: {}, comment: 'see', delivery: 'default', savedAt: 1, deliveredAt: null, readAt: null, forcedAt: null, previous: [],
