@@ -54,6 +54,8 @@ your-attention --help
 
 `npm link` puts `your-attention` on your path. To update later, run `git pull && npm ci` in the same folder.
 
+The package is also on npm, but install it from a checkout rather than with `npm install -g`: the project runs TypeScript sources, and Node refuses to strip types in anything under `node_modules`. So a global install ends with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` on the first line it runs, while the same tree outside `node_modules` works fine.
+
 ### 4. Start or open your inbox
 
 **On your laptop:**
