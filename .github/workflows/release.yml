@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: write
+  # npm publish --provenance signs an attestation with the job's OIDC token.
+  id-token: write
 
 jobs:
   release:
