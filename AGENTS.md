@@ -168,13 +168,16 @@ A release is a tag whose name carries the version `package.json` declares. `rele
 3. Tag and push only the tag: `git tag -a v1.2.3 -m "v1.2.3" && git push origin v1.2.3`.
 4. Watch the run with `gh run watch --workflow release.yml`. A red run produces nothing to install.
 
-Publishing to npm happens on a laptop, not in the workflow, because this account requires two-factor authentication for a publish. From a checkout of the tagged commit:
+Publishing to npm happens on a laptop, not in the workflow, because this account requires two-factor authentication for a publish and its token can only deposit a version in the staging area. From a checkout of the tagged commit:
 
 ```sh
-npm publish --otp 123456
+npm stage publish --access public --otp 123456   # answers a staged id
+npm stage approve <staged id> --otp 654321       # after the automated review
 ```
 
-The repository keeps `NPM_TOKEN` unset. npm now restricts the tokens that bypass two-factor authentication, and the stage-only one tried for the first release could not create a name the registry had never seen: it answered `403 You may not perform that action with these credentials` even for `npm stage publish`.
+The approval needs a second code, because the first expires while the registry runs its review. Approving before that review ends answers `409 automated review hasn't finished`. A direct `npm publish` on a name the registry has never seen answers `E_STAGE_REQUIRED`, which names staging as the way in.
+
+The repository keeps `NPM_TOKEN` unset: npm now restricts the tokens that bypass two-factor authentication, and a token scoped to named packages cannot create a package the registry has never listed.
 
 So the workflow creates the release alone, and the formula installs the release tarball.
 
