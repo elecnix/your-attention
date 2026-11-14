@@ -1286,7 +1286,9 @@ export class Inbox {
     if (mode !== 'off' && mode !== 'all' && mode !== 'agents') throw new InboxError(400, 'requireCard.mode must be off, all or agents');
     const reminders = Number(input?.reminders ?? REMINDERS_DEFAULT);
     if (!Number.isInteger(reminders) || reminders < 0 || reminders > REMINDERS_MAX) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${REMINDERS_MAX}`);
-    const agents = mode === 'agents' ? [...new Set((input.agents ?? []).map((a: string) => String(a).trim()).filter(Boolean))] : [];
+    // A list is what the field takes, so a string or an object is refused rather than mapped over.
+    if (input.agents !== undefined && !Array.isArray(input.agents)) throw new InboxError(400, 'requireCard.agents must be a list of agent ids');
+    const agents = mode === 'agents' ? [...new Set(((input.agents as string[] | undefined) ?? []).map((a: string) => String(a).trim()).filter(Boolean))] : [];
     if (agents.some((a) => a.length > 80)) throw new InboxError(400, 'requireCard.agents takes agent ids of at most 80 characters');
     if (mode === 'agents' && !agents.length) throw new InboxError(400, 'requireCard.mode agents needs at least one agent; use off instead');
     return { mode, reminders, ...(agents.length ? { agents } : {}) };
