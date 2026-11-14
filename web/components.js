@@ -5,7 +5,7 @@ import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { copyText, installCopy } from './copy.js';
-import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
+import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
 
@@ -440,7 +440,16 @@ export function LinkedText({ text, byId, open, diagrams = true, files, lookup = 
   };
   const diagram = diagrams ? (source, key) => h(Diagram, { key, source }) : undefined;
   const fileLink = files ? (path, _label, key) => h(FileChip, { key, card: files, path }) : undefined;
-  return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram, fileLink }));
+  // A link to this inbox's own card address opens the card in place. A new tab would carry the cookie but not the
+  // unlock, so a PIN-locked inbox would ask for the PIN there, and the person meant the card, not a tab.
+  const link = (href, label, key) => {
+    const id = ownCardId(href, location.href);
+    if (!id) return undefined;
+    const target = byId[id];
+    const preview = target && [target.title, target.preview ?? target.text].filter(Boolean).join('\n\n').slice(0, 400);
+    return h('a', { key, href, className: 'card-link', title: preview || undefined, onClick: (e) => { e.preventDefault(); open(id); } }, label);
+  };
+  return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram, fileLink, link }));
 }
 
 export const isImage = (t) => /^image\/(png|jpeg|gif|webp)$/.test(t);

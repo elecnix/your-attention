@@ -678,3 +678,16 @@ test('a link to a cleared card shows its title, and every unknown link on the ca
   await expect(text.locator('.dead-link')).toHaveCount(0);
   expect(lookups).toHaveLength(1);
 });
+
+test('a link to this inbox\'s own card address opens that card in place, not in a new tab', async ({ page }) => {
+  const here = inbox.server.url;
+  await inbox.agent.post({ id: 'linked-b', agent: 's-own', title: 'Ship the invoice fix?', priority: 'now', text: 'The fix passes its tests.' });
+  await inbox.agent.post({ id: 'linked-a', agent: 's-own', title: 'Merge cards waiting?', priority: 'now', text: `First [#3282](${here}/#card=linked-b), then the rest.` });
+  let popups = 0;
+  page.on('popup', () => { popups += 1; });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Merge cards waiting?' }).click();
+  await page.locator('.focus-card .card-text a.card-link', { hasText: '#3282' }).click();
+  await expect(page.locator('.focus-card .card-title')).toHaveText('Ship the invoice fix?');
+  expect(popups).toBe(0);
+});

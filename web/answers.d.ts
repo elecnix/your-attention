@@ -18,6 +18,8 @@ export function describe(card: Card, answer: Answer | undefined): string;
 /** Every revision, newest first: for each one, the lines it removed and added in each field. */
 export function changeSteps(card: Card): { version: number; fields: { label: string; removed: string[]; added: string[] }[] }[];
 /** The name a pick and the page's lookups use for an option: its id, or its label when it has none. */
+/** The card id of a link to this inbox's own card address, such as http://host:4815/#card=<id>, else undefined. */
+export function ownCardId(href: string, here: string): string | undefined;
 export function optionId(option: { id?: string; label: string }): string;
 /** A pick's value: the option's id and its label. */
 export function optionValue(option: { id?: string; label: string }): string;
