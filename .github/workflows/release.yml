@@ -41,12 +41,16 @@ jobs:
             exit 1
           }
       - name: publish to npm
-        # Skipped while the repository has no NPM_TOKEN, so the GitHub release can still be
-        # created. Add the token as a repository secret to publish from then on.
-        if: ${{ secrets.NPM_TOKEN != '' }}
-        run: npm publish --provenance --access public
+        # The guard is a shell test, not a step condition: GitHub refuses to read `secrets` in an
+        # `if`, and that refusal is a startup failure, which runs no step at all.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "NPM_TOKEN is not set: skipping the npm publish, and creating the release alone"
+            exit 0
+          fi
+          npm publish --provenance --access public
       - name: create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

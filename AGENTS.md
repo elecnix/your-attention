@@ -159,6 +159,19 @@ vale sync && vale *.md   # prose rules, the same ones CI runs
 
 Set `YOUR_ATTENTION_SKIP_MDNS=1` to skip the mDNS test on a network that drops multicast.
 
+## Releases
+
+A release is a tag whose name carries the version `package.json` declares. `release.yml` runs on a `v*` tag and refuses one that disagrees with `package.json` or with `VERSION` in `src/core/version.ts`. With an `NPM_TOKEN` secret in the repository, it publishes the package to npm. It always creates the GitHub release, whose tarball the Homebrew formula installs.
+
+1. Set `version` in `package.json` and `VERSION` in `src/core/version.ts` to the same value. A unit test keeps the two in step.
+2. Merge that bump to `main` through a pull request, so CI has passed on the same commit you will tag.
+3. Tag and push only the tag: `git tag -a v1.2.3 -m "v1.2.3" && git push origin v1.2.3`.
+4. Watch the run with `gh run watch --workflow release.yml`. A red run produces nothing to install.
+
+`NPM_TOKEN` holds an automation token from an npm account with rights to the package name. Without it the job skips the publish and creates the release alone, which is what the formula reads.
+
+Never move a tag that has published something. `livecheck` in the tap's formula follows the releases, so a new tag is where a new Homebrew version comes from.
+
 ## Invite codes on the hosted service
 
 A hosted deployment gives each person an inbox through an invite code. `invite:<code>` in the `INVITES` KV namespace holds how many inboxes that code may still create, and codes need 20 characters or more:
