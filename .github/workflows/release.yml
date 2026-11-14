@@ -1,0 +1,51 @@
+name: release
+
+# A tag that names the version package.json declares is the release: it publishes the
+# package to npm when NPM_TOKEN is set, then creates the GitHub release whose tag the
+# Homebrew formula and livecheck read. Nothing here runs on a branch.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: the tag names the version package.json declares
+        # A tag on a commit whose version says something else ships a package nobody can
+        # identify, and the formula then pins a URL that never existed. Fail before that.
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME does not match the version $version in package.json"
+            exit 1
+          fi
+          grep -q "'$version'" src/core/version.ts || {
+            echo "::error::src/core/version.ts does not declare $version"
+            exit 1
+          }
+      - name: publish to npm
+        # Skipped while the repository has no NPM_TOKEN, so the GitHub release can still be
+        # created. Add the token as a repository secret to publish from then on.
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME" --verify-tag

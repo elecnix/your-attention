@@ -17,6 +17,14 @@
   "bin": {
     "your-attention": "bin/your-attention.js"
   },
+  "files": [
+    "bin",
+    "src",
+    "web",
+    "LICENSE",
+    "README.md",
+    "PRINCIPLES.md"
+  ],
   "pi": {
     "extensions": [
       "./src/integrations/pi/extension.ts"
