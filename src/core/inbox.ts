@@ -15,7 +15,7 @@ import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, RequireCardSettings, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -120,6 +120,9 @@ export const UNREAD_ID_LIMIT = 20;
 // The images of one answer share a byte budget, because the route reads a body of 16 MB and base64 costs four thirds:
 // ten images of 8 MB each would make a body no route accepts.
 export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
+const REMINDERS_DEFAULT = 3;
+const REMINDERS_MAX = 10;
+
 const ANSWER_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 /** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
 export const MIN_FILE_CHARGE = 64 * 1024;
@@ -1239,8 +1242,55 @@ export class Inbox {
     return this.store.get<Settings>('meta', 'settings') ?? { allowHtml: false };
   }
 
+  /** The require-a-card rule as the inbox holds it, defaulted rather than absent. */
+  requireCard(): RequireCardSettings {
+    const s = this.settings().requireCard;
+    return { mode: s?.mode ?? 'off', reminders: Number.isFinite(s?.reminders) ? Number(s?.reminders) : REMINDERS_DEFAULT, ...(s?.agents?.length ? { agents: [...s.agents] } : {}) };
+  }
+
+  /** Whether this session is asked for a card, and how many times: the rule, resolved for one agent id. */
+  requireCardFor(agent: string): { on: boolean; reminders: number } {
+    const rule = this.requireCard();
+    const on = rule.mode === 'all' || (rule.mode === 'agents' && (rule.agents ?? []).includes(agent));
+    return { on, reminders: rule.reminders };
+  }
+
+  /** An agent turns the rule on or off for itself. Its own conduct, so no card and no approval. */
+  setRequireCardForAgent(agent: string, enabled: boolean): RequireCardSettings {
+    const id = String(agent ?? '').trim();
+    if (!id || id.length > 80) throw new InboxError(400, 'a session id of at most 80 characters is required');
+    const rule = this.requireCard();
+    const have = new Set(rule.agents ?? []);
+    if (enabled) have.add(id); else have.delete(id);
+    const agents = [...have];
+    const mode: RequireCardSettings['mode'] = agents.length ? 'agents' : 'off';
+    return this.putRequireCard({ mode, reminders: rule.reminders, ...(agents.length ? { agents } : {}) });
+  }
+
+  /** Change the rule, then tell every connected agent, which is what spares them a restart. */
+  private putRequireCard(next: RequireCardSettings): RequireCardSettings {
+    const clean = this.checkRequireCard(next);
+    this.store.put('meta', 'settings', { ...this.settings(), requireCard: clean });
+    this.emit({ type: 'change', card: '' });
+    for (const [, subs] of this.agents) for (const send of subs) send({ type: 'settings', id: randomId(6), requireCard: clean });
+    return clean;
+  }
+
+  private checkRequireCard(input: RequireCardSettings): RequireCardSettings {
+    const mode = input?.mode;
+    if (mode !== 'off' && mode !== 'all' && mode !== 'agents') throw new InboxError(400, 'requireCard.mode must be off, all or agents');
+    const reminders = Number(input?.reminders ?? REMINDERS_DEFAULT);
+    if (!Number.isInteger(reminders) || reminders < 0 || reminders > REMINDERS_MAX) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${REMINDERS_MAX}`);
+    const agents = mode === 'agents' ? [...new Set((input.agents ?? []).map((a: string) => String(a).trim()).filter(Boolean))] : [];
+    if (agents.some((a) => a.length > 80)) throw new InboxError(400, 'requireCard.agents takes agent ids of at most 80 characters');
+    if (mode === 'agents' && !agents.length) throw new InboxError(400, 'requireCard.mode agents needs at least one agent; use off instead');
+    return { mode, reminders, ...(agents.length ? { agents } : {}) };
+  }
+
   setSettings(input: Partial<Settings> & PinChange): Settings {
     const next: Settings = { ...this.settings(), ...(typeof input.allowHtml === 'boolean' ? { allowHtml: input.allowHtml } : {}) };
+    // The rule goes through the same validation the tool uses, so a settings PUT and an agent's proposal agree.
+    if (input.requireCard !== undefined) next.requireCard = this.checkRequireCard(input.requireCard);
     if (input.groupBy !== undefined) next.groupBy = this.checkGroupBy(input.groupBy);
     if (input.pins !== undefined) next.pins = this.checkPins(input.pins);
     // A pin or an unpin travels as its own change, so two devices that pin at the same moment both keep their value.
@@ -1257,6 +1307,8 @@ export class Inbox {
     }
     this.store.put('meta', 'settings', next);
     this.emit({ type: 'change', card: '' });
+    // A settings write is how the person changes the rule: connected sessions hear it instead of needing a restart.
+    if (input.requireCard !== undefined) for (const [, subs] of this.agents) for (const send of subs) send({ type: 'settings', id: randomId(6), requireCard: next.requireCard! });
     return next;
   }
 
