@@ -12,3 +12,4 @@ cloudflare/.terraform/
 *.tfstate
 *.tfstate.backup
 *.tfplan
+dist/
