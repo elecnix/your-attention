@@ -1,6 +1,6 @@
 // Images the person pastes into an answer: which clipboard items count, which files the inbox accepts, and the
 // thumbnails under a field. The state is per card, so a draft survives a re-render and a revision of the card.
-export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+// An answer takes any file. A thumbnail shows an image; anything else shows its name, since an img cannot draw it.
 export const IMAGE_LIMIT_BYTES = 8 * 1024 * 1024;
 // The answer route reads a body of at most 16 MB, and base64 makes an image four thirds of its size, so the images of
 // one answer share a budget well under that. Ten images of 8 MB would be a body of 107 MB, which no route accepts.
@@ -18,10 +18,12 @@ export function imageFiles(clipboard) {
   return out;
 }
 
-/** Why the inbox would refuse this file, or null. */
+/** The extension a file with no name gets, by type where it is known. */
+const EXTENSION = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+
+/** Why the inbox would refuse this file, or null. The type is free; only the size is bounded. */
 export function checkImage(file) {
   const name = file.name || 'the pasted file';
-  if (!IMAGE_TYPES.includes(file.type)) return `${name} is ${file.type || 'an unknown type'}: an answer takes only PNG, JPEG, GIF or WebP images.`;
   if (file.size > IMAGE_LIMIT_BYTES) return `${name} is over the limit of 8 MB.`;
   return null;
 }
@@ -60,7 +62,7 @@ export const pastedImages = {
     const late = draftProblem(have, file);
     if (late) return late;
     counter += 1;
-    drafts.set(cardId, [...have, { key: `img${counter}`, name: file.name && file.name !== 'image.png' ? file.name : `pasted-${counter}.${file.type.slice(6).replace('jpeg', 'jpg')}`, field, src, url: URL.createObjectURL(file), size: file.size }]);
+    drafts.set(cardId, [...have, { key: `img${counter}`, type: file.type, name: file.name && file.name !== 'image.png' ? file.name : `pasted-${counter}.${EXTENSION[file.type] ?? 'bin'}`, field, src, url: URL.createObjectURL(file), size: file.size }]);
     return null;
   },
   remove(cardId, key) {
@@ -100,9 +102,17 @@ export function drawStrips(cardId) {
     for (const img of mine) {
       const fig = document.createElement('figure');
       fig.className = 'pasted-thumb';
-      const pic = document.createElement('img');
-      pic.src = img.src;
-      pic.alt = `Pasted image ${img.name}`;
+      let pic;
+      if (String(img.type || '').startsWith('image/')) {
+        pic = document.createElement('img');
+        pic.src = img.src;
+        pic.alt = `Pasted image ${img.name}`;
+      } else {
+        // Not an image: the strip shows the file's name, and a click opens it in a new tab.
+        pic = document.createElement('span');
+        pic.className = 'pasted-chip';
+        pic.textContent = img.name;
+      }
       const drop = document.createElement('button');
       drop.type = 'button';
       drop.className = 'pasted-remove';
