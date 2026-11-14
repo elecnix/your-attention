@@ -54,6 +54,8 @@ your-attention --help
 
 `npm link` puts `your-attention` on your path. To update later, run `git pull && npm ci` in the same folder.
 
+The package is also on npm, and `npm install -g your-attention` works. The published tarball contains the same sources compiled into `dist/`, because Node refuses to strip TypeScript types in anything under `node_modules`. A checkout runs the sources directly, with no build step.
+
 ### 4. Start or open your inbox
 
 **On your laptop:**

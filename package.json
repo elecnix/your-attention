@@ -1,6 +1,6 @@
 {
   "name": "your-attention",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "One inbox where all your coding agents ask you questions as cards, and your answers reach them at once.",
   "license": "MIT",
   "type": "module",
@@ -19,6 +19,7 @@
   },
   "files": [
     "bin",
+    "dist",
     "src",
     "web",
     "LICENSE",
@@ -45,7 +46,8 @@
     "cloudflare:check": "npm run cloudflare:build && wrangler deploy --dry-run --outdir .cloudflare/dist",
     "cpu-budget": "node --disable-warning=ExperimentalWarning scripts/cpu-budget.ts",
     "check:principles": "node --disable-warning=ExperimentalWarning scripts/check-principle-links.ts",
-    "test:cloudflare": "npm run cloudflare:build && node --test --test-concurrency=1 --disable-warning=ExperimentalWarning \"test/cloudflare/**/*.test.ts\""
+    "test:cloudflare": "npm run cloudflare:build && node --test --test-concurrency=1 --disable-warning=ExperimentalWarning \"test/cloudflare/**/*.test.ts\"",
+    "prepack": "node scripts/pack-sources.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
