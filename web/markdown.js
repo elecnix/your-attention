@@ -56,8 +56,9 @@ function inline(h, text, key, opts = {}) {
     if (m[3] && m[3][0] === '_' && !underscoreEmphasis(text, m.index, m[3])) { re.lastIndex = m.index + 1; continue; }
     if (m.index > last) out.push(text.slice(last, m.index));
     const k = `${key}.${n++}`;
-    // A session link opens another agent's session in herdr, through the page, so it gets no new tab.
-    const a = (href, label) => (SESSION_LINK.test(href)
+    // A session link opens another agent's session in herdr, through the page, so it gets no new tab. A renderer can
+    // take a link over, such as the page opening its own card links in place.
+    const a = (href, label) => opts.link?.(href, label, k) ?? (SESSION_LINK.test(href)
       ? h('a', { key: k, href, className: 'session-link', title: 'Open this session in herdr' }, label)
       : h('a', { key: k, href, target: '_blank', rel: 'noopener noreferrer' }, label));
     const file = (path, label) => (opts.fileLink ? opts.fileLink(path, label, k) : h('code', { key: k }, path));

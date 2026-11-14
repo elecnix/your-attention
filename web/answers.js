@@ -183,6 +183,17 @@ function fieldLabels(source) {
 
 // The name a pick and the page's lookups use for an option: its id, or its label when the card has none, as a card
 // stored before the inbox gave every option an id does.
+// The card a link points at when it is this inbox's own card address, such as http://host:4815/#card=<id>, or a bare
+// #card=<id>. The page opens it in place: a new tab would carry the cookie but not the unlock, so a PIN-locked inbox would
+// ask again there. Any other address is a link off the page.
+export function ownCardId(href, here) {
+  let url;
+  let base;
+  try { base = new URL(here); url = new URL(String(href), base); } catch { return undefined; }
+  if (url.origin !== base.origin || url.pathname !== base.pathname) return undefined;
+  return /^#card=([\w.:-]{1,80})$/.exec(url.hash)?.[1];
+}
+
 export const optionId = (o) => o.id ?? o.label;
 // A pick names the option and its label both, so a pick stays only while the revised card still offers that option.
 export const optionValue = (o) => `${optionId(o)}:${o.label}`;
