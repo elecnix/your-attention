@@ -177,6 +177,24 @@ When the person dismisses a card, the inbox records what they had on screen: the
 
 The inbox saves a revision on a dismissed card, and the card stays in **Sent**. The person may still answer the card, and that answer goes to the agent as any answer to a closed card does.
 
+## A card the person sends to an agent
+
+The page shows a panel of every agent known to the inbox, so the person picks one and writes it a card. `POST /v1/send {agent, text}` takes that message, for the owner only, and answers 201 with `{id, agent, card, sentAt, deliveredAt?}`. The first line of the message becomes `title`, at most 300 characters, and the lines under it become `text`, so a one-line message reads once. Its `kind` is `ask`. The queue doesn't show it, since it waits for an agent rather than for the person.
+
+`GET /v1/state` feeds the panel as well. Each card summary keeps `origin.cwd` beside `origin.name` and `origin.harness`, so the page reads a working directory in the state it already fetches. The newest card that reported one decides it, and when no card reported a directory, the panel leaves that line out.
+
+A new card goes to each open connection that reports that agent id, as a guidance event goes to its agents. The inbox sets `deliveredAt` then. While no connection reports the agent, the card waits, and the next session with that id receives it as it connects ([DP19](PRINCIPLES.md#dp19-an-answer-to-an-offline-agent-is-kept-and-agents-can-find-it)). The state of an agent never prevents addressing it ([DP18](PRINCIPLES.md#dp18-each-card-shows-if-its-agent-is-listening-busy-or-offline)). Each card goes once. The sweep deletes a sent card 30 days after it went, so a session that never returns leaves the inbox as it was, and `POST /v1/reset` removes those records too.
+
+An agent stream receives the card as an event of its own:
+
+```json
+{ "type": "card", "id": "5f2a9c01", "card": { "id": "5f2a9c01", "agent": "claude:abc", "kind": "ask", "title": "Please rebase on main", "text": "The deploy needs the fix.", "priority": "soon" }, "sentAt": 1762000000000 }
+```
+
+There is nothing for the agent to answer on this card. A card goes one way, so the agent replies with a card of its own, which waits in the queue for the person. The pi extension, the Claude Code channel and the OpenCode plugin each read the event as a note for the model. `your-attention watch` prints it as it prints the others, and `--no-card` and `--select` cut the card of this event as they cut an answer's.
+
+For each agent, the panel shows the session name on its newest card and the working directory that card reported. Presence decides the rest. A connected session reads as connected. A session that went offline reads as offline, with the time of its last connection. An agent with no presence row reads as never connected. A session that drops channel notifications says so, because a card pushed there reaches no model.
+
 ## Approvals
 
 Some actions need the person's own words in an agent's session, such as lifting a denial from Claude Code's auto-mode check. An agent puts that sentence on its card as an approval, and the person approves it on the card instead of typing it in the pane.
@@ -541,7 +559,7 @@ Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST 
 
 A page event gives a card's id only, so for each `change` the watcher reads `GET /v1/cards/<id>` and prints `{type: "change", id, card, answer, state, rev, receivedAt}`. On these lines `id` is the card's id. The watcher skips a change whose `rev` matches the line it printed last for that card. For a card that is gone, it prints `{type: "change", id, receivedAt}`. An empty `id` means many cards changed at once, as after `clear`. `presence` and `code` pass through as the inbox writes them. The page socket doesn't send `hello`, so the watcher writes `{type: "hello", role: "owner"}` each time the socket or the stream opens.
 
-`--agent` keeps the cards and presence of that agent, and the `hello` lines. `--no-card` and `--select` cut the card after that filter reads it. `--type` keeps the event types it lists, with either role: `hello`, `answer`, `guidance` and `returned` for an agent, and `hello`, `change`, `presence` and `code` for the owner. `--ack` with `--role owner` exits with an error, since only the token that posted a card may acknowledge its answer. Before it opens the socket, the watcher calls `GET /v1/pin`, which only an owner may call. A 403 there, or a machine with no owner pairing, makes it exit with the advice to run `your-attention pair <url> --role owner`.
+`--agent` keeps the cards and presence of that agent, and the `hello` lines. `--no-card` and `--select` cut the card after that filter reads it. `--type` keeps the event types it lists, with either role: `hello`, `answer`, `card`, `guidance` and `returned` for an agent, and `hello`, `change`, `presence` and `code` for the owner. `--ack` with `--role owner` exits with an error, since only the token that posted a card may acknowledge its answer. Before it opens the socket, the watcher calls `GET /v1/pin`, which only an owner may call. A 403 there, or a machine with no owner pairing, makes it exit with the advice to run `your-attention pair <url> --role owner`.
 
 An owner watcher sees every card and every answer, and the agents' presence, as a page does. It uses an owner token: the `owner-token` file, or the paired token in `owner.json`. `writePrivate` writes both with mode 0600. To end a paired watcher's access, sign that machine out from the devices list on the page, which sends `DELETE /v1/tokens/<id>`.
 
@@ -589,7 +607,7 @@ To stop, the agent posts `system: {type: "unsubscribe"}` with its agent id and g
 `GET /v1/state` returns `{cards, answers, presence, states, priorities, levels, settings, guidance}`. `cards` has one summary for each card except the cleared ones, enough for the queue, the levels, presence and the answer states:
 
 - `id`, `agent`, `kind`, `title`, `priority`, `status`, `rating`, `from`, `follows`, `followedBy`, `deliver`, `version`, `createdAt`, `updatedAt` and `expiresAt`, as on the card.
-- `tags`, at most 10, with each key and value cut to 100 characters. `origin` keeps `name` and `harness`.
+- `tags`, at most 10, with each key and value cut to 100 characters. `origin` keeps `name`, `harness` and `cwd`: the queue groups by the name, priority rules read the harness, and the panel that sends an agent a card shows the working directory.
 - `closed`, with its outcome cut to 300 characters, and `triage` with its `state` only.
 - `links`, the ids that the text links with `[[card-id]]`, at most 20, and `preview`, the first 300 characters of the text.
 - `rev`, which changes with every change to the card or its answer.

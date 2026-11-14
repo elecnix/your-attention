@@ -21,7 +21,7 @@ export type WatchLine = WithoutCard<AgentEvent> & { receivedAt: number };
 
 /** The line for one event, cut to the fields the watcher asked for. */
 export function watchLine(event: AgentEvent, options: WatchOptions, receivedAt: number): WatchLine {
-  if (event.type !== 'answer' && event.type !== 'returned') return { ...event, receivedAt };
+  if (event.type !== 'answer' && event.type !== 'returned' && event.type !== 'card') return { ...event, receivedAt };
   const { card, ...rest } = event;
   return { ...rest, ...cut(card, options), receivedAt } as WatchLine;
 }

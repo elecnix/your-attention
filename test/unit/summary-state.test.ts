@@ -35,9 +35,11 @@ describe('the state sends card summaries', () => {
     assert.deepEqual(c.links, ['c0']);
     assert.equal(c.preview?.length, 300);
     assert.deepEqual(c.tags, { topic: 'release' });
-    assert.deepEqual(c.origin, { name: 'release agent', harness: 'pi' });
+    // The summary names the session, its harness and the folder it reported: the panel that sends an agent a card lists
+    // them too, and the queue groups by the name. The card's own content stays out, and so does the answer.
+    assert.deepEqual(c.origin, { name: 'release agent', harness: 'pi', cwd: '/home/me/repo' });
     const sent = JSON.stringify(s);
-    for (const content of ['secret plan', '<p>big</p>', 'go ahead', '/home/me/repo', '"yes"']) assert.equal(sent.includes(content), false, content);
+    for (const content of ['secret plan', '<p>big</p>', 'go ahead', '"yes"']) assert.equal(sent.includes(content), false, content);
     assert.equal(s.states['c1'], 'answered');
     assert.ok(s.answers['c1']?.savedAt);
   });

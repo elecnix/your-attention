@@ -348,6 +348,20 @@
   .devices-dialog .device-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; flex-basis: 100%; }
   .devices-dialog .device-actions .note { font-size: calc(12px * var(--text-scale)); margin: 0; flex-basis: 100%; }
   .qr-dialog .note, .qr-dialog .muted { font-size: calc(13px * var(--text-scale)); }
+  .queue .agents-open { display: block; width: 100%; margin: 12px 0 0; }
+  .agents-dialog { width: min(640px, calc(100vw - 32px)); }
+  .agents-dialog .agents { list-style: none; margin: 10px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .agents-dialog .agent { display: flex; gap: 8px; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .agents-dialog .agent-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .agents-dialog .agent-name { overflow-wrap: anywhere; }
+  .agents-dialog .agent-facts { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: calc(12px * var(--text-scale)); color: var(--muted); }
+  /* A dotted dot marks a connected agent, so the panel reads at a glance which one a card reaches now. */
+  .agents-dialog .agent-state.online { color: var(--ok); }
+  .agents-dialog .agent-state.online::before { content: "● "; }
+  .agents-dialog .agent-facts code { font-family: var(--font-code); font-size: .95em; overflow-wrap: anywhere; }
+  .agents-dialog .agent-send { display: flex; gap: 6px; align-items: flex-end; }
+  .agents-dialog .agent-send textarea { flex: 1; min-width: 0; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; resize: vertical; }
+  .agents-dialog .agent .note { font-size: calc(12px * var(--text-scale)); margin: 0; }
   /* A phone: the bar scrolls away, the title, the status and the links share the first row, and every control is big enough for a thumb. */
   @media (max-width: 760px) {
     /* One page scroll on a phone: the queue grows with its cards instead of scrolling inside itself. */

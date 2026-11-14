@@ -8,6 +8,7 @@ import { copyText, installCopy } from './copy.js';
 import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
+import { agentList } from './agents.js';
 
 export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions, secretFieldsOf };
 
@@ -920,4 +921,72 @@ export function DevicesLink() {
             h('button', { type: 'button', className: 'btn danger', onClick: () => revoke(t.id), disabled: busy === t.id, autoFocus: true }, busy === t.id ? 'Signing out…' : 'Sign it out'))
           : h('button', { type: 'button', className: 'btn', onClick: () => setConfirming(t.id) }, 'Sign out')))),
       h('div', { className: 'qr-actions' }, h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: confirming === null }, 'Close'))));
+}
+
+/** What the panel's button and title say, so the person and a test find the same words. */
+export const SEND_LABEL = 'Send a card to an agent';
+
+/** The agents the inbox knows, and a message box for each. A message is a card addressed to that agent, which it
+ * receives on its stream: the panel invents no other channel, and the agent replies with a card of its own (DP24).
+ * Its button sits at the foot of the queue, with the inbox's other doors, so the bar keeps the room a phone needs. */
+export function AgentsPanel({ state, startOpen = false }) {
+  // A story opens the panel, since nothing clicks there.
+  const [open, setOpen] = React.useState(startOpen);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (open && ref.current && !ref.current.open) ref.current.showModal();
+  }, [open]);
+  const close = () => { ref.current?.close(); setOpen(false); };
+  const agents = agentList(state);
+  return h(React.Fragment, null,
+    h('button', { type: 'button', className: 'btn agents-open', onClick: () => setOpen(true) }, SEND_LABEL),
+    open && h(BarDialog, { dialogRef: ref, className: 'qr-dialog agents-dialog', titleId: 'agents-title', title: SEND_LABEL, onClose: close },
+      h('p', null, 'Your card goes to that agent on its stream. It answers with a card of its own, which waits in your queue.'),
+      agents.length
+        ? h('ul', { className: 'agents' }, agents.map((a) => h(AgentRow, { key: a.id, agent: a })))
+        : h('p', { className: 'muted' }, 'No agent has connected to this inbox yet.'),
+      h('div', { className: 'qr-actions' }, h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: true }, 'Close'))));
+}
+
+/** One agent in the panel: what the inbox knows about it, and the message the person sends it. */
+function AgentRow({ agent }) {
+  const [text, setText] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [result, setResult] = React.useState(null);
+  const draft = text.trim();
+  async function send() {
+    if (!draft || busy) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await api(`${BASE}v1/send`, { agent: agent.id, text: draft });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `the inbox answered ${res.status}`);
+      setText('');
+      // The inbox says whether a connection took the card, so the person knows if it waits for the session.
+      setResult({ ok: true, message: body.deliveredAt
+        ? `Sent to ${agent.name}: the card is on its stream now.`
+        : `Waiting for ${agent.name}: it is offline, so the card arrives when its session connects.` });
+    } catch (e) {
+      setResult({ ok: false, message: `The card did not go: ${String((e && e.message) || e)}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return h('li', { className: `agent ${agent.status}` },
+    h('div', { className: 'agent-what' },
+      h('span', { className: 'agent-name' }, agent.name),
+      h('span', { className: 'agent-facts' },
+        h('span', { className: `agent-state ${agent.status}` }, agent.label),
+        agent.id !== agent.name && h('code', { className: 'agent-id' }, agent.id),
+        agent.cwd && h('code', { className: 'agent-cwd', title: agent.cwd }, agent.cwd))),
+    h('label', { className: 'agent-send' },
+      h('textarea', {
+        rows: 2, value: text, placeholder: `Message to ${agent.name}`, 'aria-label': `Message to ${agent.name}`,
+        onChange: (e) => setText(e.target.value),
+        // Command+Enter or Control+Enter sends, as it does on a card.
+        onKeyDown: (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } },
+      }),
+      h('button', { type: 'button', className: 'btn primary', onClick: send, disabled: busy || !draft }, busy ? 'Sending…' : 'Send')),
+    result && h('p', { className: result.ok ? 'note ok' : 'note warn', role: 'status' }, result.message));
 }

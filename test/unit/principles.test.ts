@@ -22,6 +22,20 @@ describe('principles', () => {
     assert.doesNotMatch(read('inbox.ts'), /set(Timeout|Interval)\(/);
   });
 
+  it('the page shows an agent as connected only from presence, and keeps no list of its own', () => {
+    // DP18 and DP34: presence comes from the connections an inbox holds right now. A list the page remembered would
+    // show a session that has ended as connected, and the person would send a card that goes nowhere.
+    const panel = fs.readFileSync(path.join(ROOT, 'web/agents.js'), 'utf8');
+    assert.doesNotMatch(panel, /\b(localStorage|sessionStorage|store)\b/, 'the agent list lives in GET /v1/state only');
+    assert.doesNotMatch(panel, /online:\s*true/, 'only a presence row makes an agent online');
+  });
+
+  it('a card that waited for an offline agent goes out when that agent connects', () => {
+    // DP19: the inbox keeps what it cannot deliver yet, and hands it over when the session comes back.
+    const connect = /connect\(caller: Caller[\s\S]*?\n  \}/.exec(read('inbox.ts'))?.[0] ?? '';
+    assert.match(connect, /this\.deliverSent\(agent\);/, 'a connection takes the cards that waited for its agent');
+  });
+
   it('every principle in PRINCIPLES.md has a statement and a reason', () => {
     const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);

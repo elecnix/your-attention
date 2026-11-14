@@ -44,8 +44,9 @@ export interface CardSummary {
   status?: string;
   rating?: number;
   tags?: Record<string, string>;
-  /** The session name, for the agent's name in the list, and the harness, which priority rules read. */
-  origin?: { name?: string; harness?: string };
+  /** The session name, for the agent's name in the list, its harness, which priority rules read, and the working
+   * directory it reported, which the panel that sends an agent a card shows. */
+  origin?: { name?: string; harness?: string; cwd?: string };
   from?: string;
   follows?: string;
   followedBy?: string;
@@ -76,7 +77,10 @@ export function summarize(card: Card, answer: Answer | undefined): CardSummary {
   const text = card.text ?? '';
   const links = [...new Set([...text.matchAll(/\[\[([\w.:-]{1,80})\]\]/g)].map((m) => m[1] as string))].slice(0, MAX_LINKS);
   const tags = cleanTags(card.tags);
-  const origin = card.origin?.name || card.origin?.harness ? { ...(card.origin.name ? { name: card.origin.name } : {}), ...(card.origin.harness ? { harness: card.origin.harness } : {}) } : undefined;
+  const o = card.origin;
+  const origin = o && (o.name || o.harness || o.cwd)
+    ? { ...(o.name ? { name: o.name } : {}), ...(o.harness ? { harness: o.harness } : {}), ...(o.cwd ? { cwd: o.cwd } : {}) }
+    : undefined;
   return {
     id: card.id, agent: card.agent, kind: card.kind, title: card.title, priority: card.priority, status: card.status, rating: card.rating, tags, origin,
     from: card.from, follows: card.follows, followedBy: card.followedBy, deliver: card.deliver, version: card.version,
