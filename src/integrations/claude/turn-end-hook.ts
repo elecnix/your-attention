@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Client, loadConfig } from '../../client.ts';
 import { homeDir } from '../../node/home.ts';
+import { envRequireCard } from '../require-card.ts';
 
 interface StopInput {
   session_id?: string;
@@ -49,8 +50,6 @@ async function readStdin(): Promise<string> {
 }
 
 export async function main(): Promise<void> {
-  // The person opts in per session, so a background agent can run without a card.
-  if (process.env['YOUR_ATTENTION_REQUIRE_CARD'] !== '1') return;
   let input: StopInput = {};
   try {
     input = JSON.parse((await readStdin()) || '{}') as StopInput;
@@ -63,11 +62,26 @@ export async function main(): Promise<void> {
   if (!config) return;
   const session = input.session_id ?? process.env['CLAUDE_CODE_SESSION_ID'] ?? `pid-${process.ppid}`;
   const agent = `claude:${session}`;
+  // The rule comes from the inbox, so turning it on costs no restart. A value in the environment is a decision for the
+  // whole session and wins over the inbox for as long as the session runs: a start without it hands the session back.
+  const inbox = new Client(config);
+  // A value in the environment decides the session without asking the inbox, so a session cut off from it still
+  // behaves the way it was started.
+  let rule = envRequireCard(process.env);
+  if (!rule) {
+    try {
+      const view = await inbox.requireCard(agent);
+      rule = { on: view.on, reminders: view.reminders };
+    } catch {
+      // An inbox that cannot answer must never hold the session open.
+      return;
+    }
+  }
+  if (!rule.on) return;
   let open: boolean;
   try {
-    open = (await new Client(config).list()).some((c) => c.card.agent === agent && c.state === 'open');
+    open = (await inbox.list()).some((c) => c.card.agent === agent && c.state === 'open');
   } catch {
-    // An inbox that cannot answer must never hold the session open.
     return;
   }
   // A card of its own is what the request asks for, so that resets the count.
@@ -75,9 +89,9 @@ export async function main(): Promise<void> {
     resetAsks(session);
     return;
   }
-  // Three asks is the cap: a session that cannot post a card is left alone rather than asked forever.
+  // The reminders the person set are the cap, and 0 means never: a session that cannot post a card is left alone.
   const asked = readAsks(session);
-  if (asked >= CARD_REQUESTS) return;
+  if (asked >= rule.reminders) return;
   writeAsks(session, asked + 1);
   process.stderr.write(`${NO_CARD}\n`);
   process.exitCode = 2;

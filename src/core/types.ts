@@ -307,6 +307,8 @@ export interface Card {
    * the guidance the proposal starts from, so the card can say when it changed since. `agents` is on cards stored
    * before the page listed the online agents from live presence, and nothing reads it. */
   broadcast?: { text: string; message?: string; agents?: string[]; from?: string; base?: { version: number; text: string } };
+  /** A rule proposed for every agent at once, which changes only when the person approves the card. */
+  requireCard?: { mode: 'all' | 'off'; reminders: number; from?: string };
   /** On a system card that asks to send an agent's answers to a webhook: the id of that subscription. */
   subscription?: string;
   origin?: Origin;

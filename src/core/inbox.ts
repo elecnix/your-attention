@@ -1260,6 +1260,11 @@ export class Inbox {
     const id = String(agent ?? '').trim();
     if (!id || id.length > 80) throw new InboxError(400, 'a session id of at most 80 characters is required');
     const rule = this.requireCard();
+    // A session cannot step out of a rule that names every agent: only the person can, by changing it for all.
+    if (rule.mode === 'all') {
+      if (enabled) return rule;
+      throw new InboxError(400, 'this inbox asks every agent for a card: change the rule for every agent, or post a card anyway');
+    }
     const have = new Set(rule.agents ?? []);
     if (enabled) have.add(id); else have.delete(id);
     const agents = [...have];
@@ -1285,6 +1290,57 @@ export class Inbox {
     if (agents.some((a) => a.length > 80)) throw new InboxError(400, 'requireCard.agents takes agent ids of at most 80 characters');
     if (mode === 'agents' && !agents.length) throw new InboxError(400, 'requireCard.mode agents needs at least one agent; use off instead');
     return { mode, reminders, ...(agents.length ? { agents } : {}) };
+  }
+
+  /** What one session should do: the rule resolved for it, beside the rule itself, for whoever wants to see it. */
+  requireCardView(agent: string): { on: boolean; reminders: number; rule: RequireCardSettings } {
+    return { ...this.requireCardFor(agent), rule: this.requireCard() };
+  }
+
+  /**
+   * Propose the rule for every agent at once. Holding every session of the inbox to a card is the inbox's own conduct,
+   * so it takes the person's approval: an agent that could turn it on for the others would police its neighbours.
+   */
+  proposeRequireCard(input: { on: boolean; reminders?: number; by?: { caller: Caller; agent: string } }): Card {
+    const from = input.by ? String(input.by.agent ?? '').trim() : '';
+    if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
+    const rule = this.requireCard();
+    const reminders = input.reminders === undefined ? rule.reminders : Number(input.reminders);
+    if (!Number.isInteger(reminders) || reminders < 0 || reminders > REMINDERS_MAX) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${REMINDERS_MAX}`);
+    const mode: 'all' | 'off' = input.on ? 'all' : 'off';
+    const times = `${reminders} time${reminders === 1 ? '' : 's'}`;
+    const what = mode === 'all'
+      ? `Every agent in this inbox would have to hold an open card, asked up to ${times} in a stretch without one.`
+      : 'No agent in this inbox would be asked for a card.';
+    const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes to change the card rule for every agent. ${what} It changes only if you approve it.`;
+    // The text and the proposal are measured whole before anything is stored, the way a guidance proposal is.
+    const proposal = { mode, reminders, ...(from ? { from } : {}) };
+    const size = new TextEncoder().encode(JSON.stringify({ text: cardText, requireCard: proposal })).length + 2048;
+    if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card would be ${size} bytes, over the limit of ${MAX_CARD_BYTES}`);
+    const id = `require-card-${randomId(4)}`;
+    this.postCard({ token: '', role: 'owner' }, {
+      id, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
+      title: mode === 'all' ? 'Hold every agent to a card?' : 'Stop asking every agent for a card?',
+      text: cardText,
+      options: [{ id: 'approve', label: mode === 'all' ? 'Approve: hold every agent' : 'Approve: stop asking' }, { id: 'reject', label: 'Reject' }],
+    });
+    const card: Card = { ...this.getCard(id), requireCard: proposal };
+    this.store.put('cards', id, card);
+    this.emit({ type: 'change', card: id });
+    return card;
+  }
+
+  /** Apply or drop a proposed rule, close the card, and tell the agent that proposed it. */
+  private resolveRequireCard(card: Card, answer: Answer): void {
+    if (!card.requireCard) return;
+    if ([answer.values['choice']].flat()[0] === 'approve') {
+      const next = this.putRequireCard({ mode: card.requireCard.mode, reminders: card.requireCard.reminders });
+      this.closeAs(card, 'resolved', next.mode === 'all'
+        ? `Approved: every agent is asked for a card, up to ${next.reminders} time${next.reminders === 1 ? '' : 's'} in a stretch without one.`
+        : 'Approved: no agent is asked for a card.');
+    } else this.closeAs(card, 'resolved', 'Rejected: the card rule did not change.');
+    if (card.requireCard.from) this.flush(card.requireCard.from);
   }
 
   setSettings(input: Partial<Settings> & PinChange): Settings {
@@ -1647,6 +1703,7 @@ export class Inbox {
     this.usage.record('answers');
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
+    else if (card.kind === 'system' && card.requireCard) this.resolveRequireCard(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
     else if (card.kind === 'system' && card.id.startsWith('priorities-')) this.resolvePriorityProposal(card, answer);
     else if (card.kind === 'system' && card.subscription) this.resolveSubscription(card, answer);

@@ -132,7 +132,7 @@ claude() {
 } }
 ```
 
-**A card from a session that stops without one (optional).** With `YOUR_ATTENTION_REQUIRE_CARD=1` in the session's environment, this hook gives the model one request to post a card when it stops with none open, and names the `card_post` call to make. Claude Code marks the stop that request causes with `stop_hook_active`, so the hook does nothing then. A session gets **three asks at most** without a card, counted in `~/.your-attention/claude/<session>.card-asks`, and the count resets when the person types a prompt, when an answer arrives through the channel, and when a card of the session's own is open. Leave the variable out for a background agent that should run without a card.
+**A card from a session that stops without one (optional, off until asked for).** This hook gives the model one request to post a card when it stops with none open, and names the `card_post` call to make. Claude Code marks the stop that request causes with `stop_hook_active`, so the hook does nothing then. Whether the hook asks comes from the inbox, not the environment, so turning it on reaches a session that is already running: an agent asks for itself with `settings {"scope": "self", "on": true}`, and an agent that proposes it for every agent posts a card the person approves. The count resets when the person types a prompt, when an answer arrives through the channel, and when a card of the session's own is open. `YOUR_ATTENTION_REQUIRE_CARD` stays as a per-session override: `1` asks, `0` does not, and the value wins over the inbox for as long as the session runs. A background agent gets neither, which is why a launcher sets the variable at the agent's start rather than in a startup file.
 
 ```json
 { "hooks": {
@@ -154,7 +154,7 @@ your-attention pi --tags repo=acme/api,topic=billing -- [pi args]
 
 Every card the session posts inherits them, under the tags on the card itself. The agent reads or changes them with the `card_tags` tool, so a compaction loses nothing.
 
-With `YOUR_ATTENTION_REQUIRE_CARD=1` in its environment, a session is asked for a card when a run settles and none of its cards is open. The extension sends the request as a user message. A session gets **three asks at most** without a card, and the count resets when a run starts for any reason other than the request itself, and when a card of the session's own is open. Leave the variable out for a background agent that should run without a card.
+A session is asked for a card when a run settles and none of its cards is open, once the inbox asks it: the agent turns it on for itself with `settings {"scope": "self", "on": true}`, or proposes it for every agent, which the person approves on a card. The extension sends the request as a user message. How many times one stretch without a card is asked about is part of the rule: three by default, and zero never asks. `YOUR_ATTENTION_REQUIRE_CARD=1` in the session's environment asks anyway, `0` holds it back, and either value wins over the inbox for as long as the session runs. A background agent gets neither, which is why a launcher sets the variable at the agent's start rather than in a startup file.
 
 #### OpenCode
 

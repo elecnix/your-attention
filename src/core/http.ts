@@ -493,6 +493,23 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       // A laptop offers the counts once. A hosted inbox tells the person once that they are always on.
       return json({ ...s, notice: !s.notified && !blocked, blocked, source: t.source, destination: t.destination, next: inbox.usage.report(inbox.usage.today(), t.source) });
     }
+    // One rule, read or changed per session or for the whole inbox. A change for the whole inbox is a card the person
+    // answers, because holding every agent to a card is not one agent's decision.
+    if (a === 'settings' && b === 'require-card') {
+      if (method === 'GET') return json(inbox.requireCardView(url.searchParams.get('agent') ?? ''));
+      if (method === 'POST') {
+        const input = await readJson<{ scope?: string; on?: unknown; reminders?: unknown; agent?: string }>(req);
+        const who = String(input.agent ?? '').trim();
+        const on = input.on === true;
+        const reminders = input.reminders === undefined ? undefined : Number(input.reminders);
+        if (input.scope === 'self') return json(inbox.setRequireCardForAgent(who, on));
+        if (input.scope === 'all') {
+          const card = inbox.proposeRequireCard({ on, ...(reminders === undefined ? {} : { reminders }), ...(who ? { by: { caller: me, agent: who } } : {}) });
+          return json(publicCard(card), 201);
+        }
+        throw new InboxError(400, 'scope must be self or all');
+      }
+    }
     if (a === 'settings') {
       if (method === 'GET') return json(inbox.settings());
       if (method === 'PUT') { owner(); return json(inbox.setSettings(await readJson<Partial<Settings>>(req))); }

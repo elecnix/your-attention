@@ -152,6 +152,30 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return 'Closed.';
     case 'card_search':
       return JSON.stringify((await inbox.search(String(args['query'] ?? ''), { answered: args['include_open'] !== true, limit: args['limit'] === undefined ? undefined : Number(args['limit']) })).map((r) => ({ id: r.card.id, title: r.card.title, answer: r.answer ? describeAnswer(r.card, r.answer) : null })), null, 2);
+    case 'settings': {
+      const scope = args['scope'];
+      const ruleSays = (rule: { mode: string; agents?: string[] }) => rule.mode === 'all'
+        ? 'every agent in this inbox'
+        : rule.mode === 'agents' ? `the agents it names: ${(rule.agents ?? []).join(', ')}` : 'no agent in this inbox';
+      const says = (on: boolean, reminders: number) => on
+        ? `This session must hold an open card, asked up to ${reminders} time${reminders === 1 ? '' : 's'} in a stretch without one.`
+        : 'This session is not asked for a card.';
+      if (scope === undefined) {
+        const view = await inbox.requireCard(agent);
+        return `${says(view.on, view.reminders)} The rule asks ${ruleSays(view.rule)}.`;
+      }
+      if (args['on'] === undefined) throw new Error('say on: true to ask this session for a card, false to stop asking');
+      const on = args['on'] === true;
+      if (scope === 'self') {
+        const next = await inbox.setRequireCardForSelf(agent, on);
+        return `${says(on, next.reminders)} This took effect at once, for this session only: no card asked the person, because it is your own conduct.`;
+      }
+      if (scope === 'all') {
+        const card = await inbox.proposeRequireCard({ on, ...(args['reminders'] === undefined ? {} : { reminders: Number(args['reminders']) }), agent });
+        return `Proposed the rule for every agent on card ${card.id}. It changes only if the person approves it, and the answer arrives ${ctx.arrival}.`;
+      }
+      throw new Error('scope must be self, for this session, or all, for every agent');
+    }
   }
   throw new Error(`unknown tool ${name}`);
 }
