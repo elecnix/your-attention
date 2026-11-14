@@ -66,7 +66,7 @@ your-attention open --link      # prints a one-time sign-in link, for a private 
 
 The inbox keeps its files in `~/.your-attention`. Set `YOUR_ATTENTION_HOME` to move them.
 
-In a terminal, `start` and `serve` offer to set a [PIN](#protect-the-inbox-with-a-pin) while the inbox has none. Type `y` and the PIN twice, `s` to skip until the next start, or `n` to stop asking. A service started at login has no terminal, so it never asks.
+The [PIN](#protect-the-inbox-with-a-pin) is optional. A laptop inbox used by one person works fine without it. In a terminal, `start` and `serve` offer to set it while the inbox has none: type `y` and the PIN twice, `s` to skip until the next start, or `n` to stop asking. A service started at login has no terminal, so it never asks.
 
 To start the inbox when you log in (optional), write a launchd or systemd unit. Without `--write`, the command only prints the unit.
 
@@ -322,6 +322,8 @@ The inbox shows the request to you as a card with the address and the header nam
 ## Protect the inbox with a PIN
 
 An answer on a card goes straight into a coding agent's session. Someone who gets the inbox address or a sign-in link, from a bookmark, the browser history or a pasted message, could open the page and answer as you. A 4-digit PIN stops that: the address or link signs a browser in, and each new tab must also type the PIN before it shows a card or takes an answer.
+
+The PIN is optional. Set one when other machines on your network can open the inbox, and when you would mind a sign-in link kept in a browser history.
 
 ```sh
 your-attention pin status       # whether the inbox has a PIN, and any lockout
