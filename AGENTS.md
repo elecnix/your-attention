@@ -168,9 +168,15 @@ A release is a tag whose name carries the version `package.json` declares. `rele
 3. Tag and push only the tag: `git tag -a v1.2.3 -m "v1.2.3" && git push origin v1.2.3`.
 4. Watch the run with `gh run watch --workflow release.yml`. A red run produces nothing to install.
 
-`NPM_TOKEN` holds a token from an npm account with rights to the package name. Without it the job skips the publish and creates the release alone, which is what the formula reads.
+Publishing to npm happens on a laptop, not in the workflow, because this account requires two-factor authentication for a publish. From a checkout of the tagged commit:
 
-A stage-only token cannot publish a version directly: it deposits one with `npm stage publish`, and a maintainer promotes it with two-factor authentication. Such a token needs that step written into the workflow, and the last step of a release stays a person typing six digits. A token restricted to named packages cannot create a package the registry has never seen. So a first release needs a token scoped to all packages, or a classic automation token.
+```sh
+npm publish --otp 123456
+```
+
+The repository keeps `NPM_TOKEN` unset. npm now restricts the tokens that bypass two-factor authentication, and the stage-only one tried for the first release could not create a name the registry had never seen: it answered `403 You may not perform that action with these credentials` even for `npm stage publish`.
+
+So the workflow creates the release alone, and the formula installs the release tarball.
 
 Never move a tag that has published something. `livecheck` in the tap's formula follows the releases, so a new tag is where a new Homebrew version comes from.
 
