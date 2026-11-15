@@ -5,6 +5,7 @@ import { describeAnswer, type Client } from '../client.ts';
 import { typeFromName } from '../core/inbox.ts';
 import type { Approval, AskQuestion, CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
+import { envRequireCard } from './require-card.ts';
 import { cardTools, removedTools } from './tools.ts';
 
 export interface ToolContext {
@@ -162,11 +163,18 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         : 'This session is not asked for a card.';
       if (scope === undefined) {
         const view = await inbox.requireCard(agent);
+        // A session started with the environment value obeys that value, so the inbox's answer would mislead it.
+        const forced = envRequireCard(process.env);
+        if (forced) {
+          return `${says(forced.on, forced.reminders)} YOUR_ATTENTION_REQUIRE_CARD decides for this session until it restarts, so the inbox's rule does not apply to it. That rule asks ${ruleSays(view.rule)}.`;
+        }
         return `${says(view.on, view.reminders)} The rule asks ${ruleSays(view.rule)}.`;
       }
       if (typeof args['on'] !== 'boolean') throw new Error('say on: true to ask this session for a card, false to stop asking');
       const on = args['on'];
       if (scope === 'self') {
+        // A session the environment decides for cannot change what governs it, and saying otherwise would mislead.
+        if (envRequireCard(process.env)) throw new Error('YOUR_ATTENTION_REQUIRE_CARD decides for this session until it restarts, so a self change would have no effect: use scope all to change the rule for every agent');
         // The count belongs to the whole inbox, so a self change that named one would be dropped rather than applied.
         if (args['reminders'] !== undefined) throw new Error('the reminder count applies to every agent, so change it with scope all');
         const next = await inbox.setRequireCardForSelf(agent, on);

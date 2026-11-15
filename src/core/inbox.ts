@@ -1342,8 +1342,12 @@ export class Inbox {
 
   /** Apply or drop a proposed rule, close the card, and tell the agent that proposed it. */
   private resolveRequireCard(card: Card, answer: Answer): void {
-    // A proposal that already closed applies nothing: a later answer to it is not a decision anyone made.
-    if (!card.requireCard || card.closed) return;
+    // A proposal that already closed applies nothing, because a later answer to it is not a decision anyone made.
+    // The proposer still hears that answer, so a connected stream is not left without what the store already holds.
+    if (!card.requireCard || card.closed) {
+      if (card.requireCard?.from) this.flush(card.requireCard.from);
+      return;
+    }
     if ([answer.values['choice']].flat()[0] === 'approve') {
       const next = this.putRequireCard({ mode: card.requireCard.mode, reminders: card.requireCard.reminders });
       this.closeAs(card, 'resolved', next.mode === 'all'

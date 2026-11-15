@@ -141,6 +141,14 @@ describe('the require-a-card rule', () => {
     }));
     assert.equal(dropped.status, 400);
 
+    // A count arrives as a number or not at all, since null and true would read as 0 and 1 through Number().
+    const lookalikeCount = await handle(new Request(selfPath, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agentToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'all', on: true, reminders: null, agent: 's1' }),
+    }));
+    assert.equal(lookalikeCount.status, 400);
+
     // A body of `null` is refused rather than crashing the route.
     const empty = await handle(new Request(selfPath, {
       method: 'POST',
@@ -159,6 +167,11 @@ describe('the require-a-card rule', () => {
     assert.equal(card.token, proposer.token.id, 'the card belongs to the agent that proposed it, so the person\'s answer reaches it');
     await inbox.answer(card.id, { values: { choice: 'reject' } });
     assert.ok(heard.some((e) => e.type === 'answer'), 'the proposer hears the answer it was waiting for');
+    // A second answer to the closed proposal still reaches the stream, since the store already holds it.
+    heard.length = 0;
+    await inbox.answer(card.id, { values: { choice: 'approve' } });
+    assert.ok(heard.some((e) => e.type === 'answer'), 'an answer after the close is pushed too');
+    assert.equal(inbox.requireCardFor('s1').on, false, 'and it still changes no rule');
     // A proposer that was offline finds the answer in unread, as a guidance proposer does.
     const waiting = inbox.unread({ token: proposer.token.id, role: 'agent' }, 'proposer');
     assert.deepEqual(waiting.cards, [card.id]);

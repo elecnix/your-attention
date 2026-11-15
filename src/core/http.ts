@@ -504,7 +504,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         // A rule says whether someone is asked for a card, so the request says it plainly rather than in a lookalike.
         if (typeof input.on !== 'boolean') throw new InboxError(400, 'on must be true or false');
         const on = input.on;
-        const reminders = input.reminders === undefined ? undefined : Number(input.reminders);
+        // A count is a number or it is nothing: `null`, `""` and `true` would arrive as 0 or 1 through Number().
+        if (input.reminders !== undefined && typeof input.reminders !== 'number') throw new InboxError(400, 'reminders must be a whole number');
+        const reminders = input.reminders;
         if (input.scope === 'self') {
           // The count applies to every agent, so a self change that carried one would be dropped rather than applied.
           if (input.reminders !== undefined) throw new InboxError(400, 'reminders applies to every agent: change it with scope all');
