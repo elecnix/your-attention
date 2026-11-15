@@ -498,7 +498,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (a === 'settings' && b === 'require-card') {
       if (method === 'GET') return json(inbox.requireCardView(url.searchParams.get('agent') ?? ''));
       if (method === 'POST') {
-        const input = await readJson<{ scope?: string; on?: unknown; reminders?: unknown; agent?: string }>(req);
+        // A request body may be `null`, and reading it as an object would crash rather than refuse it.
+        const input = (await readJson<{ scope?: string; on?: unknown; reminders?: unknown; agent?: string }>(req)) ?? {};
         const who = String(input.agent ?? '').trim();
         // A rule says whether someone is asked for a card, so the request says it plainly rather than in a lookalike.
         if (typeof input.on !== 'boolean') throw new InboxError(400, 'on must be true or false');

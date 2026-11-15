@@ -127,6 +127,25 @@ describe('the require-a-card rule', () => {
     }));
     assert.equal(mine.status, 200);
     assert.equal(inbox.requireCardFor('agent a').on, true);
+
+    // A body of `null` is refused rather than crashing the route.
+    const empty = await handle(new Request(selfPath, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agentToken}`, 'content-type': 'application/json' },
+      body: 'null',
+    }));
+    assert.equal(empty.status, 400);
+  });
+
+  it('brings the outcome back to the agent that proposed the rule', async () => {
+    const inbox = fresh();
+    const proposer = await inbox.createToken('agent a', 'agent');
+    const heard: AgentEvent[] = [];
+    inbox.connect({ token: proposer.token.id, role: 'agent' }, 'proposer', (e) => heard.push(e));
+    const card = inbox.proposeRequireCard({ on: true, by: { caller: { token: proposer.token.id, role: 'agent' }, agent: 'proposer' } });
+    assert.equal(card.token, proposer.token.id, 'the card belongs to the agent that proposed it, so the person\'s answer reaches it');
+    await inbox.answer(card.id, { values: { choice: 'reject' } });
+    assert.ok(heard.some((e) => e.type === 'answer'), 'the proposer hears the answer it was waiting for');
   });
 
   it('stops a session from stepping out of a rule that names every agent', () => {

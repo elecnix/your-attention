@@ -186,6 +186,8 @@ export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, a
  * still goes to the agent that proposed the text. */
 function recipient(card: Card, answer: Answer): string | null {
   if (card.kind === 'system' && card.broadcast) return card.broadcast.from && card.token ? card.broadcast.from : null;
+  // A rule proposal travels the same way: the person answers it, and the agent that proposed it hears the outcome.
+  if (card.kind === 'system' && card.requireCard) return card.requireCard.from && card.token ? card.requireCard.from : null;
   return card.deliver === 'stream' && cardState(card, answer) !== 'closed' ? card.agent : null;
 }
 
@@ -1332,7 +1334,7 @@ export class Inbox {
       text: cardText,
       options: [{ id: 'approve', label: mode === 'all' ? 'Approve: hold every agent' : 'Approve: stop asking' }, { id: 'reject', label: 'Reject' }],
     });
-    const card: Card = { ...this.getCard(id), requireCard: proposal };
+    const card: Card = { ...this.getCard(id), ...(from && input.by?.caller.token ? { token: input.by.caller.token } : {}), requireCard: proposal };
     this.store.put('cards', id, card);
     this.emit({ type: 'change', card: id });
     return card;
