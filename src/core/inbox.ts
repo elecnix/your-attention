@@ -13,6 +13,7 @@ import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
+import { VERSION } from './version.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
@@ -2383,7 +2384,7 @@ export class Inbox {
    * summaries, so its time grows with the cards on show, never with the size of their text or the cleared ones. */
   summaryState(): {
     cards: CardSummary[]; answers: Record<string, AnswerSummary>; presence: Record<string, Presence>; states: Record<string, CardState>;
-    priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance;
+    priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance; version: string;
   } {
     const cards = this.store.list<CardSummary>('summaries').sort((a, b) => a.createdAt - b.createdAt);
     const answers: Record<string, AnswerSummary> = {};
@@ -2396,7 +2397,7 @@ export class Inbox {
       states[c.id] = this.shownState(c, presence[c.agent], c.answer);
       priorities[c.id] = this.effectivePriority(c, levels, c.answer);
     }
-    return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance() };
+    return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance(), version: VERSION };
   }
 
   /** GET /v1/cards/<id>: the whole card, its answer, its state, and the rev of its summary. `owner` keeps what only the
@@ -2431,7 +2432,7 @@ export class Inbox {
 
   state(): {
     cards: Card[]; answers: Record<string, Answer>; presence: Record<string, Presence>; states: Record<string, CardState>;
-    priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance;
+    priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance; version: string;
   } {
     const cards = this.store.list<Card>('cards').filter((c) => !c.archivedAt).map(publicCard).sort((a, b) => a.createdAt - b.createdAt)
       // A body stored before the inbox checked bodies may not draw whole, so the page gets what it can draw.
@@ -2447,7 +2448,7 @@ export class Inbox {
     const levels = this.priorities();
     // The answers are read already, so each card costs no storage read of its own.
     const priorities = Object.fromEntries(cards.map((c) => [c.id, this.effectivePriority(c, levels, answers[c.id])]));
-    return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance() };
+    return { cards, answers, presence, states, priorities, levels, settings: this.settings(), guidance: this.guidance(), version: VERSION };
   }
 }
 

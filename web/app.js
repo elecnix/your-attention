@@ -630,7 +630,8 @@ export function App() {
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable')),
       h(DevicesLink),
       h(PhoneLink),
-      h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: 'Your Attention on GitHub' },
+      // The version the inbox runs, on hover, so a deployment can be told apart without opening anything.
+      h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': state.version ? `Your Attention ${state.version} on GitHub` : 'Your Attention on GitHub', title: state.version ? `Your Attention ${state.version} on GitHub` : 'Your Attention on GitHub' },
         h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'currentColor' }, h('path', { d: OCTOCAT }))))),
     h(UsageNotice, { telemetry, onChange: changeTelemetry }),
     pinForm && h(PinForm, {
