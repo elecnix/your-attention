@@ -1589,7 +1589,11 @@ export class Inbox {
     // The ticked agents, or every connected one when the answer names none. Only connected agents get the event.
     const picked = Array.isArray(answer.values['agents']) ? new Set((answer.values['agents'] as unknown[]).map(String)) : undefined;
     // The card may hold a text an older inbox stored, so the catalog is dropped once more before it becomes the guidance.
-    const guidance: Guidance = { text: guidanceTextOnly(broadcast.text, this.widgetCatalog()), version: this.guidance().version + 1, at: this.now() };
+    const text = guidanceTextOnly(broadcast.text, this.widgetCatalog());
+    // A card kept before this change may hold nothing but the catalog or the tag lines, and storing that would leave
+    // every agent reading a blank guidance. The approval changes nothing instead, and the card says so.
+    if (!text) return 'Rejected: that text was only the widget catalog or the tag lines, so the guidance did not change.';
+    const guidance: Guidance = { text, version: this.guidance().version + 1, at: this.now() };
     this.store.put('meta', 'guidance', guidance);
     let sent = 0;
     for (const [k, subs] of this.agents) {

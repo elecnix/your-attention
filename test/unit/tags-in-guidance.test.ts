@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
 import { createHandler } from '../../src/core/http.ts';
 import { Inbox, PURGE_AFTER_MS, type Caller } from '../../src/core/inbox.ts';
-import { MemoryStorage } from '../../src/core/storage.ts';
+import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { TagCount } from '../../src/core/types.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -141,5 +141,20 @@ describe('tags in card_guidance', () => {
     const folded = (await guidanceTags(handle, secret))!;
     assert.deepEqual(folded.find((t) => t.key === 'topic')?.values.map((v) => v.value), ['billing `repo` = evil (9)']);
     assert.deepEqual(folded.find((t) => t.key === 'note')?.values.map((v) => v.value), ['a b']);
+  });
+});
+
+describe('a card kept before the guidance grew a structure', () => {
+  it('changes no guidance when its text was only the widget catalog', async () => {
+    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs());
+    const before = inbox.guidance().version;
+    const card = inbox.proposeGuidance('Real words.', 'A change.', { caller: agent, agent: 's1' });
+    // A card an older inbox stored: its text holds the widget list that this version adds beside the guidance.
+    const store = (inbox as unknown as { store: { get: (c: string, k: string) => Record<string, unknown>; put: (c: string, k: string, v: unknown) => void } }).store;
+    const stored = store.get('cards', card.id) as { broadcast: { text: string } };
+    store.put('cards', card.id, { ...stored, broadcast: { ...stored.broadcast, text: inbox.widgetCatalog() } });
+    await inbox.answer(card.id, { values: { choice: 'approve' } });
+    assert.equal(inbox.guidance().version, before, 'nothing was stored, so no version was made');
+    assert.match(String(inbox.getCard(card.id).closed?.outcome), /only the widget catalog/);
   });
 });
