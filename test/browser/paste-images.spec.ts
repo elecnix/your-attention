@@ -60,10 +60,20 @@ test('an image dropped on a comment box shows a thumbnail and reaches the agent 
 });
 
 for (const how of ['paste', 'drop'] as const) {
-  test(`a ${how === 'paste' ? 'pasted' : 'dropped'} file that is not an image is refused with a message`, async ({ page }) => {
-    const card = await openCard(page, `pi-${how}`, how === 'paste' ? 'Paste a PDF' : 'Drop a PDF');
-    await putFiles(page, '.focus-card textarea', [{ type: 'application/pdf', name: 'a.pdf', body: 'JVBERi0=' }], how);
-    await expect(card.locator('[role=alert]')).toContainText('PNG, JPEG, GIF or WebP');
+  test(`a ${how} of any file is kept as a named chip, and reaches the agent`, async ({ page }) => {
+    const listening = inbox.listen(`s-file-${how}`);
+    const card = await openCard(page, `file-${how}`, `A statement, ${how}`);
+    await putFiles(page, '.focus-card textarea', [{ type: 'application/pdf', name: 'statement.pdf', body: 'JVBERi0=' }], how);
+    // A file the browser cannot draw shows its name, not a broken picture.
+    await expect(card.locator('.pasted-thumb .pasted-chip')).toHaveText('statement.pdf');
+    await expect(card.locator('.pasted-thumb img')).toHaveCount(0);
+    expect(await sendAnswer(card, listening)).toEqual(['statement.pdf']);
+  });
+
+  test(`a ${how} of a file over 8 MB is refused with a message`, async ({ page }) => {
+    const card = await openCard(page, `big-${how}`, `Too big, ${how}`);
+    await putFiles(page, '.focus-card textarea', [{ type: 'application/zip', name: 'big.zip', body: 'U'.repeat(12 * 1024 * 1024) }], how);
+    await expect(card.locator('[role=alert]')).toContainText('8 MB');
     await expect(card.locator('.pasted-thumb')).toHaveCount(0);
   });
 }

@@ -120,10 +120,10 @@ export const UNREAD_ID_LIMIT = 20;
 // The images of one answer share a byte budget, because the route reads a body of 16 MB and base64 costs four thirds:
 // ten images of 8 MB each would make a body no route accepts.
 export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
+// An answer takes any file: the person attaches what they were asked about. The page shows an image as a thumbnail
+// and everything else as a named chip, and a served file that a browser cannot render comes back as a download.
 const REMINDERS_DEFAULT = 3;
 const REMINDERS_MAX = 10;
-
-const ANSWER_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 /** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
 export const MIN_FILE_CHARGE = 64 * 1024;
 /** The largest card, as stored, without its files. */
@@ -1828,7 +1828,6 @@ export class Inbox {
     const decoded = input.map((f, i) => {
       if (!f || typeof f !== 'object' || !/^data:/.test(String(f.src ?? ''))) throw new InboxError(400, `image ${i + 1}: src must be a base64 data: URL`);
       const d = decodeDataUrl(i, f);
-      if (!ANSWER_IMAGE_TYPES.has(d.type)) throw new InboxError(400, `image ${i + 1}${f.name ? ` (${cleanName(f.name)})` : ''} is ${d.type}: an answer takes only PNG, JPEG, GIF or WebP images`);
       return d;
     });
     const bytes = decoded.reduce((n, d) => n + Math.max(d.bytes.length, MIN_FILE_CHARGE), 0);
