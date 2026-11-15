@@ -506,6 +506,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         const on = input.on;
         const reminders = input.reminders === undefined ? undefined : Number(input.reminders);
         if (input.scope === 'self') {
+          // The count applies to every agent, so a self change that carried one would be dropped rather than applied.
+          if (input.reminders !== undefined) throw new InboxError(400, 'reminders applies to every agent: change it with scope all');
           // A session changes its own conduct. The agent id on an open stream is the only identity the inbox can check.
           if (!inbox.connectedAs(me, who)) throw new InboxError(403, 'only a session connected as that agent changes its own rule');
           return json(inbox.setRequireCardForAgent(who, on));

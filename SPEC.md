@@ -417,7 +417,7 @@ An answer closes the card, and the inbox delivers it with the comment to the age
 
 ## Settings
 
-`GET /v1/settings` returns `{allowHtml, groupBy, pins, requireCard}`. Only the owner changes `allowHtml`, `groupBy` and `pins`, with `PUT /v1/settings`, which takes any of those fields and leaves the others as they are. A `requireCard` written there is the one way to name a list of agents, with `mode: agents` and the agents in `agents`.
+`GET /v1/settings` returns `{allowHtml, groupBy, pins, requireCard}`. Only the owner changes `allowHtml`, `groupBy` and `pins`, with `PUT /v1/settings`, which takes any of those fields and leaves the others as they are. A `requireCard` written there is the one way to name a list of agents, with `mode: agents` and the agents in `agents`. Under `mode: all` no session steps out of the rule, and `scope: self` with `on: false` answers 400: a rule that names every agent belongs to the person. `scope: self` refuses `reminders` too, because the count applies to every agent.
 
 - `allowHtml` lets a card carry its own HTML and scripts, in a sandboxed frame.
 - `groupBy` is the queue's grouping: `none`, `priority`, `agent`, or `tag:<key>` for any tag key a card has. It starts unset, and the queue groups by nothing.

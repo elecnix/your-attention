@@ -167,6 +167,8 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       if (typeof args['on'] !== 'boolean') throw new Error('say on: true to ask this session for a card, false to stop asking');
       const on = args['on'];
       if (scope === 'self') {
+        // The count belongs to the whole inbox, so a self change that named one would be dropped rather than applied.
+        if (args['reminders'] !== undefined) throw new Error('the reminder count applies to every agent, so change it with scope all');
         const next = await inbox.setRequireCardForSelf(agent, on);
         return `${says(on, next.reminders)} This took effect at once, for this session only: no card asked the person, because it is your own conduct.`;
       }

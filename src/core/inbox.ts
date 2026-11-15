@@ -1894,11 +1894,12 @@ export class Inbox {
       .filter((a) => {
         const card = this.store.get<Card>('cards', a.card);
         if (!card) return false;
-        // A guidance card closes as the person answers it, and its answer waits for the agent that proposed the text.
-        const guidance = card.kind === 'system' && card.broadcast;
-        if (guidance ? recipient(card, a) === null : cardState(card, a) === 'closed') return false;
+        // A proposal card closes as the person answers it, and its answer waits for the agent that proposed the text.
+        const proposal = card.kind === 'system' && (card.broadcast ?? card.requireCard);
+        const from = card.broadcast?.from ?? card.requireCard?.from;
+        if (proposal ? recipient(card, a) === null : cardState(card, a) === 'closed') return false;
         if (caller.role !== 'owner' && card.token !== caller.token) return false;
-        return agent === undefined || (guidance ? card.broadcast?.from : card.agent) === agent;
+        return agent === undefined || (proposal ? from : card.agent) === agent;
       })
       .map((a) => a.card)
       .sort();

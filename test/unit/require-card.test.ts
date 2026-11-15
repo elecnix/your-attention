@@ -119,6 +119,9 @@ describe('the require-a-card rule', () => {
     }));
     assert.equal(stranger.status, 403);
     assert.equal(inbox.requireCardFor('someone-else').on, true, 'the refused change left the rule alone');
+    // Start from a rule that asks nobody, so the self change below has something to change.
+    inbox.setSettings({ requireCard: { mode: 'off', reminders: 3 } });
+    assert.equal(inbox.requireCardFor('agent a').on, false);
     inbox.connect({ token: agentRecord.token.id, role: 'agent' }, 'agent a', () => {});
     const mine = await handle(new Request(selfPath, {
       method: 'POST',
@@ -126,7 +129,17 @@ describe('the require-a-card rule', () => {
       body: JSON.stringify({ scope: 'self', on: true, agent: 'agent a' }),
     }));
     assert.equal(mine.status, 200);
-    assert.equal(inbox.requireCardFor('agent a').on, true);
+    assert.equal(inbox.requireCardFor('agent a').on, true, 'the self change is what put that agent under the rule');
+    assert.equal(inbox.requireCard().mode, 'agents');
+    assert.deepEqual(inbox.requireCard().agents, ['agent a']);
+
+    // The reminder count belongs to every agent, so a self change that carried one is refused rather than dropped.
+    const dropped = await handle(new Request(selfPath, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agentToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'self', on: true, reminders: 0, agent: 'agent a' }),
+    }));
+    assert.equal(dropped.status, 400);
 
     // A body of `null` is refused rather than crashing the route.
     const empty = await handle(new Request(selfPath, {
@@ -146,6 +159,9 @@ describe('the require-a-card rule', () => {
     assert.equal(card.token, proposer.token.id, 'the card belongs to the agent that proposed it, so the person\'s answer reaches it');
     await inbox.answer(card.id, { values: { choice: 'reject' } });
     assert.ok(heard.some((e) => e.type === 'answer'), 'the proposer hears the answer it was waiting for');
+    // A proposer that was offline finds the answer in unread, as a guidance proposer does.
+    const waiting = inbox.unread({ token: proposer.token.id, role: 'agent' }, 'proposer');
+    assert.deepEqual(waiting.cards, [card.id]);
   });
 
   it('stops a session from stepping out of a rule that names every agent', () => {
