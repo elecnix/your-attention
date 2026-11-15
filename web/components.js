@@ -945,12 +945,13 @@ export function AgentsPanel({ state, startOpen = false }) {
     open && h(BarDialog, { dialogRef: ref, className: 'qr-dialog agents-dialog', titleId: 'agents-title', title: SEND_LABEL, onClose: close },
       h('p', null, 'Your card goes to that agent on its stream. It answers with a card of its own, which waits in your queue.'),
       !agents.length && h('p', { className: 'muted note' }, 'Nobody to send to: no agent has connected to this inbox yet.'),
-      h(SendForm, { agents }),
-      h('div', { className: 'qr-actions' }, h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: true }, 'Close'))));
+      // The form carries the dialog's one row of actions, as the devices dialog does, so Send and Close sit
+      // side by side instead of each holding a row of its own.
+      h(SendForm, { agents, onClose: close })));
 }
 
-/** The panel's one form: the agent a card goes to, the message, and the button that sends it. */
-function SendForm({ agents }) {
+/** The panel's one form: the agent a card goes to, the message, and the row of actions that sends it or closes it. */
+function SendForm({ agents, onClose }) {
   const [picked, setPicked] = React.useState(null);
   const [text, setText] = React.useState('');
   const [busy, setBusy] = React.useState(false);
@@ -1001,5 +1002,6 @@ function SendForm({ agents }) {
       })),
     result && h('p', { className: result.ok ? 'note ok' : 'note warn', role: 'status' }, result.message),
     h('div', { className: 'qr-actions' },
-      h('button', { type: 'submit', className: 'btn primary', disabled: busy || !draft || !agent }, busy ? 'Sending…' : 'Send')));
+      h('button', { type: 'submit', className: 'btn primary', disabled: busy || !draft || !agent }, busy ? 'Sending…' : 'Send'),
+      h('button', { type: 'button', className: 'btn', onClick: onClose, autoFocus: true }, 'Close')));
 }

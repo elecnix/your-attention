@@ -179,7 +179,7 @@ The inbox saves a revision on a dismissed card, and the card stays in **Sent**. 
 
 ## A card the person sends to an agent
 
-The page shows a panel of every agent known to the inbox, with one drop-down that picks the agent, one message field and one button that sends. `POST /v1/send {agent, text}` takes that message, for the owner only, and answers 201 with `{id, agent, card, sentAt, deliveredAt?}`. The first line of the message becomes `title`, at most 300 characters, and the lines under it become `text`, so a one-line message reads once. Its `kind` is `ask`. The queue doesn't show it, since it waits for an agent rather than for the person.
+The page shows a panel of every agent known to the inbox, with one drop-down that picks the agent and one message field for the card. The row of actions at the foot of the panel puts **Send** first, as the default of the dialog, with **Close** after it and quieter. `POST /v1/send {agent, text}` takes that message, for the owner only, and answers 201 with `{id, agent, card, sentAt, deliveredAt?}`. The first line of the message becomes `title`, at most 300 characters, and the lines under it become `text`, so a one-line message reads once. Its `kind` is `ask`. The queue doesn't show it, since it waits for an agent rather than for the person.
 
 `GET /v1/state` feeds the panel as well. Each card summary keeps `origin.cwd` beside `origin.name` and `origin.harness`, so the page reads a working directory in the state it already fetches. The newest card that reported one decides it, and when no card reported a directory, the panel leaves that line out.
 

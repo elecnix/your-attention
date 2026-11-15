@@ -1,5 +1,5 @@
 // The agents panel: who the inbox knows, and the one form that sends a card to the agent its drop-down picks.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { cardEvents } from '../unit/fixture.ts';
 import { openDialog, startInbox, type TestInbox } from './inbox.ts';
 
@@ -12,6 +12,17 @@ const PANEL = 'Send a card to an agent';
 /** The drop-down that picks the agent a card goes to, and the field the person writes the message in. */
 const pick = (dialog: ReturnType<Page['locator']>) => dialog.getByRole('combobox', { name: 'Agent', exact: true });
 const message = (dialog: ReturnType<Page['locator']>) => dialog.getByRole('textbox', { name: 'Message', exact: true });
+
+/** What the browser draws behind a button, as the page's accent color reads on the same page. */
+const backdrop = (button: Locator) => button.evaluate((el) => getComputedStyle(el).backgroundColor);
+const accentOf = (dialog: Locator) => dialog.evaluate((el) => {
+  const probe = document.createElement('span');
+  probe.style.color = 'var(--accent)';
+  el.appendChild(probe);
+  const accent = getComputedStyle(probe).color;
+  probe.remove();
+  return accent;
+});
 
 test('picks an agent in the drop-down, shows what presence says about it, and sends it a card', async ({ page }) => {
   // A card from that session is where the inbox learns the name it reports and where it runs.
@@ -118,4 +129,26 @@ test('says a card waits for an agent that is offline, hands it over when the ses
   stream.stop();
   await expect(dialog).toContainText('Last seen');
   await expect(dialog).not.toContainText('Connected now');
+});
+
+test('puts Send and Close on one row, with Send as the primary action of the dialog', async ({ page }) => {
+  // A session holds its stream open, so the panel has an agent to send to and the row shows in its usual state.
+  inbox.listen('pi:solo');
+  await expect.poll(() => inbox.server.inbox.isOnline('pi:solo')).toBe(true);
+  await inbox.open(page);
+
+  const dialog = await openDialog(page, PANEL);
+  const send = dialog.getByRole('button', { name: 'Send', exact: true });
+  const close = dialog.getByRole('button', { name: 'Close', exact: true });
+  const [s, c] = [(await send.boundingBox())!, (await close.boundingBox())!];
+  // One row: the middle of each button sits at the same height, and Send reads first, on the left.
+  expect(Math.abs(s.y + s.height / 2 - (c.y + c.height / 2))).toBeLessThan(2);
+  expect(s.x + s.width).toBeLessThanOrEqual(c.x);
+
+  // Send wears the accent a primary action takes, and Close keeps the quiet look the other dialogs give it.
+  const accent = await accentOf(dialog);
+  expect(await backdrop(send)).toBe(accent);
+  expect(await backdrop(close)).not.toBe(accent);
+  await expect(send).toHaveClass(/primary/);
+  await expect(close).not.toHaveClass(/primary/);
 });
