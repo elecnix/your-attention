@@ -11,7 +11,7 @@ import { checkMermaid } from '../adapters/mermaid.ts';
 import { bodyErrors, fallbackBody } from '../adapters/openui-body.ts';
 import { SqliteStorage } from '../adapters/sqlite.ts';
 import { randomId } from '../core/crypto.ts';
-import { createHandler } from '../core/http.ts';
+import { createHandler, originParam } from '../core/http.ts';
 import type { ApprovalSender, Caller } from '../core/inbox.ts';
 import { agentSocket, pageSocket } from '../core/socket.ts';
 import { WebSocketServer } from 'ws';
@@ -224,7 +224,8 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
       caller = { token: t.id, role: t.role };
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const conn = agentSocket(inbox, agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, u.searchParams.get('instance') ?? undefined, false, u.searchParams.get('channel') === 'off');
+      const wire = { resumed: false, channelOff: u.searchParams.get('channel') === 'off', origin: originParam(u) };
+      const conn = agentSocket(inbox, agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, u.searchParams.get('instance') ?? undefined, wire);
       // A connection that misses a heartbeat is gone, and presence follows within seconds.
       let alive = true;
       ws.on('pong', () => { alive = true; });

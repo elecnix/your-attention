@@ -1,10 +1,26 @@
 // The card that asks the person to approve new card guidance: the proposal as a diff against the current guidance,
 // and the comment that goes with the answer to the agent that proposed the text.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
-test.beforeEach(async () => { inbox = await startInbox(); });
+// A stand-in for herdr that records each command it gets, so a click on a row's chip shows the pane it focused.
+let calls: string;
+const focused = (): string[] => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n') : []);
+test.beforeAll(() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-herdr-'));
+  calls = path.join(dir, 'calls');
+  const bin = path.join(dir, 'herdr');
+  fs.writeFileSync(bin, `#!/bin/sh\necho "$*" >> '${calls}'\necho '{}'\n`, { mode: 0o755 });
+  process.env['HERDR_BIN_PATH'] = bin;
+});
+test.beforeEach(async () => {
+  fs.rmSync(calls, { force: true });
+  inbox = await startInbox();
+});
 test.afterEach(async () => { await inbox.close(); });
 
 /** The current guidance with one word changed on its first line of three words or more, and one line added at the end. */
@@ -136,4 +152,55 @@ test('unticking every agent by hand also makes a newcomer join unticked', async 
   await expect(agents.locator('.agent input[type=checkbox]:checked')).toHaveCount(0);
   await page.getByRole('button', { name: 'Approve and send' }).click();
   await expect.poll(async () => (await inbox.state()).answers[card.id]?.values['agents']).toEqual([]);
+});
+
+/** How many agents with that prefix the inbox holds online now. */
+async function onlineCount(prefix: string): Promise<number> {
+  const presence = ((await inbox.state()) as unknown as { presence: Record<string, { online: boolean }> }).presence;
+  return Object.entries(presence).filter(([a, p]) => a.startsWith(prefix) && p.online).length;
+}
+
+test('a row shows the name its connection reported, for a session with no card in the state', async ({ page }) => {
+  inbox.listen('claude:no-card', { harness: 'claude-code', session: 'no-card', name: 'Rename the retry flag' });
+  await expect.poll(() => onlineCount('claude:no-card')).toBe(1);
+  await inbox.agent.proposeGuidance('Always attach a screenshot.', { message: 'Adds a rule the last four cards needed.', agent: 's-guide' });
+  await inbox.open(page);
+  const row = page.locator('.broadcast .agents .agent');
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText('Rename the retry flag');
+  // Nothing of that session is in the state but its presence row, so the name can only come from the connection.
+  expect((await inbox.state()).cards.filter((c) => c.agent === 'claude:no-card')).toEqual([]);
+});
+
+test('a row for a session in a herdr pane shows the chip, and the chip opens that pane', async ({ page }) => {
+  inbox.listen('claude:pane', { harness: 'claude-code', session: 'pane', name: 'Ship the release', herdrPane: 'w7:p2' });
+  await expect.poll(() => onlineCount('claude:pane')).toBe(1);
+  await inbox.agent.proposeGuidance('Always attach a screenshot.', { message: 'Adds a rule the last four cards needed.', agent: 's-guide' });
+  await inbox.open(page);
+  const row = page.locator('.broadcast .agents .agent');
+  await expect(row).toContainText('Ship the release');
+  const chip = row.locator('a.session-link');
+  await expect(chip).toHaveAttribute('href', 'https://herdr.invalid/v1/pane/w7:p2');
+  // The chip sits beside the box rather than inside its label, so a click opens the pane and leaves the tick alone.
+  await row.locator('input[type=checkbox]').uncheck();
+  await chip.click();
+  // herdr focuses a pane through its agent, as a session link to a pane does.
+  await expect.poll(focused).toEqual(['agent focus w7:p2']);
+  await expect(row.locator('input[type=checkbox]')).not.toBeChecked();
+});
+
+test("a row falls back to the newest card's name, and then to the agent id", async ({ page }) => {
+  inbox.listen('claude:with-card');
+  inbox.listen('claude:bare');
+  await expect.poll(() => onlineCount('claude:')).toBe(2);
+  await inbox.agent.post({ id: 'older', agent: 'claude:with-card', title: 'An earlier card', origin: { name: 'The older name' } });
+  await inbox.agent.post({ id: 'newer', agent: 'claude:with-card', title: 'A later card', origin: { name: 'The newest name' } });
+  await inbox.agent.proposeGuidance('Always attach a screenshot.', { message: 'Adds a rule the last four cards needed.', agent: 's-guide' });
+  await inbox.open(page);
+  const agents = page.locator('.broadcast .agents');
+  await expect(agents.locator('.agent', { hasText: 'The newest name' })).toHaveCount(1);
+  await expect(agents).not.toContainText('The older name');
+  // The session that reported no name and posted no card shows its id, as it always did.
+  await expect(agents.locator('.agent', { hasText: 'claude:bare' })).toHaveCount(1);
+  await expect(agents.locator('.agent a.session-link')).toHaveCount(0);
 });

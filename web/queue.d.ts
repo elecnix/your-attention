@@ -20,7 +20,7 @@ export const CLOSED_LABEL: Record<string, string>;
 export const STATE_LABEL: Record<string, string>;
 /** The ids of the sections every Group by choice shows. */
 export const SECTION_ID: { system: string; checking: string; outbox: string; sent: string };
-export function agentName(id: string, cards: Card[]): string;
+export function agentName(id: string, cards: Card[], presence?: Record<string, Presence>): string;
 export function presenceOf(card: Pick<Card, 'agent' | 'deliver'>, state: InboxState): ['off' | 'busy' | 'on', string] | null;
 export interface Queue {
   byId: Record<string, Card>;

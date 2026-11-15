@@ -49,6 +49,10 @@ export interface Origin {
   herdrTab?: string;
 }
 
+/** Where a connected session runs, as its connection reports it: the fields a presence row keeps, and the page labels
+ * a row with, or opens from. A card's origin carries `cwd` and the herdr workspace and tab labels as well. */
+export type PresenceOrigin = Pick<Origin, 'harness' | 'session' | 'name' | 'host' | 'herdrPane'>;
+
 export interface Reply {
   text: string;
   at: number;
@@ -426,6 +430,9 @@ export interface Presence {
   /** The agent's session discards channel notifications, because it started without the development-channels flag
    * that turns them on, so an answer pushed there never reaches it. Set by a connection that knows. */
   channelOff?: true;
+  /** Where the session runs, from the connection that serves it, so a page can label the session and open its pane
+   * even when the session has no card in the inbox. A connection that reports none keeps what the row had. */
+  origin?: PresenceOrigin;
 }
 
 /** What an agent stream receives for each answer. */

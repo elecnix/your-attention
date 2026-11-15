@@ -6,7 +6,7 @@ import { expect, type Page } from '@playwright/test';
 import { Client } from '../../src/client.ts';
 import type { ApprovalSender } from '../../src/core/inbox.ts';
 import type { Storage } from '../../src/core/storage.ts';
-import type { AgentEvent, Card } from '../../src/core/types.ts';
+import type { AgentEvent, Card, Origin } from '../../src/core/types.ts';
 import { serve, type RunningServer } from '../../src/node/server.ts';
 
 /** Open the dialog that the button of that name in the bar opens, and return it once its content shows. */
@@ -27,8 +27,9 @@ export interface TestInbox {
   state(): Promise<{ cards: Card[]; states: Record<string, string>; answers: Record<string, { values: Record<string, unknown>; comment: string }> }>;
   /** Store replies on a card, as an inbox wrote them before linked follow-ups. Nothing posts a reply now. Call it before the page opens. */
   seedReplies(id: string, texts: string[]): void;
-  /** Receive answers for one agent, into a list the test reads. */
-  listen(agentId: string): { events: AgentEvent[]; stop(): void };
+  /** Receive answers for one agent, into a list the test reads. `origin` is what the connection reports about its
+   * session, which the inbox keeps on the agent's presence. */
+  listen(agentId: string, origin?: Origin): { events: AgentEvent[]; stop(): void };
   /** The keys to this inbox, as the owner's own route lists them: one per browser, phone and paired machine. */
   tokens(): Promise<{ id: string; name: string; role: string }[]>;
   close(): Promise<void>;
@@ -62,10 +63,10 @@ export async function startInbox(opts: { usage?: boolean; pinPrompt?: boolean; a
       const res = await fetch(`${server.url}/v1/tokens`, { headers: { authorization: `Bearer ${server.ownerToken}` } });
       return (await res.json()) as { id: string; name: string; role: string }[];
     },
-    listen(agentId) {
+    listen(agentId, origin) {
       const events: AgentEvent[] = [];
       const ctl = new AbortController();
-      void agent.stream(agentId, (e) => { events.push(e); }, ctl.signal);
+      void agent.stream(agentId, (e) => { events.push(e); }, ctl.signal, 'auto', origin ? { origin } : {});
       stops.push(() => ctl.abort());
       return { events, stop: () => ctl.abort() };
     },

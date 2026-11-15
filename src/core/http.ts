@@ -17,6 +17,18 @@ export const CSRF_HEADER = 'x-your-attention';
 const ONCE_HEADER = 'x-your-attention-once';
 /** A client-chosen id that makes a write idempotent across links and retries. */
 export const MESSAGE_HEADER = 'x-message-id';
+
+/** The origin an agent connection reports in its address, as the JSON a client sends: `harness`, `session`, `name`,
+ * `host` and `herdrPane`. Anything that is not JSON is no origin, and the connection still opens. */
+export function originParam(url: URL): unknown {
+  const raw = url.searchParams.get('origin');
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'text/html']);
 /** The type of a local file, by its extension. Text that a browser would download, such as Markdown and CSV, shows as plain text. */
@@ -418,7 +430,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       let wake: () => void = () => {};
       const woken = new Promise<void>((r) => { wake = r; });
       const channelOff = url.searchParams.get('channel') === 'off';
-      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } }, url.searchParams.get('instance') ?? undefined, { channelOff });
+      const disconnect = inbox.connect(me, agent, (ev) => { if (ev.type !== 'hello') { events.push(ev); wake(); } }, url.searchParams.get('instance') ?? undefined, { channelOff, origin: originParam(url) });
       let timer: ReturnType<typeof setTimeout> | undefined;
       // A client that drops its connection ends the wait at once, so the inbox lets go of its subscriber and its timer.
       const gone = req.signal.aborted ? Promise.resolve() : new Promise<void>((r) => req.signal.addEventListener('abort', () => r(), { once: true }));
@@ -435,7 +447,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (method === 'GET' && a === 'stream') {
       const agent = url.searchParams.get('agent');
       if (!agent) return json({ error: 'agent is required' }, 400);
-      return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined, { channelOff: url.searchParams.get('channel') === 'off' }), heartbeatMs);
+      return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined, { channelOff: url.searchParams.get('channel') === 'off', origin: originParam(url) }), heartbeatMs);
     }
     if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, 100), url.searchParams.get('answered') === '1'));
     if (method === 'GET' && a === 'unread') return json(inbox.unread(me, url.searchParams.get('agent') ?? undefined));
