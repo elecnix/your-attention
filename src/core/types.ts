@@ -205,6 +205,15 @@ export interface DefaultTagsWrite {
   from?: string;
 }
 
+export interface RequireCardSettings {
+  /** off: nobody is asked. all: every agent is asked. agents: only the listed ones are. */
+  mode: 'off' | 'all' | 'agents';
+  /** The agents the rule holds, when mode is agents. */
+  agents?: string[];
+  /** How many times one stretch without a card is asked about. 0 means never. */
+  reminders: number;
+}
+
 export interface Settings {
   /** Lets cards carry their own HTML and scripts, in a sandboxed frame. */
   allowHtml: boolean;
@@ -212,6 +221,8 @@ export interface Settings {
   groupBy?: string;
   /** The pinned tag values, oldest first, as [key, value] pairs. Absent until the owner pins one. */
   pins?: [string, string][];
+  /** The rule that a session which settles without an open card is asked for one. Absent means off. */
+  requireCard?: RequireCardSettings;
 }
 
 /** A change the owner makes to the pins: one value in or out, so another device's pin is never overwritten. */
@@ -296,6 +307,8 @@ export interface Card {
    * the guidance the proposal starts from, so the card can say when it changed since. `agents` is on cards stored
    * before the page listed the online agents from live presence, and nothing reads it. */
   broadcast?: { text: string; message?: string; agents?: string[]; from?: string; base?: { version: number; text: string } };
+  /** A rule proposed for every agent at once, which changes only when the person approves the card. */
+  requireCard?: { mode: 'all' | 'off'; reminders: number; from?: string };
   /** On a system card that asks to send an agent's answers to a webhook: the id of that subscription. */
   subscription?: string;
   origin?: Origin;
@@ -427,6 +440,8 @@ export type AgentEvent =
   | { type: 'hello'; agent: string; version: number; guidance: number }
   | AnswerEvent
   | { type: 'guidance'; id: string; guidance: Guidance }
+  /** The inbox's require-a-card rule changed. A session holding an environment override ignores it. */
+  | { type: 'settings'; id: string; requireCard: RequireCardSettings }
   /** `by` names who sent the card back: triage, or the inbox page when it could not draw the card. */
   | { type: 'returned'; id: string; card: Card; reason: string; by?: string };
 

@@ -15,7 +15,7 @@ import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, Role, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, RequireCardSettings, Role, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -120,6 +120,9 @@ export const UNREAD_ID_LIMIT = 20;
 // The images of one answer share a byte budget, because the route reads a body of 16 MB and base64 costs four thirds:
 // ten images of 8 MB each would make a body no route accepts.
 export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
+const REMINDERS_DEFAULT = 3;
+const REMINDERS_MAX = 10;
+
 const ANSWER_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 /** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
 export const MIN_FILE_CHARGE = 64 * 1024;
@@ -183,6 +186,8 @@ export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, a
  * still goes to the agent that proposed the text. */
 function recipient(card: Card, answer: Answer): string | null {
   if (card.kind === 'system' && card.broadcast) return card.broadcast.from && card.token ? card.broadcast.from : null;
+  // A rule proposal travels the same way: the person answers it, and the agent that proposed it hears the outcome.
+  if (card.kind === 'system' && card.requireCard) return card.requireCard.from && card.token ? card.requireCard.from : null;
   return card.deliver === 'stream' && cardState(card, answer) !== 'closed' ? card.agent : null;
 }
 
@@ -1239,8 +1244,125 @@ export class Inbox {
     return this.store.get<Settings>('meta', 'settings') ?? { allowHtml: false };
   }
 
+  /** The require-a-card rule as the inbox holds it, defaulted rather than absent. */
+  requireCard(): RequireCardSettings {
+    const s = this.settings().requireCard;
+    return { mode: s?.mode ?? 'off', reminders: Number.isFinite(s?.reminders) ? Number(s?.reminders) : REMINDERS_DEFAULT, ...(s?.agents?.length ? { agents: [...s.agents] } : {}) };
+  }
+
+  /** Whether this session is asked for a card, and how many times: the rule, resolved for one agent id. */
+  requireCardFor(agent: string): { on: boolean; reminders: number } {
+    const rule = this.requireCard();
+    const on = rule.mode === 'all' || (rule.mode === 'agents' && (rule.agents ?? []).includes(agent));
+    return { on, reminders: rule.reminders };
+  }
+
+  /** Whether this caller reported this agent id on an open stream, the only identity the inbox can check for a session. */
+  connectedAs(caller: Caller, agent: string): boolean {
+    return this.agents.has(`${caller.token}\n${agent}`);
+  }
+
+  /** An agent turns the rule on or off for itself. Its own conduct, so no card and no approval. */
+  setRequireCardForAgent(agent: string, enabled: boolean): RequireCardSettings {
+    const id = String(agent ?? '').trim();
+    if (!id || id.length > 80) throw new InboxError(400, 'a session id of at most 80 characters is required');
+    const rule = this.requireCard();
+    // A session cannot step out of a rule that names every agent: only the person can, by changing it for all.
+    if (rule.mode === 'all') {
+      if (enabled) return rule;
+      throw new InboxError(400, 'this inbox asks every agent for a card: change the rule for every agent, or post a card anyway');
+    }
+    const have = new Set(rule.agents ?? []);
+    if (enabled) have.add(id); else have.delete(id);
+    const agents = [...have];
+    const mode: RequireCardSettings['mode'] = agents.length ? 'agents' : 'off';
+    return this.putRequireCard({ mode, reminders: rule.reminders, ...(agents.length ? { agents } : {}) });
+  }
+
+  /** Change the rule, then tell every connected agent, which is what spares them a restart. */
+  private putRequireCard(next: RequireCardSettings): RequireCardSettings {
+    const clean = this.checkRequireCard(next);
+    this.store.put('meta', 'settings', { ...this.settings(), requireCard: clean });
+    this.emit({ type: 'change', card: '' });
+    for (const [, subs] of this.agents) for (const send of subs) send({ type: 'settings', id: randomId(6), requireCard: clean });
+    return clean;
+  }
+
+  private checkRequireCard(input: RequireCardSettings): RequireCardSettings {
+    const mode = input?.mode;
+    if (mode !== 'off' && mode !== 'all' && mode !== 'agents') throw new InboxError(400, 'requireCard.mode must be off, all or agents');
+    // A count is a number or nothing: a string, a boolean or null would read as 0 or 1 and slip past the range check.
+    if (input?.reminders !== undefined && typeof input.reminders !== 'number') throw new InboxError(400, 'requireCard.reminders must be a whole number');
+    const reminders = Number(input?.reminders ?? REMINDERS_DEFAULT);
+    if (!Number.isInteger(reminders) || reminders < 0 || reminders > REMINDERS_MAX) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${REMINDERS_MAX}`);
+    // A list is what the field takes, so a string or an object is refused rather than mapped over.
+    if (input.agents !== undefined && !Array.isArray(input.agents)) throw new InboxError(400, 'requireCard.agents must be a list of agent ids');
+    const agents = mode === 'agents' ? [...new Set(((input.agents as string[] | undefined) ?? []).map((a: string) => String(a).trim()).filter(Boolean))] : [];
+    if (agents.some((a) => a.length > 80)) throw new InboxError(400, 'requireCard.agents takes agent ids of at most 80 characters');
+    if (mode === 'agents' && !agents.length) throw new InboxError(400, 'requireCard.mode agents needs at least one agent; use off instead');
+    return { mode, reminders, ...(agents.length ? { agents } : {}) };
+  }
+
+  /** What one session should do: the rule resolved for it, beside the rule itself, for whoever wants to see it. */
+  requireCardView(agent: string): { on: boolean; reminders: number; rule: RequireCardSettings } {
+    return { ...this.requireCardFor(agent), rule: this.requireCard() };
+  }
+
+  /**
+   * Propose the rule for every agent at once. Holding every session of the inbox to a card is the inbox's own conduct,
+   * so it takes the person's approval: an agent that could turn it on for the others would police its neighbours.
+   */
+  proposeRequireCard(input: { on: boolean; reminders?: number; by?: { caller: Caller; agent: string } }): Card {
+    const from = input.by ? String(input.by.agent ?? '').trim() : '';
+    if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
+    const rule = this.requireCard();
+    const reminders = input.reminders === undefined ? rule.reminders : Number(input.reminders);
+    if (!Number.isInteger(reminders) || reminders < 0 || reminders > REMINDERS_MAX) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${REMINDERS_MAX}`);
+    const mode: 'all' | 'off' = input.on ? 'all' : 'off';
+    const times = `${reminders} time${reminders === 1 ? '' : 's'}`;
+    const what = mode === 'all'
+      ? `Every agent in this inbox would have to hold an open card, asked up to ${times} in a stretch without one.`
+      : 'No agent in this inbox would be asked for a card.';
+    const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes to change the card rule for every agent. ${what} It changes only if you approve it.`;
+    // The text and the proposal are measured whole before anything is stored, the way a guidance proposal is.
+    const proposal = { mode, reminders, ...(from ? { from } : {}) };
+    const size = new TextEncoder().encode(JSON.stringify({ text: cardText, requireCard: proposal })).length + 2048;
+    if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card would be ${size} bytes, over the limit of ${MAX_CARD_BYTES}`);
+    const id = `require-card-${randomId(4)}`;
+    this.postCard({ token: '', role: 'owner' }, {
+      id, agent: SYSTEM_AGENT, kind: 'system', deliver: 'none', priority: this.priorities()[0]?.id,
+      title: mode === 'all' ? 'Hold every agent to a card?' : 'Stop asking every agent for a card?',
+      text: cardText,
+      options: [{ id: 'approve', label: mode === 'all' ? 'Approve: hold every agent' : 'Approve: stop asking' }, { id: 'reject', label: 'Reject' }],
+    });
+    const card: Card = { ...this.getCard(id), ...(from && input.by?.caller.token ? { token: input.by.caller.token } : {}), requireCard: proposal };
+    this.store.put('cards', id, card);
+    this.emit({ type: 'change', card: id });
+    return card;
+  }
+
+  /** Apply or drop a proposed rule, close the card, and tell the agent that proposed it. */
+  private resolveRequireCard(card: Card, answer: Answer): void {
+    // A proposal that already closed applies nothing, because a later answer to it is not a decision anyone made.
+    // The proposer still hears that answer, so a connected stream is not left without what the store already holds.
+    if (!card.requireCard || card.closed) {
+      if (card.requireCard?.from) this.flush(card.requireCard.from);
+      return;
+    }
+    if ([answer.values['choice']].flat()[0] === 'approve') {
+      const next = this.putRequireCard({ mode: card.requireCard.mode, reminders: card.requireCard.reminders });
+      this.closeAs(card, 'resolved', next.mode === 'all'
+        ? `Approved: every agent is asked for a card, up to ${next.reminders} time${next.reminders === 1 ? '' : 's'} in a stretch without one.`
+        : 'Approved: no agent is asked for a card.');
+    } else this.closeAs(card, 'resolved', 'Rejected: the card rule did not change.');
+    if (card.requireCard.from) this.flush(card.requireCard.from);
+  }
+
   setSettings(input: Partial<Settings> & PinChange): Settings {
     const next: Settings = { ...this.settings(), ...(typeof input.allowHtml === 'boolean' ? { allowHtml: input.allowHtml } : {}) };
+    // The rule goes through the same validation the tool uses, so a settings PUT and an agent's proposal agree.
+    if (input.requireCard !== undefined) next.requireCard = this.checkRequireCard(input.requireCard);
     if (input.groupBy !== undefined) next.groupBy = this.checkGroupBy(input.groupBy);
     if (input.pins !== undefined) next.pins = this.checkPins(input.pins);
     // A pin or an unpin travels as its own change, so two devices that pin at the same moment both keep their value.
@@ -1257,6 +1379,8 @@ export class Inbox {
     }
     this.store.put('meta', 'settings', next);
     this.emit({ type: 'change', card: '' });
+    // A settings write is how the person changes the rule: connected sessions hear it instead of needing a restart.
+    if (input.requireCard !== undefined) for (const [, subs] of this.agents) for (const send of subs) send({ type: 'settings', id: randomId(6), requireCard: next.requireCard! });
     return next;
   }
 
@@ -1595,6 +1719,7 @@ export class Inbox {
     this.usage.record('answers');
     this.emit({ type: 'change', card: id });
     if (card.kind === 'system' && card.id.startsWith('pair-')) await this.resolvePairing(card, answer);
+    else if (card.kind === 'system' && card.requireCard) this.resolveRequireCard(card, answer);
     else if (card.kind === 'system' && card.broadcast) this.resolveBroadcast(card, answer);
     else if (card.kind === 'system' && card.id.startsWith('priorities-')) this.resolvePriorityProposal(card, answer);
     else if (card.kind === 'system' && card.subscription) this.resolveSubscription(card, answer);
@@ -1775,11 +1900,12 @@ export class Inbox {
       .filter((a) => {
         const card = this.store.get<Card>('cards', a.card);
         if (!card) return false;
-        // A guidance card closes as the person answers it, and its answer waits for the agent that proposed the text.
-        const guidance = card.kind === 'system' && card.broadcast;
-        if (guidance ? recipient(card, a) === null : cardState(card, a) === 'closed') return false;
+        // A proposal card closes as the person answers it, and its answer waits for the agent that proposed the text.
+        const proposal = card.kind === 'system' && (card.broadcast ?? card.requireCard);
+        const from = card.broadcast?.from ?? card.requireCard?.from;
+        if (proposal ? recipient(card, a) === null : cardState(card, a) === 'closed') return false;
         if (caller.role !== 'owner' && card.token !== caller.token) return false;
-        return agent === undefined || (guidance ? card.broadcast?.from : card.agent) === agent;
+        return agent === undefined || (proposal ? from : card.agent) === agent;
       })
       .map((a) => a.card)
       .sort();
