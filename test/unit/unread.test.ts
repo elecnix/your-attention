@@ -2,13 +2,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Caller } from '../../src/core/inbox.ts';
-import { agent, owner, setup } from './fixture.ts';
+import { agent, owner, oneCardInbox } from './fixture.ts';
 
 
 
 describe('the answers a client has not consumed', () => {
   it('counts what was answered and never acknowledged, for that agent and that token', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'One' });
     inbox.postCard(agent, { id: 'c2', agent: 's1', title: 'Two' });
     inbox.postCard(agent, { id: 'other', agent: 's2', title: 'Another agent' });
@@ -24,7 +24,7 @@ describe('the answers a client has not consumed', () => {
   });
 
   it('leaves out a closed card, and another client\'s cards', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'One' });
     await inbox.answer('c1', { values: {} });
     inbox.close(agent, 'c1', 'resolved', 'done');

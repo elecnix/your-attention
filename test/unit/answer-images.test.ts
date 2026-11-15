@@ -11,7 +11,7 @@ import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import { imagesDir, saveAnswerImages } from '../../src/integrations/images.ts';
 
 import { checkImage, draftProblem, imageFiles, IMAGE_LIMIT_BYTES, IMAGE_TYPES } from '../../web/paste-images.js';
-import { agent, owner, setup } from './fixture.ts';
+import { agent, owner, oneCardInbox } from './fixture.ts';
 
 // A 1x1 PNG.
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -20,7 +20,7 @@ const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
 
 describe('images pasted into an answer', () => {
   it('stores each image and serves its bytes to the agent that asked', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     const a = await inbox.answer('c1', { comment: 'see these', images: [{ src: png, name: 'shot.png', field: 'comment' }, { src: png }] });
     assert.equal(a.images?.length, 2);
     assert.deepEqual(a.images?.map((f) => [f.name, f.type, f.field]), [['shot.png', 'image/png', 'comment'], ['pasted-2.png', 'image/png', undefined]]);
@@ -32,21 +32,21 @@ describe('images pasted into an answer', () => {
   });
 
   it('refuses a file that is not an image, and says which one', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4').toString('base64')}`;
     await assert.rejects(inbox.answer('c1', { images: [{ src: png }, { src: pdf, name: 'a.pdf' }] }), /image 2 \(a\.pdf\).*PNG, JPEG, GIF or WebP/);
     await assert.rejects(inbox.answer('c1', { images: [{ src: 'https://example.com/a.png' }] }), /data: URL/);
   });
 
   it('refuses an image over 8 MB and more than 10 images', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     const big = `data:image/png;base64,${Buffer.alloc(8 * 1024 * 1024 + 64).toString('base64')}`;
     await assert.rejects(inbox.answer('c1', { images: [{ src: big }] }), (e: Error & { status?: number }) => e.status === 413);
     await assert.rejects(inbox.answer('c1', { images: Array.from({ length: 11 }, () => ({ src: png })) }), /at most 10 images/);
   });
 
   it('keeps the images of an earlier answer in previous, and deletes none until the card goes', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     const first = await inbox.answer('c1', { images: [{ src: png }] });
     const second = await inbox.answer('c1', { comment: 'again' });
     assert.equal(second.images, undefined);
@@ -55,7 +55,7 @@ describe('images pasted into an answer', () => {
   });
 
   it('serves it through the answer route', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     const handle = createHandler(inbox, { heartbeatMs: 50 });
     const owner = (await inbox.createToken('page', 'owner')).secret;
     const res = await handle(new Request('http://inbox.test/v1/cards/c1/answer', {
@@ -157,7 +157,7 @@ describe('the images of one answer share a byte budget', () => {
   });
 
   it('an answer over the budget is refused with 413, before anything is stored', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     // 8 MB of base64 is 6 MB of bytes, so two of them are past the 10 MB an answer carries and each is under the 8 MB
     // an image may be.
     const big = `data:image/png;base64,${'A'.repeat(8 * 1024 * 1024)}`;
@@ -196,14 +196,14 @@ describe('what the agent reads about the images', () => {
   });
 
   it('refuses images on a pairing request, whose card the sweep deletes without its files', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     const pairing = inbox.requestPairing('this laptop', 'owner');
     const card = `pair-${pairing.id}`;
     await assert.rejects(inbox.answer(card, { images: [{ src: png, name: 's.png' }] }), (e: Error & { status?: number }) => e.status === 400 && /pairing request takes a code/.test(e.message));
   });
 
   it('takes images on a card the agent called pair-something, which is no pairing request', async () => {
-    const inbox = setup();
+    const inbox = oneCardInbox();
     // The id alone does not make a pairing: an agent picks its own card ids, and this one is never swept.
     inbox.postCard(agent, { id: 'pair-check', agent: 's1', title: 'Which one?' });
     const answered = await inbox.answer('pair-check', { comment: 'see', images: [{ src: png, name: 's.png' }] });

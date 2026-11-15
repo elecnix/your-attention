@@ -1,13 +1,21 @@
-// A real inbox for one spec file, and helpers to act as agents on it.
+// A real inbox for one spec file, helpers to act as agents on it, and the way a spec opens a dialog of the page.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { Client } from '../../src/client.ts';
 import type { ApprovalSender } from '../../src/core/inbox.ts';
 import type { Storage } from '../../src/core/storage.ts';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
 import { serve, type RunningServer } from '../../src/node/server.ts';
+
+/** Open the dialog that the button of that name in the bar opens, and return it once its content shows. */
+export async function openDialog(page: Page, name: string) {
+  await page.getByRole('button', { name }).click();
+  const dialog = page.getByRole('dialog', { name });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
 
 export interface TestInbox {
   server: RunningServer;

@@ -2,26 +2,21 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Inbox, InboxError, SENT_KEEP_MS } from '../../src/core/inbox.ts';
-import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
-import type { AgentEvent } from '../../src/core/types.ts';
-import { agent, owner } from './fixture.ts';
+import type { AgentEvent, SentCard } from '../../src/core/types.ts';
+import { agent, cardEvents, NOW, owner, setup } from './fixture.ts';
 
-const NOW = 1_800_000_000_000;
-
-/** An inbox whose clock a test moves, with the events one agent's connection receives. */
-function setup(): { inbox: Inbox; events: AgentEvent[]; connect: (id: string) => void; tick: (ms: number) => void } {
-  let clock = NOW;
-  const inbox = new Inbox(new MemoryStorage(), () => clock, new MemoryBlobs());
-  const events: AgentEvent[] = [];
-  return {
-    inbox,
-    events,
-    connect: (id) => { inbox.connect(agent, id, (ev) => events.push(ev)); },
-    tick: (ms) => { clock += ms; },
-  };
+/** A card sent to an agent with no connection: move the clock by `wait`, let `whileAway` act on the inbox, then let
+ * that session connect. Answers the card the send returned, the cards the stream held before the connection, and
+ * the ones it received when the session came. */
+function sendWhileAway(agentId: string, text: string, wait: number, whileAway: (inbox: Inbox) => void = () => {}): { sent: SentCard; before: number; received: Extract<AgentEvent, { type: 'card' }>[] } {
+  const { inbox, events, connect, clock } = setup();
+  const sent = inbox.sendCard(owner, { agent: agentId, text });
+  const before = cardEvents(events).length;
+  clock.advance(wait);
+  whileAway(inbox);
+  connect(agentId);
+  return { sent, before, received: cardEvents(events) };
 }
-
-const cards = (events: AgentEvent[]): Extract<AgentEvent, { type: 'card' }>[] => events.filter((e): e is Extract<AgentEvent, { type: 'card' }> => e.type === 'card');
 
 describe('a card the person sends to an agent', () => {
   it('reaches the agent\'s stream while the agent is connected, and says that it went', () => {
@@ -29,8 +24,8 @@ describe('a card the person sends to an agent', () => {
     connect('claude:s1');
     const sent = inbox.sendCard(owner, { agent: 'claude:s1', text: 'Please rebase on main before you deploy.' });
     assert.equal(sent.deliveredAt, NOW, 'a connection took the card, so the person reads that it went');
-    assert.equal(cards(events).length, 1);
-    const [event] = cards(events);
+    assert.equal(cardEvents(events).length, 1);
+    const [event] = cardEvents(events);
     assert.equal(event?.card.agent, 'claude:s1');
     assert.equal(event?.card.kind, 'ask');
     assert.equal(event?.card.title, 'Please rebase on main before you deploy.');
@@ -41,22 +36,18 @@ describe('a card the person sends to an agent', () => {
     const { inbox, events, connect } = setup();
     connect('pi:5f2a');
     inbox.sendCard(owner, { agent: 'pi:5f2a', text: '\nThe deploy needs a decision\n\nPick a region before the run.\n' });
-    const [event] = cards(events);
+    const [event] = cardEvents(events);
     assert.equal(event?.card.title, 'The deploy needs a decision');
     assert.equal(event?.card.text, 'Pick a region before the run.');
   });
 
   it('keeps the card for an agent that is offline, and hands it over when its session connects', () => {
-    const { inbox, events, connect, tick } = setup();
-    const sent = inbox.sendCard(owner, { agent: 'claude:s1', text: 'Are you still on the release?' });
+    const { sent, before, received } = sendWhileAway('claude:s1', 'Are you still on the release?', 2 * 60 * 60 * 1000);
     assert.equal(sent.deliveredAt, undefined, 'the inbox says the card waits');
-    assert.equal(cards(events).length, 0, 'nothing went, because no connection reports that agent');
-
-    tick(2 * 60 * 60 * 1000);
-    connect('claude:s1');
-    const [event] = cards(events);
-    assert.equal(event?.card.title, 'Are you still on the release?');
-    assert.equal(event?.sentAt, NOW, 'the card keeps when the person sent it');
+    assert.equal(before, 0, 'nothing went, because no connection reports that agent');
+    assert.equal(received.length, 1);
+    assert.equal(received[0]?.card.title, 'Are you still on the release?');
+    assert.equal(received[0]?.sentAt, NOW, 'the card keeps when the person sent it');
   });
 
   it('sends the card once, however often the agent reconnects', () => {
@@ -64,7 +55,7 @@ describe('a card the person sends to an agent', () => {
     inbox.sendCard(owner, { agent: 'claude:s1', text: 'One card, please.' });
     connect('claude:s1');
     connect('claude:s1');
-    assert.equal(cards(events).length, 1);
+    assert.equal(cardEvents(events).length, 1);
   });
 
   it('goes on its way to the agent, whatever token its connection reported under', () => {
@@ -74,7 +65,7 @@ describe('a card the person sends to an agent', () => {
     inbox.connect(other, 'claude:s1', (ev) => events.push(ev));
     const sent = inbox.sendCard(owner, { agent: 'claude:s1', text: 'A card for the session, not for a token.' });
     assert.equal(sent.deliveredAt, NOW);
-    assert.equal(cards(events).length, 1);
+    assert.equal(cardEvents(events).length, 1);
   });
 
   it('refuses a sender that is not the owner, an empty message and a missing agent', () => {
@@ -85,11 +76,7 @@ describe('a card the person sends to an agent', () => {
   });
 
   it('forgets a card that nobody took after 30 days, so a session that never returns leaves nothing behind', () => {
-    const { inbox, events, connect, tick } = setup();
-    inbox.sendCard(owner, { agent: 'gone:s1', text: 'Anyone there?' });
-    tick(SENT_KEEP_MS);
-    inbox.sweep();
-    connect('gone:s1');
-    assert.equal(cards(events).length, 0);
+    const { received } = sendWhileAway('gone:s1', 'Anyone there?', SENT_KEEP_MS, (inbox) => inbox.sweep());
+    assert.equal(received.length, 0);
   });
 });

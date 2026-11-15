@@ -19,11 +19,18 @@ type WithoutCard<T> = T extends { card: Card } ? Omit<T, 'card'> & { card?: Part
 /** One line of `your-attention watch` output. */
 export type WatchLine = WithoutCard<AgentEvent> & { receivedAt: number };
 
+/** The line for one event: the event without its card, the card cut to the fields the watcher asked for, and when
+ * the watcher read it. `card` is the card the event carries, and undefined for an event that carries none, which
+ * goes out as it came. */
+function line(event: object, card: Card | undefined, options: WatchOptions, receivedAt: number): Record<string, unknown> {
+  if (!card) return { ...event, receivedAt };
+  const { card: carried, ...rest } = event as { card: Card };
+  return { ...rest, ...cut(carried, options), receivedAt };
+}
+
 /** The line for one event, cut to the fields the watcher asked for. */
 export function watchLine(event: AgentEvent, options: WatchOptions, receivedAt: number): WatchLine {
-  if (event.type !== 'answer' && event.type !== 'returned' && event.type !== 'card') return { ...event, receivedAt };
-  const { card, ...rest } = event;
-  return { ...rest, ...cut(card, options), receivedAt } as WatchLine;
+  return line(event, 'card' in event ? event.card : undefined, options, receivedAt) as WatchLine;
 }
 
 /** The card a line keeps, as `{card}`, or nothing with --no-card. */
@@ -71,9 +78,7 @@ export function ownerEvent(event: Exclude<PageEvent, { type: 'beat' }>, detail: 
 
 /** The line for one owner event, cut to the fields the watcher asked for. */
 export function ownerLine(event: OwnerEvent, options: WatchOptions, receivedAt: number): OwnerLine {
-  if (event.type !== 'change' || !event.card) return { ...event, receivedAt };
-  const { card, ...rest } = event;
-  return { ...rest, ...cut(card, options), receivedAt };
+  return line(event, event.type === 'change' ? event.card : undefined, options, receivedAt) as OwnerLine;
 }
 
 export interface WatchFilter {

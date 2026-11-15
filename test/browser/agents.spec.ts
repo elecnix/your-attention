@@ -1,7 +1,7 @@
 // The agents panel: who the inbox knows, and the one form that sends a card to the agent its drop-down picks.
 import { expect, test, type Page } from '@playwright/test';
-import type { AgentEvent } from '../../src/core/types.ts';
-import { startInbox, type TestInbox } from './inbox.ts';
+import { cardEvents } from '../unit/fixture.ts';
+import { openDialog, startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
 test.beforeEach(async () => { inbox = await startInbox(); });
@@ -9,20 +9,9 @@ test.afterEach(async () => { await inbox.close(); });
 
 const PANEL = 'Send a card to an agent';
 
-/** Open the panel, as the person does with the people-shaped button in the bar. */
-async function openPanel(page: Page) {
-  await page.getByRole('button', { name: PANEL }).click();
-  const dialog = page.getByRole('dialog', { name: PANEL });
-  await expect(dialog).toBeVisible();
-  return dialog;
-}
-
 /** The drop-down that picks the agent a card goes to, and the field the person writes the message in. */
 const pick = (dialog: ReturnType<Page['locator']>) => dialog.getByRole('combobox', { name: 'Agent', exact: true });
 const message = (dialog: ReturnType<Page['locator']>) => dialog.getByRole('textbox', { name: 'Message', exact: true });
-
-/** The cards the person sent, as the agent's stream received them. */
-const cardsSeen = (events: AgentEvent[]): Extract<AgentEvent, { type: 'card' }>[] => events.filter((e): e is Extract<AgentEvent, { type: 'card' }> => e.type === 'card');
 
 test('picks an agent in the drop-down, shows what presence says about it, and sends it a card', async ({ page }) => {
   // A card from that session is where the inbox learns the name it reports and where it runs.
@@ -34,7 +23,7 @@ test('picks an agent in the drop-down, shows what presence says about it, and se
   await expect.poll(() => inbox.server.inbox.isOnline('claude:s1')).toBe(true);
   await inbox.open(page);
 
-  const dialog = await openPanel(page);
+  const dialog = await openDialog(page, PANEL);
   // One form, one drop-down: both names, the connected agent first, and nothing to pick before the person does.
   await expect(pick(dialog).locator('option')).toHaveText(['storage', 'release']);
   await pick(dialog).selectOption('claude:s1');
@@ -46,8 +35,8 @@ test('picks an agent in the drop-down, shows what presence says about it, and se
   await expect(dialog).toContainText('Sent to storage');
 
   // The card the person wrote arrives on that agent's stream, and nowhere else.
-  await expect.poll(() => cardsSeen(stream.events).length).toBe(1);
-  const sent = cardsSeen(stream.events)[0];
+  await expect.poll(() => cardEvents(stream.events).length).toBe(1);
+  const sent = cardEvents(stream.events)[0];
   expect(sent?.card.title).toBe('Please rebase on main before you deploy.');
   expect(sent?.card.agent).toBe('claude:s1');
 });
@@ -58,7 +47,7 @@ test('sends with the one button when the inbox knows a single connected agent', 
   await expect.poll(() => inbox.server.inbox.isOnline('pi:solo')).toBe(true);
   await inbox.open(page);
 
-  const dialog = await openPanel(page);
+  const dialog = await openDialog(page, PANEL);
   await expect(pick(dialog).locator('option')).toHaveText(['pi:solo']);
   await expect(pick(dialog)).toHaveValue('pi:solo');
   await expect(dialog).toContainText('Connected now');
@@ -67,14 +56,14 @@ test('sends with the one button when the inbox knows a single connected agent', 
   await dialog.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(dialog).toContainText('Sent to pi:solo');
 
-  await expect.poll(() => cardsSeen(stream.events).length).toBe(1);
-  expect(cardsSeen(stream.events)[0]?.card.agent).toBe('pi:solo');
+  await expect.poll(() => cardEvents(stream.events).length).toBe(1);
+  expect(cardEvents(stream.events)[0]?.card.agent).toBe('pi:solo');
 });
 
 test('says there is nobody to send to when no agent has connected, and offers no send', async ({ page }) => {
   await inbox.open(page);
 
-  const dialog = await openPanel(page);
+  const dialog = await openDialog(page, PANEL);
   await expect(dialog).toContainText('Nobody to send to: no agent has connected to this inbox yet.');
   await expect(pick(dialog)).toBeDisabled();
   await expect(message(dialog)).toBeDisabled();
@@ -85,7 +74,7 @@ test('says a card waits for an agent that is offline, hands it over when the ses
   await inbox.agent.post({ agent: 'pi:away', title: 'Which region first?', origin: { harness: 'pi', name: 'release', cwd: '/home/nicolas/Source/acme/release' } });
   await inbox.open(page);
 
-  const dialog = await openPanel(page);
+  const dialog = await openDialog(page, PANEL);
   await expect(pick(dialog).locator('option')).toHaveText(['release']);
   await expect(dialog).toContainText('Never connected');
   await message(dialog).fill('Ping me when the run is done.');
@@ -94,8 +83,8 @@ test('says a card waits for an agent that is offline, hands it over when the ses
 
   // The session connects later, and the card that waited arrives then.
   const stream = inbox.listen('pi:away');
-  await expect.poll(() => cardsSeen(stream.events).length).toBe(1);
-  const sent = cardsSeen(stream.events)[0];
+  await expect.poll(() => cardEvents(stream.events).length).toBe(1);
+  const sent = cardEvents(stream.events)[0];
   expect(sent?.card.title).toBe('Ping me when the run is done.');
 
   // When it goes, the state line reads it as offline with when the inbox last saw it, and never as connected.

@@ -1,21 +1,13 @@
 // The devices dialog: every key to this inbox, and signing one out.
 import os from 'node:os';
 import { expect, test, type Page } from '@playwright/test';
-import { startInbox, type TestInbox } from './inbox.ts';
+import { openDialog, startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
 test.beforeEach(async () => { inbox = await startInbox(); });
 test.afterEach(async () => { await inbox.close(); });
 
 const DIALOG = 'Devices signed in to this inbox';
-
-/** Open the dialog, as a person does with the key-shaped button in the bar. */
-async function openDialog(page: Page) {
-  await page.getByRole('button', { name: DIALOG }).click();
-  const dialog = page.getByRole('dialog', { name: DIALOG });
-  await expect(dialog).toBeVisible();
-  return dialog;
-}
 
 /** Sign one device out, past the confirmation that asks first. */
 async function signOut(dialog: ReturnType<Page['locator']>, name: string) {
@@ -30,7 +22,7 @@ test('lists the keys to this inbox, and signs one device out after asking', asyn
   const phone = 'device signed in 2026-11-01 10:00';
   await inbox.server.inbox.createToken(phone, 'owner');
   await inbox.open(page);
-  const dialog = await openDialog(page);
+  const dialog = await openDialog(page, DIALOG);
   await expect(dialog).toContainText(phone);
   await expect(dialog).toContainText(`page on ${os.hostname()}`);
 
@@ -62,7 +54,7 @@ test('signs a device out on an inbox with a PIN, because every page call carries
   await page.getByLabel('PIN').fill('2468');
   await page.getByRole('button', { name: 'Unlock' }).click();
   await page.locator('.bar .pill.on').waitFor();
-  const dialog = await openDialog(page);
+  const dialog = await openDialog(page, DIALOG);
   await expect(dialog).toContainText(phone);
   await signOut(dialog, phone);
   expect((await inbox.tokens()).map((t) => t.name)).not.toContain(phone);
