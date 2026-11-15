@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { COOKIE, createHandler } from '../../src/core/http.ts';
-import { Inbox } from '../../src/core/inbox.ts';
+import { DEFAULT_GUIDANCE, Inbox } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 
 async function setup() {
@@ -201,6 +201,19 @@ describe('http routes for the card model', () => {
     assert.deepEqual([saved.groupBy, saved.pins], ['tag:topic', [['topic', 'billing']]]);
     assert.deepEqual(((await (await call('GET', '/v1/state', { token: owner })).json()) as { settings: { groupBy?: string; pins?: [string, string][] } }).settings, { allowHtml: true, groupBy: 'tag:topic', pins: [['topic', 'billing']] });
     assert.equal((await call('PUT', '/v1/settings', { token: owner, body: { groupBy: 'week' } })).status, 400);
+  });
+
+  it('takes a guidance proposal that carries the widget catalog, and keeps it out of the text', async () => {
+    const { call, agent, inbox } = await setup();
+    const catalog = inbox.widgetCatalog();
+    assert.ok(catalog, 'the inbox lists the built-in widgets');
+    const text = 'Show diffs.';
+    const proposed = await call('POST', '/v1/guidance', { token: agent, body: { text: `${text}\n\n${catalog}`, message: 'Adds the diff rule.' } });
+    assert.equal(proposed.status, 201);
+    assert.equal(((await proposed.json()) as { broadcast: { text: string } }).broadcast.text, text, 'the card keeps the text alone');
+    const read = ((await (await call('GET', '/v1/guidance', { token: agent })).json()) as { text: string; version: number; widgets?: string });
+    assert.equal(read.text, DEFAULT_GUIDANCE, 'nothing changes before the person approves');
+    assert.ok(read.widgets?.includes('- mermaid:'), 'the catalog arrives once, in its own field');
   });
 });
 

@@ -25,10 +25,13 @@ before(() => {
 });
 after(() => { globalThis.fetch = realFetch; });
 
-async function setup() {
+async function setup(storedGuidance?: string) {
   let t = 1_000_000_000;
   const clock = { now: () => t, advance: (ms: number) => { t += ms; } };
-  const inbox = new Inbox(new MemoryStorage(), clock.now);
+  const storage = new MemoryStorage();
+  // An older inbox kept the widget catalog inside the guidance text, so a test that reads the guidance back seeds one.
+  if (storedGuidance !== undefined) storage.put('meta', 'guidance', { text: storedGuidance, version: 9, at: 0 });
+  const inbox = new Inbox(storage, clock.now);
   const handle = createHandler(inbox, { heartbeatMs: 50 });
   const secret = (await inbox.createToken('agents', 'agent')).secret;
   served = { handle, secret };
@@ -76,6 +79,23 @@ describe('tags in GET /v1/guidance', () => {
     assert.equal(tags.length, 20);
     assert.equal(tags[0]!.key, 'topic', '20 cards beat 1, so the multi-value key sorts first');
     assert.deepEqual(tags[0]!.values.map((v) => v.value), [...Array(15).keys()].map((i) => `v${String(i).padStart(2, '0')}`), 'ties sort by value');
+  });
+});
+
+describe('the widget catalog in card_guidance', () => {
+  it('prints each widget once, after the text, from a stored text that already carried the catalog', async () => {
+    const catalog = new Inbox(new MemoryStorage()).widgetCatalog();
+    assert.ok(catalog, 'the inbox lists the built-in widgets');
+    const text = 'Lead with the goal.';
+    const { secret } = await setup(`${text}\n\n${catalog}`);
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    const ctx = { inbox: new Client({ url: `http://${HOST}`, token: secret }), secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' };
+    const out = await runTool(ctx, 'card_guidance', {});
+    const marker = out.indexOf('Not part of the guidance text, added to this answer: the widget catalog.');
+    assert.ok(out.startsWith(`Card guidance, version 9:\n${text}\n\n`), `the text comes first and alone: ${out}`);
+    assert.ok(marker > out.indexOf(text) + text.length, `the marker comes after the text: ${out}`);
+    for (const name of ['mermaid', 'secret']) assert.equal(out.split(`- ${name}:`).length - 1, 1, `one line for ${name}: ${out}`);
+    assert.ok(!out.slice(0, marker).includes('- mermaid:'), `no widget line before the marker: ${out}`);
   });
 });
 
