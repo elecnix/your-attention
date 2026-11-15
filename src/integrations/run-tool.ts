@@ -162,6 +162,8 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         ? `This session must hold an open card, asked up to ${reminders} time${reminders === 1 ? '' : 's'} in a stretch without one.`
         : 'This session is not asked for a card.';
       if (scope === undefined) {
+        // A change without a scope would be read as a request to read the rule, so the call says what it wants.
+        if (args['on'] !== undefined || args['reminders'] !== undefined) throw new Error('say scope: self for this session, or all for every agent');
         const view = await inbox.requireCard(agent);
         // A session started with the environment value obeys that value, so the inbox's answer would mislead it.
         const forced = envRequireCard(process.env);
@@ -181,7 +183,9 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         return `${says(on, next.reminders)} This took effect at once, for this session only: no card asked the person, because it is your own conduct.`;
       }
       if (scope === 'all') {
-        const card = await inbox.proposeRequireCard({ on, ...(args['reminders'] === undefined ? {} : { reminders: Number(args['reminders']) }), agent });
+        // A count arrives as a number or not at all, since null and true would reach the inbox as 0 and 1.
+        if (args['reminders'] !== undefined && typeof args['reminders'] !== 'number') throw new Error('reminders must be a whole number');
+        const card = await inbox.proposeRequireCard({ on, ...(args['reminders'] === undefined ? {} : { reminders: args['reminders'] }), agent });
         return `Proposed the rule for every agent on card ${card.id}. It changes only if the person approves it, and the answer arrives ${ctx.arrival}.`;
       }
       throw new Error('scope must be self, for this session, or all, for every agent');

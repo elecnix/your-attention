@@ -1291,6 +1291,8 @@ export class Inbox {
   private checkRequireCard(input: RequireCardSettings): RequireCardSettings {
     const mode = input?.mode;
     if (mode !== 'off' && mode !== 'all' && mode !== 'agents') throw new InboxError(400, 'requireCard.mode must be off, all or agents');
+    // A count is a number or nothing: a string, a boolean or null would read as 0 or 1 and slip past the range check.
+    if (input?.reminders !== undefined && typeof input.reminders !== 'number') throw new InboxError(400, 'requireCard.reminders must be a whole number');
     const reminders = Number(input?.reminders ?? REMINDERS_DEFAULT);
     if (!Number.isInteger(reminders) || reminders < 0 || reminders > REMINDERS_MAX) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${REMINDERS_MAX}`);
     // A list is what the field takes, so a string or an object is refused rather than mapped over.

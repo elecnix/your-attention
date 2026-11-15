@@ -188,6 +188,9 @@ describe('the require-a-card rule', () => {
     const inbox = fresh();
     assert.throws(() => inbox.setSettings({ requireCard: { mode: 'agents', reminders: 3 } }), /needs at least one agent/);
     assert.throws(() => inbox.setSettings({ requireCard: { mode: 'all', reminders: 11 } }), /whole number from 0 to 10/);
+    // A count is a number or nothing: a string or a boolean would read as 0 or 1 and slip past the range check.
+    assert.throws(() => inbox.setSettings({ requireCard: { mode: 'all', reminders: '' } } as never), /must be a whole number/);
+    assert.throws(() => inbox.setSettings({ requireCard: { mode: 'all', reminders: true } } as never), /must be a whole number/);
     // `agents` takes a list, so a string is refused with 400 rather than crashing on map.
     assert.throws(() => inbox.setSettings({ requireCard: { mode: 'agents', agents: 's1' } } as never), /must be a list of agent ids/);
     assert.throws(() => inbox.setSettings({ requireCard: { mode: 'sometimes', reminders: 3 } } as never), /must be off, all or agents/);
