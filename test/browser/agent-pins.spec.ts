@@ -65,6 +65,8 @@ test('an agent with no session name is pinned and named by its id', async ({ pag
   const chip = page.locator('.focus-card .tags .tag.agent');
   await expect(chip).toContainText('Agent: s-gamma');
   await chip.getByRole('button', { name: 'Pin agent s-gamma to the top' }).click();
+  // The pin and the redraw are two steps, so the queue is read once the chip says the agent is pinned.
+  await expect(page.locator('.focus-card .tags .tag.agent').getByRole('button', { name: 'Unpin agent s-gamma' })).toHaveAttribute('aria-pressed', 'true');
   expect((await headings(page))[0]?.toLowerCase()).toBe('s-gamma');
   expect(await groupOf(page, 'Rename the gamma branch?')).toMatch(/s-gamma/);
   await heading(page, 's-gamma').getByRole('button', { name: 'Unpin agent s-gamma' }).click();
