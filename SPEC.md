@@ -15,7 +15,7 @@ The Cloudflare build serves events over the WebSocket only, so `GET /v1/stream`,
 
 Each stream sends a `beat` event every 2 seconds, so a client can tell a quiet inbox from a dead one. The inbox reports an agent offline 2 seconds after its last connection closes, so a reconnect or the next poll does not flicker its presence. The inbox keeps an agent's presence row for 30 days after the agent goes offline, and the sweep then deletes it, so `GET /v1/state` does not grow with every session that ever connected. The sweep never deletes the row of an online agent. An agent that reconnects after the prune gets a fresh row, and any answer that waited for it.
 
-`GET /v1/info` returns `{"name":"your-attention","protocol":1,"id":"<inbox id>","pair":"/v1/pair","checks":{"diagrams":true,"body":true}}`. The id stays the same over every link to the inbox. `checks` says what the inbox checks itself before it takes a card, as [Checks on the client](#checks-on-the-client) describes. An inbox whose answer has no `checks` checks both.
+`GET /v1/info` returns `{"name":"your-attention","version":"0.1.1","protocol":1,"id":"<inbox id>","pair":"/v1/pair","checks":{"diagrams":true,"body":true}}`. `version` names the release an inbox runs, which tells one deployment from another, and the page shows it when the person hovers over the GitHub mark. The id stays the same over every link to the inbox. `checks` says what the inbox checks itself before it takes a card, as [Checks on the client](#checks-on-the-client) describes. An inbox whose answer has no `checks` checks both.
 
 ## One message over several links
 

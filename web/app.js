@@ -124,6 +124,18 @@ export function App() {
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
 
+  // The release the inbox runs, read once: GET /v1/state carries no version, and the GitHub mark names it on hover.
+  // The request is aborted on the way out, so a page that closes takes no half-open socket with it.
+  const [release, setRelease] = React.useState('');
+  React.useEffect(() => {
+    if (auth !== 'ok') return;
+    const stop = new AbortController();
+    fetch(BASE + 'v1/info', { signal: stop.signal }).then((r) => (r.ok ? r.json() : null)).then((info) => {
+      if (info && typeof info.version === 'string') setRelease(info.version);
+    }).catch(() => {});
+    return () => stop.abort();
+  }, [auth]);
+
   // Each state carries the inbox's Group by and pins, so a change on another page reaches this one without a reload.
   React.useEffect(() => {
     if (!state) return;
@@ -630,7 +642,8 @@ export function App() {
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable')),
       h(DevicesLink),
       h(PhoneLink),
-      h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: 'Your Attention on GitHub' },
+      // The release the inbox runs, on hover, so a deployment can be told apart without opening anything.
+      h('a', { className: 'repo', href: 'https://github.com/elecnix/your-attention', target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Your Attention on GitHub', title: release ? `Your Attention ${release} on GitHub` : 'Your Attention on GitHub' },
         h('svg', { viewBox: '0 0 16 16', width: 22, height: 22, 'aria-hidden': 'true', fill: 'currentColor' }, h('path', { d: OCTOCAT }))))),
     h(UsageNotice, { telemetry, onChange: changeTelemetry }),
     pinForm && h(PinForm, {
