@@ -435,13 +435,19 @@ An answer closes the card, and the inbox delivers it with the comment to the age
 
 ## Settings
 
-`GET /v1/settings` returns `{allowHtml, groupBy, pins}`. Only the owner changes them, with `PUT /v1/settings`, which takes any of the three fields and leaves the others as they are.
+`GET /v1/settings` returns `{allowHtml, groupBy, pins, requireCard}`. Only the owner changes `allowHtml`, `groupBy` and `pins`, with `PUT /v1/settings`, which takes any of those fields and leaves the others as they are. A `requireCard` written there is the one way to name a list of agents, with `mode: agents` and the agents in `agents`. Under `mode: all` no session changes the rule for itself, and `scope: self` with `on: false` answers 400, because a rule that names every agent belongs to the person. `scope: self` refuses `reminders` too, because the count applies to every agent.
 
 - `allowHtml` lets a card carry its own HTML and scripts, in a sandboxed frame.
 - `groupBy` is the queue's grouping: `none`, `priority`, `agent`, or `tag:<key>` for any tag key a card has. It starts unset, and the queue groups by nothing.
 - `pins` lists the pinned tag values as `[key, value]` pairs, oldest first, at most 20. A pin puts each matching card in its own group at the top of the queue. It starts unset, so the queue doesn't show a pinned group. A system card, such as a guidance or priority proposal, sits above every pinned group under the heading **Needs your approval**, and it stays out of the pinned groups even when its tags match a pin.
 
-The inbox answers 400 for a value it cannot use, such as a `groupBy` of `week`, or for a pin that is not a tag key with its value. The terminal client reads the same two settings from `GET /v1/state`. It saves its **Group by** choice with `PUT /v1/settings`, and pressing `p` pins or unpins the value of the queue's tag in the open card.
+The inbox answers 400 for a value it cannot use, such as a `groupBy` of `week`, or for a pin that is not a tag key with its value.
+
+`requireCard` is the rule that a session must hold an open card, as `{mode, agents?, reminders}`. `mode` is `off`, `all` or `agents`: `all` applies the rule to every agent, `agents` applies it to the agents in `agents`, and `off` applies it to none. `reminders` is how many times one stretch without a card is asked about, from 0 to 10; it starts at 3, and 0 never asks. The inbox answers 400 for a mode it does not know, for a count outside that range, and for `agents` with no agent named.
+
+`GET /v1/settings/require-card?agent=<id>` returns `{on, reminders, rule}`, the rule beside the answer for one session, so a harness reads one value rather than resolving the rule itself. `POST /v1/settings/require-card {scope, on, reminders?, agent}` changes it. `scope: self` turns it on or off for that one agent at once, and the inbox takes the change without a card, because how a session conducts itself is its own. The agent id a stream reports is the one the client declares, as it is for presence and for a card's `agent`, so a self change needs an open stream reporting that id and nothing more: the rule decides whether a session is asked for a card, and that is all it touches: it never reads a card, and access stays with the token. `scope: all` posts a system card that proposes the rule for every agent, and nothing changes until the owner approves that card; an answer to it from any other client gets 403, because a rule over every agent is not one agent's decision to make. Approving stores the rule and sends a `settings` event carrying `{requireCard}` to every connected agent stream, which is what spares a running session a restart; rejecting leaves the rule as it was. An answer that arrives after the card closed leaves the rule as it was.
+
+`YOUR_ATTENTION_REQUIRE_CARD` in a session's environment decides instead for as long as the session runs, and it is a decision made when the process starts rather than an exemption the inbox grants, so it stays outside the rule and does not alter it: `1` asks that session for a card and any other value holds it back, and the inbox's rule, its count included, is not read at all. A session started without the value takes the inbox's rule again, so the override lasts as long as the process that carries it, and no startup file can put it there for the sessions a launcher starts. A background agent is started without it. The terminal client reads the same two settings from `GET /v1/state`. It saves its **Group by** choice with `PUT /v1/settings`, and pressing `p` pins or unpins the value of the queue's tag in the open card.
 
 A page that finds **Group by** or the pins in this browser's local storage and none in the inbox copies them into the inbox once, then reads the inbox. A value the inbox already has is never overwritten, and each device copies once.
 
@@ -540,6 +546,14 @@ An agent opens `GET /v1/stream?agent=<id>`, and the inbox reports the agent onli
 ```
 
 The event above is trimmed to the fields an agent reads. The `id` is a receipt: the Claude Code channel watches the session transcript for it before it sends the acknowledgment.
+
+The inbox also sends a `settings` event to every open agent stream when the require-a-card rule changes, whoever changed it, which is what spares a running session a restart:
+
+```json
+{ "type": "settings", "id": "8a1c40e2f9b3", "requireCard": { "mode": "all", "reminders": 3 } }
+```
+
+The event carries the whole rule rather than the field that moved, so a session that missed an earlier one still reads the rule in force.
 
 The agent addresses take an optional `&channel=off`, which says that the session drops every channel notification, so an answer pushed to it never arrives. The inbox records it on the agent's presence as `channelOff: true`, `GET /v1/state` sends it with the rest of the presence, and the card shows **Channel off** until a connection reports otherwise. The Claude Code channel reads the development-channels flag off its parent's command line, and a session started without `--dangerously-load-development-channels server:your-attention` sends that parameter.
 

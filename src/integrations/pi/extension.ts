@@ -10,15 +10,34 @@ import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { parseTagsFlag } from '../tags.ts';
+import { type CardRule, ENV_REMINDERS, envRequireCard } from '../require-card.ts';
 import { cardTools } from '../tools.ts';
 
 // stdout belongs to pi, so a stream that stops for good says why on stderr instead of vanishing.
 const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
 
-/** What a session is asked when a run settles with no open card, once the person opts in with YOUR_ATTENTION_REQUIRE_CARD=1. */
+/** What a session is asked when a run settles with no open card, once the inbox asks it for one. */
 const NO_CARD = '[your-attention] This session has no open card. Post one with card_post that says what you are working on and what you need from the person.';
-/** How many times one stretch without a card is asked about. The person chose three. */
-const CARD_REQUESTS = 3;
+/** The reminders a session gets when the environment decides the rule, since the inbox's count does not apply to it. */
+const CARD_REQUESTS = ENV_REMINDERS;
+
+/**
+ * The rule this session obeys. A value in YOUR_ATTENTION_REQUIRE_CARD decides for the whole session and never reads the
+ * inbox, so a change there cannot mix with it; starting without the value hands the session back to the inbox.
+ */
+async function requireCardRule(inbox: Client, agent: string): Promise<CardRule> {
+  // A value in the environment decides the session without asking the inbox, so a session cut off from it still
+  // behaves the way it was started.
+  const forced = envRequireCard(process.env);
+  if (forced) return forced;
+  try {
+    const view = await inbox.requireCard(agent);
+    return { on: view.on, reminders: view.reminders };
+  } catch (e) {
+    log('could not read the card rule:', (e as Error).message);
+    return { on: false, reminders: 0 };
+  }
+}
 
 // The parts of pi's ExtensionAPI this extension uses.
 interface PiContext {
@@ -124,8 +143,10 @@ export default function yourAttention(pi: PiApi): void {
     asked = 0;
   });
   pi.on('agent_settled', async (_event, ctx) => {
-    if (!inbox || process.env['YOUR_ATTENTION_REQUIRE_CARD'] !== '1') return;
-    if (!ctx.isIdle()) return;
+    if (!inbox || !ctx.isIdle()) return;
+    // The rule comes from the inbox, so turning it on costs no restart.
+    const rule = await requireCardRule(inbox, agent);
+    if (!rule.on) return;
     let open = false;
     try {
       open = (await inbox.list()).some((c) => c.card.agent === agent && c.state === 'open');
@@ -138,8 +159,8 @@ export default function yourAttention(pi: PiApi): void {
       asked = 0;
       return;
     }
-    // Three asks is the cap: a session that cannot post a card is left alone rather than asked forever.
-    if (asked >= CARD_REQUESTS) return;
+    // The reminders the person set are the cap, and 0 means never: a session that cannot post a card is left alone.
+    if (asked >= rule.reminders) return;
     asked++;
     ourRun = true;
     pi.sendUserMessage(NO_CARD);

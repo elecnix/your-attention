@@ -223,6 +223,18 @@ export class Client {
   guidance(): Promise<Guidance & { widgets?: string; tags?: TagCount[] }> { return this.call('GET', '/v1/guidance'); }
   /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. */
   proposeGuidance(text: string, opts: { message: string; agent?: string }): Promise<Card> { return this.call('POST', '/v1/guidance', { text, ...opts }); }
+  /** The require-a-card rule resolved for one session, and the rule itself. */
+  requireCard(agent: string): Promise<{ on: boolean; reminders: number; rule: { mode: string; agents?: string[]; reminders: number } }> {
+    return this.call('GET', `/v1/settings/require-card?agent=${encodeURIComponent(agent)}`);
+  }
+  /** Turn the rule on or off for this session alone. Its own conduct, so no card asks the person. */
+  setRequireCardForSelf(agent: string, on: boolean): Promise<{ mode: string; agents?: string[]; reminders: number }> {
+    return this.call('POST', '/v1/settings/require-card', { scope: 'self', on, agent });
+  }
+  /** Propose the rule for every agent, as a card the person approves or rejects. */
+  proposeRequireCard(input: { on: boolean; reminders?: number; agent: string }): Promise<Card> {
+    return this.call('POST', '/v1/settings/require-card', { scope: 'all', ...input });
+  }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
   search(q: string, opts: { answered?: boolean; limit?: number } = {}): Promise<{ card: Card; answer?: Answer }[]> {
