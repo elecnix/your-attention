@@ -493,6 +493,34 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       // A laptop offers the counts once. A hosted inbox tells the person once that they are always on.
       return json({ ...s, notice: !s.notified && !blocked, blocked, source: t.source, destination: t.destination, next: inbox.usage.report(inbox.usage.today(), t.source) });
     }
+    // One rule, read or changed per session or for the whole inbox. A change for the whole inbox is a card the person
+    // answers, because holding every agent to a card is not one agent's decision.
+    if (a === 'settings' && b === 'require-card') {
+      if (method === 'GET') return json(inbox.requireCardView(url.searchParams.get('agent') ?? ''));
+      if (method === 'POST') {
+        // A request body may be `null`, and reading it as an object would crash rather than refuse it.
+        const input = (await readJson<{ scope?: string; on?: unknown; reminders?: unknown; agent?: string }>(req)) ?? {};
+        const who = String(input.agent ?? '').trim();
+        // A rule says whether someone is asked for a card, so the request says it plainly rather than in a lookalike.
+        if (typeof input.on !== 'boolean') throw new InboxError(400, 'on must be true or false');
+        const on = input.on;
+        // A count is a number or it is nothing: `null`, `""` and `true` would arrive as 0 or 1 through Number().
+        if (input.reminders !== undefined && typeof input.reminders !== 'number') throw new InboxError(400, 'reminders must be a whole number');
+        const reminders = input.reminders;
+        if (input.scope === 'self') {
+          // The count applies to every agent, so a self change that carried one would be dropped rather than applied.
+          if (input.reminders !== undefined) throw new InboxError(400, 'reminders applies to every agent: change it with scope all');
+          // A session changes its own conduct. The agent id on an open stream is the only identity the inbox can check.
+          if (!inbox.connectedAs(me, who)) throw new InboxError(403, 'only a session connected as that agent changes its own rule');
+          return json(inbox.setRequireCardForAgent(who, on));
+        }
+        if (input.scope === 'all') {
+          const card = inbox.proposeRequireCard({ on, ...(reminders === undefined ? {} : { reminders }), ...(who ? { by: { caller: me, agent: who } } : {}) });
+          return json(publicCard(card), 201);
+        }
+        throw new InboxError(400, 'scope must be self or all');
+      }
+    }
     if (a === 'settings') {
       if (method === 'GET') return json(inbox.settings());
       if (method === 'PUT') { owner(); return json(inbox.setSettings(await readJson<Partial<Settings>>(req))); }

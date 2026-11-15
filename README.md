@@ -54,6 +54,8 @@ your-attention --help
 
 `npm link` puts `your-attention` on your path. To update later, run `git pull && npm ci` in the same folder.
 
+The package is also on npm, and `npm install -g your-attention` works. The published tarball contains the same sources compiled into `dist/`, because Node refuses to strip TypeScript types in anything under `node_modules`. A checkout runs the sources directly, with no build step.
+
 ### 4. Start or open your inbox
 
 **On your laptop:**
@@ -66,7 +68,7 @@ your-attention open --link      # prints a one-time sign-in link, for a private 
 
 The inbox keeps its files in `~/.your-attention`. Set `YOUR_ATTENTION_HOME` to move them.
 
-In a terminal, `start` and `serve` offer to set a [PIN](#protect-the-inbox-with-a-pin) while the inbox has none. Type `y` and the PIN twice, `s` to skip until the next start, or `n` to stop asking. A service started at login has no terminal, so it never asks.
+The [PIN](#protect-the-inbox-with-a-pin) is optional. A laptop inbox used by one person works fine without it. In a terminal, `start` and `serve` offer to set it while the inbox has none: type `y` and the PIN twice, `s` to skip until the next start, or `n` to stop asking. A service started at login has no terminal, so it never asks.
 
 To start the inbox when you log in (optional), write a launchd or systemd unit. Without `--write`, the command only prints the unit.
 
@@ -132,7 +134,7 @@ claude() {
 } }
 ```
 
-**A card from a session that stops without one (optional).** With `YOUR_ATTENTION_REQUIRE_CARD=1` in the session's environment, this hook gives the model one request to post a card when it stops with none open, and names the `card_post` call to make. Claude Code marks the stop that request causes with `stop_hook_active`, so the hook does nothing then. A session gets **three asks at most** without a card, counted in `~/.your-attention/claude/<session>.card-asks`, and the count resets when the person types a prompt, when an answer arrives through the channel, and when a card of the session's own is open. Leave the variable out for a background agent that should run without a card.
+**A card from a session that stops without one (optional, off until asked for).** This hook gives the model one request to post a card when it stops with none open, and names the `card_post` call to make. Claude Code marks the stop that request causes with `stop_hook_active`, so the hook does nothing then. Whether the hook asks comes from the inbox, not the environment, so turning it on reaches a session that is already running. A session turns it on with `settings {"scope": "self", "on": true}`, and a proposal that would apply to all agents waits for the person's approval on a card. The count resets when the person types a prompt, when an answer arrives through the channel, and when a card of the session's own is open. `YOUR_ATTENTION_REQUIRE_CARD` stays as a per-session override: `1` asks and any other value stops the ask, and that decision stands in place of the inbox for as long as the session runs. A background agent gets neither. Set the variable at the agent's start rather than in a startup file, since a launcher that starts a non-interactive harness leaves it out.
 
 ```json
 { "hooks": {
@@ -154,7 +156,7 @@ your-attention pi --tags repo=acme/api,topic=billing -- [pi args]
 
 Every card the session posts inherits them, under the tags on the card itself. The agent reads or changes them with the `card_tags` tool, so a compaction loses nothing.
 
-With `YOUR_ATTENTION_REQUIRE_CARD=1` in its environment, a session is asked for a card when a run settles and none of its cards is open. The extension sends the request as a user message. A session gets **three asks at most** without a card, and the count resets when a run starts for any reason other than the request itself, and when a card of the session's own is open. Leave the variable out for a background agent that should run without a card.
+When a run settles and none of its cards is open, the session gets one request for a card, once the inbox's rule covers it. A session turns the rule on with `settings {"scope": "self", "on": true}`, and a proposal that would apply to all agents waits for the person's approval on a card. The extension sends the request as a user message. The rule states how many times one stretch without a card gets asked about: three by default, and zero never. `YOUR_ATTENTION_REQUIRE_CARD=1` in the session's environment asks anyway and any other value stops the ask, and that decision stands in place of the inbox for as long as the session runs. A background agent gets neither, so set the variable at the agent's start rather than in a startup file.
 
 #### OpenCode
 
@@ -322,6 +324,8 @@ The inbox shows the request to you as a card with the address and the header nam
 ## Protect the inbox with a PIN
 
 An answer on a card goes straight into a coding agent's session. Someone who gets the inbox address or a sign-in link, from a bookmark, the browser history or a pasted message, could open the page and answer as you. A 4-digit PIN stops that: the address or link signs a browser in, and each new tab must also type the PIN before it shows a card or takes an answer.
+
+The PIN is optional. Set one when other machines on your network can open the inbox, and when you would mind a sign-in link kept in a browser history.
 
 ```sh
 your-attention pin status       # whether the inbox has a PIN, and any lockout

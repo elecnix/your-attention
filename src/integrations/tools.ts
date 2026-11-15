@@ -126,6 +126,18 @@ export const cardTools: CardTool[] = [
     }, required: ['name', 'source'] },
   },
   {
+    name: 'settings',
+    description: 'Read or change the settings of this inbox that decide how this session works. Today there is one: whether a session must hold an open card, and how many times a stretch without one is asked about. Call it with no arguments to read the rule as it applies to this session. `scope: self` changes it for this session alone, at once, because it is your own conduct. `scope: all` proposes it for every agent, which posts a card the person approves or rejects: nothing changes until they answer.',
+    schema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['self', 'all'], description: 'Who the change applies to: this session alone, or every agent in the inbox. Leave it out to read the rule.' },
+        on: { type: 'boolean', description: 'true to ask for a card, false to stop asking. Required with a scope.' },
+        reminders: { type: 'number', description: 'How many times one stretch without a card is asked about, 0 to 10. Read with no arguments, or proposed with scope all.' },
+      },
+    },
+  },
+  {
     name: 'card_guidance',
     description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it, or rejects it. Their answer and comment come back to you, so you can revise the text and propose again.',
     schema: { type: 'object', properties: { propose: { type: 'string', description: 'The new guidance text. Leave it out to read the current guidance.' }, message: { type: 'string', description: 'Required with propose: one or two sentences for the person who approves it, saying what this changes and why. A proposal without a message is refused.' } } },
