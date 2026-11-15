@@ -90,7 +90,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
     const ctl = new AbortController();
     void inbox.stream(card.agent, async (ev) => {
       if (ev.type === 'answer') await sidecar.answered(ev.card, ev.answer).catch((e: Error) => log('answer failed:', e.message));
-    }, ctl.signal).catch((e: Error) => log('stream ended:', e.message));
+    }, ctl.signal, 'auto', { origin: card.origin }).catch((e: Error) => log('stream ended:', e.message));
     return ctl;
   };
 

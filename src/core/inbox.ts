@@ -15,7 +15,7 @@ import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -2092,8 +2092,10 @@ export class Inbox {
   /** An agent connects. `instance` names the agent process, and stays the same across its reconnects. `resumed` marks a
    * connection the platform rebuilt for a socket that stayed open, such as a Durable Object waking from hibernation:
    * the agent already got its `hello` on that socket, so it gets none again. `channelOff` says the session discards
-   * channel notifications, and a connection that leaves it out keeps what the last one said. */
-  connect(caller: Caller, agent: string, send: AgentSend, instance?: string, opts: { resumed?: boolean; channelOff?: boolean } = {}): () => void {
+   * channel notifications, and a connection that leaves it out keeps what the last one said. `origin` says where the
+   * session runs, so a page can label the session before it posts any card, and a connection that leaves it out keeps
+   * the origin the row already carries. */
+  connect(caller: Caller, agent: string, send: AgentSend, instance?: string, opts: { resumed?: boolean; channelOff?: boolean; origin?: unknown } = {}): () => void {
     if (String(agent).length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     const k = this.key(caller.token, agent);
     let set = this.agents.get(k);
@@ -2103,7 +2105,7 @@ export class Inbox {
     this.usage.saw('agents', agent);
     if (instance) this.usage.saw('instances', instance);
     if (caller.token) this.usage.saw('tokens', caller.token);
-    this.setPresence(agent, true, opts.channelOff);
+    this.setPresence(agent, true, opts.channelOff, opts.origin);
     if (!opts.resumed) send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     this.flush(agent);
     // A card the person sent while this agent was away goes out as soon as it connects, as a waiting answer does.
@@ -2119,13 +2121,18 @@ export class Inbox {
     };
   }
 
-  /** `channelOff` is undefined for a connection that says nothing about the channel, which keeps what is stored. */
-  private setPresence(agent: string, online: boolean, channelOff?: boolean): void {
+  /** `channelOff` is undefined for a connection that says nothing about the channel, which keeps what is stored. An
+   * `origin` the connection reports replaces the stored one, and a connection that reports none keeps it, as it does
+   * for the channel. */
+  private setPresence(agent: string, online: boolean, channelOff?: boolean, reported?: unknown): void {
     const before = this.store.get<Presence>('presence', agent);
     const off = channelOff ?? before?.channelOff;
+    const origin = connectionOrigin(reported) ?? before?.origin;
     const next: Presence = { ...before, agent, online, lastSeen: this.now() };
     delete next.channelOff;
     if (off) next.channelOff = true;
+    delete next.origin;
+    if (origin) next.origin = origin;
     // A live connection has no closing time, and one left from an earlier close would arm the alarm for a past moment.
     if (online) delete next.leftAt;
     this.store.put<Presence>('presence', agent, next);
@@ -2541,6 +2548,9 @@ function searchText(card: Card): string {
 
 const ORIGIN_FIELDS = ['harness', 'session', 'name', 'host', 'cwd', 'herdrPane', 'herdrWorkspace', 'herdrTab'] as const;
 
+/** The origin fields a presence row keeps: what labels a session on a card, and what opens its pane. */
+const PRESENCE_ORIGIN_FIELDS = ['harness', 'session', 'name', 'host', 'herdrPane'] as const;
+
 /** A post's tags as the merge reads them: an object of values, or nothing. A client that sends anything else keeps the
  * tags it sent on the card, as it always did. */
 function ownTags(tags: unknown): Record<string, string> | undefined {
@@ -2552,6 +2562,17 @@ function cleanOrigin(origin: unknown): Origin | undefined {
   if (!origin || typeof origin !== 'object') return undefined;
   const out: Origin = {};
   for (const k of ORIGIN_FIELDS) {
+    const v = (origin as Record<string, unknown>)[k];
+    if (v !== undefined && v !== null && v !== '') out[k] = String(v).slice(0, 200);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** The origin a connection reports, as its presence row keeps it: the fields that label the session and open its pane. */
+export function connectionOrigin(origin: unknown): PresenceOrigin | undefined {
+  if (!origin || typeof origin !== 'object') return undefined;
+  const out: PresenceOrigin = {};
+  for (const k of PRESENCE_ORIGIN_FIELDS) {
     const v = (origin as Record<string, unknown>)[k];
     if (v !== undefined && v !== null && v !== '') out[k] = String(v).slice(0, 200);
   }

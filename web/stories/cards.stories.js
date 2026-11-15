@@ -81,11 +81,12 @@ export const Dismissed = {
 
 // A proposal that edits one word and adds one line: the unchanged lines collapse behind a control.
 const GUIDANCE = 'Lead with the goal.\nGive two options, with the one you recommend first.\nEnd with a recommendation.';
-// Live presence: two agents online, and one that connected once and left.
+// Live presence: two sessions online, with the names their connections reported, one of them in a herdr pane, and one
+// that connected once and left.
 const PRESENCE = {
-  'claude:3239ab8e': { agent: 'claude:3239ab8e', online: true, lastSeen: 0 },
-  'pi:01a17c01': { agent: 'pi:01a17c01', online: true, lastSeen: 0 },
-  'herdr:w1:p2': { agent: 'herdr:w1:p2', online: false, lastSeen: 0 },
+  'claude:3239ab8e': { agent: 'claude:3239ab8e', online: true, lastSeen: 0, origin: { harness: 'claude-code', session: '3239ab8e', name: 'Rename the retry flag', herdrPane: 'w7:p2' } },
+  'pi:01a17c01': { agent: 'pi:01a17c01', online: true, lastSeen: 0, origin: { harness: 'pi', session: '01a17c01', name: 'Queue layout' } },
+  'herdr:w1:p2': { agent: 'herdr:w1:p2', online: false, lastSeen: 0, origin: { harness: 'herdr', name: 'Deploy watch', herdrPane: 'w1:p2' } },
 };
 const PROPOSAL = 'Lead with the goal.\nGive three options, with the one you recommend first.\nEnd with a recommendation.\nAttach a screenshot to every UI card.';
 const guidanceStory = (guidance) => ({

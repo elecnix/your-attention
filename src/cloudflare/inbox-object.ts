@@ -1,12 +1,12 @@
 // One inbox as one Durable Object. All its changes go through this object one
 // at a time, and it hibernates when idle: agent sockets stay open, and the
 // object rebuilds each connection from the socket's attachment when it wakes.
-import { COOKIE, createHandler } from '../core/http.ts';
-import { Inbox } from '../core/inbox.ts';
+import { COOKIE, createHandler, originParam } from '../core/http.ts';
+import { Inbox, connectionOrigin } from '../core/inbox.ts';
 import { pinKeyError, type PinKey } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
 import { dataPoint } from '../core/telemetry.ts';
-import type { Role } from '../core/types.ts';
+import type { PresenceOrigin, Role } from '../core/types.ts';
 import { DurableSqlStorage, R2Blobs } from './storage.ts';
 import type { Env } from './worker.ts';
 
@@ -25,6 +25,8 @@ interface SocketAttachment {
   role?: Role;
   /** The session discards channel notifications, so presence keeps saying so across a wake. */
   channel?: 'off' | undefined;
+  /** Where the session runs, so presence keeps the name and the pane across a wake. */
+  origin?: PresenceOrigin;
   /** When the socket opened, the start of its heartbeat clock until its first ping. */
   connectedAt?: number;
   /** The last ping the object answered itself, in epoch milliseconds. The platform's pong timestamp may
@@ -122,7 +124,7 @@ export class InboxObject {
       return conn;
     }
     const caller = a.token && a.role ? { token: a.token, role: a.role } : undefined;
-    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance, resumed, a.channel === 'off');
+    const conn = agentSocket(this.inbox, a.agent, { send: (t) => ws.send(t), close: (c, r) => ws.close(c, r) }, caller, a.instance, { resumed, channelOff: a.channel === 'off', origin: a.origin });
     this.sockets.set(ws, conn);
     return conn;
   }
@@ -243,7 +245,8 @@ export class InboxObject {
       const pair = new WebSocketPair();
       const server = pair[1];
       this.ctx.acceptWebSocket(server, ['agent']);
-      server.serializeAttachment({ agent, instance: url.searchParams.get('instance') ?? undefined, channel: url.searchParams.get('channel') === 'off' ? 'off' : undefined, token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
+      const origin = connectionOrigin(originParam(url));
+      server.serializeAttachment({ agent, instance: url.searchParams.get('instance') ?? undefined, channel: url.searchParams.get('channel') === 'off' ? 'off' : undefined, ...(origin ? { origin } : {}), token: token?.id, role: token?.role, connectedAt: Date.now() } satisfies SocketAttachment);
       this.attach(server);
       await this.schedule();
       return new Response(null, { status: 101, webSocket: pair[0] });

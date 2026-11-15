@@ -108,7 +108,7 @@ export function createPlugin(z: unknown) {
         const sealed = await secrets.receive(ev.card, ev.answer);
         const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(inbox, agentOf(session), ev.answer))}${sealed ? `\n${sealed}` : ''}`;
         await send(session, `[your-attention answer ${ev.id}] ${what}`);
-      }, stop.signal).catch(() => {});
+      }, stop.signal, 'auto', { origin: { harness: 'opencode', session, host: os.hostname(), herdrPane: process.env['HERDR_PANE_ID'] } }).catch(() => {});
     };
 
     // A session from before a restart, seen in an event, is followed when it has a card in the inbox.

@@ -263,6 +263,9 @@
   .broadcast .agents { display: grid; gap: 4px; margin: 8px 0; padding: 0; border: 0; font-size: calc(14px * var(--text-scale)); }
   .broadcast .agents legend { font-weight: 600 !important; padding: 0; margin-bottom: 4px; }
   .broadcast .agents .all { font-weight: 600 !important; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  /* A row is the box with the session's name, and the chip that opens its pane when the connection reported one. */
+  .broadcast .agents .agent { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .broadcast .agents .agent label { display: flex; align-items: center; gap: 6px; }
   .broadcast .agents .hint { color: var(--muted); font-size: calc(13px * var(--text-scale)); }
   .markdown a, .card-text a, .focus-card label a { color: var(--accent); }
   .card-title { font-size: calc(18px * var(--text-scale)); margin: 4px 0 8px; }

@@ -650,6 +650,9 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
   // The agents online now, from live presence, every one ticked until the person unticks it: an agent that comes
   // online while the card is open joins ticked, and one that leaves drops off the list.
   const online = Object.values(presence).filter((p) => p.online && p.agent !== 'system').map((p) => p.agent).sort();
+  // The pane a session runs in, from what its connection reported, so one click on its row opens that session.
+  const paneOf = (a) => (presence[a] && presence[a].origin && presence[a].origin.herdrPane) || '';
+  const chip = (pane) => h('a', { className: 'session-link', href: `https://herdr.invalid/v1/pane/${pane}`, title: 'Open this pane in herdr' }, 'Open pane');
   // `flipped` holds the exceptions to `allOn`: the unticked agents while every agent starts ticked, and the ticked
   // ones once the person has unticked them all, so an agent that comes online after that joins unticked.
   const [allOn, setAllOn] = React.useState(true);
@@ -703,7 +706,7 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
       sign, r.words ? marked(r.words) : r.text, r.undone && h('span', { className: 'undone' }, ' (added after the proposal)')));
   }
   return h('div', { className: 'broadcast' },
-    h('div', { className: 'field' }, `${b.from ? `${agentName(b.from, cards)} proposes` : 'Proposed'} changes to card guidance version ${current.version}`),
+    h('div', { className: 'field' }, `${b.from ? `${agentName(b.from, cards, presence)} proposes` : 'Proposed'} changes to card guidance version ${current.version}`),
     b.message && h('p', { className: 'broadcast-message' }, b.message),
     changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
     h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
@@ -712,8 +715,12 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
       h('legend', null, `Send to ${online.length} online agent${online.length === 1 ? '' : 's'}`),
       online.length > 1 && h('label', { className: 'all' },
         h('input', { type: 'checkbox', ref: allRef, checked: picked.length === online.length, onChange: () => { setAllOn(picked.length < online.length); setFlipped(new Set()); } }), 'All agents'),
-      online.map((a) => h('label', { key: a, className: 'agent' },
-        h('input', { type: 'checkbox', checked: ticked(a), onChange: () => toggle(a) }), agentName(a, cards))),
+      online.map((a) => {
+        const pane = paneOf(a);
+        return h('div', { key: a, className: 'agent' },
+          h('label', null, h('input', { type: 'checkbox', checked: ticked(a), onChange: () => toggle(a) }), agentName(a, cards, presence)),
+          pane && chip(pane));
+      }),
       h('span', { className: 'hint' }, 'Offline agents get the new guidance when they reconnect, or when they call card_guidance.')),
     h('div', { className: 'html-answer' },
       h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: b.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),

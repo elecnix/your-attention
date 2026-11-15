@@ -47,6 +47,23 @@ describe('principles', () => {
     assert.match(form, /pickedAgent\(agents, picked\)/, 'a pick that left the list reads as the first agent');
   });
 
+  it('the guidance card labels each row from presence, and opens the pane a connection reported', () => {
+    // DP14 and DP43: the person picks the agents that get the guidance by the name each session reports, not by an id
+    // they cannot place, and a session in a herdr pane is one click away even when it posted no card.
+    const panel = fs.readFileSync(path.join(ROOT, 'web/components.js'), 'utf8');
+    const form = /export function BroadcastForm[\s\S]*?\n}\n/.exec(panel)?.[0] ?? '';
+    assert.match(form, /agentName\(a, cards, presence\)/, 'a row reads its name from presence, then from the cards, then the id');
+    assert.match(form, /https:\/\/herdr\.invalid\/v1\/pane\/\$\{pane\}/, 'a row of a session in a pane opens that pane');
+  });
+
+  it('a connection carries its origin onto the presence row', () => {
+    // DP34: presence comes from the connections an inbox holds, so the name and the pane a session reports arrive with
+    // the connection, and a session with no card in the inbox still has a name.
+    const source = read('inbox.ts');
+    assert.match(source, /this\.setPresence\(agent, true, opts\.channelOff, opts\.origin\);/, 'connect passes the origin it was given to the presence');
+    assert.match(source, /connectionOrigin\(reported\) \?\? before\?\.origin/, 'a connection that reports none keeps the origin the row had');
+  });
+
   it('every principle in PRINCIPLES.md has a statement and a reason', () => {
     const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);

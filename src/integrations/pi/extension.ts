@@ -120,7 +120,7 @@ export default function yourAttention(pi: PiApi): void {
       // Steer by default; start a new turn when the agent is idle.
       if (ctx.isIdle()) pi.sendUserMessage(text);
       else pi.sendUserMessage(text, { deliverAs: ev.answer.delivery === 'followUp' ? 'followUp' : 'steer' });
-    }, stop.signal).catch((e: Error) => log('stream stopped:', e.message));
+    }, stop.signal, 'auto', { origin }).catch((e: Error) => log('stream stopped:', e.message));
   });
 
   pi.on('session_shutdown', () => {

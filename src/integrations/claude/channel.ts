@@ -280,4 +280,4 @@ void inbox.stream(agent, async (ev) => {
   } finally {
     push.pushing = false;
   }
-}, stop.signal, 'auto', { channelOff }).catch((e: Error) => log('stream stopped:', e.message));
+}, stop.signal, 'auto', { channelOff, origin: { ...origin, name: claudeSessionName(session) } }).catch((e: Error) => log('stream stopped:', e.message));

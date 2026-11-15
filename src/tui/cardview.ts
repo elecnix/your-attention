@@ -7,7 +7,7 @@ import { answerValues, cardSource, changeSteps, describe, formValues, guidanceDi
 import { cardAge } from '../../web/age.js';
 import { CLOSED_LABEL, STATE_LABEL, agentName, presenceOf, type InboxState, type Queue } from '../../web/queue.js';
 import type { CardSummary } from '../core/summary.ts';
-import type { Answer, Attachment, Card } from '../core/types.ts';
+import type { Answer, Attachment, Card, Presence } from '../core/types.ts';
 import { BodyRenderer, FormStore, parse, type Action, type BodyContext, type Widget } from './body.ts';
 import { Doc, type Span } from './doc.ts';
 import type { KeyEvent } from './input.ts';
@@ -31,7 +31,7 @@ export interface CardViewHost {
 }
 
 /** OpenUI Lang for the cards the page draws with its own components: broadcast and HTML cards. */
-export function terminalSource(c: Card, cards: CardSummary[], online: string[] = []): string {
+export function terminalSource(c: Card, cards: CardSummary[], online: string[] = [], presence: Record<string, Presence> = {}): string {
   const buttons = (list: [string, string, string][]) => `b = Buttons([${list.map(([label, msg, variant]) => `Button(${J(label)}, @ToAssistant(${J(msg)}), ${J(variant)})`).join(', ')}], "row")`;
   if (c.broadcast && !c.closed) {
     // The agents online now, from live presence, as the page lists them.
@@ -40,7 +40,7 @@ export function terminalSource(c: Card, cards: CardSummary[], online: string[] =
     return [
       'root = Card([f])',
       `f = Form("broadcast", b, [${agents.length ? 'fa, ' : ''}fh, fc])`,
-      ...(agents.length ? [`fa = FormControl(${J(`Send to ${agents.length} online agent${agents.length === 1 ? '' : 's'}`)}, CheckBoxGroup("agents", [${agents.map((a) => `CheckBoxItem(${J(agentName(a, cards))}, "", ${J(a)}, true)`).join(', ')}]))`] : []),
+      ...(agents.length ? [`fa = FormControl(${J(`Send to ${agents.length} online agent${agents.length === 1 ? '' : 's'}`)}, CheckBoxGroup("agents", [${agents.map((a) => `CheckBoxItem(${J(agentName(a, cards, presence))}, "", ${J(a)}, true)`).join(', ')}]))`] : []),
       `fh = TextContent(${J(`${agents.length ? '' : 'Send to 0 online agents. '}Offline agents get the new guidance when they reconnect, or when they call card_guidance.`)})`,
       `fc = FormControl("Comment", TextArea("comment", ${J(c.broadcast.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?')}, 3))`,
       buttons([['Approve and send', 'approve', 'primary'], ['Reject', 'reject', 'secondary'], ['Skip for now', 'skip', 'secondary']]),
@@ -324,7 +324,7 @@ export class CardView {
     };
     // A body stored before the inbox checked bodies may not draw whole: the inbox sends what the page draws in its place.
     if (card.bodyFallback) doc.para([{ text: 'Warning: part of this card did not draw, because its body has an error. The source from that error on is at the end of the card.', style: st.warn }]);
-    const result = parse(terminalSource(card.bodyFallback ? { ...card, body: card.bodyFallback.body } : card, s.cards, onlineAgents(s)));
+    const result = parse(terminalSource(card.bodyFallback ? { ...card, body: card.bodyFallback.body } : card, s.cards, onlineAgents(s), s.presence));
     if (!result) doc.para([{ text: 'Loading the form…', style: st.dim }]);
     else {
       this.renderer = new BodyRenderer(doc, ctx);
@@ -411,7 +411,7 @@ export class CardView {
     const rows = guidanceDiff(current.text, b.text, changed ? b.base!.text : undefined);
     const same = rows.filter((r) => r.kind === 'same').length;
     doc.gap();
-    doc.para([{ text: `${b.from ? `${sanitize(agentName(b.from, s.cards))} proposes` : 'Proposed'} changes to card guidance version ${current.version}`, style: st.dim }]);
+    doc.para([{ text: `${b.from ? `${sanitize(agentName(b.from, s.cards, s.presence))} proposes` : 'Proposed'} changes to card guidance version ${current.version}`, style: st.dim }]);
     if (b.message) { doc.gap(); doc.para([{ text: sanitize(b.message) }]); }
     if (changed) doc.para([{ text: `Warning: the guidance changed after the agent proposed this text. The proposal starts from version ${b.base!.version}, and the guidance is now version ${s.guidance!.version}. Approving removes the lines marked as added after the proposal.`, style: st.warn }]);
     const whole = same > 0 && toggle('meta:guidance-full', `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`);

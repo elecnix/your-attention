@@ -11,8 +11,11 @@ export const SECTION_ID = { system: 'section: system', checking: 'section: check
 const idPart = (s) => String(s).replace(/[%:]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 const groupId = (kind, ...parts) => [kind, ...parts.map(idPart)].join(': ');
 
-// An agent's name for people: the session name its newest card carries, else its id.
-export function agentName(id, cards) {
+// An agent's name for people: the name its connection reports, else the session name its newest card carries, else its
+// id. A session that has posted no card still has a name, because presence keeps the one its connection sent.
+export function agentName(id, cards, presence = {}) {
+  const reported = presence[id] && presence[id].origin && presence[id].origin.name;
+  if (reported) return reported;
   let best = null;
   for (const c of cards) if (c.agent === id && c.origin && c.origin.name && (!best || c.createdAt > best.createdAt)) best = c;
   return best ? best.origin.name : id;
@@ -56,7 +59,7 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   // No grouping by default. The choices follow the properties the cards carry.
   const tagKeys = [...new Set(visible.flatMap((c) => Object.keys(c.tags || {})))].sort();
   const tagKey = groupBy.startsWith('tag:') ? groupBy.slice(4) : null;
-  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? agentName(c.agent, visible) : tagKey !== null ? tagOf(c, tagKey) || `No ${tagKey}` : 'Waiting for you');
+  const groupKey = (c) => (groupBy === 'priority' ? label(levelOf(c)) : groupBy === 'agent' ? agentName(c.agent, visible, state.presence) : tagKey !== null ? tagOf(c, tagKey) || `No ${tagKey}` : 'Waiting for you');
   // The cards the inbox clears: answered or closed. Search still finds them.
   const dealt = visible.filter((c) => ['closed', 'answered', 'delivered', 'read'].includes(st(c)));
   const grouped = groupBy === 'none' ? [['Waiting for you', unpinned]] : [...unpinned.reduce((m, c) => m.set(groupKey(c), [...(m.get(groupKey(c)) || []), c]), new Map())];

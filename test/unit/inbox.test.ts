@@ -152,6 +152,32 @@ describe('delivery', () => {
     assert.equal(inbox.isOnline('s1'), true);
   });
 
+  it('keeps the origin a connection reports on the presence, across a disconnect and a reconnect', () => {
+    let t = 0;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const agentA: Caller = { token: 'ta', role: 'agent' };
+    const close = inbox.connect(agentA, 's1', () => {}, undefined, { origin: { harness: 'claude-code', session: 's1', name: 'Rename the retry flag', host: 'laptop', cwd: '/src/inbox', herdrPane: 'w7:p2' } });
+    // The row keeps what labels the session and opens its pane, and drops the fields only a card's origin carries.
+    assert.deepEqual(inbox.state().presence['s1']?.origin, { harness: 'claude-code', session: 's1', name: 'Rename the retry flag', host: 'laptop', herdrPane: 'w7:p2' });
+    close();
+    t += PRESENCE_GRACE_MS * 2;
+    inbox.sweep();
+    assert.equal(inbox.state().presence['s1']?.origin?.name, 'Rename the retry flag');
+    // A connection that says nothing about its session keeps the name the row already has.
+    inbox.connect(agentA, 's1', () => {});
+    assert.equal(inbox.state().presence['s1']?.origin?.name, 'Rename the retry flag');
+    // A connection that reports another origin replaces it, as one from a renamed session does.
+    inbox.connect(agentA, 's1', () => {}, undefined, { origin: { name: 'Ship the release' } });
+    assert.deepEqual(inbox.state().presence['s1']?.origin, { name: 'Ship the release' });
+  });
+
+  it('takes no origin from a connection that sends something that is not an origin', () => {
+    const { inbox, agentA } = setup();
+    inbox.connect(agentA, 's1', () => {}, undefined, { origin: 'a page address' });
+    assert.equal(inbox.state().presence['s1']?.origin, undefined);
+    assert.equal(inbox.isOnline('s1'), true);
+  });
+
   it('keeps Channel off on the presence across a disconnect and a reconnect', () => {
     let t = 0;
     const inbox = new Inbox(new MemoryStorage(), () => t);
