@@ -4,7 +4,12 @@
   "main": "src/cloudflare/worker.ts",
   "compatibility_date": "2026-10-01",
   "assets": { "directory": ".cloudflare/assets", "binding": "ASSETS", "run_worker_first": true },
-  "durable_objects": { "bindings": [{ "name": "INBOX", "class_name": "InboxObject" }, { "name": "REGISTRY", "class_name": "RegistryObject" }] },
+  "durable_objects": {
+    "bindings": [{ "name": "INBOX", "class_name": "InboxObject" }, { "name": "REGISTRY", "class_name": "RegistryObject" }],
+    // An active object keeps its old code until it hibernates, and the sweep alarm keeps the inbox awake, so a deploy
+    // can leave it on the previous version for good. A minute, then it takes the version that was deployed.
+    "code_update_strategy": { "mode": "deferred", "max_delay": 60 }
+  },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InboxObject", "RegistryObject"] }],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "your-attention-files" }],
   "kv_namespaces": [{ "binding": "INVITES", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],

@@ -16,6 +16,11 @@ on:
         type: choice
         options: [single, hosted]
         default: single
+      code_update:
+        description: deferred waits for an object to hibernate, up to a minute; immediate resets active objects at once
+        type: choice
+        options: [deferred, immediate]
+        default: deferred
 
 permissions:
   contents: read
@@ -97,10 +102,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           KV_NAMESPACE_ID: ${{ vars.KV_NAMESPACE_ID }}
           MODE: ${{ inputs.mode }}
+          CODE_UPDATE: ${{ inputs.code_update }}
         run: |
           sed -i "s/REPLACE_WITH_KV_NAMESPACE_ID/${KV_NAMESPACE_ID}/" wrangler.jsonc
           npm run cloudflare:build
-          npx wrangler deploy --var "MODE:${MODE}"
+          npx wrangler deploy --var "MODE:${MODE}" --durable-objects-code-update-mode "$CODE_UPDATE"
       - name: set the owner token
         if: inputs.mode == 'single'
         env:
