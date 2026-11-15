@@ -125,13 +125,15 @@ export function App() {
   refreshRef.current = refresh;
 
   // The release the inbox runs, read once: GET /v1/state carries no version, and the GitHub mark names it on hover.
+  // The request is aborted on the way out, so a page that closes takes no half-open socket with it.
   const [release, setRelease] = React.useState('');
   React.useEffect(() => {
-    let live = true;
-    fetch(BASE + 'v1/info').then((r) => (r.ok ? r.json() : null)).then((info) => {
-      if (live && info && typeof info.version === 'string') setRelease(info.version);
+    if (auth !== 'ok') return;
+    const stop = new AbortController();
+    fetch(BASE + 'v1/info', { signal: stop.signal }).then((r) => (r.ok ? r.json() : null)).then((info) => {
+      if (info && typeof info.version === 'string') setRelease(info.version);
     }).catch(() => {});
-    return () => { live = false; };
+    return () => stop.abort();
   }, [auth]);
 
   // Each state carries the inbox's Group by and pins, so a change on another page reaches this one without a reload.
