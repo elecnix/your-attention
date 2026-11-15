@@ -64,6 +64,14 @@ describe('principles', () => {
     assert.match(source, /connectionOrigin\(reported\) \?\? before\?\.origin/, 'a connection that reports none keeps the origin the row had');
   });
 
+  it('a pin groups by the property it names, a tag value or an agent', () => {
+    // DP15: a pin lifts what the card itself carries, so a tag pin reads that tag and an agent pin the agent that
+    // posted the card. An agent's heading is the name presence and the cards give it, never a list the page kept.
+    const queue = fs.readFileSync(path.join(ROOT, 'web/queue.js'), 'utf8');
+    assert.match(queue, /Array\.isArray\(pin\) \? tagOf\(c, pin\[0\]\) === pin\[1\] : c\.agent === pin\?\.agent/, 'a tag pin matches the card tag, and an agent pin the agent that posted it');
+    assert.match(queue, /agentName\(pin\?\.agent/, 'an agent pin is named the way the inbox names that agent');
+  });
+
   it('every principle in PRINCIPLES.md has a statement and a reason', () => {
     const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);

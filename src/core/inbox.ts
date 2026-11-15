@@ -15,7 +15,7 @@ import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, Option, PersonPresence, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -145,9 +145,11 @@ const RETRY_MAX_MS = 60 * 60 * 1000;
 export const RETRY_GIVE_UP_MS = 24 * 60 * 60 * 1000;
 /** Headers the inbox sets on each webhook call itself, or that the platform sets. */
 const RESERVED_HEADER = /^(content-type|content-length|host|transfer-encoding|connection|x-your-attention-.*)$/i;
-/** The pinned tag values one inbox keeps. A tag key or value is cut to 100 characters, as in the card's summary. */
+/** The pins one inbox keeps: a tag key or value is cut to 100 characters, as in the card's summary, and an agent id
+to 80, as a card's agent is. */
 export const MAX_PINS = 20;
 export const MAX_TAG_CHARS = 100;
+export const MAX_AGENT_CHARS = 80;
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
@@ -499,7 +501,7 @@ export class Inbox {
     if (!title) throw new InboxError(400, 'title is required');
     const agent = String(input.agent ?? '').trim();
     if (!agent) throw new InboxError(400, 'agent is required');
-    if (agent.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (agent.length > MAX_AGENT_CHARS) throw new InboxError(400, `agent must be at most ${MAX_AGENT_CHARS} characters`);
     if (title.length > 300) throw new InboxError(400, 'title must be at most 300 characters');
     if (agent === SYSTEM_AGENT && caller.token !== '') throw new InboxError(403, 'the system agent is reserved');
     this.makeRoom(input.id);
@@ -848,7 +850,7 @@ export class Inbox {
   private requestingAgent(caller: Caller, input: NewCard): string {
     if (caller.role === 'extension') throw new InboxError(403, 'an extension posts no cards');
     const agent = String(input?.agent ?? '').trim();
-    if (!agent || agent.length > 80) throw new InboxError(400, 'agent is required, at most 80 characters');
+    if (!agent || agent.length > MAX_AGENT_CHARS) throw new InboxError(400, `agent is required, at most ${MAX_AGENT_CHARS} characters`);
     if (agent === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
     return agent;
   }
@@ -1301,7 +1303,7 @@ export class Inbox {
     // A list is what the field takes, so a string or an object is refused rather than mapped over.
     if (input.agents !== undefined && !Array.isArray(input.agents)) throw new InboxError(400, 'requireCard.agents must be a list of agent ids');
     const agents = mode === 'agents' ? [...new Set(((input.agents as string[] | undefined) ?? []).map((a: string) => String(a).trim()).filter(Boolean))] : [];
-    if (agents.some((a) => a.length > 80)) throw new InboxError(400, 'requireCard.agents takes agent ids of at most 80 characters');
+    if (agents.some((a) => a.length > MAX_AGENT_CHARS)) throw new InboxError(400, `requireCard.agents takes agent ids of at most ${MAX_AGENT_CHARS} characters`);
     if (mode === 'agents' && !agents.length) throw new InboxError(400, 'requireCard.mode agents needs at least one agent; use off instead');
     return { mode, reminders, ...(agents.length ? { agents } : {}) };
   }
@@ -1317,7 +1319,7 @@ export class Inbox {
    */
   proposeRequireCard(input: { on: boolean; reminders?: number; by?: { caller: Caller; agent: string } }): Card {
     const from = input.by ? String(input.by.agent ?? '').trim() : '';
-    if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (from.length > MAX_AGENT_CHARS) throw new InboxError(400, `agent must be at most ${MAX_AGENT_CHARS} characters`);
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
     const rule = this.requireCard();
     const reminders = input.reminders === undefined ? rule.reminders : Number(input.reminders);
@@ -1370,7 +1372,8 @@ export class Inbox {
     if (input.pins !== undefined) next.pins = this.checkPins(input.pins);
     // A pin or an unpin travels as its own change, so two devices that pin at the same moment both keep their value.
     if (input.pinAdd !== undefined || input.pinRemove !== undefined) {
-      const same = (a: [string, string], b: [string, string]) => a[0] === b[0] && a[1] === b[1];
+      // Two pins are the same pin when they name the same tag and value, or the same agent.
+      const same = (a: Pin, b: Pin) => (Array.isArray(a) && Array.isArray(b) ? a[0] === b[0] && a[1] === b[1] : !Array.isArray(a) && !Array.isArray(b) && a.agent === b.agent);
       const add = input.pinAdd === undefined ? [] : this.checkPins(input.pinAdd);
       const remove = input.pinRemove === undefined ? [] : this.checkPins(input.pinRemove);
       const current = next.pins ?? [];
@@ -1397,15 +1400,24 @@ export class Inbox {
     return key && groupBy !== 'none' ? `tag:${key}` : groupBy as string;
   }
 
-  /** Pins reach the queue the page draws, so a pair that isn't a tag key and its value is refused rather than stored. */
-  private checkPins(pins: unknown): [string, string][] {
-    if (!Array.isArray(pins) || pins.length > MAX_PINS) throw new InboxError(400, `pins must be a list of at most ${MAX_PINS} [key, value] pairs`);
-    return pins.map((pair, i) => {
-      if (!Array.isArray(pair) || pair.length !== 2) throw new InboxError(400, `pin ${i + 1}: give a tag key and its value`);
-      const [key, value] = pair.map((side) => (typeof side === 'string' ? side.trim() : ''));
-      if (!key || !value) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are both required`);
-      if (key.length > MAX_TAG_CHARS || value.length > MAX_TAG_CHARS) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are at most ${MAX_TAG_CHARS} characters`);
-      return [key, value];
+  /** Pins reach the queue the page draws, so a tag key and its value, or an agent id, that cannot work is refused rather
+   * than stored. A tag pin keeps the [key, value] pair an older inbox stores and an older client sends. */
+  private checkPins(pins: unknown): Pin[] {
+    if (!Array.isArray(pins) || pins.length > MAX_PINS) throw new InboxError(400, `pins must be a list of at most ${MAX_PINS} pins`);
+    return pins.map((pin: unknown, i): Pin => {
+      // A pair is a tag pin, the shape every inbox that pinned a value before agent pins existed holds.
+      if (Array.isArray(pin)) {
+        if (pin.length !== 2) throw new InboxError(400, `pin ${i + 1}: give a tag key and its value, or an agent`);
+        const [key, value] = pin.map((side) => (typeof side === 'string' ? side.trim() : ''));
+        if (!key || !value) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are both required`);
+        if (key.length > MAX_TAG_CHARS || value.length > MAX_TAG_CHARS) throw new InboxError(400, `pin ${i + 1}: the tag key and its value are at most ${MAX_TAG_CHARS} characters`);
+        return [key, value];
+      }
+      // An agent pin names one agent, and the queue matches it against the agent each card carries.
+      const agent = pin && typeof pin === 'object' && typeof (pin as { agent?: unknown }).agent === 'string' ? (pin as { agent: string }).agent.trim() : '';
+      if (!agent) throw new InboxError(400, `pin ${i + 1}: give a tag key and its value, or an agent id`);
+      if (agent.length > MAX_AGENT_CHARS) throw new InboxError(400, `pin ${i + 1}: an agent id is at most ${MAX_AGENT_CHARS} characters`);
+      return { agent };
     });
   }
 
@@ -1535,7 +1547,7 @@ export class Inbox {
     const bullets = this.widgetCatalog().split('\n').slice(1).filter((l) => l.trim());
     if (bullets.some((l) => clean.includes(l))) throw new InboxError(400, 'the proposal includes the widget catalog, which the inbox adds beside the guidance text and which is not part of it: propose the text without those lines');
     const from = by ? String(by.agent ?? '').trim() : '';
-    if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (from.length > MAX_AGENT_CHARS) throw new InboxError(400, `agent must be at most ${MAX_AGENT_CHARS} characters`);
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
     const base = this.guidance();
     const id = `guidance-${randomId(4)}`;
@@ -2023,7 +2035,7 @@ export class Inbox {
   private agentId(agent: unknown): string {
     const id = String(agent ?? '').trim();
     if (!id) throw new InboxError(400, 'agent is required');
-    if (id.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (id.length > MAX_AGENT_CHARS) throw new InboxError(400, `agent must be at most ${MAX_AGENT_CHARS} characters`);
     return id;
   }
 
@@ -2096,7 +2108,7 @@ export class Inbox {
    * session runs, so a page can label the session before it posts any card, and a connection that leaves it out keeps
    * the origin the row already carries. */
   connect(caller: Caller, agent: string, send: AgentSend, instance?: string, opts: { resumed?: boolean; channelOff?: boolean; origin?: unknown } = {}): () => void {
-    if (String(agent).length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
+    if (String(agent).length > MAX_AGENT_CHARS) throw new InboxError(400, `agent must be at most ${MAX_AGENT_CHARS} characters`);
     const k = this.key(caller.token, agent);
     let set = this.agents.get(k);
     if (!set) this.agents.set(k, (set = new Set()));

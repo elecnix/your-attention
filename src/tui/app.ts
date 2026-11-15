@@ -5,9 +5,9 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { cardDetails } from '../../web/details.js';
-import { after, buildQueue, type InboxState, type Queue } from '../../web/queue.js';
+import { after, agentName, buildQueue, type InboxState, type Queue } from '../../web/queue.js';
 import type { CardSummary } from '../core/summary.ts';
-import type { Attachment } from '../core/types.ts';
+import type { Attachment, Pin } from '../core/types.ts';
 import { notOwnerAdvice } from '../client.ts';
 import { homeDir, writePrivate } from '../node/home.ts';
 import { ApiError, InboxApi, ownerConfig } from './api.ts';
@@ -53,8 +53,8 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   };
   let focus: string | null = null;
   let pinned: string | null = null;
-  /** The pinned tag values the inbox holds, oldest first, as [key, value] pairs. */
-  let pins: [string, string][] = [];
+  /** The pins the inbox holds, oldest first: a tag pin as [key, value], an agent pin as {agent}. */
+  let pins: Pin[] = [];
   let known: Set<string> | null = null;
   const views = new Map<string, CardView>();
   // GET /v1/state sends summaries. The card on screen, the one after it and the one it follows load whole, ahead of time.
@@ -341,31 +341,35 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     status(`Group by ${m.groupBy === 'none' ? 'nothing' : m.groupBy.replace(/^tag:/, '')}.`);
     api.call('PUT', '/v1/settings', { groupBy: m.groupBy }).catch((e: Error) => status(`The inbox did not keep the grouping: ${e.message}`, 'warn'));
   };
-  /** Pin the open card's value of the tag the queue groups by, or unpin it, as a heading's pin does on the page. */
+  /** Pin the open card's value of the queue's grouping, or unpin it, as a heading's pin does on the page: a tag value
+   * under a tag grouping, and the agent that posted the card under an agent grouping. */
   const togglePin = async (): Promise<void> => {
     const key = m.groupBy.startsWith('tag:') ? m.groupBy.slice(4) : null;
+    const agent = m.groupBy === 'agent' ? String(m.current?.agent ?? '').trim() : '';
     const value = key && m.current ? String((m.current.tags ?? {})[key] ?? '').trim() : '';
-    if (!key || !m.current) { status('Group by a tag first (g), then p pins the open card’s value.', 'warn'); return; }
-    if (!value) { status(`This card has no ${key} tag.`, 'warn'); return; }
+    if (!m.current || (!key && !agent)) { status('Group by a tag or an agent first (g), then p pins the open card’s value.', 'warn'); return; }
+    if (key && !value) { status(`This card has no ${key} tag.`, 'warn'); return; }
+    const pin: Pin = key ? [key, value] : { agent };
+    // Two pins are the same pin when they name the same tag and value, or the same agent.
+    const same = (a: Pin, b: Pin) => (Array.isArray(a) && Array.isArray(b) ? a[0] === b[0] && a[1] === b[1] : !Array.isArray(a) && !Array.isArray(b) && a.agent === b.agent);
+    const what = key ? `${key}: ${value}` : `agent ${agentName(agent, m.state?.cards ?? [], m.state?.presence ?? {})}`;
     // The inbox keeps one list of pins for every device, so the toggle applies to the freshest list it has, not to the
     // one this terminal read when it last connected: another device may have pinned something since. A read that fails
     // leaves nothing to base the write on, so nothing is written.
-    let fresh: [string, string][];
+    let fresh: Pin[];
     try {
       const s = await api.state();
-      fresh = Array.isArray(s.settings?.pins) ? (s.settings.pins as [string, string][]) : [];
+      fresh = Array.isArray(s.settings?.pins) ? s.settings.pins : [];
     } catch (e) {
       status(`The inbox did not answer, so nothing was pinned: ${(e as Error).message}`, 'warn');
       return;
     }
-    const had = fresh.some(([k, v]) => k === key && v === value);
-    const next: [string, string][] = had ? fresh.filter(([k, v]) => !(k === key && v === value)) : [...fresh, [key, value]];
-    pins = next;
+    const had = fresh.some((p) => same(p, pin));
+    pins = had ? fresh.filter((p) => !same(p, pin)) : [...fresh, pin];
     if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
-    status(had ? `Unpinned ${key}: ${value}.` : `Pinned ${key}: ${value} to the top.`, 'ok');
+    status(had ? `Unpinned ${what}.` : `Pinned ${what} to the top.`, 'ok');
     // The change travels as one pin in or out, so a pin another device adds at the same moment survives.
-    const change = had ? { pinRemove: [[key, value]] } : { pinAdd: [[key, value]] };
-    api.call('PUT', '/v1/settings', change).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
+    api.call('PUT', '/v1/settings', had ? { pinRemove: [pin] } : { pinAdd: [pin] }).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
   };
   const clearDealt = () => {
     const n = m.queue?.dealt.length ?? 0;

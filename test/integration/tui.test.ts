@@ -297,6 +297,33 @@ describe('your-attention tui', () => {
     await t.stop();
   });
 
+  it('p pins the agent of the open card under an agent grouping, and pins it out again', async () => {
+    await post({ id: 'apin-a', agent: 's-alpha', title: 'Alpha needs a decision', priority: 'now' });
+    await post({ id: 'apin-b', agent: 's-beta', title: 'Beta needs a decision', priority: 'soon' });
+    // Group by agent, as a page saved it: the alpha card ranks first, so only a pin moves beta above it.
+    h.server.inbox.setSettings({ groupBy: 'agent', pins: [] });
+    const t = tui();
+    await t.waitFor('s-alpha (1)');
+    assert.ok(t.vt.text().indexOf('s-alpha (1)') < t.vt.text().indexOf('s-beta (1)'), 'the alpha group comes first before the pin');
+    // Open the beta card, whose agent p pins, and its group heads the queue.
+    const row = await t.waitFor('Beta needs a decision');
+    t.click(row.x + 2, row.y);
+    await until(() => (t.vt.text().split('Beta needs a decision').length > 2 ? true : undefined));
+    t.send('p');
+    await t.waitFor('Pinned agent s-beta to the top.');
+    await until(() => (h.server.inbox.settings().pins?.length === 1 ? true : undefined));
+    assert.deepEqual(h.server.inbox.settings().pins, [{ agent: 's-beta' }]);
+    await until(() => (t.vt.text().indexOf('s-beta (1)') < t.vt.text().indexOf('s-alpha (1)') ? true : undefined));
+    // p again unpins the agent, and the grouping's own order comes back.
+    t.send('p');
+    await t.waitFor('Unpinned agent s-beta.');
+    await until(() => (h.server.inbox.settings().pins?.length === 0 ? true : undefined));
+    await until(() => (t.vt.text().indexOf('s-alpha (1)') < t.vt.text().indexOf('s-beta (1)') ? true : undefined));
+    h.server.inbox.setSettings({ groupBy: 'none' });
+    for (const id of ['apin-a', 'apin-b']) await agent.close(id, 'retracted', 'test over');
+    await t.stop();
+  });
+
   // The stand-in for herdr is a shell script, which Windows does not run.
   it('opens a herdr session link through the inbox, which focuses that tab', { skip: process.platform === 'win32' }, async () => {
     await post({ id: 'link', agent: 's-link', title: 'Look at the release agent', priority: 'now', text: 'See [the release agent](https://herdr.invalid/v1/tab/w7:t3).' });

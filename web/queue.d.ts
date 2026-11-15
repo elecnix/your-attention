@@ -1,4 +1,4 @@
-import type { CardState, Guidance, Presence, PriorityLevel, Settings } from '../src/core/types.ts';
+import type { CardState, Guidance, Pin, Presence, PriorityLevel, Settings } from '../src/core/types.ts';
 import type { AnswerSummary, CardSummary } from '../src/core/summary.ts';
 
 type Card = CardSummary;
@@ -32,8 +32,8 @@ export interface Queue {
   /** The inbox's own cards among them, which sit above every pinned group and every group. */
   systems: Card[];
   checking: Card[];
-  /** One group per pinned tag value, in pin order, with the waiting cards it holds and the id that names it. */
-  pinned: { key: string; value: string; id: string; items: Card[] }[];
+  /** One group per pin, in pin order: the pin, the heading it reads, its collapse id, and the waiting cards it holds. */
+  pinned: { pin: Pin; title: string; id: string; items: Card[] }[];
   outbox: Card[];
   sent: Card[];
   tagKeys: string[];
@@ -46,5 +46,5 @@ export interface Queue {
   hidden: Set<string>;
   order: Card[];
 }
-export function buildQueue(state: InboxState, groupBy: string, pins?: [string, string][], collapsed?: ReadonlySet<string>): Queue;
+export function buildQueue(state: InboxState, groupBy: string, pins?: Pin[], collapsed?: ReadonlySet<string>): Queue;
 export function after(order: Card[], id: string | null): string | null;
