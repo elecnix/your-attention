@@ -164,8 +164,8 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         const view = await inbox.requireCard(agent);
         return `${says(view.on, view.reminders)} The rule asks ${ruleSays(view.rule)}.`;
       }
-      if (args['on'] === undefined) throw new Error('say on: true to ask this session for a card, false to stop asking');
-      const on = args['on'] === true;
+      if (typeof args['on'] !== 'boolean') throw new Error('say on: true to ask this session for a card, false to stop asking');
+      const on = args['on'];
       if (scope === 'self') {
         const next = await inbox.setRequireCardForSelf(agent, on);
         return `${says(on, next.reminders)} This took effect at once, for this session only: no card asked the person, because it is your own conduct.`;

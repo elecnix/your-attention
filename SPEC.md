@@ -417,7 +417,7 @@ An answer closes the card, and the inbox delivers it with the comment to the age
 
 ## Settings
 
-`GET /v1/settings` returns `{allowHtml, groupBy, pins, requireCard}`. Only the owner changes the first three, with `PUT /v1/settings`, which takes any of those fields and leaves the others as they are.
+`GET /v1/settings` returns `{allowHtml, groupBy, pins, requireCard}`. Only the owner changes them, with `PUT /v1/settings`, which takes any of those fields and leaves the others as they are. A `requireCard` written there is the one way to name a list of agents, with `mode: agents` and the agents in `agents`.
 
 - `allowHtml` lets a card carry its own HTML and scripts, in a sandboxed frame.
 - `groupBy` is the queue's grouping: `none`, `priority`, `agent`, or `tag:<key>` for any tag key a card has. It starts unset, and the queue groups by nothing.
@@ -528,6 +528,14 @@ An agent opens `GET /v1/stream?agent=<id>`, and the inbox reports the agent onli
 ```
 
 The event above is trimmed to the fields an agent reads. The `id` is a receipt: the Claude Code channel watches the session transcript for it before it sends the acknowledgment.
+
+The inbox also sends a `settings` event to every open agent stream when the require-a-card rule changes, whoever changed it, which is what spares a running session a restart:
+
+```json
+{ "type": "settings", "id": "8a1c40e2f9b3", "requireCard": { "mode": "all", "reminders": 3 } }
+```
+
+The event carries the whole rule rather than the field that moved, so a session that missed an earlier one still reads the rule in force.
 
 The agent addresses take an optional `&channel=off`, which says that the session drops every channel notification, so an answer pushed to it never arrives. The inbox records it on the agent's presence as `channelOff: true`, `GET /v1/state` sends it with the rest of the presence, and the card shows **Channel off** until a connection reports otherwise. The Claude Code channel reads the development-channels flag off its parent's command line, and a session started without `--dangerously-load-development-channels server:your-attention` sends that parameter.
 

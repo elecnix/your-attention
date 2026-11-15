@@ -62,6 +62,9 @@ describe('the require-a-card rule', () => {
     // The person dismisses it without choosing, and the rule stays as it was.
     inbox.dismiss(ownerCaller, card.id, { comment: 'Never mind.' });
     assert.equal(inbox.requireCardFor('s1').on, false, 'a dismissed proposal applies nothing');
+    // Answering the dismissed proposal again does not apply what the first answer dropped.
+    await inbox.answer(card.id, { values: { choice: 'approve' } });
+    assert.equal(inbox.requireCardFor('s1').on, false, 'a closed proposal applies nothing, whoever answers it later');
     // A card that expired before it was answered is gone, and answering it says so rather than applying a rule.
     await assert.rejects(() => inbox.answer(`${card.id}-gone`, { values: { choice: 'approve' } }), /unknown card/);
     const later = inbox.proposeRequireCard({ on: true });
@@ -73,7 +76,8 @@ describe('the require-a-card rule', () => {
     const inbox = fresh();
     const handle = createHandler(inbox, { heartbeatMs: 50 });
     const owner = (await inbox.createToken('page', 'owner')).secret;
-    const agentToken = (await inbox.createToken('agent a', 'agent')).secret;
+    const agentRecord = await inbox.createToken('agent a', 'agent');
+    const agentToken = agentRecord.secret;
     const post = await handle(new Request('http://inbox.local/v1/settings/require-card', {
       method: 'POST',
       headers: { authorization: `Bearer ${agentToken}`, 'content-type': 'application/json' },
@@ -97,6 +101,32 @@ describe('the require-a-card rule', () => {
     }));
     assert.equal(applied.status, 200);
     assert.equal(inbox.requireCardFor('s1').on, true);
+
+    // A rule says whether someone is asked, so a lookalike value is refused rather than read as off.
+    const lookalike = await handle(new Request('http://inbox.local/v1/settings/require-card', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agentToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'all', on: 'true', agent: 's1' }),
+    }));
+    assert.equal(lookalike.status, 400);
+
+    // A session changes its own rule: a token with no stream as that agent cannot change one it does not run.
+    const selfPath = 'http://inbox.local/v1/settings/require-card';
+    const stranger = await handle(new Request(selfPath, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agentToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'self', on: false, agent: 'someone-else' }),
+    }));
+    assert.equal(stranger.status, 403);
+    assert.equal(inbox.requireCardFor('someone-else').on, true, 'the refused change left the rule alone');
+    inbox.connect({ token: agentRecord.token.id, role: 'agent' }, 'agent a', () => {});
+    const mine = await handle(new Request(selfPath, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${agentToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'self', on: true, agent: 'agent a' }),
+    }));
+    assert.equal(mine.status, 200);
+    assert.equal(inbox.requireCardFor('agent a').on, true);
   });
 
   it('stops a session from stepping out of a rule that names every agent', () => {

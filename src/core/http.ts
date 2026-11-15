@@ -500,9 +500,15 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'POST') {
         const input = await readJson<{ scope?: string; on?: unknown; reminders?: unknown; agent?: string }>(req);
         const who = String(input.agent ?? '').trim();
-        const on = input.on === true;
+        // A rule says whether someone is asked for a card, so the request says it plainly rather than in a lookalike.
+        if (typeof input.on !== 'boolean') throw new InboxError(400, 'on must be true or false');
+        const on = input.on;
         const reminders = input.reminders === undefined ? undefined : Number(input.reminders);
-        if (input.scope === 'self') return json(inbox.setRequireCardForAgent(who, on));
+        if (input.scope === 'self') {
+          // A session changes its own conduct. The agent id on an open stream is the only identity the inbox can check.
+          if (!inbox.connectedAs(me, who)) throw new InboxError(403, 'only a session connected as that agent changes its own rule');
+          return json(inbox.setRequireCardForAgent(who, on));
+        }
         if (input.scope === 'all') {
           const card = inbox.proposeRequireCard({ on, ...(reminders === undefined ? {} : { reminders }), ...(who ? { by: { caller: me, agent: who } } : {}) });
           return json(publicCard(card), 201);

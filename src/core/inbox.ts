@@ -1255,6 +1255,11 @@ export class Inbox {
     return { on, reminders: rule.reminders };
   }
 
+  /** Whether this caller reported this agent id on an open stream, the only identity the inbox can check for a session. */
+  connectedAs(caller: Caller, agent: string): boolean {
+    return this.agents.has(`${caller.token}\n${agent}`);
+  }
+
   /** An agent turns the rule on or off for itself. Its own conduct, so no card and no approval. */
   setRequireCardForAgent(agent: string, enabled: boolean): RequireCardSettings {
     const id = String(agent ?? '').trim();
@@ -1335,7 +1340,8 @@ export class Inbox {
 
   /** Apply or drop a proposed rule, close the card, and tell the agent that proposed it. */
   private resolveRequireCard(card: Card, answer: Answer): void {
-    if (!card.requireCard) return;
+    // A proposal that already closed applies nothing: a later answer to it is not a decision anyone made.
+    if (!card.requireCard || card.closed) return;
     if ([answer.values['choice']].flat()[0] === 'approve') {
       const next = this.putRequireCard({ mode: card.requireCard.mode, reminders: card.requireCard.reminders });
       this.closeAs(card, 'resolved', next.mode === 'all'
