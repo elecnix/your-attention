@@ -22,3 +22,6 @@ export interface ListedAgent {
 }
 
 export function agentList(state: { cards?: CardSummary[]; presence?: Record<string, Presence> }, now?: number): ListedAgent[];
+
+/** The agent a pick reads as: the picked one while the list still has it, else the first of the list, else null. */
+export function pickedAgent(agents: ListedAgent[], picked: string | null): ListedAgent | null;

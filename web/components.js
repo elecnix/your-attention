@@ -8,7 +8,7 @@ import { copyText, installCopy } from './copy.js';
 import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
-import { agentList } from './agents.js';
+import { agentList, pickedAgent } from './agents.js';
 
 export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions, secretFieldsOf };
 
@@ -926,9 +926,10 @@ export function DevicesLink() {
 /** What the panel's button and title say, so the person and a test find the same words. */
 export const SEND_LABEL = 'Send a card to an agent';
 
-/** The agents the inbox knows, and a message box for each. A message is a card addressed to that agent, which it
- * receives on its stream: the panel invents no other channel, and the agent replies with a card of its own (DP24).
- * Its button sits at the foot of the queue, with the inbox's other doors, so the bar keeps the room a phone needs. */
+/** The agents the inbox knows, and one form that sends a card to the agent the person picks. A message is a card
+ * addressed to that agent, which it receives on its stream: the panel invents no other channel, and the agent replies
+ * with a card of its own (DP24). Its button sits at the foot of the queue, with the inbox's other doors, so the bar
+ * keeps the room a phone needs. */
 export function AgentsPanel({ state, startOpen = false }) {
   // A story opens the panel, since nothing clicks there.
   const [open, setOpen] = React.useState(startOpen);
@@ -937,25 +938,29 @@ export function AgentsPanel({ state, startOpen = false }) {
     if (open && ref.current && !ref.current.open) ref.current.showModal();
   }, [open]);
   const close = () => { ref.current?.close(); setOpen(false); };
+  // The list comes from the state the page already reads, so presence that moves reaches this form as it redraws.
   const agents = agentList(state);
   return h(React.Fragment, null,
     h('button', { type: 'button', className: 'btn agents-open', onClick: () => setOpen(true) }, SEND_LABEL),
     open && h(BarDialog, { dialogRef: ref, className: 'qr-dialog agents-dialog', titleId: 'agents-title', title: SEND_LABEL, onClose: close },
       h('p', null, 'Your card goes to that agent on its stream. It answers with a card of its own, which waits in your queue.'),
-      agents.length
-        ? h('ul', { className: 'agents' }, agents.map((a) => h(AgentRow, { key: a.id, agent: a })))
-        : h('p', { className: 'muted' }, 'No agent has connected to this inbox yet.'),
+      !agents.length && h('p', { className: 'muted note' }, 'Nobody to send to: no agent has connected to this inbox yet.'),
+      h(SendForm, { agents }),
       h('div', { className: 'qr-actions' }, h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: true }, 'Close'))));
 }
 
-/** One agent in the panel: what the inbox knows about it, and the message the person sends it. */
-function AgentRow({ agent }) {
+/** The panel's one form: the agent a card goes to, the message, and the button that sends it. */
+function SendForm({ agents }) {
+  const [picked, setPicked] = React.useState(null);
   const [text, setText] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [result, setResult] = React.useState(null);
+  // A pick that left the list reads as the first agent, so a card never goes to a name that presence dropped.
+  const agent = pickedAgent(agents, picked);
   const draft = text.trim();
-  async function send() {
-    if (!draft || busy) return;
+  async function send(e) {
+    e.preventDefault();
+    if (!agent || !draft || busy) return;
     setBusy(true);
     setResult(null);
     try {
@@ -967,26 +972,31 @@ function AgentRow({ agent }) {
       setResult({ ok: true, message: body.deliveredAt
         ? `Sent to ${agent.name}: the card is on its stream now.`
         : `Waiting for ${agent.name}: it is offline, so the card arrives when its session connects.` });
-    } catch (e) {
-      setResult({ ok: false, message: `The card did not go: ${String((e && e.message) || e)}` });
+    } catch (err) {
+      setResult({ ok: false, message: `The card did not go: ${String((err && err.message) || err)}` });
     } finally {
       setBusy(false);
     }
   }
-  return h('li', { className: `agent ${agent.status}` },
-    h('div', { className: 'agent-what' },
-      h('span', { className: 'agent-name' }, agent.name),
-      h('span', { className: 'agent-facts' },
-        h('span', { className: `agent-state ${agent.status}` }, agent.label),
-        agent.id !== agent.name && h('code', { className: 'agent-id' }, agent.id),
-        agent.cwd && h('code', { className: 'agent-cwd', title: agent.cwd }, agent.cwd))),
-    h('label', { className: 'agent-send' },
+  return h('form', { className: 'agents-send', onSubmit: send },
+    h('label', { className: 'agents-pick' }, 'Agent',
+      h('select', {
+        value: agent ? agent.id : '', disabled: !agents.length,
+        onChange: (e) => { setPicked(e.target.value); setResult(null); },
+      }, agents.map((a) => h('option', { key: a.id, value: a.id }, a.name)))),
+    // What the inbox knows about the picked agent, read from the same list, so the state shows before the person writes.
+    agent && h('p', { className: 'agent-facts' },
+      h('span', { className: `agent-state ${agent.status}` }, agent.label),
+      agent.id !== agent.name && h('code', { className: 'agent-id' }, agent.id),
+      agent.cwd && h('code', { className: 'agent-cwd', title: agent.cwd }, agent.cwd)),
+    h('label', { className: 'agents-message' }, 'Message',
       h('textarea', {
-        rows: 2, value: text, placeholder: `Message to ${agent.name}`, 'aria-label': `Message to ${agent.name}`,
+        rows: 3, value: text, disabled: !agent, placeholder: agent ? `Message to ${agent.name}` : 'Message',
         onChange: (e) => setText(e.target.value),
         // Command+Enter or Control+Enter sends, as it does on a card.
-        onKeyDown: (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } },
-      }),
-      h('button', { type: 'button', className: 'btn primary', onClick: send, disabled: busy || !draft }, busy ? 'Sending…' : 'Send')),
-    result && h('p', { className: result.ok ? 'note ok' : 'note warn', role: 'status' }, result.message));
+        onKeyDown: (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(e); },
+      })),
+    result && h('p', { className: result.ok ? 'note ok' : 'note warn', role: 'status' }, result.message),
+    h('div', { className: 'qr-actions' },
+      h('button', { type: 'submit', className: 'btn primary', disabled: busy || !draft || !agent }, busy ? 'Sending…' : 'Send')));
 }

@@ -1,4 +1,4 @@
-// The agents panel: who the inbox knows, and the card the person sends one of them.
+// The agents panel: who the inbox knows, and the one form that sends a card to the agent picked in its drop-down.
 import { AgentsPanel } from '../components.js';
 import { h } from '../env.js';
 import { card, mount } from './render.js';
@@ -24,5 +24,6 @@ function state() {
   };
 }
 
-// A story opens the panel, since nothing clicks in a story.
+// A story opens the panel, since nothing clicks in a story. Its drop-down lists the three agents, the first one
+// picked, with what presence says about it under the field.
 export const SendACardToAnAgent = { render: () => mount(h(AgentsPanel, { state: state(), startOpen: true })) };

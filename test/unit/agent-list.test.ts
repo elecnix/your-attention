@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Presence } from '../../src/core/types.ts';
-import { agentList } from '../../web/agents.js';
+import { agentList, pickedAgent } from '../../web/agents.js';
 
 const HOUR = 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
@@ -74,5 +74,26 @@ describe('the agents the panel lists', () => {
   it('names an agent by its id when no card reported a session name', () => {
     const rows = agentList(state({ 'pi:9c1': { agent: 'pi:9c1', online: true, lastSeen: NOW } }), NOW);
     assert.equal(rows[0]?.name, 'pi:9c1');
+  });
+});
+
+describe('the agent the panel\'s drop-down reads as', () => {
+  const rows = agentList(state({
+    'a:here': { agent: 'a:here', online: true, lastSeen: NOW },
+    'b:away': { agent: 'b:away', online: false, lastSeen: NOW - HOUR },
+  }), NOW);
+
+  it('keeps the agent the person picked while the list still has it', () => {
+    assert.equal(pickedAgent(rows, 'b:away')?.id, 'b:away');
+  });
+
+  it('falls back to the first agent when the picked one left the list', () => {
+    // Presence drops a session, so the pick is a name that is gone: the card goes to the first agent rather than there.
+    assert.equal(pickedAgent(rows, 'c:gone')?.id, 'a:here');
+    assert.equal(pickedAgent(rows, null)?.id, 'a:here');
+  });
+
+  it('has nothing to read as while the inbox knows no agent', () => {
+    assert.equal(pickedAgent([], 'a:here'), null);
   });
 });

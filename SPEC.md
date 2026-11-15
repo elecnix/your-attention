@@ -179,7 +179,7 @@ The inbox saves a revision on a dismissed card, and the card stays in **Sent**. 
 
 ## A card the person sends to an agent
 
-The page shows a panel of every agent known to the inbox, so the person picks one and writes it a card. `POST /v1/send {agent, text}` takes that message, for the owner only, and answers 201 with `{id, agent, card, sentAt, deliveredAt?}`. The first line of the message becomes `title`, at most 300 characters, and the lines under it become `text`, so a one-line message reads once. Its `kind` is `ask`. The queue doesn't show it, since it waits for an agent rather than for the person.
+The page shows a panel of every agent known to the inbox, with one drop-down that picks the agent, one message field and one button that sends. `POST /v1/send {agent, text}` takes that message, for the owner only, and answers 201 with `{id, agent, card, sentAt, deliveredAt?}`. The first line of the message becomes `title`, at most 300 characters, and the lines under it become `text`, so a one-line message reads once. Its `kind` is `ask`. The queue doesn't show it, since it waits for an agent rather than for the person.
 
 `GET /v1/state` feeds the panel as well. Each card summary keeps `origin.cwd` beside `origin.name` and `origin.harness`, so the page reads a working directory in the state it already fetches. The newest card that reported one decides it, and when no card reported a directory, the panel leaves that line out.
 
@@ -193,7 +193,7 @@ An agent stream receives the card as an event of its own:
 
 There is nothing for the agent to answer on this card. A card goes one way, so the agent replies with a card of its own, which waits in the queue for the person. The pi extension, the Claude Code channel and the OpenCode plugin each read the event as a note for the model. `your-attention watch` prints it as it prints the others, and `--no-card` and `--select` cut the card of this event as they cut an answer's.
 
-For each agent, the panel shows the session name on its newest card and the working directory that card reported. Presence decides the rest. A connected session reads as connected. A session that went offline reads as offline, with the time of its last connection. An agent with no presence row reads as never connected. A session that drops channel notifications says so, because a card pushed there reaches no model.
+The drop-down lists the agents of `GET /v1/state` as the panel reads them, and the field under it takes the message. Below the drop-down, the panel says what presence reports for the agent it picked, and shows the working directory of that agent's newest card. A connected session reads as connected, and one that went offline reads as offline, with the time of its last connection. An agent with no presence row reads as never connected. The panel also says when a session drops channel notifications, because a card pushed there reaches no model. With no agent in the state, the panel says there is nobody to send to, and disables the button that sends. When presence drops the agent picked, the drop-down falls back to the first agent of the list, so a card never goes to a name that is gone.
 
 ## Approvals
 

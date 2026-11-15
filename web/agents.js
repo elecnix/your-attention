@@ -49,3 +49,10 @@ function reportedBy(cards, id) {
   }
   return { name, cwd };
 }
+
+/** The agent a pick reads as: the one the person picked while the list still has it, else the first of the list.
+ * A pick that left the list, as when presence drops an agent, falls back rather than sending a card to a name that is
+ * gone. With no agent at all, there is nothing to send to. */
+export function pickedAgent(agents, picked) {
+  return agents.find((a) => a.id === picked) || agents[0] || null;
+}
