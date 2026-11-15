@@ -61,6 +61,19 @@ describe('the Claude Code channel', () => {
     await until(async () => (await state()).states['cc-1'] === 'read' || undefined);
   });
 
+  it('resets the asks budget when the person sends the session a card, since that turn may post one back', async () => {
+    // The Stop hook keeps its count of asks in a file, and a session that spent all three is asked for no more.
+    const asks = path.join(h.home, 'claude', `${SESSION}.card-asks`);
+    fs.mkdirSync(path.dirname(asks), { recursive: true });
+    fs.writeFileSync(asks, '3');
+    const res = await h.owner('POST', '/v1/send', { agent: `claude:${SESSION}`, text: 'Post the deploy card before you carry on.' });
+    assert.equal(res.status, 201);
+    const note = await until(() => notes.find((n) => n.content.includes('sent this session a card')));
+    // The note asks for a reply card, which is the card the reset budget lets this session post.
+    assert.match(note.content, /Post the deploy card before you carry on\./);
+    assert.equal(fs.existsSync(asks), false, 'a sent card starts a turn, as an answer does, so the count starts over');
+  });
+
   it('closes its own card', async () => {
     await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-2', title: 'Still needed?' } });
     await mcp.callTool({ name: 'card_close', arguments: { card_id: 'cc-2', kind: 'self-answered', outcome: 'Found it in the README.' } });

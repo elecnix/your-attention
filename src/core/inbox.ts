@@ -15,7 +15,7 @@ import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, RequireCardSettings, Role, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, PinChange, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -166,6 +166,8 @@ export const PURGE_BATCH = 100;
 export const STORAGE_HEADROOM = 0.2;
 /** How long the sweep keeps the presence row of an agent after it went offline. */
 export const PRESENCE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+/** How long a card the person sent to an agent waits for it. A session that never comes back leaves nothing behind. */
+export const SENT_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 
 const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']);
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
@@ -337,6 +339,7 @@ export class Inbox {
     const oldest = this.purgeQueue()[0];
     if (oldest) times.push(this.needsRoom() ? this.now() : oldest.since + PURGE_AFTER_MS);
     for (const d of this.store.list<OutboxItem>('outbox')) times.push(d.nextAt);
+    for (const s of this.store.list<SentCard>('sent')) times.push(s.sentAt + SENT_KEEP_MS);
     return times.length ? Math.min(...times) : undefined;
   }
 
@@ -2024,6 +2027,58 @@ export class Inbox {
     return id;
   }
 
+  // ---- cards the person sends to an agent ----
+
+  /** The person sends a card to an agent. It goes on that agent's stream as a `card` event as soon as a connection for
+   * the agent is open, and waits for the session that connects next when none is: an agent's state never stops it being
+   * addressed (DP18, DP19). The agent replies with a card of its own, so the card carries the message and nothing else. */
+  sendCard(caller: Caller, input: { agent?: unknown; text?: unknown } | null | undefined): SentCard {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner sends a card to an agent');
+    const agent = this.agentId(input?.agent);
+    const text = String(input?.text ?? '').trim();
+    if (!text) throw new InboxError(400, 'text is required');
+    // The first line of the message titles the card, and the lines under it are its text, so a one-line message reads once.
+    const lines = text.split('\n');
+    const at = lines.findIndex((l) => l.trim());
+    const now = this.now();
+    // The card never sits in the person's queue, so its priority is only what an agent reads. It follows the levels as a post does.
+    const levels = this.priorities();
+    const card: Card = {
+      id: randomId(8),
+      agent,
+      kind: 'ask',
+      title: (lines[at] ?? '').trim().slice(0, 300),
+      text: lines.slice(at + 1).join('\n').trim() || undefined,
+      priority: levels.some((l) => l.id === 'soon') ? 'soon' : levels[0]?.id ?? 'soon',
+      replies: [],
+      deliver: 'stream',
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const size = new TextEncoder().encode(JSON.stringify(card)).length;
+    if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}`);
+    this.store.put<SentCard>('sent', card.id, { id: card.id, agent, card, sentAt: now });
+    this.deliverSent(agent);
+    return this.store.get<SentCard>('sent', card.id) ?? { id: card.id, agent, card, sentAt: now };
+  }
+
+  /** Hand each card waiting for this agent to its open streams, and record when it went. A connection reports an agent id,
+   * as a guidance event looks up its agents, so an agent takes what is addressed to it whatever token it connected with. */
+  private deliverSent(agent: string): void {
+    const waiting = this.store.list<SentCard>('sent').filter((s) => s.agent === agent && !s.deliveredAt);
+    if (!waiting.length) return;
+    // The agent id is what follows the first newline of the key, so an id that contains one cannot match another's.
+    const sends = [...this.agents].filter(([k]) => k.slice(k.indexOf('\n') + 1) === agent).flatMap(([, subs]) => [...subs]);
+    if (!sends.length) return;
+    const now = this.now();
+    for (const sent of waiting) {
+      this.store.put<SentCard>('sent', sent.id, { ...sent, deliveredAt: now });
+      const event: AgentEvent = { type: 'card', id: sent.id, card: publicCard(sent.card), sentAt: sent.sentAt };
+      for (const send of sends) send(event);
+    }
+  }
+
   // ---- connections ----
 
   private key(token: string, agent: string): string {
@@ -2051,12 +2106,15 @@ export class Inbox {
     this.setPresence(agent, true, opts.channelOff);
     if (!opts.resumed) send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     this.flush(agent);
+    // A card the person sent while this agent was away goes out as soon as it connects, as a waiting answer does.
+    this.deliverSent(agent);
     if (instance) this.resend(caller.token, agent, send, instance);
     return () => {
       const s = this.agents.get(k);
       if (!s?.delete(send)) return;
       if (s.size === 0) this.agents.delete(k);
-      const stillOpen = [...this.agents.keys()].some((x) => x.endsWith(`\n${agent}`));
+      // The agent id follows the first newline of the key, so an id carrying one cannot stand for another agent.
+      const stillOpen = [...this.agents.keys()].some((x) => x.slice(x.indexOf('\n') + 1) === agent);
       if (!stillOpen) this.putPresence(agent, { online: true, lastSeen: this.now(), leftAt: this.now() });
     };
   }
@@ -2192,6 +2250,10 @@ export class Inbox {
     for (const m of this.store.list<{ key: string; at: number }>('messages')) {
       if (now - m.at > MESSAGE_MEMORY_MS) this.store.delete('messages', m.key);
     }
+    // A card the person sent to an agent that never came back only makes the storage bigger after a while.
+    for (const sent of this.store.list<SentCard>('sent')) {
+      if (now - sent.sentAt >= SENT_KEEP_MS) this.store.delete('sent', sent.id);
+    }
     for (const card of this.store.list<Card>('cards')) {
       const t = card.triage;
       if (t?.state === 'pending' && t.deadline && t.deadline <= now) {
@@ -2252,6 +2314,7 @@ export class Inbox {
   async reset(caller: Caller): Promise<{ removed: number }> {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner resets the inbox');
     const cards = this.store.list<Card>('cards');
+    for (const sent of this.store.list<SentCard>('sent')) this.store.delete('sent', sent.id);
     for (const card of cards) await Promise.all(this.drop(card).map((f) => this.blobs.delete(f)));
     this.emit({ type: 'change', card: '' });
     return { removed: cards.length };

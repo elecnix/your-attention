@@ -435,6 +435,13 @@ export function describeReturned(ev: Extract<AgentEvent, { type: 'returned' }>):
   return `${ev.by ?? 'Triage'} sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`;
 }
 
+/** What an integration tells the agent about a card the person sent it from the inbox page. It asks for no answer:
+ * the agent replies with a card of its own, and the person finds it in the queue. */
+export function describeSentCard(ev: Extract<AgentEvent, { type: 'card' }>): string {
+  const text = ev.card.text ? `:\n${ev.card.text}` : '.';
+  return `The person sent this session a card, ${ev.card.id}: "${ev.card.title}"${text} Reply with a card of your own if there is something to say, and carry on with what you were doing.`;
+}
+
 export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]): string {
   const lines: string[] = [];
   if (card.questions?.length) lines.push(...questionLines(card, answer.values));

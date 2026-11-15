@@ -436,6 +436,18 @@ export interface AnswerEvent {
   answer: Answer;
 }
 
+/** A card the person sent to an agent, kept until a connection for that agent takes it. */
+export interface SentCard {
+  /** The id of the card it carries. */
+  id: string;
+  /** The agent the card is addressed to. */
+  agent: string;
+  card: Card;
+  sentAt: number;
+  /** When a connection for the agent received the card. Absent while the card still waits for it. */
+  deliveredAt?: number;
+}
+
 export type AgentEvent =
   | { type: 'hello'; agent: string; version: number; guidance: number }
   | AnswerEvent
@@ -443,7 +455,9 @@ export type AgentEvent =
   /** The inbox's require-a-card rule changed. A session holding an environment override ignores it. */
   | { type: 'settings'; id: string; requireCard: RequireCardSettings }
   /** `by` names who sent the card back: triage, or the inbox page when it could not draw the card. */
-  | { type: 'returned'; id: string; card: Card; reason: string; by?: string };
+  | { type: 'returned'; id: string; card: Card; reason: string; by?: string }
+  /** A card the person sent to this agent, as the panel in the page sends it. */
+  | { type: 'card'; id: string; card: Card; sentAt: number };
 
 /** What pages receive. They refetch state on "change". */
 export type PageEvent =

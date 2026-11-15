@@ -578,6 +578,11 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     }
 
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
+    // The person sends a card to an agent: it waits for the agent's stream, and goes out as soon as one opens.
+    if (method === 'POST' && a === 'send' && !b) {
+      owner();
+      return json(inbox.sendCard(me, await readJson<{ agent?: unknown; text?: unknown }>(req)), 201);
+    }
     if (a === 'cards') {
       if (method === 'POST' && !b) {
         const input = await readJson<NewCard>(req, BODY_LIMIT.card);

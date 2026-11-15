@@ -3,7 +3,7 @@
 // one. The answer is marked read when it reaches the model context.
 import os from 'node:os';
 import { Type } from 'typebox';
-import { Client, describeAnswer, describeReturned, loadConfig } from '../../client.ts';
+import { Client, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
 import type { NewCard } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
@@ -105,6 +105,13 @@ export default function yourAttention(pi: PiApi): void {
         else pi.sendUserMessage(note, { deliverAs: 'followUp' });
         return;
       }
+      if (ev.type === 'card') {
+        // A card the person sent this session from the inbox page: a message to act on, not a question to answer.
+        const note = `[your-attention] ${describeSentCard(ev)}`;
+        if (ctx.isIdle()) pi.sendUserMessage(note);
+        else pi.sendUserMessage(note, { deliverAs: 'followUp' });
+        return;
+      }
       if (ev.type !== 'answer') return;
       pending.set(ev.id, ev.card.id);
       const sealed = await secrets.receive(ev.card, ev.answer);
@@ -124,8 +131,9 @@ export default function yourAttention(pi: PiApi): void {
   // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
   // card. The count resets on any run the request did not start, and it stops at three.
   let asked = 0;
-  // The run our own request started. A run that begins for any other reason, such as the person typing or an answer
-  // arriving, resets the count; the run we asked for must not, or the cap below would never bite.
+  // The run our own request started. A run that begins for any other reason, such as the person typing, an answer
+  // arriving, or a card the person sent, resets the count; the run we asked for must not, or the cap below would
+  // never bite.
   let ourRun = false;
   pi.on('agent_start', () => {
     if (ourRun) {

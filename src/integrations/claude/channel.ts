@@ -12,7 +12,7 @@ import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { Client, describeAnswer, describeReturned, loadConfig } from '../../client.ts';
+import { Client, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
@@ -246,6 +246,13 @@ void inbox.stream(agent, async (ev) => {
   }
   if (ev.type === 'returned') {
     await notify(describeReturned(ev), { card_id: ev.card.id });
+    return;
+  }
+  if (ev.type === 'card') {
+    // A card the person sent starts a turn of its own, as an answer does, and it asks the model for a reply card,
+    // so the next stop may ask for a card again.
+    resetAsks(session);
+    await notify(describeSentCard(ev), { card_id: ev.card.id });
     return;
   }
   if (ev.type !== 'answer') return;

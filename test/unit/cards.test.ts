@@ -4,14 +4,7 @@ import { describe, it } from 'node:test';
 import { DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PRESENCE_KEEP_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
-
-function setup() {
-  let t = 1_000_000;
-  const clock = { now: () => t, advance: (ms: number) => { t += ms; } };
-  const inbox = new Inbox(new MemoryStorage(), clock.now);
-  const agent: Caller = { token: 'ta', role: 'agent' };
-  return { inbox, clock, agent };
-}
+import { setup } from './fixture.ts';
 
 describe('patch edits', () => {
   it('replaces text that occurs once, and keeps the earlier version', () => {

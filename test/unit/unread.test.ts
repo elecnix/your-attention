@@ -8,7 +8,8 @@ import { agent, owner, setup } from './fixture.ts';
 
 describe('the answers a client has not consumed', () => {
   it('counts what was answered and never acknowledged, for that agent and that token', async () => {
-    const inbox = setup();
+    // An inbox of this test's own, so every id it posts is one the fixture left free.
+    const { inbox } = setup();
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'One' });
     inbox.postCard(agent, { id: 'c2', agent: 's1', title: 'Two' });
     inbox.postCard(agent, { id: 'other', agent: 's2', title: 'Another agent' });
@@ -24,7 +25,7 @@ describe('the answers a client has not consumed', () => {
   });
 
   it('leaves out a closed card, and another client\'s cards', async () => {
-    const inbox = setup();
+    const { inbox } = setup();
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'One' });
     await inbox.answer('c1', { values: {} });
     inbox.close(agent, 'c1', 'resolved', 'done');
@@ -33,6 +34,6 @@ describe('the answers a client has not consumed', () => {
     inbox.postCard(stranger, { id: 'c3', agent: 's3', title: 'Three' });
     await inbox.answer('c3', { values: {} });
     assert.equal(inbox.unread(agent).unread, 0, 'another token\'s cards are not this client\'s to acknowledge');
-    assert.equal(inbox.unread({ token: 'to', role: 'owner' }).unread, 1, 'the owner sees every card');
+    assert.equal(inbox.unread(owner).unread, 1, 'the owner sees every card');
   });
 });

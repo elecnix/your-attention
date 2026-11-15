@@ -22,6 +22,31 @@ describe('principles', () => {
     assert.doesNotMatch(read('inbox.ts'), /set(Timeout|Interval)\(/);
   });
 
+  it('the page shows an agent as connected only from presence, and keeps no list of its own', () => {
+    // DP18 and DP34: presence comes from the connections an inbox holds right now. A list the page remembered would
+    // show a session that has ended as connected, and the person would send a card that goes nowhere.
+    const panel = fs.readFileSync(path.join(ROOT, 'web/agents.js'), 'utf8');
+    assert.doesNotMatch(panel, /\b(localStorage|sessionStorage|store)\b/, 'the agent list lives in GET /v1/state only');
+    assert.doesNotMatch(panel, /online:\s*true/, 'only a presence row makes an agent online');
+  });
+
+  it('a card that waited for an offline agent goes out when that agent connects', () => {
+    // DP19: the inbox keeps what it cannot deliver yet, and hands it over when the session comes back.
+    const connect = /connect\(caller: Caller[\s\S]*?\n  \}/.exec(read('inbox.ts'))?.[0] ?? '';
+    assert.match(connect, /this\.deliverSent\(agent\);/, 'a connection takes the cards that waited for its agent');
+  });
+
+  it('the form that sends a card shows what presence says about the agent its drop-down picks', () => {
+    // DP18: the person sees whether that agent is listening or offline before starting to write, and the form reads
+    // it from the agent list that presence fills, not from a state of its own. A pick that left the list reads as
+    // the first agent, so a card never goes to a name that presence dropped while the panel was open.
+    const panel = fs.readFileSync(path.join(ROOT, 'web/components.js'), 'utf8');
+    const form = /function SendForm[\s\S]*?\n}\n/.exec(panel)?.[0] ?? '';
+    assert.match(form, /h\('select'/, 'one drop-down picks the agent a card goes to');
+    assert.match(form, /\$\{agent\.status\}/, 'the state line is the picked agent\'s, from the presence list');
+    assert.match(form, /pickedAgent\(agents, picked\)/, 'a pick that left the list reads as the first agent');
+  });
+
   it('every principle in PRINCIPLES.md has a statement and a reason', () => {
     const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);
