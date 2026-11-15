@@ -10,7 +10,7 @@ import { Inbox } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import { imagesDir, saveAnswerImages } from '../../src/integrations/images.ts';
 
-import { checkImage, draftProblem, imageFiles, IMAGE_LIMIT_BYTES, IMAGE_TYPES } from '../../web/paste-images.js';
+import { checkImage, draftProblem, imageFiles, IMAGE_LIMIT_BYTES } from '../../web/paste-images.js';
 import { agent, owner, setup } from './fixture.ts';
 
 // A 1x1 PNG.
@@ -31,10 +31,13 @@ describe('images pasted into an answer', () => {
     assert.equal((await inbox.attachment({ token: 'o', role: 'owner' }, a.images![1]!.id!)).file.name, 'pasted-2.png');
   });
 
-  it('refuses a file that is not an image, and says which one', async () => {
+  it('takes any file type, and still refuses a source that is not a data: URL', async () => {
     const inbox = setup();
-    const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4').toString('base64')}`;
-    await assert.rejects(inbox.answer('c1', { images: [{ src: png }, { src: pdf, name: 'a.pdf' }] }), /image 2 \(a\.pdf\).*PNG, JPEG, GIF or WebP/);
+    for (const [type, name] of [['application/pdf', 'a.pdf'], ['application/zip', 'a.zip'], ['text/csv', 'rows.csv'], ['text/html', 'page.html']]) {
+      const src = `data:${type};base64,${Buffer.from('x').toString('base64')}`;
+      const answer = await inbox.answer('c1', { images: [{ src, name }] });
+      assert.equal(answer.images?.[0]?.type, type, name);
+    }
     await assert.rejects(inbox.answer('c1', { images: [{ src: 'https://example.com/a.png' }] }), /data: URL/);
   });
 
@@ -84,9 +87,8 @@ describe('paste handler', () => {
     assert.equal(imageFiles({ items: [items[0]] } as never).length, 0);
     assert.equal(imageFiles(null).length, 0);
   });
-  it('accepts the four image types and refuses the rest with a message', () => {
-    for (const t of IMAGE_TYPES) assert.equal(checkImage(file(t)), null);
-    assert.match(checkImage(file('application/pdf', 5, 'a.pdf')) ?? '', /a\.pdf.*PNG, JPEG, GIF or WebP/);
+  it('accepts any type, and refuses only a file over 8 MB', () => {
+    for (const t of ['image/png', 'application/pdf', 'application/zip', 'text/csv', 'text/html']) assert.equal(checkImage(file(t)), null, t);
     assert.match(checkImage(file('image/png', IMAGE_LIMIT_BYTES + 1, 'big.png')) ?? '', /big\.png.*8 MB/);
   });
 });
