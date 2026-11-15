@@ -11,6 +11,8 @@ test('names the version on hover over the GitHub mark', async ({ page }) => {
   await inbox.open(page);
   const mark = page.locator('a.repo');
   await expect(mark).toHaveAttribute('title', `Your Attention ${VERSION} on GitHub`);
-  // The state carries it, so a page that never asks /v1/info still knows which release it talks to.
-  expect(await page.evaluate(async () => (await (await fetch('v1/state')).json()).version)).toBe(VERSION);
+  // The accessible name stays the same, because a link's name is what a person hears, not what it runs.
+  await expect(mark).toHaveAttribute('aria-label', 'Your Attention on GitHub');
+  // The page reads it from GET /v1/info, which answers with the release the inbox runs.
+  expect(await page.evaluate(async () => (await (await fetch('v1/info')).json()).version)).toBe(VERSION);
 });

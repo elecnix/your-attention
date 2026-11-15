@@ -618,7 +618,7 @@ To stop, the agent posts `system: {type: "unsubscribe"}` with its agent id and g
 
 ## Pages
 
-`GET /v1/state` returns `{cards, answers, presence, states, priorities, levels, settings, guidance, version}`, and `version` names the release an inbox runs, so the page can show it. `cards` has one summary for each card except the cleared ones, enough for the queue, the levels, presence and the answer states:
+`GET /v1/state` returns `{cards, answers, presence, states, priorities, levels, settings, guidance}`. `cards` has one summary for each card except the cleared ones, enough for the queue, the levels, presence and the answer states:
 
 - `id`, `agent`, `kind`, `title`, `priority`, `status`, `rating`, `from`, `follows`, `followedBy`, `deliver`, `version`, `createdAt`, `updatedAt` and `expiresAt`, as on the card.
 - `tags`, at most 10, with each key and value cut to 100 characters. `origin` keeps `name`, `harness` and `cwd`: the queue groups by the name, priority rules read the harness, and the panel that sends an agent a card shows the working directory.

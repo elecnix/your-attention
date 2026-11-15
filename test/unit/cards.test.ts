@@ -5,7 +5,6 @@ import { DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_G
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
 import { setup } from './fixture.ts';
-import { VERSION } from '../../src/core/version.ts';
 
 describe('patch edits', () => {
   it('replaces text that occurs once, and keeps the earlier version', () => {
@@ -61,8 +60,6 @@ describe('card states', () => {
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q', expiresAt: clock.now() + 1000 });
     inbox.sweep();
     assert.equal(inbox.state().states['c1'], 'open');
-    // The state names the release the inbox runs, so the page can show it without a second request.
-    assert.equal(inbox.state().version, VERSION);
     clock.advance(1001);
     inbox.sweep();
     assert.equal(inbox.state().states['c1'], 'closed');
