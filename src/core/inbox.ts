@@ -1943,7 +1943,8 @@ export class Inbox {
   private deliverSent(agent: string): void {
     const waiting = this.store.list<SentCard>('sent').filter((s) => s.agent === agent && !s.deliveredAt);
     if (!waiting.length) return;
-    const sends = [...this.agents].filter(([k]) => k.endsWith(`\n${agent}`)).flatMap(([, subs]) => [...subs]);
+    // The agent id is what follows the first newline of the key, so an id that contains one cannot match another's.
+    const sends = [...this.agents].filter(([k]) => k.slice(k.indexOf('\n') + 1) === agent).flatMap(([, subs]) => [...subs]);
     if (!sends.length) return;
     const now = this.now();
     for (const sent of waiting) {
@@ -1987,7 +1988,8 @@ export class Inbox {
       const s = this.agents.get(k);
       if (!s?.delete(send)) return;
       if (s.size === 0) this.agents.delete(k);
-      const stillOpen = [...this.agents.keys()].some((x) => x.endsWith(`\n${agent}`));
+      // The agent id follows the first newline of the key, so an id carrying one cannot stand for another agent.
+      const stillOpen = [...this.agents.keys()].some((x) => x.slice(x.indexOf('\n') + 1) === agent);
       if (!stillOpen) this.putPresence(agent, { online: true, lastSeen: this.now(), leftAt: this.now() });
     };
   }

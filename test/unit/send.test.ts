@@ -32,6 +32,17 @@ describe('a card the person sends to an agent', () => {
     assert.equal(event?.card.text, undefined, 'a one-line message reads once');
   });
 
+  it('gives a card to the agent it names, and not to an id that merely ends the same way', () => {
+    const { inbox, events, connect } = setup();
+    // A connection key is `token\nagent`, so an agent id that carries a newline must not pass for another agent.
+    connect('x\nclaude:s1');
+    connect('claude:s1');
+    const sent = inbox.sendCard(owner, { agent: 'claude:s1', text: 'Rebase before you deploy.' });
+    const got = cardEvents(events).filter((e) => e.card.id === sent.id);
+    assert.equal(got.length, 1, 'one connection took the card, the one the agent id names');
+    assert.equal(got[0]?.card.agent, 'claude:s1');
+  });
+
   it('titles the card with the first line, and keeps the rest as its text', () => {
     const { inbox, events, connect } = setup();
     connect('pi:5f2a');
