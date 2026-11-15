@@ -112,8 +112,9 @@ export default function yourAttention(pi: PiApi): void {
   // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
   // card. The count resets on any run the request did not start, and it stops at three.
   let asked = 0;
-  // The run our own request started. A run that begins for any other reason, such as the person typing or an answer
-  // arriving, resets the count; the run we asked for must not, or the cap below would never bite.
+  // The run our own request started. A run that begins for any other reason, such as the person typing, an answer
+  // arriving, or a card the person sent, resets the count; the run we asked for must not, or the cap below would
+  // never bite.
   let ourRun = false;
   pi.on('agent_start', () => {
     if (ourRun) {

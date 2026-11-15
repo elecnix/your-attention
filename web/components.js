@@ -961,13 +961,16 @@ function SendForm({ agents }) {
   async function send(e) {
     e.preventDefault();
     if (!agent || !draft || busy) return;
+    // What goes, kept apart from whatever the field shows when the reply comes back.
+    const sent = draft;
     setBusy(true);
     setResult(null);
     try {
-      const res = await api(`${BASE}v1/send`, { agent: agent.id, text: draft });
+      const res = await api(`${BASE}v1/send`, { agent: agent.id, text: sent });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `the inbox answered ${res.status}`);
-      setText('');
+      // The field empties only while it still shows what went: a message the person typed during the send stays.
+      setText((current) => (current.trim() === sent ? '' : current));
       // The inbox says whether a connection took the card, so the person knows if it waits for the session.
       setResult({ ok: true, message: body.deliveredAt
         ? `Sent to ${agent.name}: the card is on its stream now.`

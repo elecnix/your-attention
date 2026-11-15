@@ -60,6 +60,33 @@ test('sends with the one button when the inbox knows a single connected agent', 
   expect(cardEvents(stream.events)[0]?.card.agent).toBe('pi:solo');
 });
 
+test('keeps a message typed while a send is still in flight, and clears the field when it holds what went', async ({ page }) => {
+  // A session holds its stream open, so the panel has an agent to send to before the person writes.
+  const stream = inbox.listen('pi:solo');
+  await expect.poll(() => inbox.server.inbox.isOnline('pi:solo')).toBe(true);
+  await inbox.open(page);
+
+  const dialog = await openDialog(page, PANEL);
+  // Hold the send open, which is the moment the person starts the next message.
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => { release = r; });
+  await page.route('**/v1/send', async (route) => { await held; await route.continue(); });
+  await message(dialog).fill('Rebase on main before you deploy.');
+  await dialog.getByRole('button', { name: 'Send', exact: true }).click();
+  await message(dialog).fill('Then run the release.');
+
+  // The reply lands: the message it carried went, and the one the person typed after it stays in the field.
+  release();
+  await expect(dialog).toContainText('Sent to pi:solo');
+  await expect(message(dialog)).toHaveValue('Then run the release.');
+
+  // A send that nobody typed over empties the field, since it still holds the message that went.
+  await dialog.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(message(dialog)).toHaveValue('');
+  await expect.poll(() => cardEvents(stream.events).length).toBe(2);
+  expect(cardEvents(stream.events).map((e) => e.card.title)).toEqual(['Rebase on main before you deploy.', 'Then run the release.']);
+});
+
 test('says there is nobody to send to when no agent has connected, and offers no send', async ({ page }) => {
   await inbox.open(page);
 

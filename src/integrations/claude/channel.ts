@@ -249,6 +249,9 @@ void inbox.stream(agent, async (ev) => {
     return;
   }
   if (ev.type === 'card') {
+    // A card the person sent starts a turn of its own, as an answer does, and it asks the model for a reply card,
+    // so the next stop may ask for a card again.
+    resetAsks(session);
     await notify(describeSentCard(ev), { card_id: ev.card.id });
     return;
   }
