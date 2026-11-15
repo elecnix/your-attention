@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import type { Storage } from '../../src/core/storage.ts';
 import { startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
@@ -22,6 +23,12 @@ test.beforeEach(async () => {
   inbox = await startInbox();
 });
 test.afterEach(async () => { await inbox.close(); });
+
+/** Store the guidance the way an older inbox did, with the widget catalog inside its text. Call it before the first read. */
+function seedStoredGuidance(text: string, version: number): void {
+  const store = (inbox.server.inbox as unknown as { store: Storage }).store;
+  store.put('meta', 'guidance', { text, version, at: 0 });
+}
 
 /** The current guidance with one word changed on its first line of three words or more, and one line added at the end. */
 async function proposal(): Promise<{ edited: string; word: string; added: string; text: string; same: number }> {
@@ -52,6 +59,20 @@ test('a guidance card shows one added line, one changed line with its word marke
   await expect(diff.locator('.same')).toHaveCount(0);
   await page.getByRole('button', { name: /Show the full text/ }).click();
   await expect(diff.locator('.same')).toHaveCount(p.same);
+});
+
+test('a stored text that carried the widget catalog approves an added paragraph with nothing removed', async ({ page }) => {
+  // The person reported an approval card that listed the whole widget catalog as lines to delete. The catalog is not
+  // guidance, so the card compares the two texts alone and shows the paragraph the proposal adds.
+  const catalog = inbox.server.inbox.widgetCatalog();
+  const text = 'Lead with the goal.';
+  seedStoredGuidance(`${text}\n\n${catalog}`, 9);
+  await inbox.agent.proposeGuidance(`${text}\n\nSay which files changed.`, { message: 'Adds the rule the last four cards needed.', agent: 's-guide' });
+  await inbox.open(page);
+  await expect(page.locator('.card-title')).toHaveText('Send new card guidance to agents?');
+  const diff = page.locator('.guidance-diff');
+  await expect(diff.locator('.del')).toHaveCount(0);
+  await expect(diff.locator('.add').last()).toContainText('Say which files changed.');
 });
 
 test('a comment and Reject go to the agent that proposed the guidance', async ({ page }) => {

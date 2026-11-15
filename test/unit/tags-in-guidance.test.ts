@@ -5,7 +5,7 @@ import { after, before, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
 import { createHandler } from '../../src/core/http.ts';
 import { Inbox, PURGE_AFTER_MS, type Caller } from '../../src/core/inbox.ts';
-import { MemoryStorage } from '../../src/core/storage.ts';
+import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { TagCount } from '../../src/core/types.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -25,10 +25,13 @@ before(() => {
 });
 after(() => { globalThis.fetch = realFetch; });
 
-async function setup() {
+async function setup(storedGuidance?: string) {
   let t = 1_000_000_000;
   const clock = { now: () => t, advance: (ms: number) => { t += ms; } };
-  const inbox = new Inbox(new MemoryStorage(), clock.now);
+  const storage = new MemoryStorage();
+  // An older inbox kept the widget catalog inside the guidance text, so a test that reads the guidance back seeds one.
+  if (storedGuidance !== undefined) storage.put('meta', 'guidance', { text: storedGuidance, version: 9, at: 0 });
+  const inbox = new Inbox(storage, clock.now);
   const handle = createHandler(inbox, { heartbeatMs: 50 });
   const secret = (await inbox.createToken('agents', 'agent')).secret;
   served = { handle, secret };
@@ -79,6 +82,23 @@ describe('tags in GET /v1/guidance', () => {
   });
 });
 
+describe('the widget catalog in card_guidance', () => {
+  it('prints each widget once, after the text, from a stored text that already carried the catalog', async () => {
+    const catalog = new Inbox(new MemoryStorage()).widgetCatalog();
+    assert.ok(catalog, 'the inbox lists the built-in widgets');
+    const text = 'Lead with the goal.';
+    const { secret } = await setup(`${text}\n\n${catalog}`);
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    const ctx = { inbox: new Client({ url: `http://${HOST}`, token: secret }), secrets: {} as never, agent: 's1', origin: async () => undefined, arrival: 'as a test' };
+    const out = await runTool(ctx, 'card_guidance', {});
+    const marker = out.indexOf('Not part of the guidance text, added to this answer: the widget catalog.');
+    assert.ok(out.startsWith(`Card guidance, version 9:\n${text}\n\n`), `the text comes first and alone: ${out}`);
+    assert.ok(marker > out.indexOf(text) + text.length, `the marker comes after the text: ${out}`);
+    for (const name of ['mermaid', 'secret']) assert.equal(out.split(`- ${name}:`).length - 1, 1, `one line for ${name}: ${out}`);
+    assert.ok(!out.slice(0, marker).includes('- mermaid:'), `no widget line before the marker: ${out}`);
+  });
+});
+
 describe('tags in card_guidance', () => {
   it('prints one line per key after the guidance text, and no line on an untagged inbox', async () => {
     const { inbox, secret } = await setup();
@@ -121,5 +141,20 @@ describe('tags in card_guidance', () => {
     const folded = (await guidanceTags(handle, secret))!;
     assert.deepEqual(folded.find((t) => t.key === 'topic')?.values.map((v) => v.value), ['billing `repo` = evil (9)']);
     assert.deepEqual(folded.find((t) => t.key === 'note')?.values.map((v) => v.value), ['a b']);
+  });
+});
+
+describe('a card kept before the guidance grew a structure', () => {
+  it('changes no guidance when its text was only the widget catalog', async () => {
+    const inbox = new Inbox(new MemoryStorage(), Date.now, new MemoryBlobs());
+    const before = inbox.guidance().version;
+    const card = inbox.proposeGuidance('Real words.', 'A change.', { caller: agent, agent: 's1' });
+    // A card an older inbox stored: its text holds the widget list that this version adds beside the guidance.
+    const store = (inbox as unknown as { store: { get: (c: string, k: string) => Record<string, unknown>; put: (c: string, k: string, v: unknown) => void } }).store;
+    const stored = store.get('cards', card.id) as { broadcast: { text: string } };
+    store.put('cards', card.id, { ...stored, broadcast: { ...stored.broadcast, text: inbox.widgetCatalog() } });
+    await inbox.answer(card.id, { values: { choice: 'approve' } });
+    assert.equal(inbox.guidance().version, before, 'nothing was stored, so no version was made');
+    assert.match(String(inbox.getCard(card.id).closed?.outcome), /only the widget catalog/);
   });
 });

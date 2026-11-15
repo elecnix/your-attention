@@ -14,7 +14,7 @@ import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, typ
 import { Usage } from './telemetry.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
-  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
 } from './types.ts';
 
@@ -1210,7 +1210,7 @@ export class Inbox {
       const values = [...new Set([...v.source.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]))];
       return `- ${w.name}: ${v.when ?? 'No hook: read its source with GET /v1/widgets/' + w.name + ' first.'}${values.length ? ` Its values: ${values.join(', ')}.` : ''}`;
     }).filter(Boolean);
-    return lines.length ? `Widgets you can place in a card body with a line \`part = widget <name> {json values}\`:\n${lines.join('\n')}` : '';
+    return lines.length ? `${CATALOG_HEADER}\n${lines.join('\n')}` : '';
   }
 
   getWidget(name: string): Template {
@@ -1479,8 +1479,24 @@ export class Inbox {
     return levels.some((l) => l.id === card.priority) ? card.priority : levels[0]?.id ?? card.priority;
   }
 
+  /** The stored guidance, repaired as it is read: an inbox that stored the widget catalog inside its text keeps the
+   * text alone from the first read, so every later read gives the same answer and no diff shows the catalog as lines
+   * the approval deletes. The repair keeps the version, so no agent hears of it. */
   guidance(): Guidance {
-    return this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: DEFAULT_GUIDANCE_VERSION, at: 0 };
+    const stored = this.store.get<Guidance>('meta', 'guidance') ?? { text: DEFAULT_GUIDANCE, version: DEFAULT_GUIDANCE_VERSION, at: 0 };
+    const text = guidanceTextOnly(stored.text, this.widgetCatalog());
+    if (text === stored.text) return stored;
+    const repaired: Guidance = { ...stored, text };
+    this.store.put('meta', 'guidance', repaired);
+    return repaired;
+  }
+
+  /** The guidance as an agent reads it: the text once, then the widget catalog and the tag values in use, each built
+   * from what the inbox has now, so neither one is ever stored in the text or printed twice. */
+  cardGuidance(): CardGuidance {
+    const g = this.guidance();
+    const widgets = this.widgetCatalog();
+    return { ...g, ...(widgets ? { widgets } : {}), tags: this.tagsInUse() };
   }
 
   /** The tag keys in use with their values and counts, for GET /v1/guidance and card_guidance, so an agent reuses a
@@ -1524,16 +1540,14 @@ export class Inbox {
   /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. With `by`,
    * the answer and its comment go to the agent that proposed the text, which may acknowledge it or retract the card. */
   proposeGuidance(text: string, message: string, by?: { caller: Caller; agent: string }): Card {
-    const clean = String(text ?? '').trim();
-    if (!clean) throw new InboxError(400, 'text is required');
+    // The catalog and the tag lines reach agents beside the guidance text, so a proposal that carries them keeps the
+    // words the agent wrote and loses those lines: an agent that pastes a whole card_guidance answer still proposes.
+    const clean = guidanceTextOnly(String(text ?? ''), this.widgetCatalog());
+    if (!clean) throw new InboxError(400, 'a proposal needs the guidance text itself: the widget catalog and the tag lines are added beside it, so a text with only those is empty');
     // The person reads the message to decide, so a proposal without one is refused rather than shown unexplained.
     const why = String(message ?? '').trim();
     if (!why) throw new InboxError(400, 'a guidance proposal needs a message: say what changed and why, for the person who approves it');
     if (why.length > 2000) throw new InboxError(400, 'message must be at most 2000 characters');
-    // The widget catalog reaches agents beside the guidance text, and never inside it: a proposal carries only the text.
-    // Any complete catalog line counts, so a paste that drops the header is refused too.
-    const bullets = this.widgetCatalog().split('\n').slice(1).filter((l) => l.trim());
-    if (bullets.some((l) => clean.includes(l))) throw new InboxError(400, 'the proposal includes the widget catalog, which the inbox adds beside the guidance text and which is not part of it: propose the text without those lines');
     const from = by ? String(by.agent ?? '').trim() : '';
     if (from.length > 80) throw new InboxError(400, 'agent must be at most 80 characters');
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
@@ -1574,7 +1588,12 @@ export class Inbox {
     if ([answer.values['choice']].flat()[0] !== 'approve') return 'Rejected: the guidance did not change.';
     // The ticked agents, or every connected one when the answer names none. Only connected agents get the event.
     const picked = Array.isArray(answer.values['agents']) ? new Set((answer.values['agents'] as unknown[]).map(String)) : undefined;
-    const guidance: Guidance = { text: broadcast.text, version: this.guidance().version + 1, at: this.now() };
+    // The card may hold a text an older inbox stored, so the catalog is dropped once more before it becomes the guidance.
+    const text = guidanceTextOnly(broadcast.text, this.widgetCatalog());
+    // A card kept before this change may hold nothing but the catalog or the tag lines, and storing that would leave
+    // every agent reading a blank guidance. The approval changes nothing instead, and the card says so.
+    if (!text) return 'Rejected: that text was only the widget catalog or the tag lines, so the guidance did not change.';
+    const guidance: Guidance = { text, version: this.guidance().version + 1, at: this.now() };
     this.store.put('meta', 'guidance', guidance);
     let sent = 0;
     for (const [k, subs] of this.agents) {
@@ -2544,6 +2563,40 @@ function searchText(card: Card): string {
   const questions = (Array.isArray(card.questions) ? card.questions : []).flatMap((q) => [q?.question, q?.text, ...(Array.isArray(q?.options) ? q.options : []).map((o) => o?.label)]);
   return [card.title, card.text, card.recommendation, card.body, ...questions, card.status, ...Object.entries(card.tags ?? {}).map(([k, v]) => `${k} ${v}`), ...(card.attachments ?? []).map((a) => a.name)]
     .filter(Boolean).join('\n');
+}
+
+/** The line `widgetCatalog()` puts above its bullets, spelled once so the cleaner recognizes the catalog it writes. */
+const CATALOG_HEADER = 'Widgets you can place in a card body with a line `part = widget <name> {json values}`:';
+
+/** The line `card_guidance` puts above the catalog, and the one it puts above the tag values. Neither is guidance. */
+const ADDED_BESIDE_GUIDANCE = /^Not part of the guidance text(?: either)?, (?:added to this answer: the widget catalog\.|tag values in use:)$/;
+
+/** One line of tag values as `card_guidance` prints it: `key` = value (2), value (1). */
+const TAG_VALUE_LINE = /^`[^`\n]+` = .*\(\d+\)\.$/;
+
+/**
+ * The guidance text alone. The widget catalog and the tag values reach an agent beside the text, so neither belongs
+ * in it: a proposal that pastes a whole `card_guidance` answer keeps the words the agent wrote, and an inbox that
+ * stored such a paste repairs its guidance on the first read. The catalog block is found by the header above it, and
+ * the tag lines by their marker, so a widget that changes later does not change how an old text reads. `catalog`
+ * drops that catalog's bullets on their own too, for a paste that kept the list and left the header behind.
+ */
+export function guidanceTextOnly(text: string, catalog?: string): string {
+  const bullets = new Set((catalog ?? '').split('\n').slice(1).filter((l) => l.trim()));
+  const kept: string[] = [];
+  let inCatalog = false;
+  let tagValues = false;
+  for (const line of String(text ?? '').split('\n')) {
+    if (line === CATALOG_HEADER) { inCatalog = true; tagValues = false; continue; }
+    if (ADDED_BESIDE_GUIDANCE.test(line)) { inCatalog = false; tagValues = line.endsWith('tag values in use:'); continue; }
+    if (bullets.has(line)) { inCatalog = false; tagValues = false; continue; }
+    // The catalog is the bullets under its header, and the tag values are the lines under their marker. Any other
+    // line ends the block and is kept, so a blank line or a new paragraph after it survives as it was written.
+    if (inCatalog) { if (/^- /.test(line)) continue; inCatalog = false; }
+    if (tagValues) { if (TAG_VALUE_LINE.test(line)) continue; tagValues = false; }
+    kept.push(line);
+  }
+  return kept.join('\n').trim();
 }
 
 const ORIGIN_FIELDS = ['harness', 'session', 'name', 'host', 'cwd', 'herdrPane', 'herdrWorkspace', 'herdrTab'] as const;

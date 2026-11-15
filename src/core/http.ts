@@ -481,7 +481,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       }
     }
     if (a === 'guidance') {
-      if (method === 'GET') return json({ ...inbox.guidance(), widgets: inbox.widgetCatalog(), tags: inbox.tagsInUse() });
+      // The text is the guidance alone: the catalog and the tag values come in fields of their own, built on this read.
+      if (method === 'GET') return json(inbox.cardGuidance());
       if (method === 'POST') {
         const g = await readJson<{ text?: string; message?: string; agent?: string }>(req);
         return json(publicCard(inbox.proposeGuidance(String(g.text ?? ''), String(g.message ?? ''), g.agent ? { caller: me, agent: String(g.agent) } : undefined)), 201);
