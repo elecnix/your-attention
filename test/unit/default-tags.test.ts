@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
-import { createHandler } from '../../src/core/http.ts';
+import { httpInbox } from './fixture.ts';
 import { Inbox, mergeDefaultTags, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { DefaultTags } from '../../src/core/types.ts';
@@ -114,26 +114,11 @@ describe('default tags', () => {
   });
 });
 
-async function httpSetup() {
-  const inbox = fresh();
-  const handle = createHandler(inbox, { heartbeatMs: 50 });
-  const owner = (await inbox.createToken('page', 'owner')).secret;
-  const agentA = (await inbox.createToken('agent a', 'agent')).secret;
-  const agentB = (await inbox.createToken('agent b', 'agent')).secret;
-  const call = (method: string, path: string, opts: { token?: string; body?: unknown } = {}) =>
-    handle(new Request(`http://inbox.test${path}`, {
-      method,
-      headers: { ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-    }));
-  return { inbox, call, owner, agentA, agentB };
-}
-
 const tagsOf = async (res: Response): Promise<DefaultTags> => (await res.json()) as DefaultTags;
 
 describe('the default tags routes', () => {
   it('writes with PUT /v1/tags and reads them back with GET', async () => {
-    const { call, agentA } = await httpSetup();
+    const { call, agentA } = await httpInbox();
     const put = await call('PUT', '/v1/tags', { token: agentA, body: { agent: 's1', tags: { repo: 'acme/api' }, from: 'YOUR_ATTENTION_TAGS' } });
     assert.equal(put.status, 200);
     const got = await tagsOf(await call('GET', '/v1/tags?agent=s1', { token: agentA }));
@@ -141,7 +126,7 @@ describe('the default tags routes', () => {
   });
 
   it('never lets a token read or change another token\'s defaults', async () => {
-    const { call, agentA, agentB } = await httpSetup();
+    const { call, agentA, agentB } = await httpInbox();
     await call('PUT', '/v1/tags', { token: agentA, body: { agent: 's1', tags: { repo: 'acme/api' } } });
     // Asked for the same agent id, another token reads its own row, which is empty.
     assert.deepEqual((await tagsOf(await call('GET', '/v1/tags?agent=s1', { token: agentB }))).tags, {});
@@ -151,7 +136,7 @@ describe('the default tags routes', () => {
   });
 
   it('lets the owner read an agent\'s defaults, and nobody else', async () => {
-    const { call, owner, agentA } = await httpSetup();
+    const { call, owner, agentA } = await httpInbox();
     await call('PUT', '/v1/tags', { token: agentA, body: { agent: 's1', tags: { repo: 'acme/api' } } });
     const list = (await (await call('GET', '/v1/tags?agent=s1', { token: owner })).json()) as { defaults: { token: string; agent: string; tags: DefaultTags['tags'] }[] };
     assert.equal(list.defaults.length, 1);
@@ -163,7 +148,7 @@ describe('the default tags routes', () => {
   });
 
   it('names the inherited tags in the post\'s reply, and only those', async () => {
-    const { call, agentA } = await httpSetup();
+    const { call, agentA } = await httpInbox();
     await call('PUT', '/v1/tags', { token: agentA, body: { agent: 's1', tags: { repo: 'acme/api', topic: 'billing' } } });
     const posted = (await (await call('POST', '/v1/cards', { token: agentA, body: { agent: 's1', title: 'q', tags: { topic: 'ops', extra: '1' } } })).json()) as { inheritedTags?: string[]; tags?: Record<string, string> };
     assert.deepEqual(posted.inheritedTags, ['repo']);

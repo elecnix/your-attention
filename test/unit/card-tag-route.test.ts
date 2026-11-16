@@ -2,25 +2,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
-import { createHandler } from '../../src/core/http.ts';
-import { Inbox } from '../../src/core/inbox.ts';
-import { MemoryStorage } from '../../src/core/storage.ts';
+import { httpInbox } from './fixture.ts';
 import type { CardSummary } from '../../src/core/summary.ts';
 import type { Card } from '../../src/core/types.ts';
 
 async function setup() {
-  const inbox = new Inbox(new MemoryStorage(), () => 1_000);
-  const handle = createHandler(inbox, { heartbeatMs: 50 });
-  const owner = (await inbox.createToken('page', 'owner')).secret;
-  const agentA = (await inbox.createToken('agent a', 'agent')).secret;
-  const agentB = (await inbox.createToken('agent b', 'agent')).secret;
-  const ext = (await inbox.createToken('triage extension', 'extension')).secret;
-  const call = (method: string, path: string, opts: { token?: string; body?: unknown } = {}): Promise<Response> =>
-    handle(new Request(`http://inbox.test${path}`, {
-      method,
-      headers: { ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-    }));
+  const { call, owner, agentA, agentB, ext } = await httpInbox();
   const post = async (token: string, body: Record<string, unknown>): Promise<Card> =>
     (await (await call('POST', '/v1/cards', { token, body: { agent: 's1', ...body } })).json()) as Card;
   return { call, post, owner, agentA, agentB, ext };
