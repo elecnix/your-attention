@@ -199,6 +199,55 @@ describe('typing an approval into a herdr pane', () => {
     }
   });
 
+  /** A pane whose box still shows each sent text for `echo` more reads after `agent prompt` returns, as Claude Code does
+   * while it takes the message in. `type` puts a draft in the box, as the person typing there. */
+  function echoingPane(calls: string[][], echo: number) {
+    let box = '';
+    let left = 0;
+    const run = async (...args: string[]): Promise<string> => {
+      calls.push(args);
+      if (args[0] === 'pane' && args[1] === 'get') return JSON.stringify({ result: { pane: { pane_id: args[2] } } });
+      if (args[0] === 'agent' && args[1] === 'prompt') { box = args[3] ?? ''; left = echo; return '{}'; }
+      if (args[0] === 'pane' && args[1] === 'read') {
+        const shown = SCREEN(box);
+        if (left > 0 && --left === 0) box = '';
+        return shown;
+      }
+      return '{}';
+    };
+    return { run, type: (text: string) => { box = text; left = 0; } };
+  }
+  const noWait = { pause: async () => {} };
+  const prompts = (calls: string[][]) => calls.filter((c) => c[0] === 'agent').map((c) => c[3]);
+
+  it('sends a second approval to the same pane once the box has taken in the first one', async () => {
+    const calls: string[][] = [];
+    const inbox = inboxWith(herdrApprovals(echoingPane(calls, 3).run, noWait));
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Go?', approvals: [approval, { pane: 'w6P:p2', text: 'Then delete the branch.' }] });
+    await inbox.answer('c1', { values: { approval_0: true, approval_1: true } });
+    const answer = await inbox.sendApprovals(owner, 'c1');
+    assert.deepEqual(answer?.approvalResults?.map((r) => (r && 'sentAt' in r ? 'sent' : r)), ['sent', 'sent']);
+    assert.deepEqual(prompts(calls), ['Yes, push the tag v1.2.0.', 'Then delete the branch.']);
+  });
+
+  it('still refuses a draft the person typed after a send to the same pane', async () => {
+    const calls: string[][] = [];
+    const pane = echoingPane(calls, 1);
+    const approvals = herdrApprovals(pane.run, noWait);
+    await approvals.send('w6P:p2', 'Yes.');
+    pane.type('wait, do not tag');
+    await assert.rejects(approvals.send('w6P:p2', 'And tag it.'), /draft you typed/);
+    assert.deepEqual(prompts(calls), ['Yes.']);
+  });
+
+  it('sends nothing when the box never takes in the text sent before', async () => {
+    const calls: string[][] = [];
+    const approvals = herdrApprovals(echoingPane(calls, Infinity).run, noWait);
+    await approvals.send('w6P:p2', 'Yes.');
+    await assert.rejects(approvals.send('w6P:p2', 'And tag it.'), /still shows the approval sent before/);
+    assert.deepEqual(prompts(calls), ['Yes.']);
+  });
+
   it('names the agent, session, tab and workspace of a pane, and nothing when herdr fails', async () => {
     const approvals = herdrApprovals(herdr('', []));
     assert.deepEqual(await approvals.describe?.('w6P:p2'), { agent: 'claude', title: 'release', tab: 'login fix', workspace: 'DevEx' });
