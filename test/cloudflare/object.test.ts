@@ -120,6 +120,27 @@ describe('the inbox Durable Object', () => {
     assert.equal(obj['inbox'].listTokens().length, 0, 'no owner token without an inbox to sign in to');
   });
 
+  for (const signIn of ['a header', 'its first frame'] as const) {
+    it(`keeps the origin a socket reports on its presence row, signed in with ${signIn}`, async () => {
+      const rt = runtime();
+      let obj = rt.make();
+      const owner = await init(obj);
+      const origin = { harness: 'pi', session: 's1', name: 'Rename the retry flag', host: 'laptop', herdrPane: 'w7:p2' };
+      const query = `agent=s1&origin=${encodeURIComponent(JSON.stringify(origin))}`;
+      const signedInWithHeader = signIn === 'a header';
+      await openSocket(obj, query, signedInWithHeader ? owner : undefined);
+      if (!signedInWithHeader) await obj.webSocketMessage(rt.sockets[0]! as never, JSON.stringify({ type: 'auth', token: owner }));
+      const state = (await (await call(obj, 'GET', '/v1/state', owner)).json()) as { presence: Record<string, { online: boolean; origin?: unknown }> };
+      assert.equal(state.presence['s1']?.online, true, 'the socket opened');
+      assert.deepEqual(state.presence['s1']?.origin, origin);
+      // The socket attachment is what a wake rebuilds the connection from, so hibernation keeps the row as it was.
+      obj = rt.make();
+      await obj.webSocketMessage(rt.sockets[0]! as never, '{"type":"ping"}');
+      const woken = (await (await call(obj, 'GET', '/v1/state', owner)).json()) as { presence: Record<string, { origin?: unknown }> };
+      assert.deepEqual(woken.presence['s1']?.origin, origin, 'the origin survives a wake');
+    });
+  }
+
   it('keeps answering agents across hibernation', async () => {
     const rt = runtime();
     let obj = rt.make();

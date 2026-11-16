@@ -1,7 +1,8 @@
-// The agents this inbox knows, as the panel that sends one a card lists them: the name each reports, the working
-// directory a card carried, the pane presence reported, and when the inbox last saw it. Only presence says an agent is
-// connected, so an agent that went offline reads as offline, whatever its cards say.
+// The agents this inbox knows, as the panel that sends one a card lists them: the name each connection reported, the
+// working directory a card carried, the pane presence reported, and when the inbox last saw it. Only presence says an
+// agent is connected, so an agent that went offline reads as offline, whatever its cards say.
 import { cardAge } from './age.js';
+import { agentName } from './queue.js';
 
 /** The agent id the inbox itself posts under, which is no session to send a card to. */
 const SYSTEM_AGENT = 'system';
@@ -17,11 +18,11 @@ export function agentList(state, now = Date.now()) {
     const online = !!p && p.online === true;
     // An agent whose presence row the inbox pruned, and one that never connected, have no time to show.
     const lastSeen = online ? null : (p && (p.leftAt ?? p.lastSeen)) || null;
-    const reported = reportedBy(cards, id);
+    // A session that has posted no card still has a name, because presence keeps the one its connection sent.
     rows.push({
       id,
-      name: reported.name || id,
-      cwd: reported.cwd || null,
+      name: reported.name || agentName(id, cards, presence),
+      cwd: reported.cwd || newestCwd(cards, id),
       // A pane is where a connection reported its session, so only presence knows one.
       pane: (p && p.origin && p.origin.herdrPane) || null,
       online,
@@ -36,20 +37,18 @@ export function agentList(state, now = Date.now()) {
   return rows.sort((a, b) => Number(b.online) - Number(a.online) || (b.lastSeen ?? 0) - (a.lastSeen ?? 0) || a.name.localeCompare(b.name));
 }
 
-/** The session name, and the working directory, of the newest card of this agent that carried each one. */
-function reportedBy(cards, id) {
-  let name = null;
-  let nameAt = -Infinity;
+/** The working directory of the newest card of this agent that carried one. A presence row keeps no directory, so a
+ * card is where the panel learns it. */
+function newestCwd(cards, id) {
   let cwd = null;
-  let cwdAt = -Infinity;
+  let at = -Infinity;
   for (const c of cards) {
     if (c.agent !== id) continue;
     const o = c.origin || {};
-    const at = c.createdAt || 0;
-    if (o.name && at >= nameAt) { name = o.name; nameAt = at; }
-    if (o.cwd && at >= cwdAt) { cwd = o.cwd; cwdAt = at; }
+    const when = c.createdAt || 0;
+    if (o.cwd && when >= at) { cwd = o.cwd; at = when; }
   }
-  return { name, cwd };
+  return cwd;
 }
 
 /** The agents whose name, id, working directory or pane carries this search, in the order the list has them, so the

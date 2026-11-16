@@ -100,6 +100,18 @@ export const cardTools: CardTool[] = [
     schema: { type: 'object', properties: { card_id: { type: 'string' }, status: { type: 'string' } }, required: ['card_id', 'status'] },
   },
   {
+    name: 'card_tag',
+    description: 'Set the tags on a card you already posted, so a search finds it and the queue groups it. A key with an empty value removes that key. The card keeps at most 10 tags, and each key and value is at most 100 characters. This changes that card alone; card_tags sets the default tags that every card of this session inherits.',
+    schema: {
+      type: 'object',
+      properties: {
+        card_id: { type: 'string' },
+        tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Tag keys and values to merge into the card, such as {repo: "acme/api", topic: "billing"}. An empty value removes that key.' },
+      },
+      required: ['card_id', 'tags'],
+    },
+  },
+  {
     name: 'card_tags',
     description: 'Set the default tags that every card this session posts inherits: repo, topic, or any other grouping key. The tool returns every default it holds, with what set it, so after a compaction this call shows the setting again. The inbox merges the defaults under the card\'s own tags when the session posts: a key on the card wins, and a key the card passes with an empty string drops that default for that card alone. The defaults stay in the inbox for this agent id, so a restart keeps them.',
     schema: {
