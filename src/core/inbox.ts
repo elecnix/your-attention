@@ -255,7 +255,7 @@ export function mergeDefaultTags(defaults: Record<string, string>, own: Record<s
 
 /** Which client set each tag, kept for the keys a card still carries after a revision. A repost may drop a tag, and
  * its record goes with it. */
-export function keptTagFrom(from: Record<string, string> | undefined, tags: Record<string, string> | undefined): Record<string, string> | undefined {
+function keptTagFrom(from: Record<string, string> | undefined, tags: Record<string, string> | undefined): Record<string, string> | undefined {
   if (!from || !tags) return undefined;
   const kept = Object.entries(from).filter(([k]) => Object.hasOwn(tags, k));
   return kept.length ? Object.fromEntries(kept) : undefined;
