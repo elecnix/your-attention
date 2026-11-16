@@ -115,7 +115,7 @@ export function createPlugin(z: unknown) {
     const maybeFollow = async (session: string): Promise<void> => {
       if (followed.has(session) || checked.has(session)) return;
       checked.add(session);
-      const mine = (await inbox.list().catch(() => [])).some(({ card, state }) => card.agent === agentOf(session) && state !== 'closed' && state !== 'read');
+      const mine = (await inbox.list().catch(() => ({ results: [] }))).results.some(({ card, state }) => card.agent === agentOf(session) && state !== 'closed' && state !== 'read');
       if (mine) follow(session);
     };
 

@@ -234,7 +234,7 @@ describe('message ids from review', () => {
     const send = () => call('POST', '/v1/cards', { token: agent, body: { agent: 's1', title: 'Same message at once' }, headers: { 'x-message-id': 'simultaneous-1' } });
     const all = await Promise.all([send(), send(), send(), send()]);
     for (const r of all) assert.ok([201, 409].includes(r.status), String(r.status));
-    assert.equal(inbox.listCards({ token: 'x', role: 'owner' }).filter((c) => c.card.title === 'Same message at once').length, 1);
+    assert.equal(inbox.listCards({ token: 'x', role: 'owner' }).results.filter((c) => c.card.title === 'Same message at once').length, 1);
     const again = await send();
     assert.equal(again.headers.get('x-message-id-replayed'), '1');
   });

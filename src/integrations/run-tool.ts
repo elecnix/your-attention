@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
-import { typeFromName } from '../core/inbox.ts';
+import { typeFromName, type SearchFilters } from '../core/inbox.ts';
 import type { Approval, AskQuestion, CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
 import { envRequireCard } from './require-card.ts';
@@ -156,8 +156,40 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
     case 'card_close':
       await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));
       return 'Closed.';
-    case 'card_search':
-      return JSON.stringify((await inbox.search(String(args['query'] ?? ''), { answered: args['include_open'] !== true, limit: args['limit'] === undefined ? undefined : Number(args['limit']) })).map((r) => ({ id: r.card.id, title: r.card.title, answer: r.answer ? describeAnswer(r.card, r.answer) : null })), null, 2);
+    case 'card_search': {
+      // A time filter takes what an agent writes: an ISO date, a date-time, or epoch milliseconds.
+      const time = (name: string): number | undefined => {
+        const raw = args[name];
+        if (raw === undefined || raw === null || raw === '') return undefined;
+        const value = typeof raw === 'number' || /^\d+$/.test(String(raw)) ? Number(raw) : Date.parse(String(raw));
+        if (!Number.isSafeInteger(value)) throw new Error(`${name} must be an ISO date or epoch milliseconds, and ${String(raw)} is neither`);
+        return value;
+      };
+      const filtered = ['state', 'tags', 'agent', 'since', 'before', 'links'].some((k) => args[k] !== undefined);
+      const page = await inbox.search(String(args['query'] ?? ''), {
+        // Words alone keep the tool's own default of answered cards. A filter picks the cards itself, so it lifts it.
+        answered: args['include_open'] === true || filtered ? undefined : true,
+        state: str(args['state']) as SearchFilters['state'],
+        tags: Array.isArray(args['tags']) ? (args['tags'] as unknown[]).map(String) : undefined,
+        agent: str(args['agent']),
+        since: time('since'),
+        before: time('before'),
+        links: str(args['links']),
+        limit: args['limit'] === undefined ? undefined : Number(args['limit']),
+        cursor: str(args['cursor']),
+      });
+      const results = page.results.map((r) => ({
+        id: r.card.id,
+        title: r.card.title,
+        state: r.state,
+        tags: r.card.tags ?? {},
+        agent: r.card.agent,
+        posted: new Date(r.card.createdAt).toISOString(),
+        updated: new Date(r.card.updatedAt).toISOString(),
+        answer: r.answer ? describeAnswer(r.card, r.answer) : null,
+      }));
+      return JSON.stringify({ results, ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}) }, null, 2);
+    }
     case 'settings': {
       const scope = args['scope'];
       const ruleSays = (rule: { mode: string; agents?: string[] }) => rule.mode === 'all'

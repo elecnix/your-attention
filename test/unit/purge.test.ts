@@ -38,11 +38,11 @@ describe('the purge of old cards', () => {
     clock.advance(1);
     assert.deepEqual(await inbox.purge(), { removed: 1 });
     assert.equal(exists(inbox, 'old'), false);
-    assert.deepEqual(inbox.search('walrus', 20, true), []);
+    assert.deepEqual(inbox.search('walrus', { limit: 20, answered: true }).results, []);
     assert.equal(await blobs.get(card.attachments![0]!.id!), undefined);
     assert.equal(await blobs.get(answer.images![0]!.id!), undefined);
     assert.equal(exists(inbox, 'new'), true);
-    assert.equal(inbox.search('narwhal', 20, true).length, 1);
+    assert.equal(inbox.search('narwhal', { limit: 20, answered: true }).results.length, 1);
   });
 
   it('deletes an unanswered card 30 days after its last revision, and never an answered card on show', async () => {

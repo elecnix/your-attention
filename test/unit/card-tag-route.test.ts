@@ -24,8 +24,8 @@ describe('tagging a card that is already posted', () => {
     const res = await tag(call, agentA, 'c1', { topic: 'billing' });
     assert.equal(res.status, 200);
     assert.deepEqual(((await res.json()) as Card).tags, { topic: 'billing' });
-    const hits = (await (await call('GET', '/v1/search?q=billing', { token: agentA })).json()) as { card: Card }[];
-    assert.deepEqual(hits.map((h) => h.card.id), ['c1']);
+    const hits = (await (await call('GET', '/v1/search?q=billing', { token: agentA })).json()) as { results: { card: Card }[] };
+    assert.deepEqual(hits.results.map((h) => h.card.id), ['c1']);
   });
 
   it('merges into the tags the card carries without dropping one', async () => {
@@ -40,8 +40,8 @@ describe('tagging a card that is already posted', () => {
     await post(agentA, { id: 'c1', title: 'q', tags: { repo: 'acme/api', topic: 'billing' } });
     const removed = (await (await tag(call, agentA, 'c1', { topic: '' })).json()) as Card;
     assert.deepEqual(removed.tags, { repo: 'acme/api' });
-    const hits = (await (await call('GET', '/v1/search?q=billing', { token: agentA })).json()) as { card: Card }[];
-    assert.deepEqual(hits, []);
+    const hits = (await (await call('GET', '/v1/search?q=billing', { token: agentA })).json()) as { results: { card: Card }[] };
+    assert.deepEqual(hits.results, []);
   });
 
   it('lets an agent tag a card another agent posted, and records which client set each tag', async () => {

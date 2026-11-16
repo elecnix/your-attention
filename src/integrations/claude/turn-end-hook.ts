@@ -80,7 +80,7 @@ export async function main(): Promise<void> {
   if (!rule.on) return;
   let open: boolean;
   try {
-    open = (await inbox.list()).some((c) => c.card.agent === agent && c.state === 'open');
+    open = (await inbox.list()).results.some((c) => c.card.agent === agent && c.state === 'open');
   } catch {
     return;
   }

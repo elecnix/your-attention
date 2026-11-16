@@ -5,7 +5,7 @@ import { randomId } from './crypto.ts';
 import { fileLinkPaths, folderFilePath } from './file-links.ts';
 import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
-import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller } from './inbox.ts';
+import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller, type SearchFilters } from './inbox.ts';
 import { UNLOCK_HEADER, UNLOCK_IDLE_MS, pinKeyError, validKey, type PinKey } from './pin.ts';
 import type { Source } from './telemetry.ts';
 import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
@@ -29,6 +29,37 @@ export function originParam(url: URL): unknown {
   } catch {
     return undefined;
   }
+}
+/** The filters a `GET /v1/search` or `GET /v1/cards` address carries: a state, tags, an agent, a time window as epoch
+ * milliseconds or ISO dates, a linked card id or URL, a result limit and a cursor. */
+export function filtersFrom(url: URL): SearchFilters {
+  const p = url.searchParams;
+  const time = (name: 'since' | 'before'): number | undefined => {
+    const raw = p.get(name);
+    if (raw === null || raw === '') return undefined;
+    const value = /^\d+$/.test(raw) ? Number(raw) : Date.parse(raw);
+    if (!Number.isSafeInteger(value)) throw new InboxError(400, `${name} must be epoch milliseconds or an ISO date`);
+    return value;
+  };
+  const state = p.get('state');
+  const agent = p.get('agent');
+  const links = p.get('links');
+  const cursor = p.get('cursor');
+  const limit = p.get('limit');
+  const since = time('since');
+  const before = time('before');
+  const tags = p.getAll('tags').flatMap((t) => t.split(',')).map((t) => t.trim()).filter(Boolean);
+  return {
+    ...(p.get('answered') === '1' ? { answered: true } : {}),
+    ...(state ? { state: state as SearchFilters['state'] } : {}),
+    ...(tags.length ? { tags } : {}),
+    ...(agent ? { agent } : {}),
+    ...(since === undefined ? {} : { since }),
+    ...(before === undefined ? {} : { before }),
+    ...(links ? { links } : {}),
+    ...(limit === null || limit === '' ? {} : { limit: Number(limit) }),
+    ...(cursor ? { cursor } : {}),
+  };
 }
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'text/html']);
@@ -450,7 +481,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (!agent) return json({ error: 'agent is required' }, 400);
       return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined, { channelOff: url.searchParams.get('channel') === 'off', origin: originParam(url) }), heartbeatMs);
     }
-    if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', Math.min(Number(url.searchParams.get('limit') ?? 20) || 20, 100), url.searchParams.get('answered') === '1'));
+    if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', filtersFrom(url)));
     if (method === 'GET' && a === 'unread') return json(inbox.unread(me, url.searchParams.get('agent') ?? undefined));
     if (method === 'GET' && a === 'dead-letters') return json(inbox.deadLetters());
     if (a === 'templates') {
@@ -613,7 +644,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         // ?ids= looks up the cards a text links to, cleared ones included, in one request.
         const ids = url.searchParams.get('ids');
         if (ids !== null) return json({ cards: inbox.linkedCards(me, ids.split(',').filter(Boolean)) });
-        return json(inbox.listCards(me));
+        return json(inbox.listCards(me, filtersFrom(url)));
       }
       if (!b) return json({ error: 'not found' }, 404);
       if (method === 'GET' && !c) {

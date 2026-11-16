@@ -56,8 +56,8 @@ describe('cards', () => {
     const { inbox, agentA, agentB } = setup();
     inbox.postCard(agentA, { id: 'c1', agent: 's1', title: 'a' });
     inbox.postCard(agentB, { id: 'c2', agent: 's2', title: 'b' });
-    assert.deepEqual(inbox.listCards(agentA).map((x) => x.card.id), ['c1']);
-    assert.equal(inbox.listCards({ token: 'o', role: 'owner' }).length, 2);
+    assert.deepEqual(inbox.listCards(agentA).results.map((x) => x.card.id), ['c1']);
+    assert.equal(inbox.listCards({ token: 'o', role: 'owner' }).results.length, 2);
   });
 });
 
@@ -327,8 +327,8 @@ describe('pages', () => {
     const { inbox, agentA } = setup();
     inbox.postCard(agentA, { id: 'c1', agent: 's1', title: 'Which database?', text: 'Postgres or SQLite' });
     await inbox.answer('c1', { comment: 'SQLite for the laptop build' });
-    assert.equal(inbox.search('laptop')[0]?.card.id, 'c1');
-    assert.equal(inbox.search('nothing-like-this').length, 0);
+    assert.equal(inbox.search('laptop').results[0]?.card.id, 'c1');
+    assert.equal(inbox.search('nothing-like-this').results.length, 0);
   });
 });
 
@@ -369,7 +369,7 @@ describe('clearing the inbox', () => {
     inbox.close(agentA, 'gone', 'retracted', 'Not needed.');
     assert.deepEqual(inbox.archive(owner), { archived: 2 });
     assert.deepEqual(inbox.state().cards.map((c) => c.id).sort(), ['waits']);
-    assert.equal(inbox.search('elephant')[0]?.card.id, 'done');
+    assert.equal(inbox.search('elephant').results[0]?.card.id, 'done');
     assert.equal(inbox.state().answers['done'], undefined);
     assert.throws(() => inbox.archive(agentA), (e: InboxError) => e.status === 403);
   });
@@ -392,7 +392,7 @@ describe('clearing the inbox', () => {
     assert.deepEqual(await inbox.reset(owner), { removed: 1 });
     assert.equal(inbox.state().cards.length, 0);
     assert.equal(Object.keys(inbox.state().answers).length, 0);
-    assert.equal(inbox.search('Reset').length, 0);
+    assert.equal(inbox.search('Reset').results.length, 0);
     assert.ok(inbox.getTemplate('t'));
   });
 });

@@ -149,7 +149,7 @@ export default function yourAttention(pi: PiApi): void {
     if (!rule.on) return;
     let open = false;
     try {
-      open = (await inbox.list()).some((c) => c.card.agent === agent && c.state === 'open');
+      open = (await inbox.list()).results.some((c) => c.card.agent === agent && c.state === 'open');
     } catch (e) {
       log('could not read the session cards:', (e as Error).message);
       return;

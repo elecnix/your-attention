@@ -191,7 +191,7 @@ export async function runTriage(cfg: TriageConfig, signal: AbortSignal): Promise
     try {
       const guidance = (await call<{ text: string }>('/v1/guidance')).text;
       const words = ev.card.title.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).join(' ');
-      const hits = words ? await call<{ card: Card; answer?: { comment: string; values: Record<string, unknown> } }[]>(`/v1/search?q=${encodeURIComponent(words)}`) : [];
+      const hits = words ? (await call<{ results: { card: Card; answer?: { comment: string; values: Record<string, unknown> } }[] }>(`/v1/search?q=${encodeURIComponent(words)}`)).results : [];
       const earlier = hits.filter((h) => h.card.id !== ev.card.id && h.answer).slice(0, 3)
         .map((h) => ({ title: h.card.title, answer: [JSON.stringify(h.answer?.values), h.answer?.comment].filter(Boolean).join(' ') }));
       ruling = parseRuling(await run(() => judgeWithRetry(cfg.judge, triagePrompt(ev.card, guidance, earlier, ev.person), ev.deadline)));

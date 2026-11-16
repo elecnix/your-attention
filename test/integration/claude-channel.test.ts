@@ -118,6 +118,28 @@ describe('the Claude Code channel', () => {
     const res = await mcp.callTool({ name: 'card_search', arguments: { query: 'agreed' } });
     assert.match(JSON.stringify(res.content), /cc-1/);
   });
+
+  it('lists cards by a filter, with each result carrying its state, tags, agent and times', async () => {
+    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-filter-open', title: 'Still waiting?', tags: { repo: 'search-test' } } });
+    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-filter-done', title: 'Settled?', tags: { repo: 'search-test' } } });
+    await h.owner('POST', '/v1/cards/cc-filter-done/answer', { values: {} });
+    type Row = { id: string; state: string; tags: Record<string, string>; agent: string; posted: string; updated: string };
+    const reply = async (args: Record<string, unknown>): Promise<{ results: Row[]; next_cursor?: string }> => {
+      const res = await mcp.callTool({ name: 'card_search', arguments: args });
+      return JSON.parse((res.content as { type: string; text: string }[])[0]?.text ?? '{}') as { results: Row[] };
+    };
+    const open = await reply({ state: 'open', tags: ['repo=search-test'] });
+    assert.deepEqual(open.results.map((r) => r.id), ['cc-filter-open']);
+    assert.equal(open.results[0]?.state, 'open');
+    assert.deepEqual(open.results[0]?.tags, { repo: 'search-test' });
+    assert.equal(open.results[0]?.agent, `claude:${SESSION}`);
+    assert.ok(open.results[0]?.posted && open.results[0]?.updated, 'each result says when the card was posted and last changed');
+    // A filter lifts the tool's default of answered cards, so no query and no state lists both.
+    const both = await reply({ tags: ['repo=search-test'] });
+    const states = Object.fromEntries(both.results.map((r) => [r.id, r.state]));
+    assert.equal(states['cc-filter-open'], 'open');
+    assert.ok(['answered', 'delivered', 'read'].includes(states['cc-filter-done'] ?? ''), `the answered card comes back too, and reads as ${states['cc-filter-done']}`);
+  });
 });
 
 describe('the batch of card model tools', () => {
