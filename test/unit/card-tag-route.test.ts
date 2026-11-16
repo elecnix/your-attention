@@ -67,6 +67,26 @@ describe('tagging a card that is already posted', () => {
     assert.deepEqual(((await byOwner.json()) as Card).tags, { topic: 'billing' });
   });
 
+  it('takes a merge that removes one key and adds another when the card is full', async () => {
+    const { call, post, agentA } = await setup();
+    const ten = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`k${i}`, 'v']));
+    await post(agentA, { id: 'c1', title: 'q', tags: ten });
+    const res = await tag(call, agentA, 'c1', { k0: '', topic: 'billing' });
+    assert.equal(res.status, 200);
+    const card = (await res.json()) as Card;
+    assert.equal(Object.keys(card.tags ?? {}).length, 10);
+    assert.equal(card.tags?.['topic'], 'billing');
+    assert.equal(card.tags?.['k0'], undefined);
+  });
+
+  it('answers 400, not 500, to a null JSON body', async () => {
+    const { call, post, agentA } = await setup();
+    await post(agentA, { id: 'c1', title: 'q' });
+    const res = await call('POST', '/v1/cards/c1/tags', { token: agentA, body: null });
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as { error: string }).error, /tags must be an object/);
+  });
+
   it('answers 400 with the key when one is past a card\'s tag limit', async () => {
     const { call, post, agentA } = await setup();
     await post(agentA, { id: 'c1', title: 'q' });

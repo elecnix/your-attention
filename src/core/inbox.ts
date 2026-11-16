@@ -1171,19 +1171,21 @@ export class Inbox {
     const card = this.owned(caller, id);
     if (!tags || typeof tags !== 'object' || Array.isArray(tags)) throw new InboxError(400, 'tags must be an object of tag keys and values');
     const next = new Map(Object.entries(card.tags ?? {}));
+    const added: string[] = [];
     for (const [k, raw] of Object.entries(tags)) {
       if (!k) throw new InboxError(400, 'each tag needs a key');
       if (k.length > MAX_TAG_CHARS) throw new InboxError(400, `tag key ${k.slice(0, 20)}… must be at most ${MAX_TAG_CHARS} characters`);
       const value = String(raw ?? '');
       if (value.length > MAX_TAG_CHARS) throw new InboxError(400, `tag ${k} must be at most ${MAX_TAG_CHARS} characters`);
-      const existed = next.has(k);
       if (value === '') next.delete(k);
       else {
+        if (!next.has(k)) added.push(k);
         next.set(k, value);
-        // A card that already carries more than the limit keeps what it has, so a change to one key still goes in.
-        if (!existed && next.size > MAX_TAGS) throw new InboxError(400, `tag ${k} takes the card past its ${MAX_TAGS} tags`);
       }
     }
+    // The limit reads the tags the card keeps at the end, so one call may remove a key and add another. A card that
+    // already carries more than the limit keeps what it has, so a change to one of its keys still goes in.
+    if (next.size > MAX_TAGS && added.length) throw new InboxError(400, `tag ${added[added.length - 1]} takes the card past its ${MAX_TAGS} tags`);
     // fromEntries gives a key named like an Object property its own key, so a tag may read `toString`.
     const merged = Object.fromEntries(next);
     const updated: Card = { ...card, tags: next.size ? merged : undefined };

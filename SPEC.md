@@ -658,7 +658,7 @@ The client never runs an HTML card's scripts. For an HTML card, a chart or anoth
 
 ## Search
 
-`GET /v1/search?q=<words>` matches each word as a prefix, over card text and answer comments. The laptop build uses SQLite FTS5.
+`GET /v1/search?q=<words>` matches each word as a prefix, over card text, its tags and answer comments. The laptop build uses SQLite FTS5.
 
 ### The search field in the page
 
