@@ -7,7 +7,7 @@ export type ListedAgentStatus = 'online' | 'offline' | 'unknown';
 /** One agent, as the panel that sends it a card lists it. */
 export interface ListedAgent {
   id: string;
-  /** The session name the agent reports on its newest card, else its id. */
+  /** The session name its connection reported, else the name on its newest card, else its id. */
   name: string;
   /** The working directory a card carried, when the inbox has one. */
   cwd: string | null;
