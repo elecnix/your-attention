@@ -61,6 +61,12 @@ export function filtersFrom(url: URL): SearchFilters {
     ...(cursor ? { cursor } : {}),
   };
 }
+/** Whether a search or cards request asks for the paged reply. A client from before the paged reply maps over the
+ * plain array it used to get, so the old answer stays for every request that names none of these parameters. The
+ * `format` marker exists because a plain word search and the old client's request are otherwise identical. */
+export function wantsPage(url: URL): boolean {
+  return url.searchParams.get('format') === 'page' || ['cursor', 'state', 'tags', 'agent', 'since', 'before', 'links'].some((name) => url.searchParams.has(name));
+}
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'text/html']);
 /** The type of a local file, by its extension. Text that a browser would download, such as Markdown and CSV, shows as plain text. */
@@ -481,7 +487,13 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (!agent) return json({ error: 'agent is required' }, 400);
       return eventStream((send) => inbox.connect(me, agent, (ev) => send(ev.type, ev), url.searchParams.get('instance') ?? undefined, { channelOff: url.searchParams.get('channel') === 'off', origin: originParam(url) }), heartbeatMs);
     }
-    if (method === 'GET' && a === 'search') return json(inbox.search(url.searchParams.get('q') ?? '', filtersFrom(url)));
+    if (method === 'GET' && a === 'search') {
+      const q = url.searchParams.get('q') ?? '';
+      const filters = filtersFrom(url);
+      // A client from before the paged reply maps over the array, so it keeps that answer.
+      if (!wantsPage(url)) return json(inbox.search(q, filters).results.map(({ card, answer }) => (answer ? { card, answer } : { card })));
+      return json(inbox.search(q, filters));
+    }
     if (method === 'GET' && a === 'unread') return json(inbox.unread(me, url.searchParams.get('agent') ?? undefined));
     if (method === 'GET' && a === 'dead-letters') return json(inbox.deadLetters());
     if (a === 'templates') {
@@ -644,7 +656,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         // ?ids= looks up the cards a text links to, cleared ones included, in one request.
         const ids = url.searchParams.get('ids');
         if (ids !== null) return json({ cards: inbox.linkedCards(me, ids.split(',').filter(Boolean)) });
-        return json(inbox.listCards(me, filtersFrom(url)));
+        // The listing keeps the array too, for a client from before the paged reply.
+        const listing = inbox.listCards(me, filtersFrom(url));
+        return json(wantsPage(url) ? listing : listing.results);
       }
       if (!b) return json({ error: 'not found' }, 404);
       if (method === 'GET' && !c) {

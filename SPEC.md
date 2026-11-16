@@ -666,6 +666,8 @@ The route takes filters, which combine with the words and with each other, and w
 
 `GET /v1/cards` lists the cards its caller may read, all of them for the owner and its own for an agent, in the order they were posted. It takes the same filters except `q`, and returns `{results, nextCursor?}` with `{card, state}` for each card. Without `limit` it returns every matching card. With one, it pages the same way as a search.
 
+A client from before the paged reply maps over the plain array it used to read, so both routes keep that answer for a request that names none of the filters, the cursor or `format=page`: the search answers `{card, answer?}[]` and the listing answers `{card, state}[]`. The client of this build sends `format=page` on every search and listing, because a plain word search carries no filter to tell the two callers apart. A filter alone asks for the paged reply as well.
+
 ### The search field in the page
 
 The page's bar has a search field that doesn't call the inbox. It reads the card summaries from `GET /v1/state`, and the whole card and answer of every card the page fetched from `GET /v1/cards/<id>`. Typing never fetches a card. An unfetched card matches on its summary alone.
