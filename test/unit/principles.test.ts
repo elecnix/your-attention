@@ -64,6 +64,14 @@ describe('principles', () => {
     assert.match(source, /connectionOrigin\(reported\) \?\? before\?\.origin/, 'a connection that reports none keeps the origin the row had');
   });
 
+  it('the panel that sends a card names each agent from the presence row, then from its cards', () => {
+    // DP43: a card shows the session name and where it runs, and the list the person picks from names the same
+    // session the same way. Most sessions have posted no card, so a list that read only cards named them by an id.
+    const list = fs.readFileSync(path.join(ROOT, 'web/agents.js'), 'utf8');
+    assert.match(list, /name: agentName\(id, cards, presence\)/, 'a row reads its name from presence, then from the cards, then the id');
+    assert.doesNotMatch(list, /reported\.name/, 'no other rule names a row');
+  });
+
   it('a pin groups by the property it names, a tag value or an agent', () => {
     // DP15: a pin lifts what the card itself carries, so a tag pin reads that tag and an agent pin the agent that
     // posted the card. An agent's heading is the name presence and the cards give it, never a list the page kept.
@@ -95,6 +103,12 @@ describe('principles', () => {
     assert.match(prompt, /kind: 'blocked'/, 'the prompt posts the blocked kind a harness gets');
     assert.match(prompt, /send-keys', open\.pane,/, 'keys go to the pane this session reported');
     assert.doesNotMatch(prompt, /card\.origin/, 'the pane of a card never decides where a keystroke goes');
+  });
+
+  it('a tag added to a card after it posted reaches search at once', () => {
+    // DP13: search reads the card's tags, so a change to them re-indexes the card rather than waiting for another post.
+    const tag = / {2}tagCard\(caller: Caller[\s\S]*?\n {2}\}/.exec(read('inbox.ts'))?.[0] ?? '';
+    assert.match(tag, /this\.store\.index\(id,/, 'the tag route re-indexes the card it changed');
   });
 
   it('every principle in PRINCIPLES.md has a statement and a reason', () => {

@@ -53,22 +53,33 @@ test('picks an agent in the drop-down, shows what presence says about it, and se
 });
 
 test('sends with the one button when the inbox knows a single connected agent', async ({ page }) => {
-  // This session posts no card, so presence alone puts it in the drop-down, under the id it reports.
-  const stream = inbox.listen('pi:solo');
+  // This session posts no card, so presence alone puts it in the drop-down, under the name its connection reported.
+  const stream = inbox.listen('pi:solo', { harness: 'pi', session: 'solo', name: 'Release the fix', host: 'laptop' });
   await expect.poll(() => inbox.server.inbox.isOnline('pi:solo')).toBe(true);
   await inbox.open(page);
 
   const dialog = await openDialog(page, PANEL);
-  await expect(pick(dialog).locator('option')).toHaveText(['pi:solo']);
+  await expect(pick(dialog).locator('option')).toHaveText(['Release the fix']);
   await expect(pick(dialog)).toHaveValue('pi:solo');
   await expect(dialog).toContainText('Connected now');
 
   await message(dialog).fill('Name the release branch after the ticket.');
   await dialog.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(dialog).toContainText('Sent to pi:solo');
+  await expect(dialog).toContainText('Sent to Release the fix');
 
   await expect.poll(() => cardEvents(stream.events).length).toBe(1);
   expect(cardEvents(stream.events)[0]?.card.agent).toBe('pi:solo');
+});
+
+test('names a connected session by its id when its connection reported no session name', async ({ page }) => {
+  const stream = inbox.listen('pi:plain', { harness: 'pi', session: 'plain', host: 'laptop' });
+  await expect.poll(() => inbox.server.inbox.isOnline('pi:plain')).toBe(true);
+  await inbox.open(page);
+
+  const dialog = await openDialog(page, PANEL);
+  await expect(pick(dialog).locator('option')).toHaveText(['pi:plain']);
+  await expect(dialog).toContainText('Connected now');
+  stream.stop();
 });
 
 test('keeps a message typed while a send is still in flight, and clears the field when it holds what went', async ({ page }) => {

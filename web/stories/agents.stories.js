@@ -20,10 +20,12 @@ function state() {
     presence: {
       'claude:demo': { agent: 'claude:demo', online: true, lastSeen: NOW },
       'pi:5f2a': { agent: 'pi:5f2a', online: false, lastSeen: NOW - 3 * HOUR },
+      // A session that holds a connection and has posted no card: its presence row is the only place its name appears.
+      'pi:9c1': { agent: 'pi:9c1', online: true, lastSeen: NOW, origin: { harness: 'pi', session: '9c1', name: 'Rename the retry flag', host: 'vandenberg' } },
     },
   };
 }
 
-// A story opens the panel, since nothing clicks in a story. Its drop-down lists the three agents, the first one
+// A story opens the panel, since nothing clicks in a story. Its drop-down lists the four agents, the first one
 // picked, with what presence says about it under the field.
 export const SendACardToAnAgent = { render: () => mount(h(AgentsPanel, { state: state(), startOpen: true })) };

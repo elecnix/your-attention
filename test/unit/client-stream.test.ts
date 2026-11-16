@@ -13,6 +13,8 @@ const TOKEN = `aaaaaaaaaaaa.${'a'.repeat(64)}`;
 interface FakeInbox {
   url: string;
   hits: string[];
+  /** The address of each socket the client asked to open, with its query string. */
+  upgraded: string[];
   close(): Promise<void>;
 }
 
@@ -22,6 +24,7 @@ interface FakeInbox {
  */
 async function fakeInbox(status: number): Promise<FakeInbox> {
   const hits: string[] = [];
+  const upgraded: string[] = [];
   const server = http.createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://inbox').pathname;
     hits.push(path);
@@ -39,12 +42,13 @@ async function fakeInbox(status: number): Promise<FakeInbox> {
     res.end('{"error":"not found"}');
   });
   // A socket that never opens: the client must treat an answer instead of a socket as "no socket here".
-  server.on('upgrade', (_req, socket) => { hits.push('/v1/ws'); socket.destroy(); });
+  server.on('upgrade', (req, socket) => { hits.push('/v1/ws'); upgraded.push(req.url ?? '/'); socket.destroy(); });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}`,
     hits,
+    upgraded,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
@@ -70,6 +74,26 @@ for (const status of [410]) {
     });
   });
 }
+
+describe('the address of the socket a stream opens', () => {
+  let inbox: FakeInbox | undefined;
+  afterEach(async () => { await inbox?.close(); });
+
+  it('carries the origin, the one place every transport carries it', async () => {
+    inbox = await fakeInbox(410);
+    const client = new Client({ url: inbox.url, token: TOKEN });
+    const control = new AbortController();
+    const origin = { harness: 'pi', session: 's1', name: 'Rename the retry flag', host: 'laptop', herdrPane: 'w7:p2' };
+    const stream = client.stream('pi:test', () => {}, control.signal, 'ws', { origin });
+    for (let i = 0; i < 100 && !inbox.upgraded.length; i++) await sleep(10);
+    control.abort();
+    await stream.catch(() => {});
+    const at = new URL(inbox.upgraded[0] ?? '/', 'http://inbox');
+    assert.equal(at.pathname, '/v1/ws');
+    assert.equal(at.searchParams.get('agent'), 'pi:test');
+    assert.deepEqual(JSON.parse(at.searchParams.get('origin') ?? 'null'), origin);
+  });
+});
 
 describe('a stream answered with 401', () => {
   let inbox: FakeInbox | undefined;
