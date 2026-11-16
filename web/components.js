@@ -8,7 +8,7 @@ import { copyText, installCopy } from './copy.js';
 import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
-import { agentList, pickedAgent } from './agents.js';
+import { agentList, pickedAgent, searchAgents } from './agents.js';
 
 export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions, secretFieldsOf };
 
@@ -973,14 +973,19 @@ export function AgentsPanel({ state, startOpen = false }) {
       h(SendForm, { agents, onClose: close })));
 }
 
-/** The panel's one form: the agent a card goes to, the message, and the row of actions that sends it or closes it. */
+/** The panel's one form: the search that picks the agent a card goes to, the message, and the row of actions that
+ * sends it or closes it. */
 function SendForm({ agents, onClose }) {
   const [picked, setPicked] = React.useState(null);
+  const [query, setQuery] = React.useState('');
   const [text, setText] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [result, setResult] = React.useState(null);
-  // A pick that left the list reads as the first agent, so a card never goes to a name that presence dropped.
-  const agent = pickedAgent(agents, picked);
+  // The list filters as the person types and keeps the order the panel gives it, so a row never moves under the
+  // pointer. A pick that the search left out reads as the first of the matches, and no match at all reads as none, so
+  // a card never goes to a name the field does not show.
+  const matches = searchAgents(agents, query);
+  const agent = pickedAgent(matches, picked);
   const draft = text.trim();
   async function send(e) {
     e.preventDefault();
@@ -1006,11 +1011,24 @@ function SendForm({ agents, onClose }) {
     }
   }
   return h('form', { className: 'agents-send', onSubmit: send },
-    h('label', { className: 'agents-pick' }, 'Agent',
-      h('select', {
-        value: agent ? agent.id : '', disabled: !agents.length,
-        onChange: (e) => { setPicked(e.target.value); setResult(null); },
-      }, agents.map((a) => h('option', { key: a.id, value: a.id }, a.name)))),
+    h('label', { className: 'agents-pick' }, 'Search the agents',
+      h('input', {
+        type: 'search', className: 'agents-search', value: query, disabled: !agents.length,
+        autoComplete: 'off', spellCheck: false, placeholder: 'A word from a name, an id, a directory or a pane',
+        onChange: (e) => { setQuery(e.target.value); setResult(null); },
+      })),
+    agents.length > 0 && (matches.length
+      ? h('ul', { className: 'agents-matches', 'aria-label': 'Agents that match the search' }, matches.map((a) => {
+        const on = !!agent && agent.id === a.id;
+        return h('li', { key: a.id },
+          h('button', {
+            type: 'button', className: on ? 'agent-match picked' : 'agent-match', 'aria-pressed': on,
+            onClick: () => { setPicked(a.id); setResult(null); },
+          },
+          h('span', { className: 'agent-match-name' }, a.name),
+          a.id !== a.name && h('code', { className: 'agent-match-id' }, a.id)));
+      }))
+      : h('p', { className: 'note muted agents-none' }, 'No agent matches this search.')),
     // What the inbox knows about the picked agent, read from the same list, so the state shows before the person writes.
     agent && h('p', { className: 'agent-facts' },
       h('span', { className: `agent-state ${agent.status}` }, agent.label),

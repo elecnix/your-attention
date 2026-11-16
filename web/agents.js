@@ -1,6 +1,6 @@
 // The agents this inbox knows, as the panel that sends one a card lists them: the name each reports, the working
-// directory a card carried, and when the inbox last saw it. Only presence says an agent is connected, so an agent that
-// went offline reads as offline, whatever its cards say.
+// directory a card carried, the pane presence reported, and when the inbox last saw it. Only presence says an agent is
+// connected, so an agent that went offline reads as offline, whatever its cards say.
 import { cardAge } from './age.js';
 
 /** The agent id the inbox itself posts under, which is no session to send a card to. */
@@ -22,6 +22,8 @@ export function agentList(state, now = Date.now()) {
       id,
       name: reported.name || id,
       cwd: reported.cwd || null,
+      // A pane is where a connection reported its session, so only presence knows one.
+      pane: (p && p.origin && p.origin.herdrPane) || null,
       online,
       lastSeen,
       channelOff: !!p && p.channelOff === true,
@@ -48,6 +50,15 @@ function reportedBy(cards, id) {
     if (o.cwd && at >= cwdAt) { cwd = o.cwd; cwdAt = at; }
   }
   return { name, cwd };
+}
+
+/** The agents whose name, id, working directory or pane carries this search, in the order the list has them, so the
+ * panel filters as the person types without moving a row. A match reads anywhere in a field, never only at its start,
+ * and it ignores case. An empty search keeps every agent. */
+export function searchAgents(agents, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return agents;
+  return agents.filter((a) => [a.name, a.id, a.cwd, a.pane].some((v) => !!v && v.toLowerCase().includes(q)));
 }
 
 /** The agent a pick reads as: the one the person picked while the list still has it, else the first of the list.
