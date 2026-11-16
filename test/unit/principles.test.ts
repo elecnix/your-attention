@@ -72,6 +72,18 @@ describe('principles', () => {
     assert.match(queue, /agentName\(pin\?\.agent/, 'an agent pin is named the way the inbox names that agent');
   });
 
+  it('a guidance proposal diffs only the editable text, so the catalog never reads as removed', () => {
+    // DP14: the widget catalog and the tag values reach an agent beside the guidance text, so an approval card that
+    // compared anything more would show them as lines the person deletes by approving.
+    const guidance = / {2}guidance\(\): Guidance \{[\s\S]*?\n {2}\}/.exec(read('inbox.ts'))?.[0] ?? '';
+    assert.match(guidance, /guidanceTextOnly\(stored\.text/, 'the stored text reads back as the guidance alone');
+    assert.match(guidance, /this\.store\.put\('meta', 'guidance', repaired\)/, 'the repair is stored, so every read gives the same text');
+    for (const f of ['web/components.js', 'src/tui/cardview.ts']) {
+      const diff = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      assert.match(diff, /guidanceDiff\(current\.text, b\.text/, `${f} diffs the two guidance texts, and nothing beside them`);
+    }
+  });
+
   it('every principle in PRINCIPLES.md has a statement and a reason', () => {
     const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);

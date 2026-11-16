@@ -1,9 +1,10 @@
 // Card features from the batch of principles about the card model.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PRESENCE_KEEP_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, publicCard, type Caller } from '../../src/core/inbox.ts';
+import { DEFAULT_GUIDANCE, DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PRESENCE_KEEP_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, guidanceTextOnly, publicCard, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
+import { guidanceDiff } from '../../web/answers.js';
 import { setup } from './fixture.ts';
 
 describe('patch edits', () => {
@@ -144,14 +145,50 @@ describe('priority levels', () => {
 });
 
 describe('guidance', () => {
-  it('refuses a proposal that carries the widget catalog, which reaches agents beside the text', () => {
+  it('cleans a stored text that carries the widget catalog, and proposes over it with only the added line in the diff', () => {
+    // An older inbox kept the catalog inside the guidance text. A proposal over that text must not fail, and the
+    // person must not read the catalog as content the approval deletes.
+    const storage = new MemoryStorage();
+    const catalog = new Inbox(storage).widgetCatalog();
+    assert.ok(catalog, 'the inbox lists the built-in widgets');
+    const text = 'Always include a diff.';
+    storage.put('meta', 'guidance', { text: `${text}\n\n${catalog}`, version: 3, at: 0 });
+    const inbox = new Inbox(storage);
+    const before = inbox.guidance();
+    assert.equal(before.text, text, 'the stored text reads back without the catalog');
+    assert.equal(storage.get<{ text: string }>('meta', 'guidance')?.text, text, 'the first read stores the repaired text');
+    assert.equal(inbox.guidance().text, before.text, 'and the same text reads the same way every time');
+    const card = inbox.proposeGuidance(`${before.text}\n\nSay which files changed.`, 'Adds the file rule.');
+    const proposed = card.broadcast?.text ?? '';
+    assert.equal(proposed, `${text}\n\nSay which files changed.`, 'the proposal stores the text alone');
+    const rows = guidanceDiff(before.text, proposed);
+    assert.equal(rows.some((r) => r.kind === 'del'), false, 'nothing reads as removed');
+    assert.deepEqual(rows.filter((r) => r.kind === 'add').map((r) => r.text), ['', 'Say which files changed.'], 'the diff adds the blank line and the paragraph, as two clean texts would');
+    assert.throws(() => inbox.proposeGuidance(catalog, 'Says why.'), /guidance text itself/, 'a paste of the catalog alone carries no text');
+  });
+
+  it('proposes a pasted card_guidance answer as the text alone', () => {
     const inbox = new Inbox(new MemoryStorage());
     const catalog = inbox.widgetCatalog();
-    assert.ok(catalog, 'the inbox lists the built-in widgets');
-    assert.throws(() => inbox.proposeGuidance(`Always include a diff.\n\n${catalog}`, 'Says why.'), /widget catalog/);
-    // Without the header line, the bullet list alone is still the catalog.
-    assert.throws(() => inbox.proposeGuidance(`Always include a diff.\n\n${catalog.split('\n').slice(1).join('\n')}`, 'Says why.'), /widget catalog/);
-    assert.ok(inbox.proposeGuidance('Always include a diff.\n\nUse `widget secret` for keys.', 'Says why.'));
+    const text = 'Always include a diff.';
+    const pasted = [
+      text,
+      '',
+      'Not part of the guidance text, added to this answer: the widget catalog.',
+      catalog,
+      '',
+      'Not part of the guidance text either, tag values in use:',
+      '`repo` = acme/api (2).',
+    ].join('\n');
+    assert.equal(inbox.proposeGuidance(pasted, 'Adds the diff rule.').broadcast?.text, text, 'the agent\'s words stay, the added lines go');
+  });
+
+  it('leaves a text without the catalog exactly as it was written', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    const text = 'Lead with the goal.\nGive two options.\n- a bullet the agent wrote is its own line.';
+    assert.equal(guidanceTextOnly(text), text);
+    assert.equal(inbox.proposeGuidance(text, 'Says why.').broadcast?.text, text);
+    assert.equal(inbox.guidance().text, DEFAULT_GUIDANCE, 'a proposal changes nothing before the person approves it');
   });
 
   it('refuses a proposal with no message, and keeps the message on the card', () => {

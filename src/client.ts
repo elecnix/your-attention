@@ -7,7 +7,7 @@ import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError } from './core/inbox.ts';
 import { isSealed } from './core/sealed.ts';
-import type { AgentEvent, Answer, Card, CloseKind, DefaultTags, DefaultTagsWrite, Guidance, NewCard, Origin, PublicSubscription, TagCount, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CardGuidance, CloseKind, DefaultTags, DefaultTagsWrite, NewCard, Origin, PublicSubscription, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 
@@ -219,8 +219,8 @@ export class Client {
   status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
   saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
-  /** The card guidance, and the catalog of widgets an agent can place. */
-  guidance(): Promise<Guidance & { widgets?: string; tags?: TagCount[] }> { return this.call('GET', '/v1/guidance'); }
+  /** The card guidance: the editable text, the catalog of widgets an agent can place, and the tags in use. */
+  guidance(): Promise<CardGuidance> { return this.call('GET', '/v1/guidance'); }
   /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. */
   proposeGuidance(text: string, opts: { message: string; agent?: string }): Promise<Card> { return this.call('POST', '/v1/guidance', { text, ...opts }); }
   /** The require-a-card rule resolved for one session, and the rule itself. */

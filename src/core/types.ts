@@ -168,6 +168,8 @@ export interface Template {
   builtin?: true;
 }
 
+/** The shared guidance for writing cards. `text` is the editable part: a proposal carries that field alone, and the
+ * card that asks for approval draws its diff from it. The widget catalog is never stored inside it. */
 export interface Guidance {
   text: string;
   version: number;
@@ -184,6 +186,14 @@ export interface TagValueCount {
 export interface TagCount {
   key: string;
   values: TagValueCount[];
+}
+
+/** The guidance as an agent reads it: the editable text in `text`, and the widget catalog and the tag values in use in
+ * fields of their own, which the inbox builds on each read. `card_guidance` prints the text once, then those. */
+export interface CardGuidance extends Guidance {
+  /** The widgets an agent can place, one line each with when to use it, or absent when the inbox lists none. */
+  widgets?: string;
+  tags?: TagCount[];
 }
 
 /** A default tag an agent keeps in the inbox: its value, and what set it, such as card_tags or YOUR_ATTENTION_TAGS. */

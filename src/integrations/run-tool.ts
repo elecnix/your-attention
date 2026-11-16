@@ -130,8 +130,8 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const g = await inbox.guidance();
       // The tags other cards set go last, one line per key, so the agent reuses a value instead of inventing one.
       const tags = (g.tags ?? []).map((t) => `\`${t.key}\` = ${t.values.map((v) => `${v.value} (${v.count})`).join(', ')}.`);
-      // The catalog and the tag lines are added by this answer, not part of the guidance, so a proposal that rewrites the
-      // whole text knows where the text ends and leaves them out.
+      // The text arrives without the catalog or the tag lines, so each widget prints once, below the marker that says
+      // where the guidance ends; a proposal that rewrites the whole text leaves those lines out.
       const extra = g.widgets ? `\n\nNot part of the guidance text, added to this answer: the widget catalog.\n${g.widgets}` : '';
       return `Card guidance, version ${g.version}:\n${g.text}${extra}${tags.length ? `\n\nNot part of the guidance text either, tag values in use:\n${tags.join('\n')}` : ''}`;
     }
