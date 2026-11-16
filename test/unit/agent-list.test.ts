@@ -71,6 +71,21 @@ describe('the agents the panel lists', () => {
     assert.deepEqual(agentList(state({ system: { agent: 'system', online: true, lastSeen: NOW } as Presence }), NOW), []);
   });
 
+  it('names an agent by the session name its connection reported, before it has posted a card', () => {
+    // The list of agents to send a card to reads the same name the guidance card's rows read: the one the presence
+    // row carries. A session that has posted no card is most of the list, and its id says nothing about it.
+    const rows = agentList(state({ 'pi:9c1': { agent: 'pi:9c1', online: true, lastSeen: NOW, origin: { harness: 'pi', session: '9c1', name: 'Rename the retry flag', host: 'laptop' } } }), NOW);
+    assert.equal(rows[0]?.name, 'Rename the retry flag');
+  });
+
+  it('reads the name presence reports before the name of an older card', () => {
+    const rows = agentList(state(
+      { 'pi:9c2': { agent: 'pi:9c2', online: true, lastSeen: NOW, origin: { name: 'Ship the release' } } },
+      [card('pi:9c2', { name: 'Rename the retry flag' })],
+    ), NOW);
+    assert.equal(rows[0]?.name, 'Ship the release');
+  });
+
   it('names an agent by its id when no card reported a session name', () => {
     const rows = agentList(state({ 'pi:9c1': { agent: 'pi:9c1', online: true, lastSeen: NOW } }), NOW);
     assert.equal(rows[0]?.name, 'pi:9c1');

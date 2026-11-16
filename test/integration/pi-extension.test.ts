@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import fs from 'node:fs';
+import os from 'node:os';
 import yourAttention from '../../src/integrations/pi/extension.ts';
 import type { Card } from '../../src/core/types.ts';
 import { seal } from '../../web/sealed.js';
@@ -45,6 +46,15 @@ describe('the pi extension', () => {
     assert.deepEqual([...tools.keys()].sort(), ['card_close', 'card_guidance', 'card_patch', 'card_post', 'card_read', 'card_search', 'card_status', 'card_tags', 'card_template_save', 'card_widget_save', 'settings']);
     await handlers.get('session_start')?.({}, ctx);
     await until(async () => (await state()).presence['pi:pi-session-1']?.online);
+  });
+
+  it('reports where the session runs on its connection, so the inbox names the row before any card', async () => {
+    // The extension puts the origin on the connection the socket carries, which is what a hosted inbox reads too.
+    const row = (await h.stored()).presence['pi:pi-session-1'] as { origin?: Record<string, string> };
+    assert.equal(row.origin?.['harness'], 'pi');
+    assert.equal(row.origin?.['session'], 'pi-session-1');
+    assert.equal(row.origin?.['name'], 'card inbox', 'the name the session reports');
+    assert.equal(row.origin?.['host'], os.hostname());
   });
 
   it('starts a new turn with the answer when pi is idle, and marks it read from the context', async () => {
