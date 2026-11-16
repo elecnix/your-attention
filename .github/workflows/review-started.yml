@@ -1,0 +1,58 @@
+name: review started
+
+# Cite's workflow can fail before it creates a single job. GitHub records that as
+# a startup_failure run with no check on the pull request, so the page, `gh pr
+# checks` and every agent watching the pull request see no review at all and
+# wait for one that will never come. This workflow reports the missing review as
+# a red check instead.
+#
+# It runs on pull_request_target, so the copy that runs is this file on the
+# default branch, and a pull request cannot weaken its own guard.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  actions: read
+  checks: read
+
+concurrency:
+  group: review-started-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  started:
+    name: review started
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for the review workflow to create its check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # The review job is named `cite`, so its check run appears on the head
+        # commit as soon as the workflow starts. A startup failure leaves the
+        # commit with no such check, and the review run says why.
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 600))
+          while :; do
+            started=$(gh api "repos/$REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
+              --jq '[.check_runs[] | select(.name == "cite")] | length')
+            if [ "$started" -ge 1 ]; then
+              echo "The review workflow started; its cite check is on $HEAD_SHA."
+              exit 0
+            fi
+            failed=$(gh api "repos/$REPOSITORY/actions/workflows/review.yml/runs?event=pull_request_target&per_page=100" \
+              --jq '[.workflow_runs[] | select(.head_sha == env.HEAD_SHA and .conclusion == "startup_failure") | .html_url] | .[0] // ""')
+            if [ -n "$failed" ]; then
+              echo "::error::The review workflow ended in startup_failure for $HEAD_SHA, so no Cite review will arrive. See $failed"
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::No cite check appeared on $HEAD_SHA in 10 minutes. The review workflow did not start; see https://github.com/$REPOSITORY/actions/workflows/review.yml"
+              exit 1
+            fi
+            sleep 10
+          done
