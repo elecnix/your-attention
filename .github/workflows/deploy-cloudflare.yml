@@ -46,7 +46,14 @@ jobs:
           cache: npm
       - run: npm ci
       - name: check before deploying
-        run: npm run typecheck && npm run test:unit && npm run test:cloudflare
+        # Each test prints a block of TAP, which kept this step at some twelve thousand lines. The output goes to a
+        # file: a failure shows its tail, and a pass shows the counts.
+        run: |
+          fail() { echo "::error::$1 failed"; tail -50 check.log; exit 1; }
+          npm run typecheck > check.log 2>&1 || fail typecheck
+          npm run test:unit > check.log 2>&1 || fail "unit tests"
+          npm run test:cloudflare > check.log 2>&1 || fail "cloudflare tests"
+          grep -E "^# (pass|fail)|^ℹ (pass|fail)" check.log || tail -5 check.log
       - name: check the credentials
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -78,7 +85,14 @@ jobs:
           cache: npm
       - run: npm ci
       - name: check before deploying
-        run: npm run typecheck && npm run test:unit && npm run test:cloudflare
+        # Each test prints a block of TAP, which kept this step at some twelve thousand lines. The output goes to a
+        # file: a failure shows its tail, and a pass shows the counts.
+        run: |
+          fail() { echo "::error::$1 failed"; tail -50 check.log; exit 1; }
+          npm run typecheck > check.log 2>&1 || fail typecheck
+          npm run test:unit > check.log 2>&1 || fail "unit tests"
+          npm run test:cloudflare > check.log 2>&1 || fail "cloudflare tests"
+          grep -E "^# (pass|fail)|^ℹ (pass|fail)" check.log || tail -5 check.log
       - name: check the credentials
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

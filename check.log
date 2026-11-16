@@ -1,0 +1,12 @@
+
+> your-attention@0.1.1 typecheck
+> npm run typecheck:tsgo && npm run typecheck:tsc-rs
+
+
+> your-attention@0.1.1 typecheck:tsgo
+> tsgo --noEmit -p . && tsgo --noEmit -p tsconfig.cloudflare.json
+
+
+> your-attention@0.1.1 typecheck:tsc-rs
+> tsc-rs --noEmit -p . && tsc-rs --noEmit -p tsconfig.cloudflare.json
+
