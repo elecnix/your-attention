@@ -19,6 +19,7 @@ export function agentList(state, now = Date.now()) {
     // An agent whose presence row the inbox pruned, and one that never connected, have no time to show.
     const lastSeen = online ? null : (p && (p.leftAt ?? p.lastSeen)) || null;
     // A session that has posted no card still has a name, because presence keeps the one its connection sent.
+    const reported = (p && p.origin) || {};
     rows.push({
       id,
       name: reported.name || agentName(id, cards, presence),
