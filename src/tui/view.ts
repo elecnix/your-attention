@@ -106,8 +106,9 @@ export function listRows(m: Model, width: number): Row[] {
   const waitingGroups = q.groups;
   // The inbox's own cards come first, above every pinned group, as on the page.
   if (q.systems.length) section('Needs your approval', q.systems, '', false, SECTION_ID.system);
-  // Each pinned tag value gets its own group at the top, under every Group by choice, as on the page.
-  for (const p of q.pinned) section(`${p.key}: ${p.value}`, p.items, 'Nothing waiting', false);
+  // Each pin gets its own group at the top, under every Group by choice, as on the page. Its heading names the tag and
+  // value, or the agent, as the person knows that agent.
+  for (const p of q.pinned) section(p.title, p.items, 'Nothing waiting', false);
   if (waitingGroups.length) for (const [title, cards, , id] of waitingGroups) section(title, cards, 'Nothing waiting', false, id);
   else section('Waiting for you', [], 'Nothing waiting', false);
   if (q.checking.length) section('Being checked by triage', q.checking, '', false, SECTION_ID.checking);

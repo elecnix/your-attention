@@ -3,8 +3,8 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
-import { after, buildQueue, SECTION_ID } from './queue.js';
+import { Approvals, AgentPin, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { after, agentName, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
 
@@ -51,11 +51,11 @@ export function App() {
   const reportedFocus = React.useRef(undefined);
   // Escape clears the card pane; nothing takes the pane again until the person picks a card.
   const [cleared, setCleared] = React.useState(false);
-  // Group by and the pinned tag values are the inbox's settings, so every page and the terminal client share them.
+  // Group by and the pins are the inbox's settings, so every page and the terminal client share them.
   // This page reads them from GET /v1/state and changes them with PUT /v1/settings.
   const [groupBy, setGroupBy] = React.useState('none');
-  // The pinned tag values, oldest first.
-  const [tagPins, setTagPins] = React.useState([]);
+  // The pins, oldest first: a tag pin as [key, value], an agent pin as {agent}.
+  const [pins, setPins] = React.useState([]);
   // The groups the person muted, by the group's kind and value, kept on this device next to the pins.
   const [collapsedGroups, setCollapsedGroups] = React.useState(() => storedCollapsedGroups());
   const toggleGroup = (id) => setCollapsedGroups((groups) => {
@@ -64,15 +64,17 @@ export function App() {
     store.set('collapsedGroups', [...next]);
     return next;
   });
-  const samePin = (a, b) => a[0] === b[0] && a[1] === b[1];
-  const isPinned = (tag) => tagPins.some((p) => samePin(p, tag));
+  // Two pins are the same pin when they name the same tag and value, or the same agent.
+  const samePin = (a, b) => (Array.isArray(a) && Array.isArray(b) ? a[0] === b[0] && a[1] === b[1] : !Array.isArray(a) && !Array.isArray(b) && a.agent === b.agent);
+  const isPinned = (tag) => pins.some((p) => Array.isArray(p) && p[0] === tag[0] && p[1] === tag[1]);
+  const isAgentPinned = (agent) => pins.some((p) => !Array.isArray(p) && p.agent === agent);
   const saveSettings = (patch) => api(`${BASE}v1/settings`, patch, 'PUT').catch(() => {});
   // A save in flight owns the list until it answers, so a state that arrives meanwhile cannot undo the click.
   const savingPins = React.useRef(0);
   // The same guard for Group by: a state that arrives before the PUT commits must not put the old choice back.
   const savingGroupBy = React.useRef(0);
-  const togglePin = (tag) => setTagPins((pins) => {
-    const next = pins.some((p) => samePin(p, tag)) ? pins.filter((p) => !samePin(p, tag)) : [...pins, tag];
+  const togglePin = (pin) => setPins((pins) => {
+    const next = pins.some((p) => samePin(p, pin)) ? pins.filter((p) => !samePin(p, pin)) : [...pins, pin];
     savingPins.current += 1;
     const mine = savingPins.current;
     api(`${BASE}v1/settings`, { pins: next }, 'PUT').catch(() => {}).finally(() => { if (savingPins.current === mine) savingPins.current = 0; });
@@ -106,7 +108,7 @@ export function App() {
         setFresh((f) => ({ ...f, ...Object.fromEntries(added.map((c) => [c.id, true])) }));
         // A card that arrives in a collapsed group raises no notification, unless it is at the highest level:
         // muting a group must never hide an urgent card.
-        const q = buildQueue(s, groupBy, tagPins, collapsedGroups);
+        const q = buildQueue(s, groupBy, pins, collapsedGroups);
         const top = (s.levels || [])[0];
         added.forEach((c) => {
           if (q.hidden.has(c.id) && (!top || q.levelOf(c) !== top.id)) return;
@@ -120,7 +122,7 @@ export function App() {
     knownRef.current = ids;
     details.keep(ids);
     setState(s);
-  }); }, [state, closing, groupBy, tagPins, collapsedGroups]);
+  }); }, [state, closing, groupBy, pins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
 
@@ -141,7 +143,7 @@ export function App() {
     if (!state) return;
     const s = state.settings || {};
     if (!savingGroupBy.current) setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
-    if (!savingPins.current) setTagPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
+    if (!savingPins.current) setPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
   }, [state]);
 
   // A page that finds Group by or the pins in this device's storage and none in the inbox copies them over once,
@@ -390,7 +392,7 @@ export function App() {
   if (auth === 'locked') return h(PinUnlock, { onUnlocked: unlocked });
   if (!state) return h('div', { className: 'done' }, 'Loading…');
 
-  const all = buildQueue(state, groupBy, tagPins, collapsedGroups);
+  const all = buildQueue(state, groupBy, pins, collapsedGroups);
   const { byId, st, levelOf, label, waiting, pending, tagKeys, dealt } = all;
   // A search shows the cards that match, from the summaries and from every whole card the page has fetched. The counts that
   // belong to the whole inbox, such as how many cards Clear removes, still come from the unfiltered queue.
@@ -398,7 +400,7 @@ export function App() {
   const matches = new Map();
   if (terms.length) for (const c of state.cards) { const m = matchCard(terms, c, details.get(c)); if (m) matches.set(c.id, m); }
   const { systems, checking, pinned: pinnedGroups, outbox, sent, groups, order } = terms.length
-    ? buildQueue({ ...state, cards: state.cards.filter((c) => matches.has(c.id)) }, groupBy, tagPins, collapsedGroups)
+    ? buildQueue({ ...state, cards: state.cards.filter((c) => matches.has(c.id)) }, groupBy, pins, collapsedGroups)
     : all;
   const visible = state.cards;
   const levels = state.levels || [];
@@ -517,6 +519,10 @@ export function App() {
       !shut && (items.length ? items.map((c) => item(c, cls === 'sent')) : h('div', { className: 'empty' }, empty)));
   };
 
+  // A pin's control: a tag pin reads its key and value, and an agent pin the name the person knows that agent by.
+  const pinControl = (pin, on) => (Array.isArray(pin)
+    ? h(TagPin, { tag: pin, on, onToggle: togglePin })
+    : h(AgentPin, { agent: pin.agent, name: agentName(pin.agent, state.cards, state.presence), on, onToggle: togglePin }));
   // A tag key saved as Group by stays on offer after its last card leaves, so the choice still reads.
   const groupTags = groupBy.startsWith('tag:') && !tagKeys.includes(groupBy.slice(4)) ? [...tagKeys, groupBy.slice(4)] : tagKeys;
   const queue = h('nav', { className: 'queue' },
@@ -526,7 +532,7 @@ export function App() {
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
     systems.length > 0 && group('Needs your approval', systems, '', 'system', undefined, SECTION_ID.system),
-    pinnedGroups.map(({ key, value, id, items }) => group(`${key}: ${value}`, items, 'Nothing waiting', 'pinned', h(TagPin, { tag: [key, value], on: true, onToggle: togglePin }), id, `pin:${key}\n${value}`)),
+    pinnedGroups.map(({ pin, title, id, items }) => group(title, items, 'Nothing waiting', 'pinned', pinControl(pin, true), id, id)),
     groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),
     checking.length > 0 && group('Being checked by triage', checking, '', undefined, undefined, SECTION_ID.checking),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent', undefined, SECTION_ID.outbox),
@@ -572,7 +578,7 @@ export function App() {
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
         h(CardAge, { card: current })),
-      h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin }),
+      h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin, agent: current.agent, name: agentName(current.agent, state.cards, state.presence), agentPinned: isAgentPinned(current.agent) }),
       current.triage && current.triage.state === 'passed' && /did not answer|failed/.test(current.triage.reason || '') && h('div', { className: 'note' }, `Triage did not check this card: ${current.triage.reason}`),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,

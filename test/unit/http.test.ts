@@ -203,6 +203,17 @@ describe('http routes for the card model', () => {
     assert.equal((await call('PUT', '/v1/settings', { token: owner, body: { groupBy: 'week' } })).status, 400);
   });
 
+  it('takes an agent pin from the settings route, and refuses one that names no agent', async () => {
+    const { call, owner } = await setup();
+    const saved = (await (await call('PUT', '/v1/settings', { token: owner, body: { pins: [['topic', 'billing'], { agent: 's1' }] } })).json()) as { pins: unknown[] };
+    assert.deepEqual(saved.pins, [['topic', 'billing'], { agent: 's1' }]);
+    // The state carries the pins to every page, so the pair an inbox stored and the agent a newer client pins both arrive.
+    assert.deepEqual(((await (await call('GET', '/v1/state', { token: owner })).json()) as { settings: { pins?: unknown } }).settings.pins, [['topic', 'billing'], { agent: 's1' }]);
+    assert.equal((await call('PUT', '/v1/settings', { token: owner, body: { pinAdd: [{ agent: '' }] } })).status, 400);
+    assert.equal((await call('PUT', '/v1/settings', { token: owner, body: { pins: [{ agent: 'x'.repeat(81) }] } })).status, 400);
+    assert.equal((await call('PUT', '/v1/settings', { token: owner, body: { pins: [['topic']] } })).status, 400);
+  });
+
   it('takes a guidance proposal that carries the widget catalog, and keeps it out of the text', async () => {
     const { call, agent, inbox } = await setup();
     const catalog = inbox.widgetCatalog();

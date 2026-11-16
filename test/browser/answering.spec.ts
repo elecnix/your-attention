@@ -56,7 +56,8 @@ for (const { picks, stored, banner, tagged, stripIds, ...card } of LABEL_ONLY) {
     if (stripIds) stripOptionIds(card.id);
     await inbox.open(page);
     await expect(page.locator('.card-title')).toHaveText(card.title);
-    if (tagged) await expect(page.getByText('Recommended')).toBeVisible();
+    // Exact, because the agent chip's `Agent: s-recommended` also contains the word.
+    if (tagged) await expect(page.getByText('Recommended', { exact: true })).toBeVisible();
     for (const label of picks) await page.getByText(label, { exact: true }).click();
     await page.getByRole('button', { name: 'Send answer' }).click();
     await expect.poll(async () => (await inbox.state()).answers[card.id]?.values).toEqual(stored);

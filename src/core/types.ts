@@ -228,21 +228,25 @@ export interface RequireCardSettings {
   reminders: number;
 }
 
+/** One pin at the top of the queue: a tag key with its value, or one agent's id. A tag pin keeps the [key, value] pair
+ * every inbox stored before a person could pin an agent, so an older inbox and an older client keep working. */
+export type Pin = [string, string] | { agent: string };
+
 export interface Settings {
   /** Lets cards carry their own HTML and scripts, in a sandboxed frame. */
   allowHtml: boolean;
   /** The queue's grouping: none, priority, agent or tag:<key>. Absent until the owner picks one. */
   groupBy?: string;
-  /** The pinned tag values, oldest first, as [key, value] pairs. Absent until the owner pins one. */
-  pins?: [string, string][];
+  /** The pins, oldest first: a tag pin as [key, value], an agent pin as {agent}. Absent until the owner pins one. */
+  pins?: Pin[];
   /** The rule that a session which settles without an open card is asked for one. Absent means off. */
   requireCard?: RequireCardSettings;
 }
 
-/** A change the owner makes to the pins: one value in or out, so another device's pin is never overwritten. */
+/** A change the owner makes to the pins: one pin in or out, so another device's pin is never overwritten. */
 export interface PinChange {
-  pinAdd?: [string, string][];
-  pinRemove?: [string, string][];
+  pinAdd?: Pin[];
+  pinRemove?: Pin[];
 }
 
 /** A file on a card, such as an image, a PDF or a Markdown document.

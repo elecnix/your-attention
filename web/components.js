@@ -343,22 +343,38 @@ export function forgetSecrets(card) {
   secretsChanged();
 }
 
-// How long ago the agent sent the card, roughly. It moves on at each turn of the clock's minute.
-/** The pin right after a tag value's label: dimmed while the value is not pinned, bright once it is. */
-export function TagPin({ tag: [key, value], on, onToggle }) {
-  const tip = on ? `Unpin ${key}: ${value}` : `Pin ${key}: ${value} to the top`;
-  return h('button', { type: 'button', className: `tag-pin${on ? ' on' : ''}`, title: tip, 'aria-label': tip, 'aria-pressed': on, onClick: (e) => { e.stopPropagation(); onToggle([key, value]); } },
+/** A pin control, dimmed while the value it names is not pinned and bright once it is. The tooltip names that value, so the
+ * person reads what a click pins or unpins. */
+function PinButton({ on, tip, onClick }) {
+  return h('button', { type: 'button', className: `tag-pin${on ? ' on' : ''}`, title: tip, 'aria-label': tip, 'aria-pressed': on, onClick: (e) => { e.stopPropagation(); onClick(); } },
     h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.pin.map((d) => h('path', { key: d, d }))));
 }
 
-/** The card's tags as chips, `topic: billing`, each with its pin. */
-export function CardTags({ tags, isPinned, onToggle }) {
-  const entries = Object.entries(tags || {}).map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v);
-  if (!entries.length) return null;
-  return h('div', { className: 'tags' }, entries.map((tag) => h('span', { key: tag[0], className: 'tag' },
-    h('span', { className: 'tag-label' }, `${tag[0]}: ${tag[1]}`), h(TagPin, { tag, on: isPinned(tag), onToggle }))));
+/** The pin right after a tag value's label: dimmed while the value is not pinned, bright once it is. */
+export function TagPin({ tag: [key, value], on, onToggle }) {
+  const tip = on ? `Unpin ${key}: ${value}` : `Pin ${key}: ${value} to the top`;
+  return h(PinButton, { on, tip, onClick: () => onToggle([key, value]) });
 }
 
+/** The pin on the agent that posted the card, or on a pinned agent's heading: dimmed while that agent is not pinned,
+ * bright once it is. */
+export function AgentPin({ agent, name, on, onToggle }) {
+  const tip = on ? `Unpin agent ${name}` : `Pin agent ${name} to the top`;
+  return h(PinButton, { on, tip, onClick: () => onToggle({ agent }) });
+}
+
+/** The card's tags as chips, `topic: billing`, each with its pin, then the agent that posted it with a pin of its own. */
+export function CardTags({ tags, isPinned, onToggle, agent, name, agentPinned }) {
+  const entries = Object.entries(tags || {}).map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v);
+  if (!entries.length && !agent) return null;
+  return h('div', { className: 'tags' },
+    entries.map((tag) => h('span', { key: tag[0], className: 'tag' },
+      h('span', { className: 'tag-label' }, `${tag[0]}: ${tag[1]}`), h(TagPin, { tag, on: isPinned(tag), onToggle }))),
+    agent && h('span', { className: 'tag agent' },
+      h('span', { className: 'tag-label' }, `Agent: ${name}`), h(AgentPin, { agent, name, on: agentPinned, onToggle })));
+}
+
+// How long ago the agent sent the card, roughly. It moves on at each turn of the clock's minute.
 export function CardAge({ card }) {
   // The tick only re-renders: each render reads the clock, so a card opened between ticks shows its own age.
   const [, setTick] = React.useState(0);

@@ -30,7 +30,7 @@ export function presenceOf(card, state) {
   return unread ? ['busy', 'Agent busy: it has an answer it has not read yet'] : ['on', 'Agent listening'];
 }
 
-/** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. `pins` lists the pinned tag values as [key, value], oldest first. `collapsed` holds the ids of the groups the person muted, each the group's kind and value. */
+/** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. `pins` lists the pins, oldest first: a tag pin as [key, value], an agent pin as {agent}. `collapsed` holds the ids of the groups the person muted, each the group's kind and value. */
 export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   const answers = state.answers;
   const byId = Object.fromEntries(state.cards.map((c) => [c.id, c]));
@@ -49,9 +49,17 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   // behind a pin. A system card keeps out of the groups, even when it carries the tag a pin matches.
   const systems = pending.filter((c) => c.kind === 'system');
   const others = pending.filter((c) => c.kind !== 'system');
-  // Each pinned value is a group below them, and a card that matches two pins goes to the oldest one.
-  const pinOf = (c) => pins.findIndex(([key, value]) => tagOf(c, key) === value);
-  const pinned = pins.map(([key, value], i) => ({ key, value, id: groupId('pin', key, value), items: others.filter((c) => pinOf(c) === i) }));
+  // Each pin is a group below them, and a card that matches two pins goes to the oldest one. A tag pin matches the tag
+  // it names, and an agent pin the agent that posted the card. Its heading names the tag and value, or the agent as the
+  // person knows it: the name its session reports, else the one on its newest card, else its id.
+  const pinMatches = (pin, c) => (Array.isArray(pin) ? tagOf(c, pin[0]) === pin[1] : c.agent === pin?.agent);
+  const pinOf = (c) => pins.findIndex((pin) => pinMatches(pin, c));
+  const pinned = pins.map((pin, i) => ({
+    pin,
+    title: Array.isArray(pin) ? `${pin[0]}: ${pin[1]}` : agentName(pin?.agent ?? '', visible, state.presence),
+    id: Array.isArray(pin) ? groupId('pin', pin[0], pin[1]) : groupId('agent-pin', pin?.agent ?? ''),
+    items: others.filter((c) => pinOf(c) === i),
+  }));
   const unpinned = others.filter((c) => pinOf(c) < 0);
   const sentAt = (c) => (c.closed ? c.closed.at : answers[c.id] ? answers[c.id].savedAt : 0);
   const outbox = visible.filter((c) => ['answered', 'delivered'].includes(st(c))).sort((a, b) => sentAt(b) - sentAt(a));
