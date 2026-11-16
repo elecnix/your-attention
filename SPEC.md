@@ -534,7 +534,7 @@ An answer on that card goes into the session's own herdr pane with `herdr agent 
 
 A blocked card keeps the default delivery, `stream`, so the extension that types the answer gets it. The extension keeps that answer away from the model, which is what `deliver: none` meant in the proposal of this card: the field sets where an answer goes, and `none` would keep it from the one integration that can act on it.
 
-A masked prompt reads the terminal itself, so a message sent through the protocol can't fill it. That case still needs `herdr` on its own, the same way the sidecar serves a harness that never reports a prompt.
+A masked prompt reads the terminal itself, so a message sent through the protocol can't fill it. That case still needs `herdr` alone, as the sidecar does for a harness that never reports a prompt.
 
 ## Clearing the inbox
 

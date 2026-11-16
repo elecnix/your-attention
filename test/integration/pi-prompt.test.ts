@@ -100,7 +100,9 @@ describe('a prompt a pi session waits on', () => {
     herdr = fakeHerdr();
   });
 
-  it('posts one blocked card that names the session, the prompt and its pane', async () => {
+  // The fake herdr is a shell script, so these two exercise the wiring on a POSIX host only; the place parsing itself
+  // is covered by the unit test, which injects the Herdr function.
+  it('posts one blocked card that names the session, the prompt and its pane', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
     await connect('pi-prompt-1', { pane: 'w7:p1', herdr: herdr.bin });
     await startPrompt('select', 'Pick a database');
     const card = await oneCard();
@@ -134,7 +136,7 @@ describe('a prompt a pi session waits on', () => {
     assert.equal((await closed(card.id))?.kind, 'answered-in-terminal');
   });
 
-  it('types an answer from the card into the session pane once, closes as resolved, and leaves the model out', async () => {
+  it('types an answer from the card into the session pane once, closes as resolved, and leaves the model out', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
     await connect('pi-prompt-4', { pane: 'w7:p1', herdr: herdr.bin });
     await startPrompt('select', 'Pick a database');
     const card = await oneCard();
