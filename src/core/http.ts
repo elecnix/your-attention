@@ -668,6 +668,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(withWarning(publicCard(await inbox.patchCardChecked(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined))));
         case 'status':
           return json(publicCard(inbox.setStatus(me, b, String(body['status'] ?? ''))));
+        case 'tags':
+          return json(publicCard(inbox.tagCard(me, b, body['tags'])));
         case 'claim':
           return json(publicCard(inbox.claim(me, b, String(body['agent'] ?? ''))));
         case 'draw-fault':

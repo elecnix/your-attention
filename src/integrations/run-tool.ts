@@ -114,6 +114,11 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
     case 'card_status':
       await inbox.status(String(args['card_id']), String(args['status'] ?? ''));
       return 'Set.';
+    case 'card_tag': {
+      const card = await inbox.tag(String(args['card_id']), args['tags'] as Record<string, string>);
+      const lines = Object.entries(card.tags ?? {}).map(([k, v]) => `${k}: ${v}`);
+      return lines.length ? `Card ${card.id} now carries the tags ${lines.join(', ')}.` : `Card ${card.id} now carries no tags.`;
+    }
     case 'card_template_save': {
       const t = await inbox.saveTemplate(String(args['name'] ?? ''), String(args['source'] ?? ''), str(args['feedback']));
       return `Saved template ${t.name} version ${t.versions.length}. Use it with card_post, template "${t.name}" and vars.`;

@@ -1164,6 +1164,37 @@ export class Inbox {
     return { card, input: { ...rest, [f]: text } };
   }
 
+  /** Merge tags into a card that is already posted, so a card that went out without a topic can be found by a search
+   * and grouped later. A key with an empty value removes that key. Only the owner and the token that posted the card
+   * may call it, as with every other route that changes one card. */
+  tagCard(caller: Caller, id: string, tags: unknown): Card {
+    const card = this.owned(caller, id);
+    if (!tags || typeof tags !== 'object' || Array.isArray(tags)) throw new InboxError(400, 'tags must be an object of tag keys and values');
+    const next = new Map(Object.entries(card.tags ?? {}));
+    for (const [k, raw] of Object.entries(tags)) {
+      if (!k) throw new InboxError(400, 'each tag needs a key');
+      if (k.length > MAX_TAG_CHARS) throw new InboxError(400, `tag key ${k.slice(0, 20)}… must be at most ${MAX_TAG_CHARS} characters`);
+      const value = String(raw ?? '');
+      if (value.length > MAX_TAG_CHARS) throw new InboxError(400, `tag ${k} must be at most ${MAX_TAG_CHARS} characters`);
+      const existed = next.has(k);
+      if (value === '') next.delete(k);
+      else {
+        next.set(k, value);
+        // A card that already carries more than the limit keeps what it has, so a change to one key still goes in.
+        if (!existed && next.size > MAX_TAGS) throw new InboxError(400, `tag ${k} takes the card past its ${MAX_TAGS} tags`);
+      }
+    }
+    // fromEntries gives a key named like an Object property its own key, so a tag may read `toString`.
+    const merged = Object.fromEntries(next);
+    const updated: Card = { ...card, tags: next.size ? merged : undefined };
+    this.store.put('cards', id, updated);
+    // Search reads the card's tags. The answer's comment stays searchable when the card is written again.
+    const answer = this.store.get<Answer>('answers', id);
+    this.store.index(id, answer ? `${searchText(updated)}\n${answer.comment}` : searchText(updated));
+    this.emit({ type: 'change', card: id });
+    return updated;
+  }
+
   /** The agent sets a state label on its own card. An empty label clears it. */
   setStatus(caller: Caller, id: string, status: string): Card {
     const card = this.owned(caller, id);
