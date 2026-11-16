@@ -101,7 +101,7 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_tag',
-    description: 'Set the tags on a card you already posted, so a search finds it and the queue groups it. A key with an empty value removes that key. The card keeps at most 10 tags, and each key and value is at most 100 characters. This changes that card alone; card_tags sets the default tags that every card of this session inherits.',
+    description: 'Set the tags on any card in the inbox, whether this session posted it or another agent did, so a search finds it and the queue groups it. A tag only groups and finds a card, and never changes what it asks or what the person answers. The card records which client set each tag. A key with an empty value removes that key. The card keeps at most 10 tags, and each key and value is at most 100 characters. This changes that card alone; card_tags sets the default tags that every card of this session inherits.',
     schema: {
       type: 'object',
       properties: {

@@ -253,6 +253,14 @@ export function mergeDefaultTags(defaults: Record<string, string>, own: Record<s
   return { tags: Object.keys(tags).length ? tags : undefined, inherited };
 }
 
+/** Which client set each tag, kept for the keys a card still carries after a revision. A repost may drop a tag, and
+ * its record goes with it. */
+export function keptTagFrom(from: Record<string, string> | undefined, tags: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!from || !tags) return undefined;
+  const kept = Object.entries(from).filter(([k]) => Object.hasOwn(tags, k));
+  return kept.length ? Object.fromEntries(kept) : undefined;
+}
+
 export class Inbox {
   private readonly store: Storage;
   private readonly blobs: BlobStore;
@@ -599,6 +607,8 @@ export class Inbox {
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
       tags: mergedTags.tags,
+      // A revision keeps the record of who set each tag for the keys the card still carries. A client never sends it.
+      tagFrom: keptTagFrom(before?.tagFrom, mergedTags.tags),
       follows: input.follows ?? before?.follows,
       followedBy: before?.followedBy,
       deliver: input.deliver ?? 'stream',
@@ -1165,22 +1175,29 @@ export class Inbox {
   }
 
   /** Merge tags into a card that is already posted, so a card that went out without a topic can be found by a search
-   * and grouped later. A key with an empty value removes that key. Only the owner and the token that posted the card
-   * may call it, as with every other route that changes one card. */
+   * and grouped later. A key with an empty value removes that key. Any agent may call it, and the owner, because a tag
+   * only groups and finds a card and never changes what it asks or what the person answers; `patch`, `close` and a
+   * repost keep their ownership check. The card records in `tagFrom` which client set each key. */
   tagCard(caller: Caller, id: string, tags: unknown): Card {
-    const card = this.owned(caller, id);
+    if (caller.role === 'extension') throw new InboxError(403, 'an extension tags no cards');
+    const card = this.getCard(id);
     if (!tags || typeof tags !== 'object' || Array.isArray(tags)) throw new InboxError(400, 'tags must be an object of tag keys and values');
+    const setter = this.store.get<Token>('tokens', caller.token)?.name ?? caller.role;
     const next = new Map(Object.entries(card.tags ?? {}));
+    const from = new Map(Object.entries(card.tagFrom ?? {}));
     const added: string[] = [];
     for (const [k, raw] of Object.entries(tags)) {
       if (!k) throw new InboxError(400, 'each tag needs a key');
       if (k.length > MAX_TAG_CHARS) throw new InboxError(400, `tag key ${k.slice(0, 20)}… must be at most ${MAX_TAG_CHARS} characters`);
       const value = String(raw ?? '');
       if (value.length > MAX_TAG_CHARS) throw new InboxError(400, `tag ${k} must be at most ${MAX_TAG_CHARS} characters`);
-      if (value === '') next.delete(k);
-      else {
+      if (value === '') {
+        next.delete(k);
+        from.delete(k);
+      } else {
         if (!next.has(k)) added.push(k);
         next.set(k, value);
+        from.set(k, setter);
       }
     }
     // The limit reads the tags the card keeps at the end, so one call may remove a key and add another. A card that
@@ -1188,7 +1205,7 @@ export class Inbox {
     if (next.size > MAX_TAGS && added.length) throw new InboxError(400, `tag ${added[added.length - 1]} takes the card past its ${MAX_TAGS} tags`);
     // fromEntries gives a key named like an Object property its own key, so a tag may read `toString`.
     const merged = Object.fromEntries(next);
-    const updated: Card = { ...card, tags: next.size ? merged : undefined };
+    const updated: Card = { ...card, tags: next.size ? merged : undefined, tagFrom: from.size ? Object.fromEntries(from) : undefined };
     this.store.put('cards', id, updated);
     // Search reads the card's tags. The answer's comment stays searchable when the card is written again.
     const answer = this.store.get<Answer>('answers', id);
