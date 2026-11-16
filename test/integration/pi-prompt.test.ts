@@ -43,9 +43,9 @@ const PROMPT_SCREEN = [
   '╰──────────────────────────────────────╯',
 ].join('\n');
 
-/** A herdr that logs each command, reads its screen from a file the test writes, and clears that file when a key goes
- * out, the way a prompt closes on the answer it took. */
-function fakeHerdr(): { bin: string; screen(screen: string): void; calls(): string[] } {
+/** A herdr that logs each command, reads its screen from a file the test writes, and writes what it is told when a key
+ * goes out, the way a prompt redraws on the answer it took. An empty screen stands for a prompt that closed. */
+function fakeHerdr(afterKey = ''): { bin: string; screen(screen: string): void; calls(): string[] } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-pi-prompt-'));
   const screen = path.join(dir, 'screen');
   const log = path.join(dir, 'calls');
@@ -58,7 +58,7 @@ case "$1 $2" in
   'tab get') printf '%s' '{"result":{"tab":{"tab_id":"w7:t1","label":"prompt test"}}}' ;;
   'workspace get') printf '%s' '{"result":{"workspace":{"workspace_id":"w7","label":"Tests"}}}' ;;
   'pane read') cat '${screen}' ;;
-  'agent send-keys') : > '${screen}' ;;
+  'agent send-keys') printf '%s' '${afterKey}' > '${screen}' ;;
 esac
 exit 0
 `, { mode: 0o755 });
@@ -168,5 +168,66 @@ describe('a prompt a pi session waits on', () => {
     const outcome = (await closed(card.id))?.outcome ?? '';
     assert.match(outcome, /no herdr pane/);
     assert.deepEqual(herdr.calls().filter((c) => c.startsWith('agent send-keys')), []);
+  });
+
+  it('closes the card whose prompt ends while the card is being posted', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
+    await connect('pi-prompt-late-end', { pane: 'w7:p1', herdr: herdr.bin });
+    // The end lands while started() reads the pane and posts the card, so no later end comes for it.
+    const posting = startPrompt('select', 'Pick a database');
+    await endPrompt();
+    await posting;
+    const card = await oneCard();
+    assert.equal((await closed(card.id))?.kind, 'answered-in-terminal');
+  });
+
+  it('sends Enter for a prompt with no title while its box still waits on the screen', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
+    herdr = fakeHerdr(PROMPT_SCREEN);
+    await connect('pi-prompt-custom-enter', { pane: 'w7:p1', herdr: herdr.bin });
+    await startPrompt('custom');
+    const card = await oneCard();
+    await h.owner('POST', `/v1/cards/${card.id}/answer`, { comment: 'SQLite' });
+    assert.equal((await closed(card.id))?.outcome, 'Typed your answer in its session.');
+    assert.deepEqual(herdr.calls().filter((c) => c.startsWith('agent send-keys')), ['agent send-keys w7:p1 SQLite', 'agent send-keys w7:p1 enter']);
+  });
+
+  it('sends no Enter into the agent that took over when a prompt with no title leaves the screen', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
+    herdr = fakeHerdr('Running the migration…\nWrote 3 files.\n');
+    await connect('pi-prompt-custom-gone', { pane: 'w7:p1', herdr: herdr.bin });
+    await startPrompt('custom');
+    const card = await oneCard();
+    await h.owner('POST', `/v1/cards/${card.id}/answer`, { comment: 'SQLite' });
+    const outcome = (await closed(card.id))?.outcome ?? '';
+    assert.deepEqual(herdr.calls().filter((c) => c.startsWith('agent send-keys')), ['agent send-keys w7:p1 SQLite'], 'the words go in, and no Enter follows the prompt');
+    assert.match(outcome, /without Enter: the prompt was not on the screen/);
+  });
+
+  it('refuses an answer on a prompt card older than the last five, instead of handing it to the model', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
+    await connect('pi-prompt-old', { pane: 'w7:p1', herdr: herdr.bin });
+    const ids: string[] = [];
+    for (let i = 1; i <= 6; i++) {
+      await startPrompt('input', `Question ${i}`);
+      const all = await until(async () => { const now = await cards(); return now.length === i ? now : undefined; });
+      ids.push(all.map((c) => c.id).find((id) => !ids.includes(id)) ?? '');
+      await endPrompt();
+    }
+    await h.owner('POST', `/v1/cards/${ids[0]}/answer`, { comment: 'SQLite' });
+    const done = await until(async () => {
+      const card = (await cards()).find((c) => c.id === ids[0]);
+      return card?.closed?.kind === 'resolved' ? card : undefined;
+    });
+    assert.match(done.closed?.outcome ?? '', /closed before your answer arrived/);
+    assert.ok(!sent.some((m) => m.includes(ids[0]!)), 'the model hears nothing of an answer on an old prompt card');
+  });
+
+  it('clears a card the terminal answered the way it clears a resolved one', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
+    await connect('pi-prompt-clear', { pane: 'w7:p1', herdr: herdr.bin });
+    await startPrompt('confirm', 'Run the tests?');
+    const card = await oneCard();
+    await endPrompt();
+    assert.equal((await closed(card.id))?.kind, 'answered-in-terminal');
+    const cleared = await h.owner('POST', '/v1/archive');
+    assert.equal(cleared.status, 200);
+    assert.equal(((await cleared.json()) as { archived: number }).archived >= 1, true, 'the route counts the card among the ones it clears');
+    await until(async () => ((await cards()).some((c) => c.id === card.id) ? undefined : true));
   });
 });

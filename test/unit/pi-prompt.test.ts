@@ -1,8 +1,10 @@
-// What a prompt card says, what the person typed on it, and whether the prompt still waits on the screen.
+// What a prompt card says, what the person typed on it, whether the prompt still waits on the screen, and the two
+// races a card has to survive: a prompt that ends while its card is posted, and a second answer while the first types.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { promptOnScreen, promptText, typedAnswer } from '../../src/integrations/pi/prompt.ts';
-import type { Answer } from '../../src/core/types.ts';
+import { createPromptCards, promptOnScreen, promptText, typedAnswer, type PromptSession } from '../../src/integrations/pi/prompt.ts';
+import type { Herdr } from '../../src/integrations/herdr/blocked.ts';
+import type { Answer, Card, NewCard } from '../../src/core/types.ts';
 
 const answer = (comment: string, values: Record<string, unknown> = {}): Answer => ({ comment, values } as Answer);
 
@@ -10,6 +12,14 @@ const SCREEN = [
   '╭──────────────────────────╮',
   '│ Pick a database          │',
   '│ ❯ SQLite                 │',
+  '╰──────────────────────────╯',
+].join('\n');
+
+/** The same box with words typed inside it: the borders stay where they were. */
+const TYPED_SCREEN = [
+  '╭──────────────────────────╮',
+  '│ Pick a database          │',
+  '│ ❯ SQLite SQLite          │',
   '╰──────────────────────────╯',
 ].join('\n');
 
@@ -41,8 +51,88 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({ title: 'Pick a database' }, 'Running the migration…'), false);
   });
 
-  it('is false for a pane that reads nothing, and true for a prompt with no title while its span is open', () => {
+  it('is false for a pane that reads nothing', () => {
     assert.equal(promptOnScreen({ title: 'Pick a database' }, ''), false);
-    assert.equal(promptOnScreen({}, SCREEN), true);
+    assert.equal(promptOnScreen({ screen: SCREEN }, ''), false);
+  });
+
+  it('tells a prompt with no title apart by its box, which stays while the answer is typed inside it', () => {
+    assert.equal(promptOnScreen({ screen: SCREEN }, TYPED_SCREEN), true, 'the same box still waits');
+    assert.equal(promptOnScreen({ screen: SCREEN }, 'Running the migration…\nWrote 3 files.'), false, 'a working agent draws no box');
+    assert.equal(promptOnScreen({}, SCREEN), false, 'a prompt with no title and no screen to compare gets no key');
+  });
+});
+
+/** A prompt session with a stand-in inbox and terminal, so a race can be run in the order a test picks. */
+function fakeSession(): {
+  session: () => PromptSession;
+  screen(screen: string): void;
+  posted: Card[];
+  closes: { id: string; kind: string; outcome: string }[];
+  keys: string[];
+  herdr: Herdr;
+} {
+  let screen = SCREEN;
+  const posted: Card[] = [];
+  const closes: { id: string; kind: string; outcome: string }[] = [];
+  const keys: string[] = [];
+  const inbox = {
+    post: async (card: NewCard) => {
+      const made = { ...card, id: card.id ?? 'prompt-x', version: 1, createdAt: 1 } as Card;
+      posted.push(made);
+      return made;
+    },
+    close: async (id: string, kind: string, outcome: string) => { closes.push({ id, kind, outcome }); },
+    ack: async () => {},
+  };
+  const herdr: Herdr = async (...args) => {
+    if (args[0] === 'pane' && args[1] === 'read') return screen;
+    if (args[0] === 'agent' && args[1] === 'send-keys') { keys.push(args[3] ?? ''); return ''; }
+    throw new Error(`the fake herdr has nothing for ${args.join(' ')}`);
+  };
+  return {
+    session: () => ({ inbox: inbox as never, agent: 'pi:s1', origin: { herdrPane: 'w7:p1' } }),
+    screen: (text: string) => { screen = text; },
+    posted,
+    closes,
+    keys,
+    herdr,
+  };
+}
+
+describe('a prompt that ends while its card is being posted', () => {
+  it('closes the card as soon as the post returns', async () => {
+    const s = fakeSession();
+    const cards = createPromptCards(s.session, s.herdr, 0);
+    // The end lands while `started` reads the pane: no card exists yet, and no later end will come.
+    const starting = cards.started({ kind: 'select', title: 'Pick a database' });
+    await cards.ended();
+    await starting;
+    assert.deepEqual(s.closes.map((c) => [c.id, c.kind]), [[s.posted[0]?.id, 'answered-in-terminal']]);
+  });
+
+  it('keeps the card of the prompt that follows, and leaves it open', async () => {
+    const s = fakeSession();
+    const cards = createPromptCards(s.session, s.herdr, 0);
+    const starting = cards.started({ kind: 'select', title: 'Pick a database' });
+    await cards.ended();
+    // The same prompt comes back before the first post returns: it keeps the card, so that card is not closed.
+    const again = cards.started({ kind: 'select', title: 'Pick a database' });
+    await Promise.all([starting, again]);
+    assert.deepEqual(s.closes, [], 'nothing closes the card the second span took over');
+  });
+});
+
+describe('two answers on one prompt card', () => {
+  it('types the answer into the pane once, and refuses the second while the first runs', async () => {
+    const s = fakeSession();
+    const cards = createPromptCards(s.session, s.herdr, 0);
+    await cards.started({ kind: 'select', title: 'Pick a database' });
+    const card = s.posted[0]!;
+    await Promise.all([cards.answered(card, answer('SQLite')), cards.answered(card, answer('SQLite'))]);
+    assert.deepEqual(s.keys.filter((k) => k !== 'enter'), ['SQLite'], 'one keystroke carries the answer');
+    const outcomes = s.closes.map((c) => c.outcome);
+    assert.equal(outcomes.filter((o) => /already being typed/.test(o)).length, 1, 'the second answer is refused with its reason');
+    assert.equal(outcomes.filter((o) => /^Typed your answer/.test(o)).length, 1, 'the first answer closes the card');
   });
 });

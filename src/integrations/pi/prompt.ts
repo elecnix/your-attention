@@ -6,7 +6,7 @@
 // overlapping prompts into one outer span, so a nested prompt never posts a second card.
 import type { Client } from '../../client.ts';
 import { randomId } from '../../core/crypto.ts';
-import type { Answer, Card, NewCard } from '../../core/types.ts';
+import type { Answer, Card, CloseKind, NewCard } from '../../core/types.ts';
 import { runHerdr } from '../herdr/approve.ts';
 import { type Herdr, trimScreen } from '../herdr/blocked.ts';
 import { herdrPlace } from '../herdr/place.ts';
@@ -47,14 +47,23 @@ export interface PromptCards {
 /** One prompt span, with the card that reports it. */
 interface Span {
   inbox: Client;
-  card: Card;
+  /** The id the card posts under, chosen before the post so a span that ends during it knows what to close. */
+  id: string;
+  /** The card the span reports, once the post has returned. */
+  card?: Card;
   /** The prompt's kind and title, so the card it leaves behind can be matched to the span that follows it. */
   kind: string;
   title?: string;
+  /** The screen the card shows, which is how a prompt with no title is recognised on the pane. */
+  screen?: string;
   /** The pane this session runs in, when it has one. */
   pane?: string;
   /** Set once nothing more can be typed: the extension typed the answer, the card closed, or an answer was refused. */
   closed?: 'typed' | 'ended' | 'refused';
+  /** Set while this extension types an answer, so a second answer is refused instead of typed into the pane as well. */
+  typing?: boolean;
+  /** The close the span asked for while its card was still being posted, run once the card exists. */
+  late?: { kind: CloseKind; outcome: string };
 }
 
 /** The session as a card names it: the name the launcher gave it, with the id beside it, or the id alone. */
@@ -90,14 +99,29 @@ export function typedAnswer(answer: Answer): string {
   return '';
 }
 
+/** The rows of a screen that draw a box edge and carry no words: a prompt's borders, which stay put while the answer
+ * is typed inside the box, and so are what a prompt with no title is recognised by. */
+function edges(screen: string): string {
+  return screen.split('\n').filter((l) => /[─━═]/.test(l) && !/[A-Za-z0-9]/.test(l)).join('\n');
+}
+
 /** Whether the prompt a card was posted for still waits on the screen just read. pi gives a title for every widget
- * except a custom screen, and a changed prompt loses that title; a prompt with no title has only its span to speak for
- * it, and a pane that reads nothing is no prompt at all. */
-export function promptOnScreen(prompt: { title?: string }, raw: string): boolean {
+ * except a custom screen, and a changed prompt loses that title; a prompt with no title has only the box it draws to
+ * speak for it, and a screen that shows no box is no prompt this extension types into. */
+export function promptOnScreen(prompt: { title?: string; screen?: string }, raw: string): boolean {
   const now = trimScreen(raw);
   if (!now) return false;
   const title = prompt.title?.trim();
-  return !title || now.includes(title);
+  if (title) return now.includes(title);
+  const then = edges(prompt.screen ?? '');
+  return then !== '' && edges(now) === then;
+}
+
+/** Why no key goes out, when the screen no longer shows the prompt the card was posted for. */
+function lostPrompt(prompt: { title?: string; screen?: string }): string {
+  return prompt.title?.trim()
+    ? 'The prompt changed or closed before your answer arrived, so nothing was typed. Answer it in the terminal.'
+    : 'This prompt has no title, and the screen does not show its box, so nothing was typed. Answer it in the terminal.';
 }
 
 const paneOf = (pane: string | undefined): string | undefined => (pane && PANE.test(pane) ? pane : undefined);
@@ -112,8 +136,9 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
   // The card the last span ended with. A prompt that flickers and comes back is a new version of that card.
   let last: { id: string; kind: string; title?: string } | undefined;
   // The cards this session posted for prompts, so an answer that arrives after its span ended is refused rather than
-  // read as a message for the model.
-  const posted: string[] = [];
+  // read as a message for the model. Every id is kept for the life of the session: any bound small enough to reach
+  // would hand an older card's answer to the model, and one id costs a few bytes.
+  const posted = new Set<string>();
   // The last inbox seen, which a late answer still needs to record its refusal.
   let inbox: Client | undefined;
 
@@ -122,10 +147,20 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
 
   /** Refuse an answer with the reason on the card: no key goes out, and the person reads why. */
   const refuse = async (to: Client, card: Card, why: string): Promise<void> => {
-    if (span?.card.id === card.id) span.closed ??= 'refused';
+    if (span?.card?.id === card.id) span.closed ??= 'refused';
     await to.ack(card.id).catch(() => {});
     await to.close(card.id, 'resolved', why).catch(() => {});
     log('no key for', card.id, why);
+  };
+
+  /** Close a span's card now, or keep the close for the post that is still on its way. */
+  const closeSpan = async (open: Span, kind: CloseKind, outcome: string): Promise<boolean> => {
+    if (!open.card) {
+      open.late = { kind, outcome };
+      return false;
+    }
+    await open.inbox.close(open.card.id, kind, outcome).catch((e: Error) => log('could not close', open.id, e.message));
+    return true;
   };
 
   return {
@@ -138,9 +173,15 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       const kind = event.kind?.trim() || 'ui';
       const title = event.title?.trim();
       const pane = paneOf(connected.origin?.herdrPane);
+      const id = last && last.kind === kind && last.title === title ? last.id : `prompt-${randomId(4)}`;
+      // The span goes on record before the first await, so a prompt that ends while the pane is read and the card is
+      // posted is still closed: the card closes as soon as it exists, rather than staying open with nothing left to
+      // close it.
+      const open: Span = { inbox: connected.inbox, id, kind, title, pane };
+      span = open;
       const raw = pane ? await read(pane) : '';
       const screen = raw ? trimScreen(raw) : '';
-      const id = last && last.kind === kind && last.title === title ? last.id : `prompt-${randomId(4)}`;
+      open.screen = screen || undefined;
       // A blocked card takes no `deliver: 'none'`, or the inbox would keep the answer from the one integration that
       // can type it. The extension reads the answer on the session's stream and never passes it to the model.
       const card = await connected.inbox.post({
@@ -155,10 +196,15 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
         // The prompt's labels never reach this extension, so the card offers no options, and the person answers in the
         // terminal or types an answer that the extension forwards.
       }).catch((e: Error) => { log('could not post the prompt card:', e.message); return undefined; });
-      if (!card) return;
-      span = { inbox: connected.inbox, card, kind, title, pane };
-      posted.push(id);
-      if (posted.length > 5) posted.shift();
+      if (!card) {
+        if (span === open) span = undefined;
+        return;
+      }
+      open.card = card;
+      posted.add(id);
+      // The span ended while its card was being posted, so nothing else will close the card. A card that a later span
+      // took over stays open, since a prompt that comes back is the same one with its card still up.
+      if (open.late && span?.id !== open.id) await closeSpan(open, open.late.kind, open.late.outcome);
       log('card', id, 'for a', kind, 'prompt');
     },
 
@@ -167,11 +213,10 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       if (!open) return;
       span = undefined;
       // The same prompt that comes back keeps its card, with a new version, rather than posting a second one.
-      last = { id: open.card.id, kind: open.kind, title: open.title };
+      last = { id: open.id, kind: open.kind, title: open.title };
       if (open.closed) return;
       open.closed = 'ended';
-      await open.inbox.close(open.card.id, 'answered-in-terminal', 'Answered in the terminal.').catch((e: Error) => log('could not close', open.card.id, e.message));
-      log('closed', open.card.id, 'as answered in the terminal');
+      if (await closeSpan(open, 'answered-in-terminal', 'Answered in the terminal.')) log('closed', open.id, 'as answered in the terminal');
     },
 
     async shutdown() {
@@ -179,40 +224,50 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       span = undefined;
       if (!open || open.closed) return;
       open.closed = 'ended';
-      await open.inbox.close(open.card.id, 'resolved', 'The session ended with this prompt open.').catch((e: Error) => log('could not close', open.card.id, e.message));
+      await closeSpan(open, 'resolved', 'The session ended with this prompt open.');
     },
 
     owns(card) {
-      return span?.card.id === card || posted.includes(card);
+      return span?.card?.id === card || posted.has(card);
     },
 
     async answered(card, answer) {
       const to = inbox;
       if (!to) return;
-      const open = span?.card.id === card.id ? span : undefined;
+      const open = span?.card?.id === card.id ? span : undefined;
       if (!open) return refuse(to, card, 'The prompt closed before your answer arrived, so nothing was typed. Answer it in the terminal.');
       if (open.closed === 'typed') return refuse(to, card, 'Your answer was already typed into its session, so nothing more was sent.');
+      // The card is marked as being answered before the first await, so a second answer that arrives while this one
+      // reads the pane and sends keys is refused, instead of typing the same words into the session twice.
+      if (open.typing) return refuse(to, card, 'An answer on this card is already being typed into its session, so nothing more was sent.');
       if (open.closed) return refuse(to, card, 'The prompt ended before your answer arrived, so nothing was typed.');
       const text = typedAnswer(answer);
       if (!text) return refuse(to, card, 'The answer was empty, so nothing was typed. Type the answer in the terminal.');
       if (!open.pane) return refuse(to, card, 'This session has no herdr pane, so the answer was not typed. Answer it in the terminal.');
+      open.typing = true;
       // The pane is read again immediately before a key goes out: a prompt that changed or closed gets no keystroke,
       // because a keystroke sent to a working agent would interrupt it.
       if (!promptOnScreen(open, await read(open.pane))) {
-        return refuse(to, card, 'The prompt changed or closed before your answer arrived, so nothing was typed. Answer it in the terminal.');
+        open.typing = false;
+        return refuse(to, card, lostPrompt(open));
       }
       try {
         await herdr('agent', 'send-keys', open.pane, text);
       } catch (e) {
+        open.typing = false;
         return refuse(to, card, `herdr could not type into the pane: ${(e as Error).message}. Answer it in the terminal.`);
       }
       // Some prompts take the typed text alone, and others need Enter to accept it. Confirm only while the same prompt
-      // still waits, the way herdr-blocked presses Enter for a number that only moved the selection.
+      // still waits, the way herdr-blocked presses Enter for a number that only moved the selection. A prompt that is
+      // gone from the screen gets no Enter, and the card says so, since a key sent to a working agent would interrupt it.
       await new Promise((r) => setTimeout(r, settleMs));
-      if (promptOnScreen(open, await read(open.pane))) await herdr('agent', 'send-keys', open.pane, 'enter').catch(() => {});
+      const waits = promptOnScreen(open, await read(open.pane));
       open.closed = 'typed';
+      if (waits) await herdr('agent', 'send-keys', open.pane, 'enter').catch(() => {});
       await to.ack(card.id).catch(() => {});
-      await to.close(card.id, 'resolved', 'Typed your answer in its session.').catch(() => {});
+      await to.close(card.id, 'resolved', waits
+        ? 'Typed your answer in its session.'
+        : 'Typed your answer in its session, without Enter: the prompt was not on the screen to confirm it.').catch(() => {});
       log('typed the answer for', card.id, 'into', open.pane);
     },
   };
