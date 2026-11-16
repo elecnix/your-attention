@@ -429,9 +429,11 @@ export class Client {
   }
 }
 
-/** The address parameters of a search or a cards listing, by the filter each one carries. */
+/** The address parameters of a search or a cards listing, by the filter each one carries. `format=page` tells the
+ * inbox this client reads `{results, nextCursor?}`; without it the inbox answers the plain array older clients map over. */
 function filterParams(opts: SearchFilters & { q?: string }): string {
   const p = new URLSearchParams();
+  p.set('format', 'page');
   if (opts.q !== undefined) p.set('q', opts.q);
   if (opts.answered) p.set('answered', '1');
   if (opts.state) p.set('state', opts.state);

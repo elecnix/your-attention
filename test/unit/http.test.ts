@@ -319,3 +319,46 @@ describe('network addresses', () => {
     assert.equal(res.status, 501);
   });
 });
+
+describe('a client from before the paged search', () => {
+  // A session that started before the paged reply went out still maps over the array, so the old address keeps its
+  // old answer. The exact addresses below are the ones that client and the triage service send.
+  it('answers the old search address with the plain array of cards it maps over', async () => {
+    const { call, agent, owner } = await setup();
+    await call('POST', '/v1/cards', { token: agent, body: { id: 'old-1', agent: 's1', title: 'Deploy the build' } });
+    await call('POST', '/v1/cards/old-1/answer', { token: owner, body: { comment: 'ship it' } });
+    const reply = (await (await call('GET', '/v1/search?q=deploy&limit=20&answered=1', { token: agent })).json()) as unknown;
+    assert.ok(Array.isArray(reply), `the old client maps over this reply, and got ${JSON.stringify(reply).slice(0, 80)}`);
+    const hits = reply as { card: { id: string }; answer?: { comment: string } }[];
+    assert.deepEqual(hits.map((h) => h.card.id), ['old-1']);
+    assert.equal(hits[0]?.answer?.comment, 'ship it');
+  });
+
+  it('answers a search with no options with the same array, as the triage service sends it', async () => {
+    const { call, agent } = await setup();
+    await call('POST', '/v1/cards', { token: agent, body: { id: 'old-2', agent: 's1', title: 'Roll the cache' } });
+    const reply = (await (await call('GET', '/v1/search?q=cache', { token: agent })).json()) as unknown;
+    assert.ok(Array.isArray(reply), 'a bare word search still answers the array');
+    assert.equal((reply as { card: { id: string } }[])[0]?.card.id, 'old-2');
+  });
+
+  it('answers the cards listing with the plain array of cards and states', async () => {
+    const { call, agent } = await setup();
+    await call('POST', '/v1/cards', { token: agent, body: { id: 'old-3', agent: 's1', title: 'q' } });
+    const reply = (await (await call('GET', '/v1/cards', { token: agent })).json()) as unknown;
+    assert.ok(Array.isArray(reply), 'the old list call reads .some over this reply');
+    assert.equal((reply as { card: { id: string }; state: string }[])[0]?.state, 'open');
+  });
+
+  it('answers the new client with the paged reply, which announces itself', async () => {
+    const { call, agent } = await setup();
+    await call('POST', '/v1/cards', { token: agent, body: { id: 'new-1', agent: 's1', title: 'Deploy the build' } });
+    const search = (await (await call('GET', '/v1/search?q=deploy&format=page', { token: agent })).json()) as { results?: { card: { id: string } }[] };
+    assert.equal(search.results?.[0]?.card.id, 'new-1');
+    const list = (await (await call('GET', '/v1/cards?format=page', { token: agent })).json()) as { results?: { card: { id: string } }[] };
+    assert.equal(list.results?.[0]?.card.id, 'new-1');
+    // A filter only the new client sends picks the new reply too, so state and tags never need the marker.
+    const filtered = (await (await call('GET', '/v1/search?state=open', { token: agent })).json()) as { results?: unknown[] };
+    assert.ok(Array.isArray(filtered.results), 'a filter picks the paged reply');
+  });
+});
