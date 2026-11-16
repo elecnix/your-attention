@@ -22,7 +22,7 @@ export function agentList(state, now = Date.now()) {
     const reported = (p && p.origin) || {};
     rows.push({
       id,
-      name: reported.name || agentName(id, cards, presence),
+      name: agentName(id, cards, presence),
       cwd: reported.cwd || newestCwd(cards, id),
       // A pane is where a connection reported its session, so only presence knows one.
       pane: (p && p.origin && p.origin.herdrPane) || null,
