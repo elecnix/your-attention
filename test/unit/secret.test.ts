@@ -136,7 +136,7 @@ describe('the secret widget', () => {
     const sealed = await seal(keys.publicKey, 'value');
     const a = await inbox.answer('k1', { values: { API_KEY: sealed, other: 'fine' } });
     assert.ok(isSealed(a.values['API_KEY']));
-    assert.equal(inbox.search(sealed.data.slice(0, 12)).length, 0, 'a sealed value stays out of search');
+    assert.equal(inbox.search(sealed.data.slice(0, 12)).results.length, 0, 'a sealed value stays out of search');
     const declined = await inbox.answer('k1', { values: { API_KEY: '' }, comment: 'Use the staging key instead.' });
     assert.equal(declined.values['API_KEY'], undefined, 'an empty field declines, and the inbox keeps nothing for it');
   });

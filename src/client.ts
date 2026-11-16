@@ -5,9 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
-import { InboxError } from './core/inbox.ts';
+import { InboxError, type SearchFilters, type SearchPage } from './core/inbox.ts';
 import { isSealed } from './core/sealed.ts';
-import type { AgentEvent, Answer, Card, CardGuidance, CloseKind, DefaultTags, DefaultTagsWrite, NewCard, Origin, PublicSubscription, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, NewCard, Origin, PublicSubscription, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 
@@ -206,7 +206,9 @@ export class Client {
     }
   }
 
-  list(): Promise<{ card: Card; state: string }[]> { return this.call('GET', '/v1/cards'); }
+  list(opts: SearchFilters = {}): Promise<{ results: { card: Card; state: CardState }[]; nextCursor?: string }> {
+    return this.call('GET', `/v1/cards${filterParams(opts)}`);
+  }
   get(id: string): Promise<{ card: Card; state: string }> { return this.call('GET', `/v1/cards/${encodeURIComponent(id)}`); }
   close(id: string, kind: CloseKind, outcome: string, ifUnanswered = false): Promise<Card> {
     return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/close`, { kind, outcome, ifUnanswered });
@@ -239,8 +241,10 @@ export class Client {
   }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
-  search(q: string, opts: { answered?: boolean; limit?: number } = {}): Promise<{ card: Card; answer?: Answer }[]> {
-    return this.call('GET', `/v1/search?q=${encodeURIComponent(q)}&limit=${opts.limit ?? 20}${opts.answered ? '&answered=1' : ''}`);
+  /** Cards that match the words and the filters. An empty query, or `*`, lists by the filters alone, and a
+   * `nextCursor` reads the page after this one. */
+  search(q: string, opts: SearchFilters = {}): Promise<SearchPage> {
+    return this.call('GET', `/v1/search${filterParams({ q, ...opts })}`);
   }
   deadLetters(): Promise<{ card: Card; answer: Answer }[]> { return this.call('GET', '/v1/dead-letters'); }
   /** The answers this client has not acknowledged, with their card ids. Every field is checked: an address that answers
@@ -423,6 +427,23 @@ export class Client {
       for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }
   }
+}
+
+/** The address parameters of a search or a cards listing, by the filter each one carries. */
+function filterParams(opts: SearchFilters & { q?: string }): string {
+  const p = new URLSearchParams();
+  if (opts.q !== undefined) p.set('q', opts.q);
+  if (opts.answered) p.set('answered', '1');
+  if (opts.state) p.set('state', opts.state);
+  for (const tag of opts.tags ?? []) p.append('tags', tag);
+  if (opts.agent) p.set('agent', opts.agent);
+  if (opts.since !== undefined) p.set('since', String(opts.since));
+  if (opts.before !== undefined) p.set('before', String(opts.before));
+  if (opts.links) p.set('links', opts.links);
+  if (opts.limit !== undefined) p.set('limit', String(opts.limit));
+  if (opts.cursor) p.set('cursor', opts.cursor);
+  const query = p.toString();
+  return query ? `?${query}` : '';
 }
 
 /** A transport the inbox answered with an HTTP status instead of a stream, so the loop can tell permanent from transient. */

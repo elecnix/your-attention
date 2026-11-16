@@ -658,7 +658,13 @@ The client never runs an HTML card's scripts. For an HTML card, a chart or anoth
 
 ## Search
 
-`GET /v1/search?q=<words>` matches each word as a prefix, over card text, its tags and answer comments. The laptop build uses SQLite FTS5.
+`GET /v1/search?q=<words>` matches each word as a prefix, over card text, its tags and answer comments. The laptop build uses SQLite FTS5. The reply is `{results, nextCursor?}`, and each result is `{card, answer?, state}`: the whole card, its answer when it has one, and the card state itself, such as `open` or `orphaned`. A result therefore shows its tags, its agent, and its posted and updated times, so a caller finds the common facts without a read per card. `answered=1` keeps only cards the person answered.
+
+The route takes filters, which combine with the words and with each other, and which work alone. Leave `q` out, or send an asterisk alone, to list every matching card. `state` takes one card state. `tags` takes a tag key alone, `repo`, or a key and value, `priority=P1`, and a call that repeats the parameter keeps only the cards with every tag named. `agent` keeps the cards one agent posted, by its id or its session name. `since` and `before` take epoch milliseconds or an ISO date, and keep the cards posted or updated at or after, or at or before, that time. `links` takes a card id or URL, and keeps the cards whose text links it. A word search returns the best match first. A listing with no words returns the card with the newest change first.
+
+`limit` sets the page size, 20 by default, and no call returns more than 100 results. When more cards match, the reply carries a `nextCursor`, and the next call passes it as `cursor` to read on. The cursor records a place in the matching list, so every page says whether more follows.
+
+`GET /v1/cards` lists the cards its caller may read, all of them for the owner and its own for an agent, in the order they were posted. It takes the same filters except `q`, and returns `{results, nextCursor?}` with `{card, state}` for each card. Without `limit` it returns every matching card. With one, it pages the same way as a search.
 
 ### The search field in the page
 
