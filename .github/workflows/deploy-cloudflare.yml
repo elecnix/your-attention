@@ -17,7 +17,7 @@ on:
         options: [single, hosted]
         default: single
       code_update:
-        description: deferred waits for an object to hibernate, up to a minute; immediate resets active objects at once
+        description: deferred gives an object a minute to finish; immediate resets it at once, for a correction that cannot wait
         type: choice
         options: [deferred, immediate]
         default: deferred
@@ -106,7 +106,15 @@ jobs:
         run: |
           sed -i "s/REPLACE_WITH_KV_NAMESPACE_ID/${KV_NAMESPACE_ID}/" wrangler.jsonc
           npm run cloudflare:build
-          npx wrangler deploy --var "MODE:${MODE}" --durable-objects-code-update-mode "$CODE_UPDATE"
+          # The flag wants a duration with deferred, and its absence is what failed the deploy of 16 November.
+          if [ "$CODE_UPDATE" = immediate ]; then mode=immediate; else mode="deferred 60s"; fi
+          # Wrangler prints its whole help on an error, so the log stays in a file: a failure shows its tail, and a
+          # success shows the four lines that say what happened.
+          if ! npx wrangler deploy --var "MODE:${MODE}" --durable-objects-code-update-mode "$mode" > deploy.log 2>&1; then
+            tail -30 deploy.log
+            exit 1
+          fi
+          grep -E "Uploaded|Deployed|Current Version" deploy.log || true
       - name: set the owner token
         if: inputs.mode == 'single'
         env:
