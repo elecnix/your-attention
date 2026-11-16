@@ -2,27 +2,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
-import { createHandler } from '../../src/core/http.ts';
-import { Inbox } from '../../src/core/inbox.ts';
-import { MemoryStorage } from '../../src/core/storage.ts';
+import { httpInbox } from './fixture.ts';
 import type { CardSummary } from '../../src/core/summary.ts';
 import type { Card } from '../../src/core/types.ts';
 
 async function setup() {
-  const inbox = new Inbox(new MemoryStorage(), () => 1_000);
-  const handle = createHandler(inbox, { heartbeatMs: 50 });
-  const owner = (await inbox.createToken('page', 'owner')).secret;
-  const agentA = (await inbox.createToken('agent a', 'agent')).secret;
-  const agentB = (await inbox.createToken('agent b', 'agent')).secret;
-  const call = (method: string, path: string, opts: { token?: string; body?: unknown } = {}): Promise<Response> =>
-    handle(new Request(`http://inbox.test${path}`, {
-      method,
-      headers: { ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-    }));
+  const { call, owner, agentA, agentB, ext } = await httpInbox();
   const post = async (token: string, body: Record<string, unknown>): Promise<Card> =>
     (await (await call('POST', '/v1/cards', { token, body: { agent: 's1', ...body } })).json()) as Card;
-  return { call, post, owner, agentA, agentB };
+  return { call, post, owner, agentA, agentB, ext };
 }
 
 const tag = (call: (method: string, path: string, opts?: { token?: string; body?: unknown }) => Promise<Response>, token: string, id: string, tags: Record<string, string>) =>
@@ -56,15 +44,55 @@ describe('tagging a card that is already posted', () => {
     assert.deepEqual(hits, []);
   });
 
-  it('answers 403 to an agent that does not own the card, and lets the owner change it', async () => {
+  it('lets an agent tag a card another agent posted, and records which client set each tag', async () => {
     const { call, post, owner, agentA, agentB } = await setup();
-    await post(agentA, { id: 'c1', title: 'q' });
-    const denied = await tag(call, agentB, 'c1', { topic: 'billing' });
-    assert.equal(denied.status, 403);
-    assert.match(((await denied.json()) as { error: string }).error, /another client owns this card/);
-    const byOwner = await tag(call, owner, 'c1', { topic: 'billing' });
+    const posted = await post(agentA, { id: 'c1', title: 'q', tags: { repo: 'acme/api' } });
+    assert.equal(posted.tagFrom, undefined, 'a card records nothing for the tags it posted with');
+    const res = await tag(call, agentB, 'c1', { topic: 'billing' });
+    assert.equal(res.status, 200);
+    const tagged = (await res.json()) as Card;
+    assert.deepEqual(tagged.tags, { repo: 'acme/api', topic: 'billing' });
+    assert.deepEqual(tagged.tagFrom, { topic: 'agent b' }, 'only the key this call set names its setter');
+    const byOwner = await tag(call, owner, 'c1', { priority: 'P1' });
     assert.equal(byOwner.status, 200);
-    assert.deepEqual(((await byOwner.json()) as Card).tags, { topic: 'billing' });
+    const card = (await byOwner.json()) as Card;
+    assert.deepEqual(card.tags, { repo: 'acme/api', topic: 'billing', priority: 'P1' });
+    assert.deepEqual(card.tagFrom, { topic: 'agent b', priority: 'page' });
+    const read = (await (await call('GET', '/v1/cards/c1', { token: agentA })).json()) as { card: Card };
+    assert.deepEqual(read.card.tagFrom, { topic: 'agent b', priority: 'page' }, 'the record stays on the card');
+  });
+
+  it('keeps patch, close and repost to the owning agent, which answers 403 to any other', async () => {
+    const { call, post, agentA, agentB } = await setup();
+    await post(agentA, { id: 'c1', title: 'q', text: 'Ship the queue?' });
+    assert.equal((await tag(call, agentB, 'c1', { priority: 'P1' })).status, 200, 'the tag route opens to every agent');
+    const patched = await call('POST', '/v1/cards/c1/patch', { token: agentB, body: { edits: [{ old: 'Ship', new: 'Hold' }] } });
+    assert.equal(patched.status, 403);
+    assert.match(((await patched.json()) as { error: string }).error, /another client owns this card/);
+    const closed = await call('POST', '/v1/cards/c1/close', { token: agentB, body: { kind: 'retracted', outcome: 'not needed' } });
+    assert.equal(closed.status, 403);
+    const reposted = await call('POST', '/v1/cards', { token: agentB, body: { id: 'c1', agent: 's2', title: 'q' } });
+    assert.equal(reposted.status, 403);
+  });
+
+  it('answers 403 to an extension token, which is not an agent', async () => {
+    const { call, post, ext, agentA } = await setup();
+    await post(agentA, { id: 'c1', title: 'q' });
+    assert.equal((await tag(call, ext, 'c1', { topic: 'billing' })).status, 403);
+  });
+
+  it('drops the record of a key its setter removes, and a patch keeps the rest', async () => {
+    const { call, post, agentA, agentB } = await setup();
+    await post(agentA, { id: 'c1', title: 'q', text: 'Ship the queue?' });
+    await tag(call, agentB, 'c1', { priority: 'P1', topic: 'billing' });
+    const removed = (await (await tag(call, agentB, 'c1', { topic: '' })).json()) as Card;
+    assert.deepEqual(removed.tags, { priority: 'P1' });
+    assert.deepEqual(removed.tagFrom, { priority: 'agent b' });
+    const patched = await call('POST', '/v1/cards/c1/patch', { token: agentA, body: { edits: [{ old: 'queue', new: 'release queue' }] } });
+    assert.equal(patched.status, 200);
+    const card = (await patched.json()) as Card;
+    assert.deepEqual(card.tags, { priority: 'P1' }, 'a patch leaves the tags alone');
+    assert.deepEqual(card.tagFrom, { priority: 'agent b' }, 'and keeps their record');
   });
 
   it('takes a merge that removes one key and adds another when the card is full', async () => {

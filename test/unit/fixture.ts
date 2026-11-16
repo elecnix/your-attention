@@ -1,4 +1,5 @@
 // A stand-in inbox, its callers and the events one agent's stream receives, for the tests that post, send and answer.
+import { createHandler } from '../../src/core/http.ts';
 import { Inbox, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, Answer } from '../../src/core/types.ts';
@@ -30,3 +31,20 @@ export function oneCardInbox(): Inbox {
 
 /** An answer to card c1: the values and comment a test reads back. */
 export const answered = (values: Record<string, unknown> = {}, comment = ''): Answer => ({ card: 'c1', version: 1, values, comment, delivery: 'default', savedAt: 1, deliveredAt: null, readAt: null, forcedAt: null, previous: [] });
+
+/** An inbox behind the HTTP handler, with the tokens of a page, two agents and an extension, and the call function that
+ * sends one of them with each request. */
+export async function httpInbox(inbox: Inbox = new Inbox(new MemoryStorage(), () => 1_000)) {
+  const handle = createHandler(inbox, { heartbeatMs: 50 });
+  const owner = (await inbox.createToken('page', 'owner')).secret;
+  const agentA = (await inbox.createToken('agent a', 'agent')).secret;
+  const agentB = (await inbox.createToken('agent b', 'agent')).secret;
+  const ext = (await inbox.createToken('triage extension', 'extension')).secret;
+  const call = (method: string, path: string, opts: { token?: string; body?: unknown } = {}): Promise<Response> =>
+    handle(new Request(`http://inbox.test${path}`, {
+      method,
+      headers: { ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
+      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    }));
+  return { inbox, handle, call, owner, agentA, agentB, ext };
+}

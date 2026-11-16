@@ -334,6 +334,8 @@ export interface Card {
   from?: string;
   /** Other properties the agent attaches, for grouping. */
   tags?: Record<string, string>;
+  /** Which client set each tag through the tag route, by tag key: the name of its token, as a default tag records what set it. Tags the card posted with record nothing. */
+  tagFrom?: Record<string, string>;
   /** The card this one follows, and the card that follows it. */
   follows?: string;
   followedBy?: string;
