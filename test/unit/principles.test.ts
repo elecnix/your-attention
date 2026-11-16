@@ -92,6 +92,12 @@ describe('principles', () => {
     }
   });
 
+  it('a tag added to a card after it posted reaches search at once', () => {
+    // DP13: search reads the card's tags, so a change to them re-indexes the card rather than waiting for another post.
+    const tag = / {2}tagCard\(caller: Caller[\s\S]*?\n {2}\}/.exec(read('inbox.ts'))?.[0] ?? '';
+    assert.match(tag, /this\.store\.index\(id,/, 'the tag route re-indexes the card it changed');
+  });
+
   it('every principle in PRINCIPLES.md has a statement and a reason', () => {
     const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);

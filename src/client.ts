@@ -217,6 +217,8 @@ export class Client {
     return this.call('POST', route, { edits, field });
   }
   status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
+  /** Merge tags into a card already posted, and drop a key whose value is empty. */
+  tag(id: string, tags: Record<string, string>): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/tags`, { tags }); }
   saveTemplate(name: string, source: string, feedback?: string): Promise<Template> { return this.call('POST', '/v1/templates', { name, source, feedback }); }
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
   /** The card guidance: the editable text, the catalog of widgets an agent can place, and the tags in use. */
