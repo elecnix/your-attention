@@ -524,6 +524,18 @@ You pick a choice and press **Press it in the session**. The sidecar receives th
 
 If all three hold, the sidecar sends the choice's number with `herdr agent send-keys`. If the screen then still shows the same dialog, the number only moved the selection, so it sends Enter. If a check fails, no key goes out, and the card closes with the reason. The sidecar sends keys only to the card's own pane.
 
+## A prompt a pi session waits on
+
+A pi extension that asks the person something in the terminal draws that prompt itself, and the session waits until it is answered. A pane that shows no new output looks the same whether the session waits or thinks, so the pi extension reads pi's own lifecycle. `ui_prompt_start` reports a prompt that opened, with the widget that waits and its title, and `ui_prompt_end` reports that the session stopped waiting. pi coalesces nested or overlapping prompts into one span, so one card covers them.
+
+The extension posts one `blocked` card for a span, and closes it when the span ends. The card states the session, the prompt's kind and its title, and links the pane when the session has one. It shows the prompt rather than its choices, because those labels stay in the terminal. A prompt that flickers and comes back keeps its card, which gains a version instead of arriving twice.
+
+An answer on that card goes into the session's own herdr pane with `herdr agent send-keys`, and only after the extension reads the pane again and finds the same prompt still waiting. A prompt whose title the screen lost counts as changed, and a prompt with no title, such as a custom screen, has only its span to say that it still waits. A session with no pane gets a card that says so, and an answer on that card closes it with the reason and sends no keystroke. The card closes as `answered-in-terminal` when the terminal answered the prompt, and as `resolved` when the extension typed the answer.
+
+A blocked card keeps the default delivery, `stream`, so the extension that types the answer gets it. The extension keeps that answer away from the model, which is what `deliver: none` meant in the proposal of this card: the field sets where an answer goes, and `none` would keep it from the one integration that can act on it.
+
+A masked prompt reads the terminal itself, so a message sent through the protocol can't fill it. That case still needs `herdr` on its own, the same way the sidecar serves a harness that never reports a prompt.
+
 ## Clearing the inbox
 
 `POST /v1/archive` clears the cards you dealt with: answered, retracted, self-answered, resolved, dismissed or expired. A cleared card leaves `/v1/state`, and `card_search` still finds it with its answer for 30 days, or until the inbox deletes the card to stay under its storage limit, so agents can check past answers before they ask again. A revision from its agent brings the card back. The page shows a **Clear answered or closed cards** button when there are any, and `your-attention clear` does the same from the command line. Only the owner can clear.
@@ -566,6 +578,8 @@ The Claude Code channel sends nothing until the client has finished connecting. 
 The channel keeps watching the transcript for the receipt. When the receipt has not appeared within 60 seconds, and the transcript has not changed in that time, the channel pushes the answer once more. When the second push misses too, and the session runs in a herdr pane, the channel types the answer into that pane with `herdr agent prompt`. It follows the rule of an approval: it sends only to the session's own pane. It never types over text the person put in that pane's input box, and it puts a space before a text that opens with a dash, which herdr would read as an option. A successful send acknowledges the answer, because the session now has it as its own message. Outside herdr, in a pane with a draft, or in a pane with no input box, the answer stays `delivered`, and the card's status reads **Not seen by the agent** with the reason.
 
 The OpenCode plugin follows one stream per session, as agent `opencode:<session id>`: each session that calls a card tool, and each session from before a restart that still has an open card. It sends each answer into its session with OpenCode's `promptAsync`. OpenCode starts a new turn when the session is idle, and queues the message behind a turn that runs. The plugin acknowledges the answer when OpenCode's `chat.message` hook shows the receipt in the conversation.
+
+The pi extension reads the answer to a blocked prompt on the session's own stream, before the generic answer path, and types it into the session's pane. The model doesn't receive a message for it, since the prompt already asked the question. The herdr sidecar does the same for the cards it posts, on a stream of its own.
 
 A client adds `instance=<id>` to the stream, `/v1/ws` or `/v1/poll` address, with one id per process that stays the same across its reconnects. The inbox records the instance that received each answer. When a different instance of the agent connects, such as a session restarted before it read an answer, the inbox sends it every answer that was delivered but never read. A reconnect from the same instance gets nothing twice.
 

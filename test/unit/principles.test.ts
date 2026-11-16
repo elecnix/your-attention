@@ -84,6 +84,19 @@ describe('principles', () => {
     }
   });
 
+  it('a pi prompt becomes a card from pi\'s own events, and its answer is typed into that session\'s pane', () => {
+    // DP16: a harness blocker blocks the agent until the person answers. The block comes from the lifecycle pi reports,
+    // since a screen shows the same thing for a session that thinks, and the answer goes to the pane the session
+    // reports about itself, never to a pane an answer or a card names.
+    const extension = fs.readFileSync(path.join(ROOT, 'src/integrations/pi/extension.ts'), 'utf8');
+    assert.match(extension, /pi\.on\('ui_prompt_start'/, 'the wait is read from the event pi sends when a prompt opens');
+    assert.match(extension, /pi\.on\('ui_prompt_end'/, 'the card closes from the event that says the wait is over');
+    const prompt = fs.readFileSync(path.join(ROOT, 'src/integrations/pi/prompt.ts'), 'utf8');
+    assert.match(prompt, /kind: 'blocked'/, 'the prompt posts the blocked kind a harness gets');
+    assert.match(prompt, /send-keys', open\.pane,/, 'keys go to the pane this session reported');
+    assert.doesNotMatch(prompt, /card\.origin/, 'the pane of a card never decides where a keystroke goes');
+  });
+
   it('every principle in PRINCIPLES.md has a statement and a reason', () => {
     const text = fs.readFileSync(path.join(ROOT, 'PRINCIPLES.md'), 'utf8').replace(/\r\n/g, '\n');
     const sections = text.split('\n### ').slice(1);
