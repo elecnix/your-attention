@@ -693,7 +693,7 @@ test('a card link shows whether its card was answered, taken back, cleared or is
   await inbox.agent.close('out-back', 'self-answered', 'Found it in the docs.');
   await inbox.agent.close('out-own', 'retracted', 'Done by hand.');
   await inbox.agent.post({ id: 'out-list', agent: 's-out', title: 'What next?', priority: 'now',
-    text: `After [[out-answered]], [[out-back]], [[out-open]] and [[out-gone]], see [the key](${here}/#card=out-own).` });
+    text: `After [[out-answered]], [[out-back]], [[out-open]] and [[out-gone]], see [the key](${here}/#card=out-own) and [the old one](${here}/#card=out-gone).` });
   await inbox.open(page);
   await page.locator('.q', { hasText: 'What next?' }).click();
   const text = page.locator('.focus-card .card-text');
@@ -710,6 +710,17 @@ test('a card link shows whether its card was answered, taken back, cleared or is
   await expect(gone).toHaveAttribute('title', /^Cleared on .+\nTaken back \(retracted by agent\) on /);
   const own = text.locator('a.card-link', { hasText: 'the key' });
   await expect(own.locator('.link-outcome')).toHaveText('taken back');
+  // An own-address link to a cleared card stays a link to that card's address, with the cleared look and its outcome.
+  const old = text.locator('a.cleared-link', { hasText: 'the old one' });
+  await expect(old).toHaveAttribute('href', `${here}/#card=out-gone`);
+  await expect(old.locator('.link-outcome')).toHaveText('taken back');
+  await expect(old).toHaveAttribute('title', /^Cleared on .+\nTaken back \(retracted by agent\) on /);
+  // A click stays on the page, as for any own-address link, since a new tab would ask a locked inbox for its PIN again.
+  let popups = 0;
+  page.on('popup', () => { popups += 1; });
+  await old.click();
+  await expect(text).toBeVisible();
+  expect(popups).toBe(0);
   // The word reads without a hover, in both themes, from the page's color tokens.
   const [okColor, warnColor] = await page.evaluate(() => ['--ok', '--warn'].map((t) => { const s = document.createElement('span'); s.style.color = `var(${t})`; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; }));
   await expect(answered.locator('.link-outcome')).toHaveCSS('color', okColor!);

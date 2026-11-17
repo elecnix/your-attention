@@ -4,6 +4,7 @@
 // The page and the terminal client share this file, so both fetch the same way.
 
 import { ownCardId } from './answers.js';
+import { linkHrefs } from './markdown.js';
 import { CLOSED_LABEL } from './queue.js';
 
 /** `load(id)` resolves to `{card, answer, state, rev}`. `changed()` runs when a fetch ends. */
@@ -41,9 +42,9 @@ export function cardDetails(load, changed) {
 export const linkIds = (...texts) => [...new Set(texts.filter(Boolean).flatMap((t) => [...String(t).matchAll(/\[\[([\w.:-]{1,80})\]\]/g)].map((m) => m[1])))];
 
 /** The ids a text links to by this inbox's own card address, http://<inbox>/#card=<id>, so the page asks about the ones
- * the state leaves out in the same request as the [[card-id]] links. */
-export const ownLinkIds = (here, ...texts) => [...new Set(texts.filter(Boolean).flatMap((t) => [...String(t).matchAll(/[^\s(<[\]]*#card=[\w.:-]{1,80}/g)]
-  .map((m) => ownCardId(m[0], here)).filter(Boolean)))];
+ * the state leaves out in the same batches as the [[card-id]] links. It reads the links the renderer draws, so each id is
+ * the one the link opens. */
+export const ownLinkIds = (here, ...texts) => [...new Set(texts.filter(Boolean).flatMap((t) => linkHrefs(t).map((href) => ownCardId(href, here)).filter(Boolean)))];
 
 // A link to an agent's card says which way that card ended. Each close kind the agent picks takes the card back, except
 // answered in the terminal, where the person did answer, only somewhere else. A card still waiting shows nothing: an

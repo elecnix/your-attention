@@ -92,6 +92,14 @@ export function renderInline(h, text, opts = {}) {
   return inline(h, String(text ?? ''), 'i', opts);
 }
 
+/** The address of each link `renderMarkdown` draws in `src`, as its `link` option receives it: a sentence's closing
+ * punctuation trimmed, and nothing from code. web/details.js finds a text's own card links with it. */
+export function linkHrefs(src) {
+  const hrefs = [];
+  renderMarkdown(() => null, src, { link: (href) => { hrefs.push(href); return null; } });
+  return hrefs;
+}
+
 export function renderMarkdown(h, src, opts = {}) {
   const ins = (text, k) => inline(h, text, k, opts);
   const lines = String(src).replace(/\r\n/g, '\n').split('\n');

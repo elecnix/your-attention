@@ -451,16 +451,19 @@ const outcomeMarker = (o) => o && h('span', { className: 'link-outcome', 'data-o
 export function LinkedText({ text, byId, open, diagrams = true, files, lookup = () => undefined, outcomeOf = () => undefined }) {
   const hover = (...lines) => lines.filter(Boolean).join('\n\n').slice(0, 600);
   // A card the state leaves out: a cleared one keeps its muted look and adds its outcome; an unknown id shows as text.
-  const leftOut = (id, label, key) => {
-    const other = lookup(id);
-    if (!other) return label === undefined ? h('span', { key, className: 'unknown-link', title: other === null ? 'The inbox does not store this card' : '' }, id) : undefined;
-    const o = linkOutcome(other.outcome);
+  const leftOutHover = (other, o) => {
     const cleared = other.archivedAt ? [`Cleared on ${new Date(other.archivedAt).toLocaleDateString()}`, o && o.title].filter(Boolean).join('\n') : o && o.title;
-    return h('span', { key, className: 'cleared-link', title: hover(cleared, other.preview) || other.title }, label ?? other.title, outcomeMarker(o));
+    return hover(cleared, other.preview) || other.title;
+  };
+  const leftOut = (id, key) => {
+    const other = lookup(id);
+    if (!other) return h('span', { key, className: 'unknown-link', title: other === null ? 'The inbox does not store this card' : '' }, id);
+    const o = linkOutcome(other.outcome);
+    return h('span', { key, className: 'cleared-link', title: leftOutHover(other, o) }, other.title, outcomeMarker(o));
   };
   const cardLink = (id, key) => {
     const target = byId[id];
-    if (!target) return leftOut(id, undefined, key);
+    if (!target) return leftOut(id, key);
     const o = linkOutcome(outcomeOf(id));
     // The state sends the start of each card's text as its preview.
     const preview = [target.title, target.preview ?? target.text].filter(Boolean).join('\n\n').slice(0, 400);
@@ -474,10 +477,12 @@ export function LinkedText({ text, byId, open, diagrams = true, files, lookup = 
     const id = ownCardId(href, location.href);
     if (!id) return undefined;
     const target = byId[id];
-    if (!target && lookup(id)) return leftOut(id, label, key);
-    const o = target && linkOutcome(outcomeOf(id));
+    // A card the state leaves out keeps its link and click, with the cleared look and the outcome from the lookup.
+    const other = !target && lookup(id);
+    const o = linkOutcome(target ? outcomeOf(id) : other && other.outcome);
     const preview = target && [target.title, target.preview ?? target.text].filter(Boolean).join('\n\n').slice(0, 400);
-    return h('a', { key, href, className: 'card-link', title: hover(o && o.title, preview) || undefined, onClick: (e) => { e.preventDefault(); open(id); } }, label, outcomeMarker(o));
+    const title = other ? leftOutHover(other, o) : hover(o && o.title, preview) || undefined;
+    return h('a', { key, href, className: other && other.archivedAt ? 'cleared-link' : 'card-link', title, onClick: (e) => { e.preventDefault(); open(id); } }, label, outcomeMarker(o));
   };
   return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram, fileLink, link }));
 }

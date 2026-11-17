@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Inbox, type Caller } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
+import { ownCardId } from '../../web/answers.js';
 import { linkOutcome, ownLinkIds } from '../../web/details.js';
+import { renderMarkdown } from '../../web/markdown.js';
 
 function setup() {
   let t = 1000;
@@ -74,8 +76,25 @@ describe('the indicator a card link shows', () => {
 });
 
 describe('the cards a text links by this inbox\'s address', () => {
-  it('finds each #card address of this inbox, and no other', () => {
-    const here = 'http://127.0.0.1:4815/';
-    assert.deepEqual(ownLinkIds(here, 'See [#12](http://127.0.0.1:4815/#card=a1), http://127.0.0.1:4815/#card=b2 and [x](https://other.cloud/#card=c3).', '#card=d4'), ['a1', 'b2', 'd4']);
-  });
+  const here = 'http://127.0.0.1:4815/';
+  // The ids the lookup asks for are the ids the page's link hook receives, so each marker matches the card its link opens.
+  const hooked = (text: string) => {
+    const ids: string[] = [];
+    renderMarkdown(() => null, text, { link: (href: string) => { const id = ownCardId(href, here); if (id) ids.push(id); return null; } });
+    return ids;
+  };
+  const cases = [
+    ['a bare link that ends a sentence', 'See http://127.0.0.1:4815/#card=abc.', ['abc']],
+    ['a bare link before a comma and a colon', 'First http://127.0.0.1:4815/#card=a1, then http://127.0.0.1:4815/#card=b2: done', ['a1', 'b2']],
+    ['a bold bare link', 'Read **http://127.0.0.1:4815/#card=bold1** first.', ['bold1']],
+    ['a Markdown link', 'See [#12](http://127.0.0.1:4815/#card=md1).', ['md1']],
+    ['another inbox', '[x](https://other.cloud/#card=c3) and https://other.cloud/#card=c4', []],
+    ['a link inside fenced code', '```\nhttp://127.0.0.1:4815/#card=code1\n```', []],
+  ] as const;
+  for (const [name, text, ids] of cases) {
+    it(`finds ${name} as the link hook receives it`, () => {
+      assert.deepEqual(ownLinkIds(here, text), ids);
+      assert.deepEqual(hooked(text), ids);
+    });
+  }
 });
