@@ -224,6 +224,11 @@
   .file-copy:hover, .file-copy:focus-visible { color: var(--ink); }
   .file-copy[data-copied="Copied"] { color: var(--ok); }
   .cleared-link, .unknown-link { color: var(--muted); }
+  /* How a linked card ended, next to its title: an icon and a word, so it reads without a hover. A card still waiting has none. */
+  .link-outcome { display: inline-flex; align-items: center; gap: .25em; margin-left: .35em; padding: 0 .35em; border: 1px solid var(--line); border-radius: 6px; font-size: .85em; line-height: 1.4; white-space: nowrap; vertical-align: baseline; color: var(--muted); }
+  .link-outcome svg { flex: none; width: .9em; height: .9em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .link-outcome[data-outcome="answered"] { color: var(--ok); }
+  .link-outcome[data-outcome="taken-back"] { color: var(--warn); }
   .cleared-link { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
   .attachments { display: grid; gap: 12px; margin: 0 0 12px; }
   .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }

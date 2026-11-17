@@ -672,11 +672,48 @@ test('a link to a cleared card shows its title, and every unknown link on the ca
   await inbox.open(page);
   await page.locator('.q', { hasText: 'Promote to prod?' }).click();
   const text = page.locator('.focus-card .card-text');
-  await expect(text.locator('.cleared-link', { hasText: 'Deploy to staging?' })).toHaveAttribute('title', /^Cleared on .+\n\nThe fix passes its tests\.$/);
+  await expect(text.locator('.cleared-link', { hasText: 'Deploy to staging?' })).toHaveAttribute('title', /^Cleared on .+\nTaken back \(no longer waiting\) on .+\n\nThe fix passes its tests\.$/);
   await expect(text.locator('.cleared-link', { hasText: 'Rotate the key?' })).toBeVisible();
   await expect(text.locator('.unknown-link')).toHaveText('never-was');
   await expect(text.locator('.dead-link')).toHaveCount(0);
   expect(lookups).toHaveLength(1);
+});
+
+test('a card link shows whether its card was answered, taken back, cleared or is still waiting', async ({ page }) => {
+  const here = inbox.server.url;
+  const owner = { token: 'test', role: 'owner' as const };
+  await inbox.agent.post({ id: 'out-gone', agent: 's-out', title: 'Old question?', priority: 'now' });
+  await inbox.agent.close('out-gone', 'retracted', 'Not needed.');
+  inbox.server.inbox.archive(owner);
+  await inbox.agent.post({ id: 'out-answered', agent: 's-out', title: 'Pick a region?', priority: 'now' });
+  await inbox.agent.post({ id: 'out-back', agent: 's-out', title: 'Rename the table?', priority: 'now' });
+  await inbox.agent.post({ id: 'out-open', agent: 's-out', title: 'Bump the version?', priority: 'now' });
+  await inbox.agent.post({ id: 'out-own', agent: 's-out', title: 'Rotate the key?', priority: 'now' });
+  await inbox.server.inbox.answer('out-answered', {});
+  await inbox.agent.close('out-back', 'self-answered', 'Found it in the docs.');
+  await inbox.agent.close('out-own', 'retracted', 'Done by hand.');
+  await inbox.agent.post({ id: 'out-list', agent: 's-out', title: 'What next?', priority: 'now',
+    text: `After [[out-answered]], [[out-back]], [[out-open]] and [[out-gone]], see [the key](${here}/#card=out-own).` });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'What next?' }).click();
+  const text = page.locator('.focus-card .card-text');
+  const answered = text.locator('.card-link', { hasText: 'Pick a region?' });
+  await expect(answered.locator('.link-outcome')).toHaveText('answered');
+  await expect(answered.locator('.link-outcome')).toHaveAttribute('data-outcome', 'answered');
+  await expect(answered).toHaveAttribute('title', /^Answered on .+\n\nPick a region\?/);
+  const back = text.locator('.card-link', { hasText: 'Rename the table?' });
+  await expect(back.locator('.link-outcome')).toHaveText('taken back');
+  await expect(back).toHaveAttribute('title', /^Taken back \(answered by agent\) on /);
+  await expect(text.locator('.card-link', { hasText: 'Bump the version?' }).locator('.link-outcome')).toHaveCount(0);
+  const gone = text.locator('.cleared-link', { hasText: 'Old question?' });
+  await expect(gone.locator('.link-outcome')).toHaveText('taken back');
+  await expect(gone).toHaveAttribute('title', /^Cleared on .+\nTaken back \(retracted by agent\) on /);
+  const own = text.locator('a.card-link', { hasText: 'the key' });
+  await expect(own.locator('.link-outcome')).toHaveText('taken back');
+  // The word reads without a hover, in both themes, from the page's color tokens.
+  const [okColor, warnColor] = await page.evaluate(() => ['--ok', '--warn'].map((t) => { const s = document.createElement('span'); s.style.color = `var(${t})`; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; }));
+  await expect(answered.locator('.link-outcome')).toHaveCSS('color', okColor!);
+  await expect(back.locator('.link-outcome')).toHaveCSS('color', warnColor!);
 });
 
 test('a link to this inbox\'s own card address opens that card in place, not in a new tab', async ({ page }) => {
