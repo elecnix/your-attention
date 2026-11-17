@@ -53,6 +53,7 @@ export async function runCardHook(cfg: CardHookConfig, check: CardCheck, signal:
   const run = limiter(cfg.concurrency ?? 3);
   const call: InboxCall = async <T>(route: string, body?: unknown): Promise<T> => {
     const res = await fetcher(`${base}${route}`, { method: body === undefined ? 'GET' : 'POST', headers: auth, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (!res.ok) throw new Error(`${route} answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
     return (await res.json()) as T;
   };
   const decide = async (ev: CardCreated): Promise<void> => {
@@ -62,8 +63,12 @@ export async function runCardHook(cfg: CardHookConfig, check: CardCheck, signal:
     } catch (e) {
       ruling = { verdict: 'pass', reason: `${cfg.name} failed (${(e as Error).message}), so the card went through.` };
     }
-    await call(`/v1/hooks/${ev.id}`, ruling).catch((e: Error) => log('verdict failed:', e.message));
-    log(ruling.verdict, ev.card.id, ruling.reason);
+    try {
+      await call(`/v1/hooks/${ev.id}`, ruling);
+      log(ruling.verdict, ev.card.id, ruling.reason);
+    } catch (e) {
+      log('verdict failed:', ev.card.id, (e as Error).message);
+    }
   };
   const q = new URLSearchParams({ name: cfg.name, hooks: 'card.created', policy: 'fail-open', timeoutMs: String(cfg.timeoutMs ?? 120_000) });
   while (!signal.aborted) {

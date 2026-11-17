@@ -260,6 +260,20 @@ describe('the example vale config', () => {
 });
 
 describe('the card.created hook runner', () => {
+  it('logs a verdict the inbox refuses as failed', async () => {
+    const event = `data: ${JSON.stringify({ type: 'hook', version: 1, id: 'h9', hook: 'card.created', card, deadline: Date.now() + 60_000, person: { pages: 0, visible: false, activeAt: null } })}\n\n`;
+    const stop = new AbortController();
+    const lines: string[] = [];
+    const fetcher = (async (url: string | URL) => {
+      if (new URL(String(url)).pathname === '/v1/extensions/stream') return new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(event)); } }));
+      setTimeout(() => stop.abort(), 50);
+      return Response.json({ error: 'The hook call is over.' }, { status: 409 });
+    }) as typeof fetch;
+    await runCardHook({ url: 'http://inbox.test', token: 't', name: 'triage-example', fetcher, log: (...a) => lines.push(a.join(' ')) }, async () => ({ verdict: 'pass', reason: 'ok' }), stop.signal);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.match(lines.join('\n'), /verdict failed: .*409/);
+  });
+
   it('sends the check\'s verdict for each card, and passes the card when the check throws', async () => {
     const event = (id: string): string => `data: ${JSON.stringify({ type: 'hook', version: 1, id, hook: 'card.created', card, deadline: Date.now() + 60_000, person: { pages: 0, visible: false, activeAt: null } })}\n\n`;
     const verdicts: { route: string; body: unknown }[] = [];
