@@ -36,4 +36,16 @@ describe('the card link lookup', () => {
     assert.equal(calls, 1);
     assert.equal(lookup.get('a'), null);
   });
+
+  it('asks about more than 20 links in batches of 20, as the page draws again after each answer', async () => {
+    const ids = Array.from({ length: 25 }, (_, i) => `c${i}`);
+    const asked: string[][] = [];
+    let lookup: ReturnType<typeof linkLookup>;
+    lookup = linkLookup(async (batch: string[]) => { asked.push(batch); return Object.fromEntries(batch.map((id) => [id, { title: id }])); }, () => lookup.want(ids));
+    lookup.want(ids);
+    for (let i = 0; i < 5; i++) await settle();
+    assert.deepEqual(asked.map((b) => b.length), [20, 5]);
+    assert.deepEqual(asked.flat(), ids);
+    assert.deepEqual(lookup.get('c24'), { title: 'c24' });
+  });
 });
