@@ -85,6 +85,10 @@ export const ICONS = {
   'self-answered': ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'm9 12 2 2 4-4'],
   'answered-in-terminal': ['M4 17l6-6-6-6', 'M12 19h8'],
   resolved: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'm9 12 2 2 4-4'],
+  // The marker of a link to a card that ended: Lucide's check for answered, undo-2 for taken back, clock for expired.
+  'link-answered': ['M20 6 9 17l-5-5'],
+  'link-taken-back': ['M9 14 4 9l5-5', 'M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11'],
+  'link-expired': ['M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20', 'M12 6v6l4 2'],
   // Lucide's file icons, for a file chip by the file's type, and its copy icon.
   file: ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4'],
   'file-code': ['M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z', 'M14 2v4a2 2 0 0 0 2 2h4', 'm10 13-2 2 2 2', 'm14 17 2-2-2-2'],

@@ -30,9 +30,11 @@ export const BlockedAgent = { render: () => mount(view(card({ kind: 'blocked', d
 
 export const WithLinks = {
   render: () => {
-    const target = card({ id: 'c2', title: 'Pick the database', text: 'SQLite or Postgres.' });
-    const cleared = { old: { title: 'Rotate the key', preview: 'The key is 90 days old.', archivedAt: Date.UTC(2026, 10, 2) } };
-    return mount(h(LinkedText, { text: 'This plan depends on [[c2]], on [[old]] and on [[missing]].', byId: { c2: target }, open: () => {}, lookup: (id) => cleared[id] ?? null }));
+    const at = Date.UTC(2026, 10, 2, 15, 0);
+    const byId = Object.fromEntries(['c2', 'c3', 'c4'].map((id, i) => [id, card({ id, title: ['Pick the database', 'Rename the table', 'Bump the version'][i], text: 'SQLite or Postgres.' })]));
+    const outcomes = { c2: { state: 'read', at }, c3: { state: 'closed', kind: 'self-answered', at }, c4: { state: 'open' } };
+    const cleared = { old: { title: 'Rotate the key', preview: 'The key is 90 days old.', archivedAt: at, outcome: { state: 'closed', kind: 'retracted', at } } };
+    return mount(h(LinkedText, { text: 'This plan follows [[c2]], [[c3]] and [[c4]], and [[old]] and [[missing]].', byId, open: () => {}, lookup: (id) => cleared[id] ?? null, outcomeOf: (id) => outcomes[id] }));
   },
 };
 
