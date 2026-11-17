@@ -412,3 +412,21 @@ describe('the card.created hook runner', () => {
     assert.match((verdicts.find((v) => v.route === '/v1/hooks/h2')?.body as { reason: string }).reason, /failed \(boom\), so the card went through/);
   });
 });
+
+describe('the example triage agent reads a damaged state file', () => {
+  it('starts with an empty state when the file is not JSON, and says so', () => {
+    const file = path.join(dir, 'state-damaged.json');
+    fs.writeFileSync(file, '{"chains": {"c1": {"agent"');
+    const state = new TriageState(file);
+    assert.match(state.warning ?? '', /could not read .*state-damaged\.json/);
+    assert.equal(state.returns('c1'), 0);
+  });
+});
+
+describe('the limiter', () => {
+  it('runs one task at a time when asked for a limit below one', async () => {
+    const { limiter } = await import('../../src/extensions/card-hook.ts');
+    const run = limiter(0);
+    assert.equal(await run(async () => 'ran'), 'ran');
+  });
+});

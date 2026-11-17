@@ -25,16 +25,25 @@ const normal = (title: string): string => title.trim().toLowerCase().replace(/\s
 
 export class TriageState {
   private data: Stored = { chains: {}, cards: {}, bypass: {} };
+  /** Set when the file could not be read, so the agent can log that it started with an empty state. */
+  readonly warning: string | undefined;
   private readonly file: string | undefined;
   private readonly now: () => number;
 
   constructor(file: string | undefined, now: () => number = Date.now) {
     this.file = file;
     this.now = now;
+    let warning: string | undefined;
     if (file && fs.existsSync(file)) {
-      const read = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Stored>;
-      this.data = { chains: read.chains ?? {}, cards: read.cards ?? {}, bypass: read.bypass ?? {} };
+      try {
+        const read = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Stored>;
+        this.data = { chains: read.chains ?? {}, cards: read.cards ?? {}, bypass: read.bypass ?? {} };
+      } catch (e) {
+        // A file cut short by a crash loses its counts and codes, and the agent starts again from none.
+        warning = `could not read ${file} (${(e as Error).message}), so the return counts and bypass codes start empty`;
+      }
     }
+    this.warning = warning;
   }
 
   /** The chain a card belongs to, recorded so its revisions and follow-ups find it. */

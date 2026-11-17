@@ -30,8 +30,9 @@ export interface CardHookConfig {
   fetcher?: typeof fetch;
 }
 
-/** Run at most `limit` tasks at once, in arrival order. */
-export function limiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
+/** Run at most `limit` tasks at once, in arrival order. A limit below one runs one at a time. */
+export function limiter(asked: number): <T>(task: () => Promise<T>) => Promise<T> {
+  const limit = Math.max(1, Math.floor(asked) || 1);
   let active = 0;
   const queue: (() => void)[] = [];
   return async (task) => {

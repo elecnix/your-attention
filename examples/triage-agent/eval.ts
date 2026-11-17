@@ -3,6 +3,7 @@
 // and changes nothing in the inbox. Card text is private, so write the report outside any repository:
 //   node examples/triage-agent/eval.ts --out ~/triage-eval/today.md [--since 2026-11-17] [--config FILE]
 import fs from 'node:fs';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { Client, ownerConfig } from '../../src/client.ts';
 import type { Card } from '../../src/core/types.ts';
@@ -17,6 +18,8 @@ const since = values.since ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(values.since) ?
 if (Number.isNaN(since.getTime())) fail(`--since must be a date or a time, such as 2026-11-17: ${values.since}`);
 const owner = ownerConfig() ?? fail('This machine runs no inbox and is not paired as owner: run `your-attention pair <url> --role owner`.');
 const cfg = loadConfig(values.config ?? defaultConfigPath());
+// Make the report's folder before the run, so a long run never ends without a place to write.
+fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
 
 // Every agent card posted in the window, read page by page as the owner: cleared cards too, and no system cards.
 const client = new Client(owner);

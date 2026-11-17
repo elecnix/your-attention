@@ -80,8 +80,9 @@ export function ownerPairing(home = homeDir()): (ClientConfig & { source: string
 /** The inbox this machine runs, with its owner token, or undefined when it runs none. */
 export function runningHere(home = homeDir()): { url: string; token: string } | undefined {
   try {
-    const { url } = JSON.parse(fs.readFileSync(path.join(home, 'server.json'), 'utf8')) as { url: string };
-    return { url, token: fs.readFileSync(path.join(home, 'owner-token'), 'utf8').trim() };
+    const { url } = JSON.parse(fs.readFileSync(path.join(home, 'server.json'), 'utf8')) as { url?: unknown };
+    const token = fs.readFileSync(path.join(home, 'owner-token'), 'utf8').trim();
+    return typeof url === 'string' && url && token ? { url, token } : undefined;
   } catch {
     return undefined;
   }
