@@ -1,0 +1,11 @@
+{
+  "vale": ["vale"],
+  "classifier": ["pr-context-classifier"],
+  "valeTimeoutMs": 30000,
+  "classifierTimeoutMs": 150000,
+  "prVerdict": {
+    "command": ["/path/to/your/pr-verdict-command"],
+    "acceptVerdicts": ["ACCEPT"],
+    "timeoutMs": 300000
+  }
+}

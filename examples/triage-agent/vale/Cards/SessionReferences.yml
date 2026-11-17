@@ -1,0 +1,13 @@
+# The person answers from the card alone, without the agent's session.
+extends: existence
+message: "'%s' points into the agent's session. Put the fact itself on the card."
+level: error
+ignorecase: true
+tokens:
+  - as discussed
+  - as mentioned
+  - see above
+  - the above
+  - like I said
+  - earlier in this session
+  - in the conversation

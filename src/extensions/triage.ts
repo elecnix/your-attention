@@ -6,14 +6,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import type { HookEvent } from '../core/hooks.ts';
 import type { Card, PersonPresence } from '../core/types.ts';
 import { homeDir, writePrivate } from '../node/home.ts';
+import { limiter, runCardHook, type Ruling } from './card-hook.ts';
 
-export interface Ruling {
-  verdict: 'pass' | 'return';
-  reason: string;
-}
+export { limiter, type Ruling };
 
 export type Judge = (prompt: string) => Promise<string>;
 
@@ -23,25 +20,9 @@ export interface TriageConfig {
   judge: Judge;
   name?: string;
   timeoutMs?: number;
-  /** Judge calls at once. A burst of cards waits its turn instead of hitting the judge's rate limit. */
+  /** Cards checked at once. A burst of cards waits its turn instead of hitting the judge's rate limit. */
   concurrency?: number;
   log?: (...a: unknown[]) => void;
-}
-
-/** Run at most `limit` tasks at once, in arrival order. */
-export function limiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
-  let active = 0;
-  const queue: (() => void)[] = [];
-  return async (task) => {
-    if (active >= limit) await new Promise<void>((r) => queue.push(r));
-    active++;
-    try {
-      return await task();
-    } finally {
-      active--;
-      queue.shift()?.();
-    }
-  };
 }
 
 /** Call the judge, and retry with backoff when it is busy, until `deadline`. */
@@ -178,56 +159,13 @@ export function defaultJudge(model = 'openrouter/auto'): Judge {
 
 /** Run triage until `signal` aborts. Reconnects after a drop, and the inbox resends calls it missed. */
 export async function runTriage(cfg: TriageConfig, signal: AbortSignal): Promise<void> {
-  const log = cfg.log ?? ((...a: unknown[]) => console.error(new Date().toISOString(), '[triage]', ...a));
-  const base = cfg.url.replace(/\/$/, '');
-  const auth = { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' };
-  const run = limiter(cfg.concurrency ?? 3);
-  const call = async <T>(route: string, body?: unknown): Promise<T> => {
-    const res = await fetch(`${base}${route}`, { method: body === undefined ? 'GET' : 'POST', headers: auth, body: body === undefined ? undefined : JSON.stringify(body) });
-    return (await res.json()) as T;
-  };
-  const decide = async (ev: Extract<HookEvent, { hook: 'card.created' }>): Promise<void> => {
-    let ruling: Ruling;
-    try {
-      const guidance = (await call<{ text: string }>('/v1/guidance')).text;
-      const words = ev.card.title.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).join(' ');
-      // A bare word search, so an inbox from before the paged reply and one after both answer the array.
-      const hits = words ? await call<{ card: Card; answer?: { comment: string; values: Record<string, unknown> } }[]>(`/v1/search?q=${encodeURIComponent(words)}`) : [];
-      const earlier = hits.filter((h) => h.card.id !== ev.card.id && h.answer).slice(0, 3)
-        .map((h) => ({ title: h.card.title, answer: [JSON.stringify(h.answer?.values), h.answer?.comment].filter(Boolean).join(' ') }));
-      ruling = parseRuling(await run(() => judgeWithRetry(cfg.judge, triagePrompt(ev.card, guidance, earlier, ev.person), ev.deadline)));
-    } catch (e) {
-      ruling = { verdict: 'pass', reason: `Triage failed (${(e as Error).message}), so the card went through.` };
-    }
-    await call(`/v1/hooks/${ev.id}`, ruling).catch((e: Error) => log('verdict failed:', e.message));
-    log(ruling.verdict, ev.card.id, ruling.reason);
-  };
-  const q = new URLSearchParams({ name: cfg.name ?? 'triage', hooks: 'card.created', policy: 'fail-open', timeoutMs: String(cfg.timeoutMs ?? 120_000) });
-  while (!signal.aborted) {
-    try {
-      const res = await fetch(`${base}/v1/extensions/stream?${q}`, { headers: auth, signal });
-      if (!res.ok || !res.body) throw new Error(`stream: ${res.status} ${await res.text()}`);
-      log('connected to', base);
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let end: number;
-        while ((end = buf.indexOf('\n\n')) >= 0) {
-          const data = buf.slice(0, end).split('\n').find((l) => l.startsWith('data: '));
-          buf = buf.slice(end + 2);
-          if (!data) continue;
-          const ev = JSON.parse(data.slice(6)) as HookEvent | { type: 'beat' };
-          if (ev.type === 'hook' && ev.hook === 'card.created') void decide(ev);
-        }
-      }
-    } catch (e) {
-      if (signal.aborted) return;
-      log('stream failed:', (e as Error).message);
-    }
-    await new Promise((r) => setTimeout(r, 1000));
-  }
+  await runCardHook({ url: cfg.url, token: cfg.token, name: cfg.name ?? 'triage', timeoutMs: cfg.timeoutMs, concurrency: cfg.concurrency, log: cfg.log }, async (ev, call) => {
+    const guidance = (await call<{ text: string }>('/v1/guidance')).text;
+    const words = ev.card.title.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).join(' ');
+    // A bare word search, so an inbox from before the paged reply and one after both answer the array.
+    const hits = words ? await call<{ card: Card; answer?: { comment: string; values: Record<string, unknown> } }[]>(`/v1/search?q=${encodeURIComponent(words)}`) : [];
+    const earlier = hits.filter((h) => h.card.id !== ev.card.id && h.answer).slice(0, 3)
+      .map((h) => ({ title: h.card.title, answer: [JSON.stringify(h.answer?.values), h.answer?.comment].filter(Boolean).join(' ') }));
+    return parseRuling(await judgeWithRetry(cfg.judge, triagePrompt(ev.card, guidance, earlier, ev.person), ev.deadline));
+  }, signal);
 }

@@ -1,0 +1,11 @@
+# A card is the finished question. A placeholder means the agent posted a draft.
+extends: existence
+message: "Replace the placeholder '%s' with what it stands for."
+level: error
+ignorecase: true
+tokens:
+  - TODO
+  - TBD
+  - FIXME
+  - XXX
+  - lorem ipsum
