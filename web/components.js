@@ -8,6 +8,7 @@ import { copyText, installCopy } from './copy.js';
 import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
+import { linkOutcome } from './details.js';
 import { agentList, pickedAgent } from './agents.js';
 
 export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions, secretFieldsOf };
@@ -442,18 +443,31 @@ export function FileChip({ card, path }) {
 // With a card id in `files`, a file: link is a chip that opens the file in a new tab, which the laptop inbox serves for that card only.
 // Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
 // A link to a card the state leaves out shows what `lookup(id)` finds: a cleared card's title, or the id as plain text.
-export function LinkedText({ text, byId, open, diagrams = true, files, lookup = () => undefined }) {
+// Each link to a card that ended carries a marker with how it ended, answered or taken back, from `outcomeOf(id)` for a
+// card on show and from the lookup for one the state leaves out. Its hover names the outcome and when.
+const OUTCOME_ICON = { answered: 'link-answered', 'taken-back': 'link-taken-back', dismissed: 'dismissed', expired: 'link-expired', returned: 'link-taken-back' };
+const outcomeMarker = (o) => o && h('span', { className: 'link-outcome', 'data-outcome': o.key }, chipIcon(OUTCOME_ICON[o.key] || 'circle'), o.word);
+
+export function LinkedText({ text, byId, open, diagrams = true, files, lookup = () => undefined, outcomeOf = () => undefined }) {
+  const hover = (...lines) => lines.filter(Boolean).join('\n\n').slice(0, 600);
+  // A card the state leaves out: a cleared one keeps its muted look and adds its outcome; an unknown id shows as text.
+  const leftOutHover = (other, o) => {
+    const cleared = other.archivedAt ? [`Cleared on ${new Date(other.archivedAt).toLocaleDateString()}`, o && o.title].filter(Boolean).join('\n') : o && o.title;
+    return hover(cleared, other.preview) || other.title;
+  };
+  const leftOut = (id, key) => {
+    const other = lookup(id);
+    if (!other) return h('span', { key, className: 'unknown-link', title: other === null ? 'The inbox does not store this card' : '' }, id);
+    const o = linkOutcome(other.outcome);
+    return h('span', { key, className: 'cleared-link', title: leftOutHover(other, o) }, other.title, outcomeMarker(o));
+  };
   const cardLink = (id, key) => {
     const target = byId[id];
-    if (!target) {
-      const other = lookup(id);
-      if (other && other.archivedAt) return h('span', { key, className: 'cleared-link', title: [`Cleared on ${new Date(other.archivedAt).toLocaleDateString()}`, other.preview].filter(Boolean).join('\n\n') }, other.title);
-      if (other) return h('span', { key, className: 'cleared-link', title: other.preview || other.title }, other.title);
-      return h('span', { key, className: 'unknown-link', title: other === null ? 'The inbox does not store this card' : '' }, id);
-    }
+    if (!target) return leftOut(id, key);
+    const o = linkOutcome(outcomeOf(id));
     // The state sends the start of each card's text as its preview.
     const preview = [target.title, target.preview ?? target.text].filter(Boolean).join('\n\n').slice(0, 400);
-    return h('a', { key, className: 'card-link', title: preview, onClick: () => open(target.id) }, target.title);
+    return h('a', { key, className: 'card-link', title: hover(o && o.title, preview), onClick: () => open(target.id) }, target.title, outcomeMarker(o));
   };
   const diagram = diagrams ? (source, key) => h(Diagram, { key, source }) : undefined;
   const fileLink = files ? (path, _label, key) => h(FileChip, { key, card: files, path }) : undefined;
@@ -463,8 +477,12 @@ export function LinkedText({ text, byId, open, diagrams = true, files, lookup = 
     const id = ownCardId(href, location.href);
     if (!id) return undefined;
     const target = byId[id];
+    // A card the state leaves out keeps its link and click, with the cleared look and the outcome from the lookup.
+    const other = !target && lookup(id);
+    const o = linkOutcome(target ? outcomeOf(id) : other && other.outcome);
     const preview = target && [target.title, target.preview ?? target.text].filter(Boolean).join('\n\n').slice(0, 400);
-    return h('a', { key, href, className: 'card-link', title: preview || undefined, onClick: (e) => { e.preventDefault(); open(id); } }, label);
+    const title = other ? leftOutHover(other, o) : hover(o && o.title, preview) || undefined;
+    return h('a', { key, href, className: other && other.archivedAt ? 'cleared-link' : 'card-link', title, onClick: (e) => { e.preventDefault(); open(id); } }, label, outcomeMarker(o));
   };
   return h('div', { className: 'card-text markdown' }, renderMarkdown(h, text, { cardLink, breaks: true, diagram, fileLink, link }));
 }

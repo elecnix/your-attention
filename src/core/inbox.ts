@@ -226,6 +226,17 @@ export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, a
   return 'answered';
 }
 
+/** What a card link shows of its target: its state, how it closed, and when the person answered or the card closed.
+ * The outcome text of a close and the person's draft stay out, since a link only says which way the card ended. */
+export interface LinkOutcome { state: CardState; kind?: CloseKind; at?: number }
+export interface LinkedCard { title: string; preview?: string; archivedAt?: number; outcome: LinkOutcome }
+
+export function linkOutcome(card: Pick<Card, 'closed' | 'triage'>, answer: Pick<Answer, 'savedAt' | 'readAt' | 'deliveredAt'> | undefined): LinkOutcome {
+  const state = cardState(card, answer);
+  if (state === 'closed' && card.closed) return { state, kind: card.closed.kind, at: card.closed.at };
+  return answer && state !== 'closed' ? { state, at: answer.savedAt } : { state };
+}
+
 /** The agent an answer goes to, or null for none. A guidance card closes as the person answers it, and its answer
  * still goes to the agent that proposed the text. */
 function recipient(card: Card, answer: Answer): string | null {
@@ -1707,15 +1718,17 @@ export class Inbox {
     return `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`;
   }
 
-  /** The title, text preview and clear time of each card the caller may read, by id, for the card links on screen.
-   * A cleared card leaves the state but stays stored until the purge, so its links still name it. Ids it never stored are left out. */
-  linkedCards(caller: Caller, ids: string[]): Record<string, { title: string; preview?: string; archivedAt?: number }> {
+  /** The title, text preview, clear time and outcome of each card the caller may read, by id, for the card links on screen.
+   * A cleared card leaves the state but stays stored until the purge, so its links still name it, and still say whether the
+   * person answered it or its agent took it back. Ids it never stored are left out. */
+  linkedCards(caller: Caller, ids: string[]): Record<string, LinkedCard> {
     if (ids.length > MAX_LOOKUP) throw new InboxError(400, `name at most ${MAX_LOOKUP} card ids`);
-    const out: [string, { title: string; preview?: string; archivedAt?: number }][] = [];
+    const out: [string, LinkedCard][] = [];
     for (const id of ids) {
       const card = this.store.get<Card>('cards', id);
       if (!card || (caller.role !== 'owner' && card.token !== caller.token)) continue;
-      out.push([id, { title: card.title, ...(card.text ? { preview: card.text.slice(0, 300) } : {}), ...(card.archivedAt ? { archivedAt: card.archivedAt } : {}) }]);
+      const outcome = linkOutcome(card, this.store.get<Answer>('answers', id));
+      out.push([id, { title: card.title, ...(card.text ? { preview: card.text.slice(0, 300) } : {}), ...(card.archivedAt ? { archivedAt: card.archivedAt } : {}), outcome }]);
     }
     // fromEntries makes every id an own key, even one named like an Object property.
     return Object.fromEntries(out);

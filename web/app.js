@@ -5,7 +5,7 @@ import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
 import { Approvals, AgentPin, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, agentName, buildQueue, SECTION_ID } from './queue.js';
-import { cardDetails, linkIds, linkLookup } from './details.js';
+import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
 
 const { React, createRoot } = window.__OpenUI;
@@ -560,13 +560,15 @@ export function App() {
     const pres = presenceOf(current, state);
     const prevDetail = current.follows ? details.get(byId[current.follows]) : undefined;
     const prev = prevDetail && prevDetail.card;
-    linked.want(linkIds(current.text, current.recommendation, ...current.replies.map((r) => r.text), prev && prev.text).filter((id) => !byId[id]));
-    const lookup = linked.get;
+    const texts = [current.text, current.recommendation, ...current.replies.map((r) => r.text), prev && prev.text];
+    linked.want([...new Set([...linkIds(...texts), ...ownLinkIds(location.href, ...texts)])].filter((id) => !byId[id]));
+    // Each card link says how its card ended: from the state for a card on show, from the lookup for one it leaves out.
+    const links = { byId, open, lookup: linked.get, outcomeOf: (id) => summaryOutcome(byId[id], state.states[id], state.answers[id]) };
     const after = current.followedBy && byId[current.followedBy];
     const draftKey = `draft:${current.id}:${current.version}`;
     const backlinks = visible.filter((c) => c.id !== current.id && (c.links || []).includes(current.id));
     const o = current.origin || {};
-    const recommendationText = (text) => h(LinkedText, { text, byId, open, lookup, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined });
+    const recommendationText = (text) => h(LinkedText, { ...links, text, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined });
     const card = h('div', { className: 'focus-card', ref: (el) => {
       if (!el || scrollToRef.current !== current.id) return;
       scrollToRef.current = null;
@@ -591,11 +593,11 @@ export function App() {
         o.herdrPane && current.kind !== 'blocked' && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/open`, {}) }, 'Open session')),
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
       // Replies agents sent before linked follow-ups stay on the card. No new reply can appear: a follow-up is a card that follows this one.
-      current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { text: r.text, byId, open, lookup, diagrams: false }))),
+      current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { ...links, text: r.text, diagrams: false }))),
       a && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
       a && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
       h('h2', { className: 'card-title' }, current.title),
-      !current.broadcast && current.text && h(LinkedText, { text: current.text, byId, open, lookup, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined }),
+      !current.broadcast && current.text && h(LinkedText, { ...links, text: current.text, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined }),
       // The agent's recommendation, drawn by the page on every kind of card, so it reads as the conclusion and never gets lost.
       // When it names one of the options, it sits inside that option instead, so the card says it once.
       current.recommendation && !recommendedOptions(current).inside && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), recommendationText(current.recommendation)),
@@ -617,7 +619,7 @@ export function App() {
         h('summary', null, 'The card before this one, and your answer'),
         h('div', { className: 'turn' },
           h('h4', null, h('a', { onClick: () => open(prev.id) }, prev.title)),
-          prev.text && h(DrawFaults.Provider, { value: drawFaultsOf(prev) }, h(LinkedText, { text: prev.text, byId, open, lookup, diagrams: prev.kind !== 'system' })),
+          prev.text && h(DrawFaults.Provider, { value: drawFaultsOf(prev) }, h(LinkedText, { ...links, text: prev.text, diagrams: prev.kind !== 'system' })),
           h('div', { className: 'ans' }, prevDetail.answer ? describe(prev, prevDetail.answer) : 'You did not answer it.'))));
     // A diagram or a body the page cannot draw goes back to the card's agent.
     main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
