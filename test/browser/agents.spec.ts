@@ -1,5 +1,5 @@
-// The agents panel: who the inbox knows, and the one form that sends a card to the agent its drop-down picks.
-import { expect, test, type Locator, type Page } from '@playwright/test';
+// The agents panel: who the inbox knows, and the one form that sends a card to the agent its search field picks.
+import { expect, test, type Locator } from '@playwright/test';
 import { cardEvents } from '../unit/fixture.ts';
 import { openDialog, startInbox, type TestInbox } from './inbox.ts';
 
@@ -9,9 +9,10 @@ test.afterEach(async () => { await inbox.close(); });
 
 const PANEL = 'Send a card to an agent';
 
-/** The drop-down that picks the agent a card goes to, and the field the person writes the message in. */
-const pick = (dialog: ReturnType<Page['locator']>) => dialog.getByRole('combobox', { name: 'Agent', exact: true });
-const message = (dialog: ReturnType<Page['locator']>) => dialog.getByRole('textbox', { name: 'Message', exact: true });
+/** The field that searches the agents, the list it filters, and the field the person writes the message in. */
+const search = (dialog: Locator) => dialog.getByRole('searchbox', { name: 'Search the agents', exact: true });
+const matches = (dialog: Locator) => dialog.getByRole('list', { name: 'Agents that match the search' }).getByRole('button');
+const message = (dialog: Locator) => dialog.getByRole('textbox', { name: 'Message', exact: true });
 
 /** What the browser draws behind a button, as the page's accent color reads on the same page. */
 const backdrop = (button: Locator) => button.evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -24,10 +25,10 @@ const accentOf = (dialog: Locator) => dialog.evaluate((el) => {
   return accent;
 });
 
-test('picks an agent in the drop-down, shows what presence says about it, and sends it a card', async ({ page }) => {
+test('finds an agent by a fragment from the middle of its name, filters the list, and sends it a card', async ({ page }) => {
   // A card from that session is where the inbox learns the name it reports and where it runs.
   await inbox.agent.post({ agent: 'claude:s1', title: 'Deploy the preview?', origin: { harness: 'claude-code', name: 'storage', cwd: '/home/nicolas/Source/acme/api' } });
-  // Another card reports a session that holds no connection, so the drop-down has a second name to pick.
+  // Another card reports a session that holds no connection, so the list has a second name to filter out.
   await inbox.agent.post({ agent: 'pi:away', title: 'Which region first?', origin: { harness: 'pi', name: 'release' } });
   // Its session holds a stream open, as the integration does while the session runs.
   const stream = inbox.listen('claude:s1');
@@ -35,11 +36,18 @@ test('picks an agent in the drop-down, shows what presence says about it, and se
   await inbox.open(page);
 
   const dialog = await openDialog(page, PANEL);
-  // One form, one drop-down: both names, the connected agent first, and nothing to pick before the person does.
-  await expect(pick(dialog).locator('option')).toHaveText(['storage', 'release']);
-  await pick(dialog).selectOption('claude:s1');
+  // The field starts empty, so every agent shows, the connected one first.
+  await expect(matches(dialog)).toHaveText([/storage/, /release/]);
+
+  // A fragment from the middle of the session name leaves that one agent.
+  await search(dialog).fill('tora');
+  await expect(matches(dialog)).toHaveCount(1);
+  await expect(matches(dialog)).toHaveText([/storage/]);
+  // The one match is the pick, so the facts under the list read as that agent.
+  await expect(matches(dialog).first()).toHaveAttribute('aria-pressed', 'true');
   await expect(dialog).toContainText('Connected now');
   await expect(dialog).toContainText('/home/nicolas/Source/acme/api');
+  await expect(dialog).not.toContainText('release');
 
   await message(dialog).fill('Please rebase on main before you deploy.');
   await dialog.getByRole('button', { name: 'Send', exact: true }).click();
@@ -52,34 +60,45 @@ test('picks an agent in the drop-down, shows what presence says about it, and se
   expect(sent?.card.agent).toBe('claude:s1');
 });
 
-test('sends with the one button when the inbox knows a single connected agent', async ({ page }) => {
-  // This session posts no card, so presence alone puts it in the drop-down, under the name its connection reported.
-  const stream = inbox.listen('pi:solo', { harness: 'pi', session: 'solo', name: 'Release the fix', host: 'laptop' });
+test('sends with Enter once a fragment leaves one agent', async ({ page }) => {
+  // This session posts no card, so presence alone puts it in the list, under the id it reports.
+  const stream = inbox.listen('pi:solo');
   await expect.poll(() => inbox.server.inbox.isOnline('pi:solo')).toBe(true);
   await inbox.open(page);
 
   const dialog = await openDialog(page, PANEL);
-  await expect(pick(dialog).locator('option')).toHaveText(['Release the fix']);
-  await expect(pick(dialog)).toHaveValue('pi:solo');
+  await expect(matches(dialog)).toHaveText(['pi:solo']);
   await expect(dialog).toContainText('Connected now');
 
   await message(dialog).fill('Name the release branch after the ticket.');
-  await dialog.getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(dialog).toContainText('Sent to Release the fix');
+  // A fragment that leaves one agent picks it, and Enter in the field sends the message to it.
+  await search(dialog).fill('solo');
+  await expect(matches(dialog)).toHaveCount(1);
+  await search(dialog).press('Enter');
+  await expect(dialog).toContainText('Sent to pi:solo');
 
   await expect.poll(() => cardEvents(stream.events).length).toBe(1);
   expect(cardEvents(stream.events)[0]?.card.agent).toBe('pi:solo');
 });
 
-test('names a connected session by its id when its connection reported no session name', async ({ page }) => {
-  const stream = inbox.listen('pi:plain', { harness: 'pi', session: 'plain', host: 'laptop' });
-  await expect.poll(() => inbox.server.inbox.isOnline('pi:plain')).toBe(true);
+test('says when nothing matches the search, offers no send, and lists every agent again when the field empties', async ({ page }) => {
+  await inbox.agent.post({ agent: 'pi:away', title: 'Which region first?', origin: { harness: 'pi', name: 'release' } });
   await inbox.open(page);
 
   const dialog = await openDialog(page, PANEL);
-  await expect(pick(dialog).locator('option')).toHaveText(['pi:plain']);
-  await expect(dialog).toContainText('Connected now');
-  stream.stop();
+  await expect(matches(dialog)).toHaveText([/release/]);
+  await message(dialog).fill('Ship it on Friday.');
+
+  await search(dialog).fill('kubernetes');
+  await expect(dialog).toContainText('No agent matches this search.');
+  await expect(matches(dialog)).toHaveCount(0);
+  await expect(message(dialog)).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+
+  // An empty field lists every agent again, and the message the person typed stays.
+  await search(dialog).fill('');
+  await expect(matches(dialog)).toHaveCount(1);
+  await expect(message(dialog)).toHaveValue('Ship it on Friday.');
 });
 
 test('keeps a message typed while a send is still in flight, and clears the field when it holds what went', async ({ page }) => {
@@ -114,7 +133,7 @@ test('says there is nobody to send to when no agent has connected, and offers no
 
   const dialog = await openDialog(page, PANEL);
   await expect(dialog).toContainText('Nobody to send to: no agent has connected to this inbox yet.');
-  await expect(pick(dialog)).toBeDisabled();
+  await expect(search(dialog)).toBeDisabled();
   await expect(message(dialog)).toBeDisabled();
   await expect(dialog.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
 });
@@ -124,7 +143,7 @@ test('says a card waits for an agent that is offline, hands it over when the ses
   await inbox.open(page);
 
   const dialog = await openDialog(page, PANEL);
-  await expect(pick(dialog).locator('option')).toHaveText(['release']);
+  await expect(matches(dialog)).toHaveText([/release/]);
   await expect(dialog).toContainText('Never connected');
   await message(dialog).fill('Ping me when the run is done.');
   await dialog.getByRole('button', { name: 'Send', exact: true }).click();

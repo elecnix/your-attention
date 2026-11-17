@@ -1,8 +1,9 @@
-// The agents panel of the page: who the inbox knows, and how it reads each one's state.
+// The agents panel of the page: who the inbox knows, how the search finds one of them, and how it reads each one's
+// state.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Presence } from '../../src/core/types.ts';
-import { agentList, pickedAgent } from '../../web/agents.js';
+import { agentList, pickedAgent, searchAgents } from '../../web/agents.js';
 
 const HOUR = 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
@@ -23,6 +24,7 @@ describe('the agents the panel lists', () => {
       id: 'claude:s1',
       name: 'storage',
       cwd: '/home/nicolas/Source/acme/api',
+      pane: null,
       online: true,
       lastSeen: null,
       channelOff: false,
@@ -92,7 +94,58 @@ describe('the agents the panel lists', () => {
   });
 });
 
-describe('the agent the panel\'s drop-down reads as', () => {
+describe('the agents a search finds', () => {
+  // A fragment from the middle of a session name is what a person remembers, and the directory and the pane are the
+  // other facts the panel shows beside that name.
+  const rows = agentList(state({
+    'pi:5f2a9c01': { agent: 'pi:5f2a9c01', online: true, lastSeen: NOW, origin: { herdrPane: 'w6P:p2' } },
+    'claude:regal-6': { agent: 'claude:regal-6', online: true, lastSeen: NOW },
+    'cli:nightly': { agent: 'cli:nightly', online: false, lastSeen: NOW - HOUR },
+  }, [
+    card('claude:regal-6', { name: 'regal-gopher-6', cwd: '/home/nicolas/Source/acme/api' }),
+    card('cli:nightly', { name: 'nightly-deploy', cwd: '/srv/release' }, NOW - 2 * HOUR),
+  ]), NOW);
+  const ids = (agents: ReturnType<typeof searchAgents>) => agents.map((a) => a.id);
+
+  it('finds an agent by a fragment from the middle of its session name', () => {
+    assert.deepEqual(ids(searchAgents(rows, 'goph')), ['claude:regal-6']);
+    assert.deepEqual(ids(searchAgents(rows, 'l-gop')), ['claude:regal-6']);
+  });
+
+  it('finds an agent by its working directory', () => {
+    assert.deepEqual(ids(searchAgents(rows, 'acme/api')), ['claude:regal-6']);
+    assert.deepEqual(ids(searchAgents(rows, 'srv/rel')), ['cli:nightly']);
+  });
+
+  it('finds an agent by its id and by the pane presence carries', () => {
+    assert.deepEqual(ids(searchAgents(rows, '5f2a')), ['pi:5f2a9c01']);
+    assert.deepEqual(ids(searchAgents(rows, 'w6p:p2')), ['pi:5f2a9c01']);
+  });
+
+  it('matches whatever the case of the search and of the name', () => {
+    assert.deepEqual(ids(searchAgents(rows, 'GoPhEr')), ['claude:regal-6']);
+    assert.deepEqual(ids(searchAgents(rows, 'NIGHTLY')), ['cli:nightly']);
+  });
+
+  it('finds no agent when no field carries the search', () => {
+    assert.deepEqual(searchAgents(rows, 'kubernetes'), []);
+  });
+
+  it('keeps every agent in the order of the panel while the search is empty', () => {
+    assert.deepEqual(ids(searchAgents(rows, '')), ids(rows));
+    assert.deepEqual(ids(searchAgents(rows, '   ')), ids(rows));
+  });
+
+  it('keeps the order of the panel among the agents it finds', () => {
+    assert.deepEqual(ids(searchAgents(rows, '/')), ['claude:regal-6', 'cli:nightly']);
+  });
+
+  it('reads the one match of a search as the pick, so a person types a fragment and Enter sends', () => {
+    assert.equal(pickedAgent(searchAgents(rows, 'goph'), null)?.id, 'claude:regal-6');
+  });
+});
+
+describe('the agent the panel\'s search reads as', () => {
   const rows = agentList(state({
     'a:here': { agent: 'a:here', online: true, lastSeen: NOW },
     'b:away': { agent: 'b:away', online: false, lastSeen: NOW - HOUR },

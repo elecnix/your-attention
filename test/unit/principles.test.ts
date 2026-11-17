@@ -36,15 +36,26 @@ describe('principles', () => {
     assert.match(connect, /this\.deliverSent\(agent\);/, 'a connection takes the cards that waited for its agent');
   });
 
-  it('the form that sends a card shows what presence says about the agent its drop-down picks', () => {
+  it('the form that sends a card shows what presence says about the agent its search picks', () => {
     // DP18: the person sees whether that agent is listening or offline before starting to write, and the form reads
-    // it from the agent list that presence fills, not from a state of its own. A pick that left the list reads as
-    // the first agent, so a card never goes to a name that presence dropped while the panel was open.
+    // it from the agent list that presence fills, not from a state of its own. The field filters that list, and a pick
+    // the search leaves out reads as its first match, so a card never goes to a name the panel does not show.
     const panel = fs.readFileSync(path.join(ROOT, 'web/components.js'), 'utf8');
     const form = /function SendForm[\s\S]*?\n}\n/.exec(panel)?.[0] ?? '';
-    assert.match(form, /h\('select'/, 'one drop-down picks the agent a card goes to');
+    assert.match(form, /const matches = searchAgents\(agents, query\)/, 'the field searches the agents of the panel');
     assert.match(form, /\$\{agent\.status\}/, 'the state line is the picked agent\'s, from the presence list');
-    assert.match(form, /pickedAgent\(agents, picked\)/, 'a pick that left the list reads as the first agent');
+    assert.match(form, /pickedAgent\(matches, picked\)/, 'a pick the search left out reads as the first match');
+    assert.doesNotMatch(form, /h\('select'/, 'no drop-down picks an agent, since a drop-down matches only from the start');
+  });
+
+  it('the agent search reads every fact the panel shows of an agent', () => {
+    // DP18 and DP43: a person remembers a fragment of a session name, a directory, or the pane a session runs in, so
+    // the search reads all of them, anywhere in the field, and the pane comes from the connection presence keeps.
+    const panel = fs.readFileSync(path.join(ROOT, 'web/agents.js'), 'utf8');
+    const search = /export function searchAgents[\s\S]*?\n}\n/.exec(panel)?.[0] ?? '';
+    assert.match(search, /\[a\.name, a\.id, a\.cwd, a\.pane\]/, 'the search reads the name, the id, the directory and the pane');
+    assert.match(search, /includes\(q\)/, 'a match reads anywhere in a field, not only at its start');
+    assert.match(panel, /p\.origin\.herdrPane/, 'the pane of a row is the one its presence carries');
   });
 
   it('the guidance card labels each row from presence, and opens the pane a connection reported', () => {

@@ -1,6 +1,6 @@
 // The agents this inbox knows, as the panel that sends one a card lists them: the name each connection reported, the
-// working directory a card carried, and when the inbox last saw it. Only presence says an agent is connected, so an agent
-// that went offline reads as offline, whatever its cards say.
+// working directory a card carried, the pane presence reported, and when the inbox last saw it. Only presence says an
+// agent is connected, so an agent that went offline reads as offline, whatever its cards say.
 import { cardAge } from './age.js';
 import { agentName } from './queue.js';
 
@@ -19,10 +19,13 @@ export function agentList(state, now = Date.now()) {
     // An agent whose presence row the inbox pruned, and one that never connected, have no time to show.
     const lastSeen = online ? null : (p && (p.leftAt ?? p.lastSeen)) || null;
     // A session that has posted no card still has a name, because presence keeps the one its connection sent.
+    const reported = (p && p.origin) || {};
     rows.push({
       id,
       name: agentName(id, cards, presence),
-      cwd: newestCwd(cards, id),
+      cwd: reported.cwd || newestCwd(cards, id),
+      // A pane is where a connection reported its session, so only presence knows one.
+      pane: (p && p.origin && p.origin.herdrPane) || null,
       online,
       lastSeen,
       channelOff: !!p && p.channelOff === true,
@@ -47,6 +50,16 @@ function newestCwd(cards, id) {
     if (o.cwd && when >= at) { cwd = o.cwd; at = when; }
   }
   return cwd;
+}
+
+/** The agents whose name, id, working directory or pane carries this search, in the order the list has them, so the
+ * panel filters as the person types without moving a row. A match reads anywhere in a field, never only at its start,
+ * and it ignores case. An empty search keeps every agent. */
+export function searchAgents(agents, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return agents;
+  // A field is lowercased as text: a row may carry a number or nothing where a name belongs, and a search must not throw.
+  return agents.filter((a) => [a.name, a.id, a.cwd, a.pane].some((v) => v !== undefined && v !== null && String(v).toLowerCase().includes(q)));
 }
 
 /** The agent a pick reads as: the one the person picked while the list still has it, else the first of the list.

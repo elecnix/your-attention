@@ -290,15 +290,21 @@
   }
   /* The PIN field is monospace with wide tracking, so each typed digit shows as its own dot. */
   .pin-input { font-family: var(--font-code) !important; letter-spacing: .3em !important; }
-  :root {
-    --openui-text-body-default: 400 calc(16px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-default-heavy: 560 calc(16px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-lg: 400 calc(18px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-lg-heavy: 560 calc(18px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-sm: 400 calc(14px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-sm-heavy: 560 calc(14px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-xs: 400 calc(12px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-xs-heavy: 560 calc(12px * var(--text-scale))/1.5 var(--font-text);
+  /* OpenUI's type tokens, scaled by --text-scale. They sit on body, not :root, because OpenUI declares the same
+     tokens on :root and again on :root:not([data-openui-theme=light]) inside a dark media query and on
+     :root[data-openui-theme=dark]. Those selectors out-rank :root, so in dark mode OpenUI's own sizes won.
+     A value declared on body beats one inherited from html whatever selector set it, and every OpenUI element,
+     portals included, renders inside body. The body tokens start at 15px, the size of a card's plain text,
+     so a card's body and its plain text read the same; lg, sm and xs keep their ratio to it (18, 14 and 12 over 16). */
+  body {
+    --openui-text-body-default: 400 calc(15px * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-default-heavy: 560 calc(15px * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-lg: 400 calc(15px * 18 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-lg-heavy: 560 calc(15px * 18 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-sm: 400 calc(15px * 14 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-sm-heavy: 560 calc(15px * 14 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-xs: 400 calc(15px * 12 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-xs-heavy: 560 calc(15px * 12 / 16 * var(--text-scale))/1.5 var(--font-text);
     --openui-text-code-default: 400 calc(14px * var(--text-scale))/1.5 var(--font-code);
     --openui-text-code-default-heavy: 700 calc(14px * var(--text-scale))/1.5 var(--font-code);
     --openui-text-code-sm: 400 calc(12px * var(--text-scale))/1.5 var(--font-code);
@@ -361,13 +367,22 @@
   .agents-dialog { width: min(640px, calc(100vw - 32px)); }
   .agents-dialog .agents-send { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
   .agents-dialog .agents-pick, .agents-dialog .agents-message { display: flex; flex-direction: column; gap: 4px; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
-  .agents-dialog .agents-pick select, .agents-dialog .agents-message textarea { font: inherit; font-size: calc(14px * var(--text-scale)); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .agents-dialog .agents-pick .agents-search, .agents-dialog .agents-message textarea { font: inherit; font-size: calc(14px * var(--text-scale)); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .agents-dialog .agents-pick .agents-search::placeholder { color: var(--muted); }
+  .agents-dialog .agents-pick .agents-search:focus-visible { outline: none; border-color: var(--accent); }
   .agents-dialog .agents-message textarea { resize: vertical; }
+  /* The agents the search kept, in the order the panel lists them. The pick takes the accent, and the list scrolls
+     rather than pushing the message out of a phone's screen. */
+  .agents-dialog .agents-matches { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow: auto; }
+  .agents-dialog .agent-match { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; font: inherit; font-size: calc(14px * var(--text-scale)); color: var(--ink); background: none; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px; cursor: pointer; }
+  .agents-dialog .agent-match:hover, .agents-dialog .agent-match:focus-visible { border-color: var(--line); }
+  .agents-dialog .agent-match.picked { border-color: var(--accent); }
   .agents-dialog .agent-facts { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: calc(12px * var(--text-scale)); color: var(--muted); margin: 0; }
   /* A dotted dot marks a connected agent, so the panel reads at a glance whether a card reaches it now. */
   .agents-dialog .agent-state.online { color: var(--ok); }
   .agents-dialog .agent-state.online::before { content: "● "; }
   .agents-dialog .agent-facts code { font-family: var(--font-code); font-size: .95em; overflow-wrap: anywhere; }
+  .agents-dialog .agent-match-id { font-family: var(--font-code); font-size: .85em; color: var(--muted); overflow-wrap: anywhere; }
   .agents-dialog .note { margin: 0; }
   /* A phone: the bar scrolls away, the title, the status and the links share the first row, and every control is big enough for a thumb. */
   @media (max-width: 760px) {

@@ -11,6 +11,8 @@ export interface ListedAgent {
   name: string;
   /** The working directory a card carried, when the inbox has one. */
   cwd: string | null;
+  /** The herdr pane the session reported with its connection, when presence carries one. */
+  pane: string | null;
   online: boolean;
   /** When the inbox last saw this agent, or null while it is connected or when it never connected. */
   lastSeen: number | null;
@@ -22,6 +24,10 @@ export interface ListedAgent {
 }
 
 export function agentList(state: { cards?: CardSummary[]; presence?: Record<string, Presence> }, now?: number): ListedAgent[];
+
+/** The agents whose name, id, working directory or pane carries the search, in the order the list has them. A match
+ * reads anywhere in a field and ignores case, and an empty search keeps every agent. */
+export function searchAgents(agents: ListedAgent[], query: string): ListedAgent[];
 
 /** The agent a pick reads as: the picked one while the list still has it, else the first of the list, else null. */
 export function pickedAgent(agents: ListedAgent[], picked: string | null): ListedAgent | null;
