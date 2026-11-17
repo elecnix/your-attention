@@ -118,20 +118,28 @@ export function cardText(card: Card): string {
 }
 
 export interface CommandResult { code: number | null; stdout: string; stderr: string }
-export type RunCommand = (argv: string[], input: string, timeoutMs: number) => Promise<CommandResult>;
+export type RunCommand = (argv: string[], input: string, timeoutMs: number, signal?: AbortSignal) => Promise<CommandResult>;
 
-/** Run a command with `input` on stdin. Rejects when it cannot start or runs past `timeoutMs`. */
-export const runCommand: RunCommand = (argv, input, timeoutMs) => new Promise((resolve, reject) => {
+const STOPPED = 'stopped because the agent is shutting down';
+
+/** Run a command with `input` on stdin. Rejects when it cannot start, runs past `timeoutMs`, or `signal` aborts, and
+ * kills the command in the last two cases, so a stopping agent leaves no check running. */
+export const runCommand: RunCommand = (argv, input, timeoutMs, signal) => new Promise((resolve, reject) => {
   const [program, ...args] = argv;
   if (!program) { reject(new Error('the command is empty')); return; }
+  if (signal?.aborted) { reject(new Error(STOPPED)); return; }
   const child = spawn(program, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
-  const timer = setTimeout(() => { child.kill(); reject(new Error(`took longer than ${timeoutMs} ms`)); }, timeoutMs);
+  const stop = (why: string): void => { child.kill(); done(); reject(new Error(why)); };
+  const onAbort = (): void => stop(STOPPED);
+  const timer = setTimeout(() => stop(`took longer than ${timeoutMs} ms`), timeoutMs);
+  const done = (): void => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };
+  signal?.addEventListener('abort', onAbort, { once: true });
   child.stdout.on('data', (d) => { stdout += String(d); });
   child.stderr.on('data', (d) => { stderr += String(d); });
-  child.on('error', (e) => { clearTimeout(timer); reject(new Error(`could not run (${e.message})`)); });
-  child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+  child.on('error', (e) => { done(); reject(new Error(`could not run (${e.message})`)); });
+  child.on('close', (code) => { done(); resolve({ code, stdout, stderr }); });
   // A command that exits without reading its input closes the pipe: its exit code is the answer, not EPIPE.
   child.stdin.on('error', () => {});
   child.stdin.end(input);
@@ -141,10 +149,10 @@ export const runCommand: RunCommand = (argv, input, timeoutMs) => new Promise((r
 type CheckOutcome = Ruling | { skipped: string };
 
 /** Run one command and read its output. Anything that goes wrong becomes a reason to skip the check. */
-async function ask<T>(label: string, argv: string[], input: string, timeoutMs: number, okCodes: number[], read: (stdout: string) => T | undefined, run: RunCommand): Promise<T | { skipped: string }> {
+async function ask<T>(label: string, argv: string[], input: string, timeoutMs: number, okCodes: number[], read: (stdout: string) => T | undefined, run: RunCommand, signal?: AbortSignal): Promise<T | { skipped: string }> {
   let res: CommandResult;
   try {
-    res = await run(argv, input, timeoutMs);
+    res = await run(argv, input, timeoutMs, signal);
   } catch (e) {
     return { skipped: `${label} ${(e as Error).message}` };
   }
@@ -158,16 +166,18 @@ async function ask<T>(label: string, argv: string[], input: string, timeoutMs: n
   return value === undefined ? { skipped: `${label} gave output it could not read: ${res.stdout.trim().slice(0, 200)}` } : value;
 }
 
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === 'string');
+
 interface ValeAlert { Line: number; Check: string; Message: string; Severity: string; Match?: string }
 
-export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand): Promise<CheckOutcome> {
+export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckOutcome> {
   const { doc, fieldAt } = cardProse(card);
   // Vale exits 1 when it finds an error, and still prints its JSON.
   const alerts = await ask('vale', [...cfg.vale, '--no-global', '--config', VALE_INI, '--output=JSON', '--ext=.md'], doc, cfg.valeTimeoutMs, [0, 1], (out) => {
     const parsed = JSON.parse(out) as unknown;
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
     return Object.values(parsed as Record<string, ValeAlert[]>).flat();
-  }, run);
+  }, run, signal);
   if ('skipped' in alerts) return alerts;
   const errors = alerts.filter((a) => a.Severity === 'error');
   if (!errors.length) return { verdict: 'pass', reason: 'vale found no error.' };
@@ -182,11 +192,14 @@ export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand 
 
 interface Classification { verdict: string; rationale?: string; clarifyingQuestions?: string[] }
 
-export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand): Promise<CheckOutcome> {
+export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckOutcome> {
   const result = await ask('classifier', [...cfg.classifier, '-p', CARD_PROMPT, '-q', CARD_QUESTION, '-'], cardText(card), cfg.classifierTimeoutMs, [0], (out) => {
     const c = JSON.parse(out) as Classification;
-    return c.verdict === 'COMPLETE' || c.verdict === 'MISSING_CONTEXT' ? c : undefined;
-  }, run);
+    if (c.verdict !== 'COMPLETE' && c.verdict !== 'MISSING_CONTEXT') return undefined;
+    if (c.rationale !== undefined && typeof c.rationale !== 'string') return undefined;
+    if (c.clarifyingQuestions !== undefined && !isStrings(c.clarifyingQuestions)) return undefined;
+    return c;
+  }, run, signal);
   if ('skipped' in result) return result;
   if (result.verdict === 'COMPLETE') return { verdict: 'pass', reason: result.rationale ?? 'The classifier found the card complete.' };
   const questions = (result.clarifyingQuestions ?? []).map((q) => `- ${q}`);
@@ -197,16 +210,19 @@ const PR_TAG = /^([\w.-]+)\/([\w.-]+)#(\d+)$/;
 
 interface PrVerdict { verdict: string; confidence_accept?: number; items?: { direction?: string; effect_label?: string; text?: string; action?: string | null }[] }
 
-export async function prVerdictCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand): Promise<CheckOutcome> {
-  if (!cfg.prVerdict) return { skipped: 'no PR-verdict command in the local config, so the PR-verdict check is off' };
+export async function prVerdictCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckOutcome> {
+  if (!cfg.prVerdict) return { skipped: 'PR verdict is off: the local config names no command' };
   const m = PR_TAG.exec(card.tags?.['pr'] ?? '');
-  if (!m) return { skipped: 'the card has no pr tag of the form owner/repo#number, so the PR-verdict check did not run' };
+  if (!m) return { skipped: 'PR verdict did not run: the card has no pr tag of the form owner/repo#number' };
   const [, owner, repo, number] = m;
   const { command, acceptVerdicts, timeoutMs } = cfg.prVerdict;
   const result = await ask('PR verdict', [...command, `https://github.com/${owner}/${repo}/pull/${number}`, '--json'], '', timeoutMs, [0], (out) => {
     const v = JSON.parse(out) as PrVerdict;
-    return typeof v.verdict === 'string' ? v : undefined;
-  }, run);
+    if (typeof v.verdict !== 'string') return undefined;
+    if (v.confidence_accept !== undefined && typeof v.confidence_accept !== 'number') return undefined;
+    if (v.items !== undefined && !(Array.isArray(v.items) && v.items.every((i) => typeof i === 'object' && i !== null))) return undefined;
+    return v;
+  }, run, signal);
   if ('skipped' in result) return result;
   if (acceptVerdicts.includes(result.verdict)) return { verdict: 'pass', reason: `The PR-verdict command answered ${result.verdict}.` };
   const confidence = typeof result.confidence_accept === 'number' ? `${Math.round(result.confidence_accept * 100)} in 100` : 'unknown';
@@ -220,10 +236,11 @@ export async function prVerdictCheck(card: Card, cfg: ExampleConfig, run: RunCom
 }
 
 /** Run the checks in order. The first one that returns the card decides, and a check that cannot run passes. */
-export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unknown[]) => void, run: RunCommand = runCommand): Promise<Ruling> {
+export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unknown[]) => void, signal?: AbortSignal, run: RunCommand = runCommand): Promise<Ruling> {
   const passed: string[] = [];
   for (const check of [valeCheck, classifierCheck, prVerdictCheck]) {
-    const outcome = await check(card, cfg, run);
+    if (signal?.aborted) break;
+    const outcome = await check(card, cfg, run, signal);
     if ('skipped' in outcome) {
       log(card.id, `${outcome.skipped}, so this check passed the card.`);
       continue;

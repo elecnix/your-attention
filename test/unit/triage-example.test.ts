@@ -52,6 +52,15 @@ function logger(): { log: (...a: unknown[]) => void; lines: string[] } {
   return { log: (...a) => lines.push(a.map(String).join(' ')), lines };
 }
 
+/** A test that `card` passes, and that the log says `why`, when the config from `over` breaks a check. */
+function itFailsOpen(what: string, card: Card, over: () => Partial<ExampleConfig>, why: RegExp): void {
+  it(`passes the card and logs why when ${what}`, async () => {
+    const { log, lines } = logger();
+    assert.equal((await checkCard(card, config(over()), log)).verdict, 'pass');
+    assert.match(lines.join('\n'), why);
+  });
+}
+
 describe('the example triage agent renders a card', () => {
   it('puts each prose field of the card in the document vale reads, and remembers which field each line came from', () => {
     const { doc, fieldAt } = cardProse({ ...card, questions: [{ question: 'Which branch?', options: [{ label: 'main', description: 'The default branch.' }] }] });
@@ -119,20 +128,28 @@ describe('the example triage agent fails open', () => {
     ['the classifier finds no key', () => ({ classifier: stub('classifier', "process.stderr.write('error: config file not found'); process.exit(1);").argv }), /classifier exited with 1: error: config file not found/],
     ['the classifier takes too long', () => ({ classifier: stub('classifier', 'setTimeout(() => {}, 10_000);').argv, classifierTimeoutMs: 300 }), /classifier took longer than 300 ms/],
     ['the classifier prints something other than its JSON', () => ({ classifier: stub('classifier', print('VERDICT: maybe')).argv }), /classifier gave output it could not read/],
+    ['the classifier gives its questions as a string', () => ({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: 'Which branch?' })).argv }), /classifier gave output it could not read/],
   ];
-  for (const [what, over, why] of cases) {
-    it(`passes the card and logs why when ${what}`, async () => {
-      const { log, lines } = logger();
-      const ruling = await checkCard(card, config(over()), log);
-      assert.equal(ruling.verdict, 'pass');
-      assert.match(lines.join('\n'), why);
-    });
-  }
+  for (const [what, over, why] of cases) itFailsOpen(what, card, over, why);
 
   it('still runs the classifier when vale cannot run', async () => {
     const classifier = stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] }));
     const ruling = await checkCard(card, config({ vale: [missing], classifier: classifier.argv }), logger().log);
     assert.equal(ruling.verdict, 'return');
+  });
+});
+
+describe('the example triage agent stops', () => {
+  it('kills a running command when the agent stops, and passes the card without waiting for the timeout', async () => {
+    const stop = new AbortController();
+    const classifier = stub('classifier', 'setTimeout(() => {}, 30_000);');
+    const { log, lines } = logger();
+    const started = Date.now();
+    setTimeout(() => stop.abort(), 200);
+    const ruling = await checkCard(card, config({ classifier: classifier.argv, classifierTimeoutMs: 30_000 }), log, stop.signal);
+    assert.equal(ruling.verdict, 'pass');
+    assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
+    assert.match(lines.join('\n'), /classifier stopped because the agent is shutting down/);
   });
 });
 
@@ -152,7 +169,7 @@ describe('the example triage agent asks a PR-verdict command about a pull reques
   it('skips the check when the local config names no command', async () => {
     const { log, lines } = logger();
     assert.equal((await checkCard(pr, config({}), log)).verdict, 'pass');
-    assert.match(lines.join('\n'), /no PR-verdict command/);
+    assert.match(lines.join('\n'), /PR verdict is off: the local config names no command/);
   });
 
   it('skips the check on a card without a pr tag, and never runs the command', async () => {
@@ -196,14 +213,9 @@ describe('the example triage agent asks a PR-verdict command about a pull reques
     ['the command takes too long', () => stub('verdict', 'setTimeout(() => {}, 10_000);').argv, /PR verdict took longer than 300 ms/, 300],
     ['the command prints JSON without a verdict', () => stub('verdict', print({ items: [] })).argv, /PR verdict gave output it could not read/],
     ['the command prints something other than JSON', () => stub('verdict', print('Likely to merge')).argv, /PR verdict gave output it could not read/],
+    ['the command gives items that are not a list', () => stub('verdict', print({ verdict: 'PUSHBACK', items: 'CI is red.' })).argv, /PR verdict gave output it could not read/],
   ];
-  for (const [what, argv, why, timeoutMs] of failures) {
-    it(`passes the card and logs why when ${what}`, async () => {
-      const { log, lines } = logger();
-      assert.equal((await checkCard(pr, config(withVerdict(argv(), timeoutMs ? { timeoutMs } : {})), log)).verdict, 'pass');
-      assert.match(lines.join('\n'), why);
-    });
-  }
+  for (const [what, argv, why, timeoutMs] of failures) itFailsOpen(what, pr, () => withVerdict(argv(), timeoutMs ? { timeoutMs } : {}), why);
 });
 
 describe('the example triage agent reads its local config', () => {

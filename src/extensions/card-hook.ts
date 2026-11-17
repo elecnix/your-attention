@@ -13,7 +13,8 @@ export type CardCreated = Extract<HookEvent, { hook: 'card.created' }>;
 /** A GET (no body) or POST to the inbox with the extension's token. */
 export type InboxCall = <T>(route: string, body?: unknown) => Promise<T>;
 
-export type CardCheck = (ev: CardCreated, call: InboxCall) => Promise<Ruling>;
+/** `signal` aborts when the extension stops, so a check can cancel the work it started. */
+export type CardCheck = (ev: CardCreated, call: InboxCall, signal: AbortSignal) => Promise<Ruling>;
 
 export interface CardHookConfig {
   url: string;
@@ -57,7 +58,7 @@ export async function runCardHook(cfg: CardHookConfig, check: CardCheck, signal:
   const decide = async (ev: CardCreated): Promise<void> => {
     let ruling: Ruling;
     try {
-      ruling = await run(() => check(ev, call));
+      ruling = await run(() => check(ev, call, signal));
     } catch (e) {
       ruling = { verdict: 'pass', reason: `${cfg.name} failed (${(e as Error).message}), so the card went through.` };
     }

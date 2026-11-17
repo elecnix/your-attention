@@ -19,4 +19,4 @@ const cfg = loadConfig(configFile);
 log(`config ${configFile}: vale ${JSON.stringify(cfg.vale)}, classifier ${JSON.stringify(cfg.classifier)}, PR verdict ${cfg.prVerdict ? JSON.stringify(cfg.prVerdict.command) : 'off'}`);
 const stop = new AbortController();
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => stop.abort());
-await runCardHook({ ...inbox, name, timeoutMs: hookTimeoutMs(cfg), log }, (ev) => checkCard(ev.card, cfg, (...a) => log(...a)), stop.signal);
+await runCardHook({ ...inbox, name, timeoutMs: hookTimeoutMs(cfg), log }, (ev, _call, signal) => checkCard(ev.card, cfg, (...a) => log(...a), signal), stop.signal);

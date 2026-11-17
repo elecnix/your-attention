@@ -33,7 +33,7 @@ The checks run in this order, from the cheapest to the slowest, and the first on
 
 ## Failing open
 
-Like the built-in triage, the agent passes a card when a check can't give an answer, and it logs why on standard error. That covers a command that isn't installed, a command that exits with an error, one that runs past its timeout, and output it can't read. The classifier exits with an error when it doesn't find an OpenRouter key, so on a machine without a key the classifier check passes each card. The next check still runs after one that can't, so a missing vale doesn't turn off the classifier.
+Like the built-in triage, the agent passes a card when a check can't give an answer, and it logs why on standard error. That covers a command that isn't installed, a command that exits with an error, one that runs past its timeout, and output it can't read. The classifier exits with an error when it doesn't find an OpenRouter key, so on a machine without a key the classifier check passes each card. The next check still runs after one that can't, so a missing vale doesn't turn off the classifier. SIGTERM kills the running command too.
 
 ## Installing the commands
 
