@@ -361,13 +361,22 @@
   .agents-dialog { width: min(640px, calc(100vw - 32px)); }
   .agents-dialog .agents-send { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
   .agents-dialog .agents-pick, .agents-dialog .agents-message { display: flex; flex-direction: column; gap: 4px; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
-  .agents-dialog .agents-pick select, .agents-dialog .agents-message textarea { font: inherit; font-size: calc(14px * var(--text-scale)); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .agents-dialog .agents-pick .agents-search, .agents-dialog .agents-message textarea { font: inherit; font-size: calc(14px * var(--text-scale)); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .agents-dialog .agents-pick .agents-search::placeholder { color: var(--muted); }
+  .agents-dialog .agents-pick .agents-search:focus-visible { outline: none; border-color: var(--accent); }
   .agents-dialog .agents-message textarea { resize: vertical; }
+  /* The agents the search kept, in the order the panel lists them. The pick takes the accent, and the list scrolls
+     rather than pushing the message out of a phone's screen. */
+  .agents-dialog .agents-matches { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow: auto; }
+  .agents-dialog .agent-match { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; font: inherit; font-size: calc(14px * var(--text-scale)); color: var(--ink); background: none; border: 1px solid transparent; border-radius: 8px; padding: 5px 8px; cursor: pointer; }
+  .agents-dialog .agent-match:hover, .agents-dialog .agent-match:focus-visible { border-color: var(--line); }
+  .agents-dialog .agent-match.picked { border-color: var(--accent); }
   .agents-dialog .agent-facts { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: calc(12px * var(--text-scale)); color: var(--muted); margin: 0; }
   /* A dotted dot marks a connected agent, so the panel reads at a glance whether a card reaches it now. */
   .agents-dialog .agent-state.online { color: var(--ok); }
   .agents-dialog .agent-state.online::before { content: "● "; }
   .agents-dialog .agent-facts code { font-family: var(--font-code); font-size: .95em; overflow-wrap: anywhere; }
+  .agents-dialog .agent-match-id { font-family: var(--font-code); font-size: .85em; color: var(--muted); overflow-wrap: anywhere; }
   .agents-dialog .note { margin: 0; }
   /* A phone: the bar scrolls away, the title, the status and the links share the first row, and every control is big enough for a thumb. */
   @media (max-width: 760px) {
