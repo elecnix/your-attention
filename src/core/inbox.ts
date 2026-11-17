@@ -153,6 +153,8 @@ export const DEFAULT_GUIDANCE = [
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
+/** The longest reason or advice an extension's verdict keeps. One triage reason may list the findings of several checks. */
+export const MAX_HOOK_TEXT = 4000;
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_ANSWER_IMAGES = 10;
 /** How many card ids `unread` names before it only counts. A command line has a length. */
@@ -768,10 +770,15 @@ export class Inbox {
   /** Close a card as returned and tell its agent why. */
   private sendBack(card: Card, reason: string, by: string): Card {
     this.closeAs(card, 'returned', reason);
-    for (const [k, subs] of this.agents) {
-      if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send({ type: 'returned', id: randomId(6), card: publicCard(card), reason, by });
-    }
+    this.tellAgent(card, { type: 'returned', id: randomId(6), card: publicCard(card), reason, by });
     return this.getCard(card.id);
+  }
+
+  /** Send an event to the streams of the agent that posted `card`, with the token that posted it. */
+  private tellAgent(card: Card, ev: AgentEvent): void {
+    for (const [k, subs] of this.agents) {
+      if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send(ev);
+    }
   }
 
   // ---- extensions and hooks ----
@@ -828,15 +835,15 @@ export class Inbox {
     return next;
   }
 
-  /** An extension answers a card.created call. */
-  hookVerdict(caller: Caller, request: string, verdict: Verdict, reason: string): Card {
+  /** An extension answers a card.created call. A pass may carry advice, which goes to the card's agent. */
+  hookVerdict(caller: Caller, request: string, verdict: Verdict, reason: string, advice = ''): Card {
     const card = this.store.list<Card>('cards').find((c) => c.triage?.request === request);
     if (!card?.triage) throw new InboxError(404, 'unknown hook call');
     const ext = [...this.extensions.values()].find((e) => e.token === caller.token && card.triage?.waiting?.includes(e.reg.name));
     if (!ext) throw new InboxError(403, 'this hook call does not wait for this extension');
     if (!(HOOKS['card.created'].verdicts as readonly string[]).includes(verdict)) throw new InboxError(400, 'verdict must be pass, hold or return');
     if (card.triage.state !== 'pending') return card;
-    const clean = String(reason ?? '').slice(0, 1000);
+    const clean = String(reason ?? '').slice(0, MAX_HOOK_TEXT);
     const waiting = (card.triage.waiting ?? []).filter((n) => n !== ext.reg.name);
     const now = this.now();
     if (verdict === 'return') {
@@ -849,6 +856,8 @@ export class Inbox {
     const next = { ...card, triage };
     this.store.put('cards', card.id, next);
     this.emit({ type: 'change', card: card.id });
+    const tip = verdict === 'pass' ? String(advice ?? '').trim().slice(0, MAX_HOOK_TEXT) : '';
+    if (tip) this.tellAgent(card, { type: 'advice', id: randomId(6), card: publicCard(next), advice: tip, by: ext.reg.name });
     return next;
   }
 

@@ -34,7 +34,7 @@ CLARIFYING_QUESTIONS:
 - question
 
 For COMPLETE, write CLARIFYING_QUESTIONS: none.
-For MISSING_CONTEXT, ask one question per failed check, and ask only about facts the card does not state. Each question must be concrete and answerable by the agent that wrote the card. Do not ask generic questions such as "Can you add more detail?"
+For MISSING_CONTEXT, ask one question per failed check, and ask only about facts the card does not state. Start each question with the number of the step it comes from, in brackets, such as "- [4] What does this agent do if the person picks Keep paging?" Each question must be concrete and answerable by the agent that wrote the card. Do not ask generic questions such as "Can you add more detail?"
 
 Question construction rule: derive each question from a specific statement, option, or term in the card, and name it in the question. Never import a concern, actor, or example from these instructions unless the card itself mentions it. Ask only questions supported by omissions in the supplied card, and do not invent missing facts.
 ```

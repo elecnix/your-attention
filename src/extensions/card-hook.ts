@@ -6,6 +6,8 @@ import type { HookEvent } from '../core/hooks.ts';
 export interface Ruling {
   verdict: 'pass' | 'return';
   reason: string;
+  /** On a pass, text the inbox sends the card's agent as an `advice` event. */
+  advice?: string;
 }
 
 export type CardCreated = Extract<HookEvent, { hook: 'card.created' }>;

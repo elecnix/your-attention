@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { CARD_PROMPT, cardProse, cardText, checkCard, DEFAULTS, loadConfig, type ExampleConfig } from '../../examples/triage-agent/checks.ts';
+import { BYPASS_TAG, CARD_PROMPT, cardProse, cardText, checkCard, DEFAULTS, loadConfig, type ExampleConfig } from '../../examples/triage-agent/checks.ts';
+import { TriageState } from '../../examples/triage-agent/state.ts';
 import { runCardHook } from '../../src/extensions/card-hook.ts';
 import type { Card } from '../../src/core/types.ts';
 
@@ -88,7 +89,7 @@ describe('the example triage agent checks a card', () => {
     assert.ok(call?.stdin.includes(`Title: ${card.title}`));
   });
 
-  it('returns a card with each vale error, its field and its rule, and ignores warnings', async () => {
+  it('returns a card with each vale error, its field and its rule, and gives warnings as advice in the same notice', async () => {
     const vale = stub('vale', print({ 'stdin.md': [
       { Line: 1, Span: [1, 1], Check: 'Cards.FirstPerson', Message: "Write about this agent in the third person, not 'I'.", Severity: 'error', Match: 'I' },
       { Line: 3, Span: [5, 9], Check: 'Cards.Hedges', Message: "Say what you know instead of 'maybe'.", Severity: 'warning', Match: 'maybe' },
@@ -97,15 +98,15 @@ describe('the example triage agent checks a card', () => {
     const ruling = await checkCard({ ...card, title: 'I retry the export' }, config({ vale: vale.argv, classifier: classifier.argv }), logger().log);
     assert.equal(ruling.verdict, 'return');
     assert.match(ruling.reason, /title, line 1: Cards\.FirstPerson: Write about this agent in the third person, not 'I'\. \("I"\)/);
-    assert.doesNotMatch(ruling.reason, /maybe/);
-    assert.equal(classifier.calls().length, 0, 'a vale error returns the card before the classifier runs');
+    assert.match(ruling.reason, /Vale, advice:\n- text, line 1: Cards\.Hedges/);
+    assert.equal(classifier.calls().length, 1, 'a vale error does not stop the classifier');
   });
 
-  it('runs the classifier when vale reports only warnings', async () => {
+  it('passes a card with only vale warnings, and sends the warnings to the agent as advice', async () => {
     const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 5], Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' }] }));
-    const classifier = complete();
-    assert.equal((await checkCard(card, config({ vale: vale.argv, classifier: classifier.argv }), logger().log)).verdict, 'pass');
-    assert.equal(classifier.calls().length, 1);
+    const ruling = await checkCard(card, config({ vale: vale.argv }), logger().log);
+    assert.equal(ruling.verdict, 'pass');
+    assert.match(ruling.advice ?? '', /Vale, advice:\n- title, line 1: Cards\.Hedges: Hedge\./);
   });
 
   it('returns a card the classifier finds MISSING_CONTEXT, with its questions', async () => {
@@ -146,7 +147,7 @@ describe('the example triage agent stops', () => {
     const { log, lines } = logger();
     const started = Date.now();
     setTimeout(() => stop.abort(), 200);
-    const ruling = await checkCard(card, config({ classifier: classifier.argv, classifierTimeoutMs: 30_000 }), log, stop.signal);
+    const ruling = await checkCard(card, config({ classifier: classifier.argv, classifierTimeoutMs: 30_000 }), log, { signal: stop.signal });
     assert.equal(ruling.verdict, 'pass');
     assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
     assert.match(lines.join('\n'), /classifier stopped because the agent is shutting down/);
@@ -186,7 +187,7 @@ describe('the example triage agent asks a PR-verdict command about a pull reques
     assert.deepEqual(verdict.calls()[0]?.argv, ['https://github.com/acme/api/pull/42', '--json']);
   });
 
-  it('returns the card with the confidence and every reason that pushes back, each with its action or its text', async () => {
+  it('returns the card, below the confidence threshold, with the confidence and every reason that pushes back', async () => {
     const verdict = stub('verdict', print(pushback));
     const ruling = await checkCard(pr, config(withVerdict(verdict.argv)), logger().log);
     assert.equal(ruling.verdict, 'return');
@@ -199,12 +200,28 @@ describe('the example triage agent asks a PR-verdict command about a pull reques
     assert.equal((await checkCard(pr, config(withVerdict(verdict.argv, { acceptVerdicts: ['ACCEPT', 'LEAN_ACCEPT'] })), logger().log)).verdict, 'pass');
   });
 
-  it('runs after vale and the classifier, and only when both pass', async () => {
+  it('passes the card with the reasons as advice when the confidence is at or above the threshold', async () => {
+    const verdict = stub('verdict', print({ ...pushback, confidence_accept: 0.6 }));
+    const ruling = await checkCard(pr, config(withVerdict(verdict.argv)), logger().log);
+    assert.equal(ruling.verdict, 'pass');
+    assert.match(ruling.advice ?? '', /PR verdict, advice:[\s\S]*60 in 100[\s\S]*Say why the retry is once/);
+  });
+
+  it('reads a pushback the command reports with exit code 1', async () => {
+    const verdict = stub('verdict', print(pushback, 1));
+    assert.equal((await checkCard(pr, config(withVerdict(verdict.argv)), logger().log)).verdict, 'return');
+  });
+
+  it('runs every check, and puts the findings of all three in one notice', async () => {
     const verdict = stub('verdict', print(pushback));
+    const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 1], Check: 'Cards.FirstPerson', Message: 'Third person.', Severity: 'error', Match: 'I' }] }, 1));
     const classifier = stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] }));
-    const ruling = await checkCard(pr, config({ ...withVerdict(verdict.argv), classifier: classifier.argv }), logger().log);
-    assert.match(ruling.reason, /What is the goal\?/);
-    assert.equal(verdict.calls().length, 0);
+    const ruling = await checkCard(pr, config({ ...withVerdict(verdict.argv), vale: vale.argv, classifier: classifier.argv }), logger().log);
+    assert.equal(ruling.verdict, 'return');
+    assert.equal(verdict.calls().length, 1);
+    const at = (part: string): number => ruling.reason.indexOf(part);
+    for (const part of ['Vale, must fix:', 'Card classifier, must fix:', 'PR verdict, must fix:']) assert.ok(at(part) >= 0, part);
+    assert.ok(at('Vale, must fix:') < at('Card classifier, must fix:') && at('Card classifier, must fix:') < at('PR verdict, must fix:'));
   });
 
   const failures: [string, () => string[], RegExp, number?][] = [
@@ -233,6 +250,20 @@ describe('the example triage agent reads its local config', () => {
     assert.deepEqual(cfg.prVerdict, { command: ['/opt/verdict', 'predict'], acceptVerdicts: ['ACCEPT'], timeoutMs: 300_000 });
   });
 
+  it('reads the policy, and fills in the parts it leaves out', () => {
+    const file = path.join(dir, 'policy.json');
+    fs.writeFileSync(file, JSON.stringify({ policy: { classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 }, maxReturns: 5 }));
+    const cfg = loadConfig(file);
+    assert.deepEqual(cfg.policy, { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 });
+    assert.equal(cfg.maxReturns, 5);
+  });
+
+  it('refuses a policy level other than block, advise or ignore', () => {
+    const file = path.join(dir, 'bad-policy.json');
+    fs.writeFileSync(file, JSON.stringify({ policy: { valeErrors: 'warn' } }));
+    assert.throws(() => loadConfig(file), /policy\.valeErrors must be block, advise or ignore/);
+  });
+
   it('refuses a config whose commands are not lists of strings, and names the file', () => {
     const file = path.join(dir, 'bad.json');
     fs.writeFileSync(file, JSON.stringify({ vale: 'vale --config x' }));
@@ -242,11 +273,95 @@ describe('the example triage agent reads its local config', () => {
   it('ships a sample config that loads, with a placeholder command', () => {
     const cfg = loadConfig(path.join(import.meta.dirname, '../../examples/triage-agent/triage-example.sample.json'));
     assert.match(cfg.prVerdict?.command[0] ?? '', /^\/path\/to\//);
+    assert.equal(cfg.stateFile, path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'));
   });
 
   it('ships a card prompt with a text fence that asks for the classifier\'s reply format', () => {
     const fence = /```text\n([\s\S]*?)\n```/.exec(fs.readFileSync(CARD_PROMPT, 'utf8'))?.[1] ?? '';
-    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does']) assert.ok(fence.includes(part), part);
+    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets']) assert.ok(fence.includes(part), part);
+  });
+});
+
+describe('the example triage agent follows the local policy', () => {
+  const missingContext = (): string[] => stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] })).argv;
+
+  it('passes a MISSING_CONTEXT card with the questions as advice when the policy says advise', async () => {
+    const ruling = await checkCard(card, config({ classifier: missingContext(), policy: { ...DEFAULTS.policy, classifierMissingContext: 'advise' } }), logger().log);
+    assert.equal(ruling.verdict, 'pass');
+    assert.match(ruling.advice ?? '', /Card classifier, advice:[\s\S]*What is the goal\?/);
+  });
+
+  it('leaves out a finding the policy ignores', async () => {
+    const ruling = await checkCard(card, config({ classifier: missingContext(), policy: { ...DEFAULTS.policy, classifierMissingContext: 'ignore' } }), logger().log);
+    assert.deepEqual([ruling.verdict, ruling.advice], ['pass', undefined]);
+  });
+});
+
+describe('the example triage agent limits the returns of one card', () => {
+  const blocked = (): Partial<ExampleConfig> => ({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] })).argv });
+
+  it('returns a card three times, then lets the next attempt through with the findings as advice', async () => {
+    const state = new TriageState(undefined);
+    const cfg = config(blocked());
+    for (let i = 1; i <= 3; i++) {
+      const ruling = await checkCard({ ...card, version: i }, cfg, logger().log, { state });
+      assert.equal(ruling.verdict, 'return', `attempt ${i}`);
+      assert.match(ruling.reason, new RegExp(`return ${i} of 3`));
+    }
+    const fourth = await checkCard({ ...card, version: 4 }, cfg, logger().log, { state });
+    assert.equal(fourth.verdict, 'pass');
+    assert.match(fourth.reason, /after 3 returns/);
+    assert.match(fourth.advice ?? '', /What is the goal\?/);
+  });
+
+  it('counts a repost that follows the returned card, or that has the same agent and title, as the same card', async () => {
+    const state = new TriageState(undefined);
+    const cfg = config(blocked());
+    await checkCard(card, cfg, logger().log, { state });
+    assert.match((await checkCard({ ...card, id: 'c2', follows: 'c1', title: 'Another title' }, cfg, logger().log, { state })).reason, /return 2 of 3/);
+    assert.match((await checkCard({ ...card, id: 'c3' }, cfg, logger().log, { state })).reason, /return 3 of 3/);
+    assert.match((await checkCard({ ...card, id: 'c4', title: 'A new question' }, cfg, logger().log, { state })).reason, /return 1 of 3/);
+  });
+
+  it('keeps the count in its state file across a restart', async () => {
+    const file = path.join(dir, 'state-restart.json');
+    const cfg = config(blocked());
+    await checkCard(card, cfg, logger().log, { state: new TriageState(file) });
+    await checkCard(card, cfg, logger().log, { state: new TriageState(file) });
+    assert.match((await checkCard(card, cfg, logger().log, { state: new TriageState(file) })).reason, /return 3 of 3/);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  });
+});
+
+describe('the example triage agent lets an urgent card through with a bypass code', () => {
+  const blocked = (): ExampleConfig => config({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] })).argv });
+  const codeIn = (reason: string): string => new RegExp(`${BYPASS_TAG}: ([\\w-]+)`).exec(reason)?.[1] ?? '';
+
+  it('gives a code in every return notice, and passes the next card of that agent that carries it, without running a check', async () => {
+    const state = new TriageState(undefined);
+    const returned = await checkCard(card, blocked(), logger().log, { state });
+    const code = codeIn(returned.reason);
+    assert.ok(code.length >= 20, returned.reason);
+    const classifier = stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: [] }));
+    const { log, lines } = logger();
+    const ruling = await checkCard({ ...card, tags: { [BYPASS_TAG]: code } }, config({ classifier: classifier.argv }), log, { state });
+    assert.equal(ruling.verdict, 'pass');
+    assert.match(ruling.reason, /bypass/);
+    assert.equal(classifier.calls().length, 0);
+    assert.match(lines.join('\n'), /bypass used by agent s1 on card c1/);
+  });
+
+  it('refuses a code a second time, from another agent, or that it never gave, and checks the card', async () => {
+    const state = new TriageState(undefined);
+    const code = codeIn((await checkCard(card, blocked(), logger().log, { state })).reason);
+    const other = await checkCard({ ...card, agent: 's2', tags: { [BYPASS_TAG]: code } }, blocked(), logger().log, { state });
+    assert.equal(other.verdict, 'return');
+    assert.match(other.reason, /bypass code on this card is not valid: it belongs to another agent/);
+    assert.equal((await checkCard({ ...card, tags: { [BYPASS_TAG]: code } }, blocked(), logger().log, { state })).verdict, 'pass');
+    const again = await checkCard({ ...card, tags: { [BYPASS_TAG]: code } }, blocked(), logger().log, { state });
+    assert.match(again.reason, /not valid: it was used already/);
+    const guessed = await checkCard({ ...card, tags: { [BYPASS_TAG]: 'guessed-code-0000000000' } }, blocked(), logger().log, { state });
+    assert.match(guessed.reason, /not valid: triage never gave it/);
   });
 });
 

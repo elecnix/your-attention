@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { loadExtensionConfig } from '../../src/client.ts';
 import { runCardHook } from '../../src/extensions/card-hook.ts';
 import { checkCard, defaultConfigPath, hookTimeoutMs, loadConfig } from './checks.ts';
+import { TriageState } from './state.ts';
 
 const { values } = parseArgs({ options: { config: { type: 'string' }, name: { type: 'string', default: 'triage-example' } } });
 const name = values.name;
@@ -16,7 +17,8 @@ if (!inbox) {
 }
 const configFile = values.config ?? defaultConfigPath();
 const cfg = loadConfig(configFile);
-log(`config ${configFile}: vale ${JSON.stringify(cfg.vale)}, classifier ${JSON.stringify(cfg.classifier)}, PR verdict ${cfg.prVerdict ? JSON.stringify(cfg.prVerdict.command) : 'off'}`);
+log(`config ${configFile}: vale ${JSON.stringify(cfg.vale)}, classifier ${JSON.stringify(cfg.classifier)}, PR verdict ${cfg.prVerdict ? JSON.stringify(cfg.prVerdict.command) : 'off'}, policy ${JSON.stringify(cfg.policy)}, at most ${cfg.maxReturns} returns`);
+const state = new TriageState(cfg.stateFile);
 const stop = new AbortController();
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => stop.abort());
-await runCardHook({ ...inbox, name, timeoutMs: hookTimeoutMs(cfg), log }, (ev, _call, signal) => checkCard(ev.card, cfg, (...a) => log(...a), signal), stop.signal);
+await runCardHook({ ...inbox, name, timeoutMs: hookTimeoutMs(cfg), log }, (ev, _call, signal) => checkCard(ev.card, cfg, (...a) => log(...a), { signal, state }), stop.signal);

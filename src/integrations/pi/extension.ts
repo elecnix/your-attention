@@ -3,7 +3,7 @@
 // one. The answer is marked read when it reaches the model context.
 import os from 'node:os';
 import { Type } from 'typebox';
-import { Client, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
 import type { NewCard } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
@@ -97,10 +97,10 @@ export default function yourAttention(pi: PiApi): void {
       }
     }
     void client.stream(agent, async (ev) => {
-      if (ev.type === 'guidance' || ev.type === 'returned') {
+      if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice') {
         const note = ev.type === 'guidance'
           ? `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`
-          : `[your-attention] ${describeReturned(ev)}`;
+          : `[your-attention] ${ev.type === 'advice' ? describeAdvice(ev) : describeReturned(ev)}`;
         if (ctx.isIdle()) pi.sendUserMessage(note);
         else pi.sendUserMessage(note, { deliverAs: 'followUp' });
         return;

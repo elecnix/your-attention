@@ -1,18 +1,20 @@
-// The checks of the example triage agent, in the order it runs them:
-//   1. vale, on the card's prose, with the rules in ./vale. An error returns the card with each finding.
-//   2. pr-context-classifier, with the card prompt in ./card-prompt.md. MISSING_CONTEXT returns the card with the
-//      classifier's questions.
-//   3. an optional PR-verdict command, named only in your local config, on a card tagged pr: owner/repo#number. A
-//      verdict outside the accepted list returns the card with the reasons the command gives.
-// The cheapest check runs first, and the first check that returns the card ends the run, so a card with a typo
-// never costs a model call. Every check fails open: when a command is missing, exits with an error, runs out of
-// time or prints something unreadable, that check passes the card, logs why, and the next check still runs.
+// The checks of the example triage agent. It runs all three on every card, at the same time, and gives every finding
+// in one notice, so an agent fixes everything in one more turn:
+//   1. vale, on the card's prose, with the rules in ./vale;
+//   2. pr-context-classifier, with the card prompt in ./card-prompt.md;
+//   3. an optional PR-verdict command, named only in your local config, on a card tagged pr: owner/repo#number.
+// The local policy says which findings block the card (it goes back to its agent) and which are advice (the card goes
+// to the person, and the agent gets the advice). After `maxReturns` returns of one card, the next attempt passes,
+// with its findings as advice. Every return notice carries a code that lets one card of that agent skip triage once.
+// Every check fails open: when a command is missing, exits with an error, runs out of time or prints something
+// unreadable, that check has no findings, and the agent logs why.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Card } from '../../src/core/types.ts';
 import type { Ruling } from '../../src/extensions/card-hook.ts';
+import { TriageState } from './state.ts';
 
 export const VALE_INI = path.join(import.meta.dirname, 'vale', '.vale.ini');
 export const CARD_PROMPT = path.join(import.meta.dirname, 'card-prompt.md');
@@ -21,9 +23,20 @@ export const CARD_QUESTION = 'Can the person make the decision this card asks fo
 export interface PrVerdictConfig {
   /** The command and its first arguments. The check appends the pull request's URL and --json. */
   command: string[];
-  /** The verdicts that pass the card. Any other verdict returns it. */
+  /** The verdicts that pass the card. Any other verdict blocks it or gives advice, by the policy's threshold. */
   acceptVerdicts: string[];
   timeoutMs: number;
+}
+
+/** What a finding does: `block` sends the card back, `advise` lets it through and tells the agent, `ignore` drops it. */
+export type Level = 'block' | 'advise' | 'ignore';
+
+export interface Policy {
+  valeErrors: Level;
+  valeWarnings: Level;
+  classifierMissingContext: Level;
+  /** A verdict the PR-verdict command does not accept blocks the card below this confidence, and is advice from it up. */
+  prVerdictBlockBelow: number;
 }
 
 export interface ExampleConfig {
@@ -33,9 +46,21 @@ export interface ExampleConfig {
   valeTimeoutMs: number;
   classifierTimeoutMs: number;
   prVerdict?: PrVerdictConfig;
+  policy: Policy;
+  /** How many times one card goes back before its next attempt passes with the findings as advice. */
+  maxReturns: number;
+  /** Where the agent keeps the return counts and the bypass codes. */
+  stateFile: string;
 }
 
-export const DEFAULTS: ExampleConfig = { vale: ['vale'], classifier: ['pr-context-classifier'], valeTimeoutMs: 30_000, classifierTimeoutMs: 150_000 };
+export const DEFAULTS: ExampleConfig = {
+  vale: ['vale'], classifier: ['pr-context-classifier'], valeTimeoutMs: 30_000, classifierTimeoutMs: 150_000,
+  policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', prVerdictBlockBelow: 0.5 },
+  maxReturns: 3,
+  stateFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'),
+};
+/** The tag an agent sets, to the code a return notice gave it, to let one urgent card skip triage. */
+export const BYPASS_TAG = 'triage-bypass';
 const PR_VERDICT_DEFAULTS = { acceptVerdicts: ['ACCEPT'], timeoutMs: 300_000 };
 
 export function defaultConfigPath(): string {
@@ -44,7 +69,7 @@ export function defaultConfigPath(): string {
 
 /** The local config, over the defaults. A missing file gives the defaults, which have no PR-verdict command. */
 export function loadConfig(file = defaultConfigPath()): ExampleConfig {
-  if (!fs.existsSync(file)) return { ...DEFAULTS };
+  if (!fs.existsSync(file)) return { ...DEFAULTS, policy: { ...DEFAULTS.policy } };
   const bad = (what: string): never => { throw new Error(`${file}: ${what}`); };
   let raw: Record<string, unknown>;
   try {
@@ -55,11 +80,26 @@ export function loadConfig(file = defaultConfigPath()): ExampleConfig {
   const strings = (name: string, v: unknown): string[] =>
     Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string') ? v : bad(`${name} must be a list of strings, such as ["vale"]`);
   const ms = (name: string, v: unknown): number => typeof v === 'number' && v > 0 ? v : bad(`${name} must be a positive number of milliseconds`);
-  const cfg: ExampleConfig = { ...DEFAULTS };
+  const level = (name: string, v: unknown): Level => v === 'block' || v === 'advise' || v === 'ignore' ? v : bad(`${name} must be block, advise or ignore`);
+  const cfg: ExampleConfig = { ...DEFAULTS, policy: { ...DEFAULTS.policy } };
   if (raw['vale'] !== undefined) cfg.vale = strings('vale', raw['vale']);
   if (raw['classifier'] !== undefined) cfg.classifier = strings('classifier', raw['classifier']);
   if (raw['valeTimeoutMs'] !== undefined) cfg.valeTimeoutMs = ms('valeTimeoutMs', raw['valeTimeoutMs']);
   if (raw['classifierTimeoutMs'] !== undefined) cfg.classifierTimeoutMs = ms('classifierTimeoutMs', raw['classifierTimeoutMs']);
+  const policy = (raw['policy'] ?? {}) as Record<string, unknown>;
+  for (const k of ['valeErrors', 'valeWarnings', 'classifierMissingContext'] as const) if (policy[k] !== undefined) cfg.policy[k] = level(`policy.${k}`, policy[k]);
+  if (policy['prVerdictBlockBelow'] !== undefined) {
+    const t = policy['prVerdictBlockBelow'];
+    cfg.policy.prVerdictBlockBelow = typeof t === 'number' && t >= 0 && t <= 1 ? t : bad('policy.prVerdictBlockBelow must be a number from 0 to 1');
+  }
+  if (raw['maxReturns'] !== undefined) {
+    const m = raw['maxReturns'];
+    cfg.maxReturns = Number.isInteger(m) && (m as number) >= 0 ? m as number : bad('maxReturns must be a whole number, 0 or more');
+  }
+  if (raw['stateFile'] !== undefined) {
+    const f = typeof raw['stateFile'] === 'string' ? raw['stateFile'] : bad('stateFile must be a path');
+    cfg.stateFile = f.startsWith('~/') ? path.join(os.homedir(), f.slice(2)) : f;
+  }
   const pr = raw['prVerdict'] as Record<string, unknown> | undefined;
   if (pr !== undefined && pr !== null) {
     cfg.prVerdict = {
@@ -71,9 +111,10 @@ export function loadConfig(file = defaultConfigPath()): ExampleConfig {
   return cfg;
 }
 
-/** How long the inbox waits for this agent: every check at its full timeout, and ten seconds to spare. */
+/** How long the inbox waits for this agent: the slowest check at its full timeout, since they run at once, and ten
+ * seconds to spare. */
 export function hookTimeoutMs(cfg: ExampleConfig): number {
-  return Math.min(cfg.valeTimeoutMs + cfg.classifierTimeoutMs + (cfg.prVerdict?.timeoutMs ?? 0) + 10_000, 600_000);
+  return Math.min(Math.max(cfg.valeTimeoutMs, cfg.classifierTimeoutMs, cfg.prVerdict?.timeoutMs ?? 0) + 10_000, 600_000);
 }
 
 /** The card's prose as Markdown for vale, one paragraph per field, and the field each line of it came from. */
@@ -145,32 +186,55 @@ export const runCommand: RunCommand = (argv, input, timeoutMs, signal) => new Pr
   child.stdin.end(input);
 });
 
-/** What one check decided: a verdict, or nothing because it could not run. */
-type CheckOutcome = Ruling | { skipped: string };
 
-/** Run one command and read its output. Anything that goes wrong becomes a reason to skip the check. */
-async function ask<T>(label: string, argv: string[], input: string, timeoutMs: number, okCodes: number[], read: (stdout: string) => T | undefined, run: RunCommand, signal?: AbortSignal): Promise<T | { skipped: string }> {
+/** Run one command and read its output. Anything that goes wrong becomes a reason the check could not run. A command
+ * whose exit code carries its verdict, as a PR-verdict tool's often does, sets `anyExit`: its output decides. */
+async function ask<T>(label: string, argv: string[], input: string, timeoutMs: number, okCodes: number[] | 'any', read: (stdout: string) => T | undefined, run: RunCommand, signal?: AbortSignal): Promise<T | { skipped: string }> {
   let res: CommandResult;
   try {
     res = await run(argv, input, timeoutMs, signal);
   } catch (e) {
     return { skipped: `${label} ${(e as Error).message}` };
   }
-  if (res.code === null || !okCodes.includes(res.code)) return { skipped: `${label} exited with ${res.code}: ${res.stderr.trim().slice(0, 300)}` };
+  const exitedBadly = res.code === null || (okCodes !== 'any' && !okCodes.includes(res.code));
   let value: T | undefined;
   try {
-    value = read(res.stdout);
+    value = exitedBadly ? undefined : read(res.stdout);
   } catch {
     value = undefined;
   }
-  return value === undefined ? { skipped: `${label} gave output it could not read: ${res.stdout.trim().slice(0, 200)}` } : value;
+  if (value !== undefined) return value;
+  if (exitedBadly || res.code !== 0) return { skipped: `${label} exited with ${res.code}: ${res.stderr.trim().slice(0, 300)}` };
+  return { skipped: `${label} gave output it could not read: ${res.stdout.trim().slice(0, 200)}` };
 }
 
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === 'string');
 
+export type CheckName = 'Vale' | 'Card classifier' | 'PR verdict';
+
+/** Findings of one check at one level, as lines of the notice. */
+export interface Section { check: CheckName; level: 'block' | 'advise'; lines: string[] }
+
+/** What one check found, or why it could not run. `detail` keeps the check's own output for the eval. */
+export interface CheckReport {
+  check: CheckName;
+  sections: Section[];
+  skipped?: string;
+  detail?: { vale?: { rule: string; severity: string }[]; classifier?: { verdict: string; rationale: string; questions: string[] }; prVerdict?: { pr: string; verdict: string; confidence?: number } };
+}
+
+/** The most findings one section lists, so the whole notice fits what the inbox keeps. */
+const MAX_LINES = 12;
+
+function section(check: CheckName, level: Level, lines: string[]): Section[] {
+  if (level === 'ignore' || !lines.length) return [];
+  const shown = lines.length > MAX_LINES ? [...lines.slice(0, MAX_LINES), `- and ${lines.length - MAX_LINES} more`] : lines;
+  return [{ check, level, lines: shown }];
+}
+
 interface ValeAlert { Line: number; Check: string; Message: string; Severity: string; Match?: string }
 
-export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckOutcome> {
+export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport> {
   const { doc, fieldAt } = cardProse(card);
   // Vale exits 1 when it finds an error, and still prints its JSON.
   const alerts = await ask('vale', [...cfg.vale, '--no-global', '--config', VALE_INI, '--output=JSON', '--ext=.md'], doc, cfg.valeTimeoutMs, [0, 1], (out) => {
@@ -178,21 +242,26 @@ export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand 
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
     return Object.values(parsed as Record<string, ValeAlert[]>).flat();
   }, run, signal);
-  if ('skipped' in alerts) return alerts;
-  const errors = alerts.filter((a) => a.Severity === 'error');
-  if (!errors.length) return { verdict: 'pass', reason: 'vale found no error.' };
+  if ('skipped' in alerts) return { check: 'Vale', sections: [], skipped: alerts.skipped };
   const lines = doc.split('\n');
-  const findings = errors.map((a) => {
+  const describe = (a: ValeAlert): string => {
     const field = fieldAt(a.Line);
     const first = lines.findIndex((_, i) => fieldAt(i + 1) === field) + 1;
     return `- ${field}, line ${a.Line - first + 1}: ${a.Check}: ${a.Message}${a.Match ? ` ("${a.Match}")` : ''}`;
-  });
-  return { verdict: 'return', reason: `vale found ${errors.length === 1 ? 'an error' : `${errors.length} errors`} in the card's prose. Fix each one and post the card again:\n${findings.join('\n')}` };
+  };
+  return {
+    check: 'Vale',
+    sections: [
+      ...section('Vale', cfg.policy.valeErrors, alerts.filter((a) => a.Severity === 'error').map(describe)),
+      ...section('Vale', cfg.policy.valeWarnings, alerts.filter((a) => a.Severity !== 'error').map(describe)),
+    ],
+    detail: { vale: alerts.map((a) => ({ rule: a.Check, severity: a.Severity })) },
+  };
 }
 
 interface Classification { verdict: string; rationale?: string; clarifyingQuestions?: string[] }
 
-export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckOutcome> {
+export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport> {
   const result = await ask('classifier', [...cfg.classifier, '-p', CARD_PROMPT, '-q', CARD_QUESTION, '-'], cardText(card), cfg.classifierTimeoutMs, [0], (out) => {
     const c = JSON.parse(out) as Classification;
     if (c.verdict !== 'COMPLETE' && c.verdict !== 'MISSING_CONTEXT') return undefined;
@@ -200,53 +269,94 @@ export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCo
     if (c.clarifyingQuestions !== undefined && !isStrings(c.clarifyingQuestions)) return undefined;
     return c;
   }, run, signal);
-  if ('skipped' in result) return result;
-  if (result.verdict === 'COMPLETE') return { verdict: 'pass', reason: result.rationale ?? 'The classifier found the card complete.' };
-  const questions = (result.clarifyingQuestions ?? []).map((q) => `- ${q}`);
-  return { verdict: 'return', reason: [`The card lacks context the person needs: ${result.rationale ?? ''}`.trim(), ...(questions.length ? ['Answer these on the card:', ...questions] : [])].join('\n') };
+  if ('skipped' in result) return { check: 'Card classifier', sections: [], skipped: result.skipped };
+  const questions = result.clarifyingQuestions ?? [];
+  const detail = { classifier: { verdict: result.verdict, rationale: result.rationale ?? '', questions } };
+  if (result.verdict === 'COMPLETE') return { check: 'Card classifier', sections: [], detail };
+  const lines = [`The card lacks context the person needs: ${result.rationale ?? ''}`.trim(), ...questions.map((q) => `- ${q}`)];
+  return { check: 'Card classifier', sections: section('Card classifier', cfg.policy.classifierMissingContext, lines), detail };
 }
 
 const PR_TAG = /^([\w.-]+)\/([\w.-]+)#(\d+)$/;
 
 interface PrVerdict { verdict: string; confidence_accept?: number; items?: { direction?: string; effect_label?: string; text?: string; action?: string | null }[] }
 
-export async function prVerdictCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckOutcome> {
-  if (!cfg.prVerdict) return { skipped: 'PR verdict is off: the local config names no command' };
+export async function prVerdictCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport> {
+  if (!cfg.prVerdict) return { check: 'PR verdict', sections: [], skipped: 'PR verdict is off: the local config names no command' };
   const m = PR_TAG.exec(card.tags?.['pr'] ?? '');
-  if (!m) return { skipped: 'PR verdict did not run: the card has no pr tag of the form owner/repo#number' };
+  if (!m) return { check: 'PR verdict', sections: [], skipped: 'PR verdict did not run: the card has no pr tag of the form owner/repo#number' };
   const [, owner, repo, number] = m;
+  const pr = `${owner}/${repo}#${number}`;
   const { command, acceptVerdicts, timeoutMs } = cfg.prVerdict;
-  const result = await ask('PR verdict', [...command, `https://github.com/${owner}/${repo}/pull/${number}`, '--json'], '', timeoutMs, [0], (out) => {
+  const result = await ask('PR verdict', [...command, `https://github.com/${owner}/${repo}/pull/${number}`, '--json'], '', timeoutMs, 'any', (out) => {
     const v = JSON.parse(out) as PrVerdict;
     if (typeof v.verdict !== 'string') return undefined;
     if (v.confidence_accept !== undefined && typeof v.confidence_accept !== 'number') return undefined;
     if (v.items !== undefined && !(Array.isArray(v.items) && v.items.every((i) => typeof i === 'object' && i !== null))) return undefined;
     return v;
   }, run, signal);
-  if ('skipped' in result) return result;
-  if (acceptVerdicts.includes(result.verdict)) return { verdict: 'pass', reason: `The PR-verdict command answered ${result.verdict}.` };
-  const confidence = typeof result.confidence_accept === 'number' ? `${Math.round(result.confidence_accept * 100)} in 100` : 'unknown';
-  const reasons = (result.items ?? []).filter((i) => i.direction === 'toward_pushback')
-    .map((i) => `- ${i.action ?? i.text ?? ''}${i.effect_label ? ` (${i.effect_label})` : ''}`);
-  return {
-    verdict: 'return',
-    reason: [`The PR-verdict command answered ${result.verdict} for ${owner}/${repo}#${number}, not ${acceptVerdicts.join(' or ')}. Its confidence that the pull request merges as it stands is ${confidence}.`,
-      ...(reasons.length ? ['Address these before you ask the person to merge:', ...reasons] : [])].join('\n'),
-  };
+  if ('skipped' in result) return { check: 'PR verdict', sections: [], skipped: result.skipped };
+  const confidence = result.confidence_accept;
+  const detail = { prVerdict: { pr, verdict: result.verdict, ...(confidence === undefined ? {} : { confidence }) } };
+  if (acceptVerdicts.includes(result.verdict)) return { check: 'PR verdict', sections: [], detail };
+  const level: Level = confidence === undefined || confidence < cfg.policy.prVerdictBlockBelow ? 'block' : 'advise';
+  const lines = [
+    `The PR-verdict command answered ${result.verdict} for ${pr}, not ${acceptVerdicts.join(' or ')}. Its confidence that the pull request merges as it stands is ${confidence === undefined ? 'unknown' : `${Math.round(confidence * 100)} in 100`}.`,
+    ...(result.items ?? []).filter((i) => i.direction === 'toward_pushback').map((i) => `- ${i.action ?? i.text ?? ''}${i.effect_label ? ` (${i.effect_label})` : ''}`),
+  ];
+  return { check: 'PR verdict', sections: section('PR verdict', level, lines), detail };
 }
 
-/** Run the checks in order. The first one that returns the card decides, and a check that cannot run passes. */
-export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unknown[]) => void, signal?: AbortSignal, run: RunCommand = runCommand): Promise<Ruling> {
-  const passed: string[] = [];
-  for (const check of [valeCheck, classifierCheck, prVerdictCheck]) {
-    if (signal?.aborted) break;
-    const outcome = await check(card, cfg, run, signal);
-    if ('skipped' in outcome) {
-      log(card.id, `${outcome.skipped}, so this check passed the card.`);
-      continue;
+/** Run all three checks at once. A check that cannot run reports why and finds nothing. */
+export async function runChecks(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport[]> {
+  return Promise.all([valeCheck(card, cfg, run, signal), classifierCheck(card, cfg, run, signal), prVerdictCheck(card, cfg, run, signal)]);
+}
+
+/** The text of every section, check by check, the blocking findings of a check before its advice. */
+function sectionsText(sections: Section[], as?: 'advise'): string {
+  return sections.map((s) => `${s.check}, ${(as ?? s.level) === 'block' ? 'must fix' : 'advice'}:\n${s.lines.join('\n')}`).join('\n\n');
+}
+
+/** Cut the middle of a notice so its head and its tail fit what the inbox keeps. */
+function fit(head: string, body: string, tail: string, max = 3900): string {
+  const room = max - head.length - tail.length - 8;
+  const cut = body.length > room ? `${body.slice(0, Math.max(0, room - 2))}\n…` : body;
+  return [head, cut, tail].filter(Boolean).join('\n\n');
+}
+
+export interface CheckOptions { signal?: AbortSignal; run?: RunCommand; state?: TriageState }
+
+/** Check a card and decide: return it with every finding, pass it with advice, or pass it. */
+export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unknown[]) => void, opts: CheckOptions = {}): Promise<Ruling> {
+  const state = opts.state ?? new TriageState(undefined);
+  let note = '';
+  const code = card.tags?.[BYPASS_TAG];
+  if (code) {
+    const used = state.useBypass(code, card.agent, card.id);
+    if (used.ok) {
+      log(card.id, `bypass used by agent ${card.agent} on card ${card.id}, with the code from card ${used.issuedFor}`);
+      return { verdict: 'pass', reason: 'Passed without checks: the agent used a triage bypass code for an urgent card.' };
     }
-    if (outcome.verdict === 'return') return outcome;
-    passed.push(outcome.reason);
+    log(card.id, `bypass refused for agent ${card.agent} on card ${card.id}: ${used.why}`);
+    note = `The ${BYPASS_TAG} code on this card is not valid: ${used.why}, so triage checked the card.`;
   }
-  return { verdict: 'pass', reason: passed.join(' ') || 'No check could run, so the card went through.' };
+  const reports = await runChecks(card, cfg, opts.run ?? runCommand, opts.signal);
+  for (const r of reports) if (r.skipped) log(card.id, `${r.skipped}, so this check found nothing.`);
+  const sections = reports.flatMap((r) => r.sections);
+  const blocking = sections.some((s) => s.level === 'block');
+  if (opts.signal?.aborted) return { verdict: 'pass', reason: 'The triage agent stopped, so the card went through.' };
+  if (!sections.length) return { verdict: 'pass', reason: note || 'Every check that ran passed the card.' };
+  const chain = state.chainOf(card);
+  if (blocking && state.returns(chain) < cfg.maxReturns) {
+    const { returns, code: next } = state.recordReturn(chain, card);
+    const head = [note, 'Triage sent this card back. Fix everything below in one revision, then post the card again.'].filter(Boolean).join('\n');
+    const tail = [
+      `This is return ${returns} of ${cfg.maxReturns}. After that, triage lets the card through and sends these findings as advice.`,
+      `If the card is urgent, post it again with the tag \`${BYPASS_TAG}: ${next}\` to skip triage once.`,
+    ].join('\n');
+    return { verdict: 'return', reason: fit(head, sectionsText(sections), tail) };
+  }
+  const advice = fit('Triage let this card through to the person, with this advice for it and the next cards:', sectionsText(sections, 'advise'), '');
+  const reason = blocking ? `Passed after ${state.returns(chain)} returns, the most triage makes, with its findings as advice.` : 'Passed with advice for the agent.';
+  return { verdict: 'pass', reason: [note, reason].filter(Boolean).join(' '), advice };
 }

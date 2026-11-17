@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerPairing } from './client.ts';
+import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerConfig, ownerPairing, runningHere } from './client.ts';
 import { parseTagsFlag } from './integrations/tags.ts';
 import type { Option, Priority, PublicSubscription } from './core/types.ts';
 import { homeDir, readHome, writePrivate } from './node/home.ts';
@@ -193,19 +193,9 @@ async function signInLink(): Promise<string> {
   return `${target.url}/#signin=${encodeURIComponent(code)}`;
 }
 
-/** The inbox this machine runs, with its owner token, or undefined when it runs none. */
-function runningHere(): { url: string; token: string } | undefined {
-  try {
-    const { url } = JSON.parse(fs.readFileSync(path.join(homeDir(), 'server.json'), 'utf8')) as { url: string };
-    return { url, token: fs.readFileSync(path.join(homeDir(), 'owner-token'), 'utf8').trim() };
-  } catch {
-    return undefined;
-  }
-}
-
 /** The inbox the PIN commands change: the one this machine runs, or else the one this machine paired with as owner. */
 function pinTarget(): { url: string; token: string } {
-  return runningHere() ?? ownerPairing() ?? fail('No inbox runs on this machine. Start one with `your-attention serve`, or pair as owner with `your-attention pair <url> --role owner`.');
+  return ownerConfig() ?? fail('No inbox runs on this machine. Start one with `your-attention serve`, or pair as owner with `your-attention pair <url> --role owner`.');
 }
 
 function localServer(): { url: string; owner: string } {
@@ -608,7 +598,7 @@ switch (command) {
       // The owner token of the inbox this machine runs, or else the owner pairing, as for `login-url`.
       const { checkOwner, watchOwner } = await import('./owner-watch.ts');
       const { ApiError } = await import('./tui/api.ts');
-      const target = runningHere() ?? ownerPairing() ?? fail('This machine runs no inbox and is not paired with one as owner. Pair it as owner with `your-attention pair <url> --role owner`, or start an inbox with `your-attention start`.');
+      const target = ownerConfig() ?? fail('This machine runs no inbox and is not paired with one as owner. Pair it as owner with `your-attention pair <url> --role owner`, or start an inbox with `your-attention start`.');
       await checkOwner(target).catch((e: unknown) => {
         if (e instanceof ApiError && e.status === 403) fail(notOwnerAdvice(target.url));
         if (e instanceof ApiError && e.status === 401) fail(`The inbox at ${target.url} refused this machine's owner token. Pair it again with \`your-attention pair ${target.url} --role owner\`.`);

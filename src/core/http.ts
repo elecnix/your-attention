@@ -594,8 +594,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       return eventStream((send) => inbox.connectExtension(me, reg, (ev) => send(ev.type, ev)), heartbeatMs);
     }
     if (method === 'POST' && a === 'hooks' && b) {
-      const v = await readJson<{ verdict?: Verdict; reason?: string }>(req);
-      return json(publicCard(inbox.hookVerdict(me, b, v.verdict as Verdict, String(v.reason ?? ''))));
+      const v = await readJson<{ verdict?: Verdict; reason?: string; advice?: string }>(req);
+      return json(publicCard(inbox.hookVerdict(me, b, v.verdict as Verdict, String(v.reason ?? ''), String(v.advice ?? ''))));
     }
     if (a === 'webhooks') {
       owner();
