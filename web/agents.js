@@ -58,7 +58,8 @@ function newestCwd(cards, id) {
 export function searchAgents(agents, query) {
   const q = query.trim().toLowerCase();
   if (!q) return agents;
-  return agents.filter((a) => [a.name, a.id, a.cwd, a.pane].some((v) => !!v && v.toLowerCase().includes(q)));
+  // A field is lowercased as text: a row may carry a number or nothing where a name belongs, and a search must not throw.
+  return agents.filter((a) => [a.name, a.id, a.cwd, a.pane].some((v) => v !== undefined && v !== null && String(v).toLowerCase().includes(q)));
 }
 
 /** The agent a pick reads as: the one the person picked while the list still has it, else the first of the list.
