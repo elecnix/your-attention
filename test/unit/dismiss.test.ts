@@ -93,7 +93,7 @@ describe('dismiss', () => {
     assert.ok(inbox.cardDetail('c1', true).card.closed?.draft, 'the owner reads the draft');
     const summary = inbox.summaryState().cards.find((c) => c.id === 'c1');
     assert.ok(summary && !('draft' in summary.closed!), 'the state summary has no draft');
-    assert.equal(inbox.search('quiet thought').length, 0, 'the draft comment is not indexed for search');
+    assert.equal(inbox.search('quiet thought').results.length, 0, 'the draft comment is not indexed for search');
   });
 
   it('keeps a later agent patch off the queue: saved, still closed, still dismissed', () => {

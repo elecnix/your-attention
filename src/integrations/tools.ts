@@ -101,7 +101,7 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_tag',
-    description: 'Set the tags on a card you already posted, so a search finds it and the queue groups it. A key with an empty value removes that key. The card keeps at most 10 tags, and each key and value is at most 100 characters. This changes that card alone; card_tags sets the default tags that every card of this session inherits.',
+    description: 'Set the tags on any card in the inbox, whether this session posted it or another agent did, so a search finds it and the queue groups it. A tag only groups and finds a card, and never changes what it asks or what the person answers. The card records which client set each tag. A key with an empty value removes that key. The card keeps at most 10 tags, and each key and value is at most 100 characters. This changes that card alone; card_tags sets the default tags that every card of this session inherits.',
     schema: {
       type: 'object',
       properties: {
@@ -165,7 +165,21 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_search',
-    description: 'Search the cards the person answered, from every session. Search before you post, so you never ask the same thing twice.',
-    schema: { type: 'object', properties: { query: { type: 'string' }, include_open: { type: 'boolean', description: 'Also return cards nobody answered yet.' }, limit: { type: 'number', description: 'At most this many results, 20 by default.' } }, required: ['query'] },
+    description: 'Search the cards of every session, or list them by filters alone. Search past answers before you post, so the person never answers the same thing twice. A filter works without a query: state "open" lists every card that waits for the person. Each result carries the card\'s state, tags, posting agent, and posted and updated times, so a list answers the common questions without a card_read per card. When the reply carries next_cursor, pass it back as cursor to read the rest of the list.',
+    schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Words to match in the title, text, tags and answer comments. Optional: leave it out, or send "*", to list cards by the filters alone.' },
+        state: { type: 'string', enum: ['open', 'answered', 'delivered', 'read', 'closed', 'orphaned', 'in-triage', 'held'], description: 'Only cards in this state. With it, include_open changes nothing.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Only cards that carry every tag here, as a key alone ("repo") or a key and value ("priority=P1").' },
+        agent: { type: 'string', description: 'Only cards this agent posted, by its agent id or its session name.' },
+        since: { type: 'string', description: 'Only cards posted or updated at or after this time: an ISO date or date-time, or epoch milliseconds.' },
+        before: { type: 'string', description: 'Only cards posted or updated at or before this time: an ISO date or date-time, or epoch milliseconds.' },
+        links: { type: 'string', description: 'Only cards whose text links this card id or URL, such as a pull request address.' },
+        include_open: { type: 'boolean', description: 'Also return cards nobody answered yet. It matters for a search by words alone, because a filter already returns every state it matches.' },
+        limit: { type: 'number', description: 'At most this many results: 20 by default, and no call returns more than 100.' },
+        cursor: { type: 'string', description: 'The next_cursor of an earlier reply, to read the page after it.' },
+      },
+    },
   },
 ];

@@ -31,6 +31,46 @@ export interface Caller {
   role: Role;
 }
 
+/** The filters a card search or listing takes. Each one is optional, and every filter given must match. */
+export interface SearchFilters {
+  /** Keep only cards the person answered. */
+  answered?: boolean;
+  /** Keep only cards in this state. */
+  state?: CardState;
+  /** Keep only cards that carry every tag listed: a key alone, or a key and a value as `key=value`. */
+  tags?: string[];
+  /** Keep only cards this agent posted, by its agent id or a part of its session name. */
+  agent?: string;
+  /** Keep only cards posted or updated at or after this time, in epoch milliseconds. */
+  since?: number;
+  /** Keep only cards posted or updated at or before this time, in epoch milliseconds. */
+  before?: number;
+  /** Keep only cards whose text links this card id or URL. */
+  links?: string;
+  /** The most results to return. A search returns 20 by default, and no call returns more than 100 at a time. */
+  limit?: number;
+  /** The `nextCursor` of an earlier call, to read the page after it. */
+  cursor?: string;
+}
+
+/** One matched card, with its answer when it has one, and the state the inbox shows for it. */
+export interface SearchResult {
+  card: Card;
+  answer?: Answer;
+  state: CardState;
+}
+
+export interface SearchPage {
+  results: SearchResult[];
+  /** Set when more cards match: pass it as `cursor` to read the next page. */
+  nextCursor?: string;
+}
+
+/** Every state a card can be in, for a filter that names one. */
+const CARD_STATES = new Set<CardState>(['in-triage', 'held', 'open', 'orphaned', 'answered', 'delivered', 'read', 'closed']);
+/** The most results one search or listing call returns, so a cursor reads the rest. */
+export const MAX_SEARCH_LIMIT = 100;
+
 /** Types an approved sentence into a herdr pane as the person's message, and names a pane's agent and tab. */
 export interface ApprovalSender {
   /** Rejects with the reason when it sends nothing, such as a draft in the pane's input box. */
@@ -186,6 +226,17 @@ export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, a
   return 'answered';
 }
 
+/** What a card link shows of its target: its state, how it closed, and when the person answered or the card closed.
+ * The outcome text of a close and the person's draft stay out, since a link only says which way the card ended. */
+export interface LinkOutcome { state: CardState; kind?: CloseKind; at?: number }
+export interface LinkedCard { title: string; preview?: string; archivedAt?: number; outcome: LinkOutcome }
+
+export function linkOutcome(card: Pick<Card, 'closed' | 'triage'>, answer: Pick<Answer, 'savedAt' | 'readAt' | 'deliveredAt'> | undefined): LinkOutcome {
+  const state = cardState(card, answer);
+  if (state === 'closed' && card.closed) return { state, kind: card.closed.kind, at: card.closed.at };
+  return answer && state !== 'closed' ? { state, at: answer.savedAt } : { state };
+}
+
 /** The agent an answer goes to, or null for none. A guidance card closes as the person answers it, and its answer
  * still goes to the agent that proposed the text. */
 function recipient(card: Card, answer: Answer): string | null {
@@ -251,6 +302,14 @@ export function mergeDefaultTags(defaults: Record<string, string>, own: Record<s
   while (Object.keys(tags).length > MAX_TAGS && inherited.length) delete tags[inherited.pop() as string];
   if (Object.keys(tags).length > MAX_TAGS) throw new InboxError(400, `a card takes at most ${MAX_TAGS} tags, with its agent's defaults`);
   return { tags: Object.keys(tags).length ? tags : undefined, inherited };
+}
+
+/** Which client set each tag, kept for the keys a card still carries after a revision. A repost may drop a tag, and
+ * its record goes with it. */
+function keptTagFrom(from: Record<string, string> | undefined, tags: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!from || !tags) return undefined;
+  const kept = Object.entries(from).filter(([k]) => Object.hasOwn(tags, k));
+  return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
 export class Inbox {
@@ -599,6 +658,8 @@ export class Inbox {
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
       tags: mergedTags.tags,
+      // A revision keeps the record of who set each tag for the keys the card still carries. A client never sends it.
+      tagFrom: keptTagFrom(before?.tagFrom, mergedTags.tags),
       follows: input.follows ?? before?.follows,
       followedBy: before?.followedBy,
       deliver: input.deliver ?? 'stream',
@@ -1165,22 +1226,29 @@ export class Inbox {
   }
 
   /** Merge tags into a card that is already posted, so a card that went out without a topic can be found by a search
-   * and grouped later. A key with an empty value removes that key. Only the owner and the token that posted the card
-   * may call it, as with every other route that changes one card. */
+   * and grouped later. A key with an empty value removes that key. Any agent may call it, and the owner, because a tag
+   * only groups and finds a card and never changes what it asks or what the person answers; `patch`, `close` and a
+   * repost keep their ownership check. The card records in `tagFrom` which client set each key. */
   tagCard(caller: Caller, id: string, tags: unknown): Card {
-    const card = this.owned(caller, id);
+    if (caller.role === 'extension') throw new InboxError(403, 'an extension tags no cards');
+    const card = this.getCard(id);
     if (!tags || typeof tags !== 'object' || Array.isArray(tags)) throw new InboxError(400, 'tags must be an object of tag keys and values');
+    const setter = this.store.get<Token>('tokens', caller.token)?.name ?? caller.role;
     const next = new Map(Object.entries(card.tags ?? {}));
+    const from = new Map(Object.entries(card.tagFrom ?? {}));
     const added: string[] = [];
     for (const [k, raw] of Object.entries(tags)) {
       if (!k) throw new InboxError(400, 'each tag needs a key');
       if (k.length > MAX_TAG_CHARS) throw new InboxError(400, `tag key ${k.slice(0, 20)}… must be at most ${MAX_TAG_CHARS} characters`);
       const value = String(raw ?? '');
       if (value.length > MAX_TAG_CHARS) throw new InboxError(400, `tag ${k} must be at most ${MAX_TAG_CHARS} characters`);
-      if (value === '') next.delete(k);
-      else {
+      if (value === '') {
+        next.delete(k);
+        from.delete(k);
+      } else {
         if (!next.has(k)) added.push(k);
         next.set(k, value);
+        from.set(k, setter);
       }
     }
     // The limit reads the tags the card keeps at the end, so one call may remove a key and add another. A card that
@@ -1188,7 +1256,7 @@ export class Inbox {
     if (next.size > MAX_TAGS && added.length) throw new InboxError(400, `tag ${added[added.length - 1]} takes the card past its ${MAX_TAGS} tags`);
     // fromEntries gives a key named like an Object property its own key, so a tag may read `toString`.
     const merged = Object.fromEntries(next);
-    const updated: Card = { ...card, tags: next.size ? merged : undefined };
+    const updated: Card = { ...card, tags: next.size ? merged : undefined, tagFrom: from.size ? Object.fromEntries(from) : undefined };
     this.store.put('cards', id, updated);
     // Search reads the card's tags. The answer's comment stays searchable when the card is written again.
     const answer = this.store.get<Answer>('answers', id);
@@ -1650,22 +1718,17 @@ export class Inbox {
     return `Sent guidance version ${guidance.version} to ${sent} connected agent${sent === 1 ? '' : 's'}. The others get it when they connect.`;
   }
 
-  /** The cards a client may read, with their states: all of them for the owner. */
-  listCards(caller: Caller): { card: Card; state: CardState }[] {
-    return this.store.list<Card>('cards')
-      .filter((c) => caller.role === 'owner' || c.token === caller.token)
-      .map((c) => ({ card: publicCard(c), state: cardState(c, this.store.get<Answer>('answers', c.id)) }));
-  }
-
-  /** The title, text preview and clear time of each card the caller may read, by id, for the card links on screen.
-   * A cleared card leaves the state but stays stored until the purge, so its links still name it. Ids it never stored are left out. */
-  linkedCards(caller: Caller, ids: string[]): Record<string, { title: string; preview?: string; archivedAt?: number }> {
+  /** The title, text preview, clear time and outcome of each card the caller may read, by id, for the card links on screen.
+   * A cleared card leaves the state but stays stored until the purge, so its links still name it, and still say whether the
+   * person answered it or its agent took it back. Ids it never stored are left out. */
+  linkedCards(caller: Caller, ids: string[]): Record<string, LinkedCard> {
     if (ids.length > MAX_LOOKUP) throw new InboxError(400, `name at most ${MAX_LOOKUP} card ids`);
-    const out: [string, { title: string; preview?: string; archivedAt?: number }][] = [];
+    const out: [string, LinkedCard][] = [];
     for (const id of ids) {
       const card = this.store.get<Card>('cards', id);
       if (!card || (caller.role !== 'owner' && card.token !== caller.token)) continue;
-      out.push([id, { title: card.title, ...(card.text ? { preview: card.text.slice(0, 300) } : {}), ...(card.archivedAt ? { archivedAt: card.archivedAt } : {}) }]);
+      const outcome = linkOutcome(card, this.store.get<Answer>('answers', id));
+      out.push([id, { title: card.title, ...(card.text ? { preview: card.text.slice(0, 300) } : {}), ...(card.archivedAt ? { archivedAt: card.archivedAt } : {}), outcome }]);
     }
     // fromEntries makes every id an own key, even one named like an Object property.
     return Object.fromEntries(out);
@@ -1978,15 +2041,62 @@ export class Inbox {
     return { unread: mine.length, cards: mine.slice(0, UNREAD_ID_LIMIT) };
   }
 
-  /** Cards that match the words, best first. `answered` keeps only cards the person answered. */
-  search(query: string, limit = 20, answered = false): { card: Card; answer?: Answer }[] {
-    const hits = this.store.search(String(query || ''), answered ? Math.max(limit * 5, 100) : limit);
-    return hits
-      .filter((h) => !answered || this.store.get('answers', h.card))
-      .slice(0, limit)
-      .map((h) => ({ card: this.store.get<Card>('cards', h.card), answer: this.store.get<Answer>('answers', h.card) }))
-      .filter((r): r is { card: Card; answer: Answer | undefined } => !!r.card)
-      .map(({ card, answer }) => (answer ? { card: publicCard(card), answer } : { card: publicCard(card) }));
+  /** Cards that match the words and the filters, best match first, and newest change first when no words are given.
+   * An empty query, or `*`, lists every card the filters match. `nextCursor` continues a longer list. */
+  search(query: string, filters: SearchFilters = {}): SearchPage {
+    const words = String(query ?? '').trim();
+    // No words list every card, so an agent can ask for the open cards without inventing a word for them.
+    const text = /^\*+$/.test(words) ? '' : words;
+    const cards = text
+      ? this.store.search(text, Number.MAX_SAFE_INTEGER).map((h) => this.store.get<Card>('cards', h.card)).filter((c): c is Card => !!c)
+      : this.store.list<Card>('cards').sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : -1));
+    return this.pageOf(cards, filters, 20);
+  }
+
+  /** The cards a client may read, with their states: all of them for the owner. Takes the filters of a search without
+   * the words, and returns every matching card unless a `limit` asks for pages. */
+  listCards(caller: Caller, filters: SearchFilters = {}): { results: { card: Card; state: CardState }[]; nextCursor?: string } {
+    const page = this.pageOf(this.store.list<Card>('cards').filter((c) => caller.role === 'owner' || c.token === caller.token), filters);
+    return { results: page.results.map(({ card, state }) => ({ card, state })), ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+  }
+
+  /** Filter the cards, page them, and give each result its answer and its state. */
+  private pageOf(cards: Card[], filters: SearchFilters, defaultLimit?: number): SearchPage {
+    if (filters.state !== undefined && !CARD_STATES.has(filters.state)) throw new InboxError(400, `state must be one of ${[...CARD_STATES].join(', ')}`);
+    const offset = readCursor(filters.cursor);
+    const asked = filters.limit ?? defaultLimit;
+    if (asked !== undefined && (!Number.isInteger(asked) || asked < 1)) throw new InboxError(400, 'limit must be a whole number of results');
+    const matched = cards
+      .map((card) => ({ card, answer: this.store.get<Answer>('answers', card.id) }))
+      .filter(({ card, answer }) => this.matchesFilters(card, answer, filters));
+    const limit = asked === undefined ? matched.length : Math.min(asked, MAX_SEARCH_LIMIT);
+    const results = matched.slice(offset, offset + limit).map(({ card, answer }): SearchResult => (
+      { card: publicCard(card), ...(answer ? { answer } : {}), state: this.shownState(card, this.store.get<Presence>('presence', card.agent), answer) }
+    ));
+    return offset + limit < matched.length ? { results, nextCursor: writeCursor(offset + limit) } : { results };
+  }
+
+  /** Whether a card passes every filter given. A search and the cards listing filter the same way. */
+  private matchesFilters(card: Card, answer: Answer | undefined, f: SearchFilters): boolean {
+    if (f.answered && !answer) return false;
+    if (f.state !== undefined && this.shownState(card, this.store.get<Presence>('presence', card.agent), answer) !== f.state) return false;
+    for (const tag of f.tags ?? []) {
+      const at = tag.indexOf('=');
+      const key = at < 0 ? tag : tag.slice(0, at);
+      if (!card.tags || !Object.hasOwn(card.tags, key)) return false;
+      if (at >= 0 && card.tags[key] !== tag.slice(at + 1)) return false;
+    }
+    // A session name is what the person sees on the card, and the agent id is what the client knows.
+    if (f.agent !== undefined && card.agent !== f.agent && !(card.origin?.name ?? '').toLowerCase().includes(f.agent.toLowerCase())) return false;
+    if (f.since !== undefined || f.before !== undefined) {
+      const inside = (t: number): boolean => (f.since === undefined || t >= f.since) && (f.before === undefined || t <= f.before);
+      if (!inside(card.createdAt) && !inside(card.updatedAt)) return false;
+    }
+    if (f.links !== undefined) {
+      const needle = f.links.toLowerCase();
+      if (!cardLinks(card).some((link) => link.toLowerCase().includes(needle))) return false;
+    }
+    return true;
   }
 
   /** This inbox's stable identity, the same over every link to it. */
@@ -2600,6 +2710,29 @@ function checkQuestions(questions: unknown): void {
     }
     if (!q.multiSelect && q.options.filter((o) => o.recommended === true).length > 1) throw new InboxError(400, `${at}: a question without multiSelect takes at most one recommended option`);
   });
+}
+
+/** A cursor is where the next page starts in the matched list, encoded so a caller treats it as opaque. */
+function writeCursor(offset: number): string {
+  return btoa(String(offset));
+}
+
+function readCursor(cursor: string | undefined): number {
+  if (cursor === undefined || cursor === '') return 0;
+  let offset = Number.NaN;
+  try { offset = Number(atob(cursor)); } catch { /* a cursor this inbox never wrote */ }
+  if (!Number.isInteger(offset) || offset < 0) throw new InboxError(400, 'cursor is not one this inbox gave out: start again without it');
+  return offset;
+}
+
+/** The cards and URLs a card's text links: [[card-id]] references and http, https or file addresses. The `links`
+ * filter matches a part of one of these, such as a pull request address. */
+function cardLinks(card: Card): string[] {
+  const text = `${card.title}\n${card.text ?? ''}\n${card.recommendation ?? ''}`;
+  return [
+    ...[...text.matchAll(/\[\[([\w.:-]{1,80})\]\]/g)].map((m) => m[1] as string),
+    ...[...text.matchAll(/(?:https?|file):\/\/[^\s<>()[\]]+/g)].map((m) => m[0]),
+  ];
 }
 
 /** The text search matches: the card's words, its tags, and its file names. */

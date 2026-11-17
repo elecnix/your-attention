@@ -191,7 +191,7 @@ describe('the hosted Cloudflare build', () => {
 
   it('searches past answers in the Durable Object storage', async () => {
     const hits = await new Client({ url: inbox, token: agent }).search('workerd');
-    assert.ok(hits.some((h) => h.card.id === 'cf-ws'));
+    assert.ok(hits.results.some((h) => h.card.id === 'cf-ws'));
   });
 
   it('refuses files past the inbox lifetime limit', async () => {

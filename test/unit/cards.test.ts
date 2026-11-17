@@ -448,8 +448,8 @@ describe('search over tags and files', () => {
     const inbox = new Inbox(new MemoryStorage());
     const agent: Caller = { token: 'ta', role: 'agent' };
     await inbox.postCardWithFiles(agent, { id: 't1', agent: 's1', title: 'q', tags: { topic: 'release' }, attachments: [{ src: 'data:text/plain;base64,aGk=', name: 'rollout-notes.txt' }] });
-    assert.equal(inbox.search('release')[0]?.card.id, 't1');
-    assert.equal(inbox.search('rollout')[0]?.card.id, 't1');
+    assert.equal(inbox.search('release').results[0]?.card.id, 't1');
+    assert.equal(inbox.search('rollout').results[0]?.card.id, 't1');
   });
 
   it('names the file that is too large', async () => {
@@ -500,8 +500,8 @@ describe('fixes from the dogfood run', () => {
     inbox.postCard(agent, { id: 'a1', agent: 's1', title: 'cache size question' });
     inbox.postCard(agent, { id: 'a2', agent: 's1', title: 'cache policy question' });
     await inbox.answer('a2', { comment: 'LRU' });
-    assert.equal(inbox.search('cache').length, 2);
-    assert.deepEqual(inbox.search('cache', 20, true).map((r) => r.card.id), ['a2']);
+    assert.equal(inbox.search('cache').results.length, 2);
+    assert.deepEqual(inbox.search('cache', { limit: 20, answered: true }).results.map((r) => r.card.id), ['a2']);
   });
 });
 

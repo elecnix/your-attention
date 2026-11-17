@@ -41,7 +41,22 @@ export function boxState(ansi: string): { state: 'EMPTY' | 'GHOST' | 'DRAFT' | '
   return found ?? { state: 'NO-BOX', text: '' };
 }
 
-export function herdrApprovals(herdr: Herdr = runHerdr): ApprovalSender {
+/** How often, and how many times, a send reads the box again while it still shows the text sent before. */
+const SETTLE_MS = 100;
+const SETTLE_READS = 30;
+
+const words = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+/** Whether the box shows `sent`, or its first line when the text wraps. */
+const shows = (box: string, sent: string | undefined): boolean => !!sent && !!words(box) && words(sent).startsWith(words(box));
+
+export function herdrApprovals(herdr: Herdr = runHerdr, opts: { pause?: (ms: number) => Promise<void> } = {}): ApprovalSender {
+  const pause = opts.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  // The last text this sender typed into each pane. `agent prompt` returns once the pane accepts it, and the box keeps
+  // showing it a moment longer, so a second approval to the same pane waits for the box to clear instead of taking that
+  // text for the person's draft.
+  const sent = new Map<string, string>();
+  const readBox = async (pane: string) => boxState(await herdr('pane', 'read', pane, '--lines', '40', '--source', 'visible', '--format', 'ansi'));
   const paneInfo = async (pane: string): Promise<Record<string, string | undefined>> => {
     if (!PANE_ID.test(pane)) throw new Error(`${pane} is not a herdr pane id`);
     return (JSON.parse(await herdr('pane', 'get', pane)) as { result: { pane: Record<string, string | undefined> } }).result.pane;
@@ -49,10 +64,16 @@ export function herdrApprovals(herdr: Herdr = runHerdr): ApprovalSender {
   return {
     async send(pane, text) {
       try { await paneInfo(pane); } catch { throw new Error(`herdr has no pane ${pane}`); }
-      const box = boxState(await herdr('pane', 'read', pane, '--lines', '40', '--source', 'visible', '--format', 'ansi'));
+      let box = await readBox(pane);
+      for (let n = 0; box.state === 'DRAFT' && shows(box.text, sent.get(pane)) && n < SETTLE_READS; n++) {
+        await pause(SETTLE_MS);
+        box = await readBox(pane);
+      }
       if (box.state === 'NO-BOX') throw new Error(`pane ${pane} shows no input box, so nothing was sent`);
+      if (box.state === 'DRAFT' && shows(box.text, sent.get(pane))) throw new Error(`the input box in pane ${pane} still shows the approval sent before, so nothing was sent: once it clears, answer again`);
       if (box.state === 'DRAFT') throw new Error(`the input box in pane ${pane} holds a draft you typed, so nothing was sent: send or clear it, then answer again`);
       await herdr('agent', 'prompt', pane, text);
+      sent.set(pane, text);
     },
     async describe(pane) {
       try {

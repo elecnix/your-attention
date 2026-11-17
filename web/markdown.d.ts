@@ -9,8 +9,12 @@ export interface MarkdownOptions<T> {
   breaks?: boolean;
   /** What a ```mermaid block becomes, from its source. */
   diagram?: (source: string, key: string) => T;
+  /** What a link to an http, https or mailto address becomes, or undefined or null for the default link. */
+  link?: (href: string, label: unknown, key: string) => T | null | undefined;
 }
 export const SESSION_LINK: RegExp;
 export const MERMAID_FENCE: RegExp;
 export function renderInline<T>(h: Hyperscript<T>, text: string | undefined, opts?: MarkdownOptions<T>): (T | string)[];
+/** The address of each link renderMarkdown draws in `src`, as its `link` option receives it. */
+export function linkHrefs(src: string): string[];
 export function renderMarkdown<T>(h: Hyperscript<T>, src: string, opts?: MarkdownOptions<T>): T[];

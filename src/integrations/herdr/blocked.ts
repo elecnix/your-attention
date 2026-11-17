@@ -104,7 +104,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
       if (!adopted) {
         // After a restart, take back the cards still open, so no pane gets a second card.
         adopted = true;
-        for (const { card, state } of await inbox.list()) {
+        for (const { card, state } of (await inbox.list()).results) {
           const pane = card.origin?.herdrPane;
           if (card.kind !== 'blocked' || !pane || state === 'closed' || state === 'read') continue;
           open.set(pane, { card, screen: card.screen ?? '', adopted: true, listen: listen(card) });
@@ -112,7 +112,7 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
       }
       const blocked = (await agents()).filter((a) => a.agent_status === 'blocked');
       // A pane whose AskUserQuestion already has a card needs no second card.
-      const askPanes = new Set((await inbox.list())
+      const askPanes = new Set((await inbox.list()).results
         .filter(({ card, state }) => card.dialog && state === 'open' && card.origin?.herdrPane)
         .map(({ card }) => card.origin?.herdrPane));
       let labels: Record<string, string> | undefined;

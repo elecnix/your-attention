@@ -191,6 +191,7 @@ export async function runTriage(cfg: TriageConfig, signal: AbortSignal): Promise
     try {
       const guidance = (await call<{ text: string }>('/v1/guidance')).text;
       const words = ev.card.title.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).join(' ');
+      // A bare word search, so an inbox from before the paged reply and one after both answer the array.
       const hits = words ? await call<{ card: Card; answer?: { comment: string; values: Record<string, unknown> } }[]>(`/v1/search?q=${encodeURIComponent(words)}`) : [];
       const earlier = hits.filter((h) => h.card.id !== ev.card.id && h.answer).slice(0, 3)
         .map((h) => ({ title: h.card.title, answer: [JSON.stringify(h.answer?.values), h.answer?.comment].filter(Boolean).join(' ') }));
