@@ -290,15 +290,21 @@
   }
   /* The PIN field is monospace with wide tracking, so each typed digit shows as its own dot. */
   .pin-input { font-family: var(--font-code) !important; letter-spacing: .3em !important; }
-  :root {
-    --openui-text-body-default: 400 calc(16px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-default-heavy: 560 calc(16px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-lg: 400 calc(18px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-lg-heavy: 560 calc(18px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-sm: 400 calc(14px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-sm-heavy: 560 calc(14px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-xs: 400 calc(12px * var(--text-scale))/1.5 var(--font-text);
-    --openui-text-body-xs-heavy: 560 calc(12px * var(--text-scale))/1.5 var(--font-text);
+  /* OpenUI's type tokens, scaled by --text-scale. They sit on body, not :root, because OpenUI declares the same
+     tokens on :root and again on :root:not([data-openui-theme=light]) inside a dark media query and on
+     :root[data-openui-theme=dark]. Those selectors out-rank :root, so in dark mode OpenUI's own sizes won.
+     A value declared on body beats one inherited from html whatever selector set it, and every OpenUI element,
+     portals included, renders inside body. The body tokens start at 15px, the size of a card's plain text,
+     so a card's body and its plain text read the same; lg, sm and xs keep their ratio to it (18, 14 and 12 over 16). */
+  body {
+    --openui-text-body-default: 400 calc(15px * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-default-heavy: 560 calc(15px * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-lg: 400 calc(15px * 18 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-lg-heavy: 560 calc(15px * 18 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-sm: 400 calc(15px * 14 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-sm-heavy: 560 calc(15px * 14 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-xs: 400 calc(15px * 12 / 16 * var(--text-scale))/1.5 var(--font-text);
+    --openui-text-body-xs-heavy: 560 calc(15px * 12 / 16 * var(--text-scale))/1.5 var(--font-text);
     --openui-text-code-default: 400 calc(14px * var(--text-scale))/1.5 var(--font-code);
     --openui-text-code-default-heavy: 700 calc(14px * var(--text-scale))/1.5 var(--font-code);
     --openui-text-code-sm: 400 calc(12px * var(--text-scale))/1.5 var(--font-code);
