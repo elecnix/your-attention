@@ -39,7 +39,14 @@ export class TriageState {
         const read = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Stored> | null;
         const table = (v: unknown): boolean => v === undefined || (typeof v === 'object' && v !== null && !Array.isArray(v));
         if (!read || typeof read !== 'object' || !table(read.chains) || !table(read.cards) || !table(read.bypass)) throw new Error('it is not a state file');
-        this.data = { chains: read.chains ?? {}, cards: read.cards ?? {}, bypass: read.bypass ?? {} };
+        // An entry of the wrong type goes, so its card counts from zero instead of breaking every check of it.
+        const keep = <T>(rec: Record<string, unknown> | undefined, ok: (v: Record<string, unknown>) => boolean): Record<string, T> =>
+          Object.fromEntries(Object.entries(rec ?? {}).filter(([, v]) => typeof v === 'object' && v !== null && ok(v as Record<string, unknown>))) as Record<string, T>;
+        this.data = {
+          chains: keep<Chain>(read.chains as Record<string, unknown> | undefined, (c) => typeof c['agent'] === 'string' && typeof c['title'] === 'string' && typeof c['returns'] === 'number' && typeof c['at'] === 'number'),
+          cards: keep(read.cards as Record<string, unknown> | undefined, (c) => typeof c['chain'] === 'string' && typeof c['at'] === 'number'),
+          bypass: keep<Bypass>(read.bypass as Record<string, unknown> | undefined, (b) => typeof b['agent'] === 'string' && typeof b['card'] === 'string' && typeof b['issuedAt'] === 'number'),
+        };
       } catch (e) {
         // A file cut short by a crash loses its counts and codes, and the agent starts again from none.
         warning = `could not read ${file} (${(e as Error).message}), so the return counts and bypass codes start empty`;

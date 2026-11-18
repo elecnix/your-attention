@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { BYPASS_TAG, CARD_PROMPT, cardProse, cardText, checkCard, DEFAULTS, loadConfig, type ExampleConfig } from '../../examples/triage-agent/checks.ts';
+import { BYPASS_TAG, CARD_PROMPT, cardProse, cardText, checkCard, DEFAULTS, loadConfig, runCommand, type ExampleConfig, type RunCommand } from '../../examples/triage-agent/checks.ts';
 import { TriageState } from '../../examples/triage-agent/state.ts';
 import { runCardHook } from '../../src/extensions/card-hook.ts';
 import type { Card } from '../../src/core/types.ts';
@@ -125,6 +125,7 @@ describe('the example triage agent fails open', () => {
     ['vale is not installed', () => ({ vale: [missing] }), /vale could not run/],
     ['vale prints something other than JSON', () => ({ vale: stub('vale', print('vale crashed')).argv }), /vale gave output it could not read/],
     ['vale exits with a runtime error', () => ({ vale: stub('vale', print('E100 no config', 2)).argv }), /vale exited with 2/],
+    ['vale lists an alert that is not an object', () => ({ vale: stub('vale', print({ 'stdin.md': [null] }, 1)).argv }), /vale gave output it could not read/],
     ['the classifier is not installed', () => ({ classifier: [missing] }), /classifier could not run/],
     ['the classifier finds no key', () => ({ classifier: stub('classifier', "process.stderr.write('error: config file not found'); process.exit(1);").argv }), /classifier exited with 1: error: config file not found/],
     ['the classifier takes too long', () => ({ classifier: stub('classifier', 'setTimeout(() => {}, 10_000);').argv, classifierTimeoutMs: 300 }), /classifier took longer than 300 ms/],
@@ -132,6 +133,18 @@ describe('the example triage agent fails open', () => {
     ['the classifier gives its questions as a string', () => ({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: 'Which branch?' })).argv }), /classifier gave output it could not read/],
   ];
   for (const [what, over, why] of cases) itFailsOpen(what, card, over, why);
+
+  it('keeps the other checks\' findings when one check throws', async () => {
+    const classifier = stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] }));
+    const run: RunCommand = async (argv, input, timeoutMs, signal) => {
+      if (argv[0] === 'vale-that-throws') throw Object.assign(new Error('boom'), { thrownByTest: true });
+      return runCommand(argv, input, timeoutMs, signal);
+    };
+    const { log, lines } = logger();
+    const ruling = await checkCard(card, config({ vale: ['vale-that-throws'], classifier: classifier.argv }), log, { run });
+    assert.equal(ruling.verdict, 'return');
+    assert.match(lines.join('\n'), /vale/);
+  });
 
   it('still runs the classifier when vale cannot run', async () => {
     const classifier = stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] }));
@@ -461,6 +474,14 @@ describe('the example triage agent reads a damaged state file', () => {
     const state = new TriageState(file);
     assert.match(state.warning ?? '', /could not read .*state-damaged\.json/);
     assert.equal(state.returns('c1'), 0);
+  });
+
+  it('drops a chain entry that is not an object, and counts that card from zero', async () => {
+    const file = path.join(dir, 'state-entry.json');
+    fs.writeFileSync(file, JSON.stringify({ chains: { c1: 5 }, cards: { c1: 'x' }, bypass: { code: null } }));
+    const state = new TriageState(file);
+    const cfg = config({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: [] })).argv });
+    assert.match((await checkCard(card, cfg, logger().log, { state })).reason, /return 1 of 3/);
   });
 
   it('starts empty, and says so, when the file is JSON of the wrong shape', () => {

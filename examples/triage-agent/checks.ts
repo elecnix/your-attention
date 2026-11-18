@@ -222,7 +222,8 @@ async function ask<T>(label: string, argv: string[], input: string, timeoutMs: n
     value = undefined;
   }
   if (value !== undefined) return value;
-  if (exitedBadly || res.code !== 0) return { skipped: `${label} exited with ${res.code}: ${res.stderr.trim().slice(0, 300)}` };
+  // An exit code the command doesn't use for success explains the failure better than its unreadable output.
+  if (exitedBadly || (okCodes === 'any' && res.code !== 0)) return { skipped: `${label} exited with ${res.code}: ${res.stderr.trim().slice(0, 300)}` };
   return { skipped: `${label} gave output it could not read: ${res.stdout.trim().slice(0, 200)}` };
 }
 
@@ -258,7 +259,12 @@ export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand 
   const alerts = await ask('vale', [...cfg.vale, '--no-global', '--config', VALE_INI, '--output=JSON', '--ext=.md'], doc, cfg.valeTimeoutMs, [0, 1], (out) => {
     const parsed = JSON.parse(out) as unknown;
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
-    return Object.values(parsed as Record<string, ValeAlert[]>).flat();
+    const lists = Object.values(parsed as Record<string, unknown>);
+    if (!lists.every(Array.isArray)) return undefined;
+    const all = (lists as unknown[][]).flat();
+    const isAlert = (a: unknown): a is ValeAlert => typeof a === 'object' && a !== null
+      && typeof (a as ValeAlert).Line === 'number' && typeof (a as ValeAlert).Check === 'string' && typeof (a as ValeAlert).Message === 'string' && typeof (a as ValeAlert).Severity === 'string';
+    return all.every(isAlert) ? all : undefined;
   }, run, signal);
   if ('skipped' in alerts) return { check: 'Vale', sections: [], skipped: alerts.skipped };
   const lines = doc.split('\n');
@@ -325,9 +331,16 @@ export async function prVerdictCheck(card: Card, cfg: ExampleConfig, run: RunCom
   return { check: 'PR verdict', sections: section('PR verdict', level, lines), detail };
 }
 
-/** Run all three checks at once. A check that cannot run reports why and finds nothing. */
+/** Run all three checks at once. A check that cannot run, or that throws, reports why and finds nothing, and the
+ * other two keep their findings. */
 export async function runChecks(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport[]> {
-  return Promise.all([valeCheck(card, cfg, run, signal), classifierCheck(card, cfg, run, signal), prVerdictCheck(card, cfg, run, signal)]);
+  const guard = (check: CheckName, report: Promise<CheckReport>): Promise<CheckReport> =>
+    report.catch((e: Error) => ({ check, sections: [], skipped: `${check} failed (${e.message})` }));
+  return Promise.all([
+    guard('Vale', valeCheck(card, cfg, run, signal)),
+    guard('Card classifier', classifierCheck(card, cfg, run, signal)),
+    guard('PR verdict', prVerdictCheck(card, cfg, run, signal)),
+  ]);
 }
 
 /** The text of every section, check by check, the blocking findings of a check before its advice. */

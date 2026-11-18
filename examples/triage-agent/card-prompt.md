@@ -21,7 +21,7 @@ Before you decide, work through these steps:
 3. Check that the card states the goal and the reason it needs a decision now.
 4. For each option, check that its description says what this agent does if the person picks it. An option with only a label, or a description that restates the label, fails this check. A card that asks only for a secret value, such as an API key, has no options by design: check instead that it says why the agent needs each value.
 5. When the card recommends an option, check that it gives evidence for that recommendation: a fact the agent observed, not only a statement that the option is better, safer, or expected. A card that by design has no recommendation, such as one that asks only for a secret value or only free-text questions, passes this check.
-6. Check that the card has a recommendation and that one option is marked recommended. A card with free-text questions only and no options passes this check when its text says what the agent will do with the answer.
+6. Check that the card has a recommendation and that one option is marked recommended. A card with free-text questions only and no options passes this check when its text says what the agent will do with the answer. A card that asks only for a secret value passes this check, as it passes step 4.
 7. When the text asks two or more questions above a single options list, the card fails: each question needs its own entry in "Questions", with its own options, so the person answers it beside its context.
 8. Answer COMPLETE only if every check passes. A fact counts as present if the card states it anywhere, including in an option description, a question, or a quoted command or log.
 
