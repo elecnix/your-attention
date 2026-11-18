@@ -41,6 +41,7 @@ describe('the triage eval', () => {
     assert.equal(parseWhen('2026-11-18')?.getTime(), new Date(2026, 10, 18).getTime());
     assert.equal(parseWhen('2026-11-18T00:00:50Z')?.toISOString(), '2026-11-18T00:00:50.000Z');
     assert.equal(parseWhen('soon'), undefined);
+    assert.equal(parseWhen(''), undefined, 'an empty value, as from an unset shell variable, is not a time');
   });
 
   it('refuses to finish a run that was stopped, so no report counts the cut-short cards as clean', async () => {

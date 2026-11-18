@@ -16,8 +16,9 @@ const { values } = parseArgs({ options: { out: { type: 'string' }, since: { type
 const fail = (why: string): never => { console.error(why); process.exit(1); };
 const out = values.out || fail('Give the report path with --out FILE, outside any repository: the report quotes card text.');
 // A date alone means its midnight in local time, for both ends, and no --since means today's.
-const since = values.since ? parseWhen(values.since) ?? fail(`--since must be a date or a time, such as 2026-11-17: ${values.since}`) : new Date(new Date().setHours(0, 0, 0, 0));
-const until = values.before ? parseWhen(values.before) ?? fail(`--before must be a date or a time, such as 2026-11-18: ${values.before}`) : new Date();
+// An empty value, as from an unset shell variable, is an error, never the default.
+const since = values.since !== undefined ? parseWhen(values.since) ?? fail(`--since must be a date or a time, such as 2026-11-17: ${values.since}`) : new Date(new Date().setHours(0, 0, 0, 0));
+const until = values.before !== undefined ? parseWhen(values.before) ?? fail(`--before must be a date or a time, such as 2026-11-18: ${values.before}`) : new Date();
 const owner = ownerConfig() ?? fail('This machine runs no inbox and is not paired as owner: run `your-attention pair <url> --role owner`.');
 const cfg = loadConfig(values.config ?? defaultConfigPath());
 // Make the report's folder before the run, so a long run never ends without a place to write.
