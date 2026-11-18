@@ -26,6 +26,9 @@ export function App() {
   const linkedRef = React.useRef(null);
   linkedRef.current ??= linkLookup((ids) => fetch(`${BASE}v1/cards?ids=${ids.map(encodeURIComponent).join(',')}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`the inbox answered ${r.status}`)))).then((r) => r.cards), () => setLoaded((n) => n + 1));
   const linked = linkedRef.current;
+  // The card the state leaves out that the person opened from a link, and the card they read before it.
+  const outsideRef = React.useRef(null);
+  const previousRef = React.useRef(null);
   const [auth, setAuth] = React.useState('checking');
   // The search field filters the queue in the browser, so it never asks the inbox for anything. Command+K (Control+K off a Mac) focuses it.
   const [query, setQuery] = React.useState('');
@@ -120,8 +123,8 @@ export function App() {
       }
     }
     knownRef.current = ids;
-    // The card on screen keeps its copy even when the state leaves it out, as it does a cleared card opened from a link.
-    details.keep(focusRef.current ? new Set([...ids, focusRef.current]) : ids);
+    // A cleared card opened from a link keeps its copy, though the state leaves it out, from its fetch on.
+    details.keep(outsideRef.current ? new Set([...ids, outsideRef.current]) : ids);
     setState(s);
   }); }, [state, closing, groupBy, pins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
@@ -415,13 +418,15 @@ export function App() {
   const firstInSight = (cards) => cards.find((c) => !all.hidden.has(c.id));
   const lastVisit = firstInSight(pending.filter((c) => c.id === lastVisitRef.current));
   // A card the state leaves out, such as a cleared one, opens from a link to it, and the page fetches it on its own. Until
-  // the fetch ends the pane waits for it, and a card the inbox does not have leaves the queue's card on screen.
+  // the fetch ends the pane waits for it, and a card the inbox does not have leaves the card read before on screen.
   const outside = !cleared && focus && !byId[focus] ? focus : null;
+  outsideRef.current = outside;
   if (outside) details.want([{ id: outside, rev: (details.get({ id: outside }) || {}).rev ?? 0 }]);
   const outsideDetail = outside ? details.get({ id: outside }) : undefined;
   const away = outsideDetail && outsideDetail.card ? { ...outsideDetail.card, rev: outsideDetail.rev ?? 0 } : null;
   const fetchingOutside = outside && !details.tried(outside);
-  const shown = cleared ? null : byId[focus] || away || (fetchingOutside ? null : pinned || lastVisit || firstInSight(pending) || null);
+  const missing = outside && !fetchingOutside && !away ? byId[previousRef.current] : null;
+  const shown = cleared ? null : byId[focus] || away || (fetchingOutside ? null : missing || pinned || lastVisit || firstInSight(pending) || null);
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
   details.want([shown, shown && byId[after(order, shown.id)], shown && shown.follows && byId[shown.follows]]);
   const detail = details.get(shown);
@@ -440,6 +445,7 @@ export function App() {
   // Each card you open is a step in the browser's history, so back and forward move between them.
   const go = (id) => {
     if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id));
+    if (current && current.id !== id) previousRef.current = current.id;
     setCleared(false);
     setFocus(id);
     // On a phone the card sits above the queue, so the page scrolls up to the card that opened.

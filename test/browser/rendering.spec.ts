@@ -711,6 +711,36 @@ test('a link to a cleared card opens that card, which says it was cleared', asyn
   await expect(page.locator('.focus-card h2.card-title')).toHaveText('Keep the old index?');
 });
 
+test('a cleared card opened from a link stays on screen through a state change, and is fetched once', async ({ page }) => {
+  await inbox.agent.post({ id: 'stay-gone', agent: 's-stay', title: 'Rotate the old key?', priority: 'now', text: 'The old key signs nothing now.' });
+  await inbox.agent.close('stay-gone', 'retracted', 'Rotated by hand.');
+  inbox.server.inbox.archive({ token: 'test', role: 'owner' });
+  await inbox.agent.post({ id: 'stay-next', agent: 's-stay', title: 'Revoke the old key?', priority: 'now', text: 'After [[stay-gone]].' });
+  const fetches: string[] = [];
+  page.on('request', (r) => { if (r.url().endsWith('/v1/cards/stay-gone')) fetches.push(r.url()); });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Revoke the old key?' }).click();
+  await page.locator('.focus-card .card-text a.cleared-link').click();
+  const title = page.locator('.focus-card h2.card-title');
+  await expect(title).toHaveText('Rotate the old key?');
+  // A new card changes the state, and the page refreshes it while the cleared card is open.
+  await inbox.agent.post({ id: 'stay-new', agent: 's-stay', title: 'A new question?', priority: 'later' });
+  await expect(page.locator('.q', { hasText: 'A new question?' })).toBeVisible();
+  await expect(title).toHaveText('Rotate the old key?');
+  expect(fetches).toHaveLength(1);
+});
+
+test('a link to a card the inbox does not have leaves the card you were reading on screen', async ({ page }) => {
+  const here = inbox.server.url;
+  await inbox.agent.post({ id: 'miss-first', agent: 's-miss', title: 'The first card in the queue?', priority: 'now' });
+  await inbox.agent.post({ id: 'miss-read', agent: 's-miss', title: 'The card being read?', priority: 'later', text: `See [a card that never was](${here}/#card=never-stored).` });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'The card being read?' }).click();
+  await page.locator('.focus-card .card-text a', { hasText: 'a card that never was' }).click();
+  await expect(page.locator('.focus-card h2.card-title')).toHaveText('The card being read?');
+  await expect.poll(() => new URL(page.url()).hash).toBe('#card=miss-read');
+});
+
 test('a card link shows whether its card was answered, taken back, cleared or is still waiting', async ({ page }) => {
   const here = inbox.server.url;
   const owner = { token: 'test', role: 'owner' as const };
