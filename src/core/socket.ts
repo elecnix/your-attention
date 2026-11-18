@@ -71,7 +71,9 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
         try { inbox.ack(me, msg.card); } catch (e) { ws.send(JSON.stringify({ type: 'error', error: (e as Error).message })); }
       }
       if (msg.type === 'origin') {
-        try { if (inbox.reportOrigin(me, agent, msg.origin)) origin = connectionOrigin(msg.origin); } catch (e) { ws.send(JSON.stringify({ type: 'error', error: (e as Error).message })); }
+        // The socket keeps what it was told even when the row already had it, as it does after another connection of
+        // the same session reported the rename first: a wake rebuilds this connection from it.
+        try { inbox.reportOrigin(me, agent, msg.origin); origin = connectionOrigin(msg.origin) ?? origin; } catch (e) { ws.send(JSON.stringify({ type: 'error', error: (e as Error).message })); }
       }
     },
     close() {

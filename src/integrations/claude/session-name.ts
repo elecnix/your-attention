@@ -6,6 +6,8 @@ import path from 'node:path';
 
 /** How much of the transcript one read takes at a time, so a transcript of tens of megabytes never becomes one string. */
 const CHUNK = 1 << 20;
+/** How many of the transcript's first bytes a read compares, to notice a transcript replaced by another. */
+const HEAD = 256;
 
 /**
  * A /rename or --name writes a custom-title record, and Claude Code keeps appending
@@ -25,6 +27,9 @@ export class SessionName {
   private rest = Buffer.alloc(0);
   private custom: string | undefined;
   private generated: string | undefined;
+  /** The transcript's modification time at the last read, and its first bytes, which a replacement changes. */
+  private mtime = 0;
+  private head = Buffer.alloc(0);
   private readonly session: string;
   private readonly root: string;
 
@@ -37,11 +42,14 @@ export class SessionName {
     if (!/^[\w-]+$/.test(this.session)) return undefined;
     this.file ??= this.find();
     if (!this.file) return undefined;
-    let size: number;
+    let st: fs.Stats;
     // A transcript that went away is looked for again, and read from its start wherever it turns up.
-    try { size = fs.statSync(this.file).size; } catch { this.file = undefined; this.reset(); return undefined; }
-    if (size < this.offset) this.reset();
-    if (size > this.offset) this.scan(size);
+    try { st = fs.statSync(this.file); } catch { this.file = undefined; this.reset(); return undefined; }
+    if (st.size === this.offset && st.mtimeMs === this.mtime) return this.name();
+    // Claude Code only appends, so a transcript whose first bytes changed, or that got shorter, is another file.
+    if (st.size < this.offset || !this.sameHead()) this.reset();
+    this.mtime = st.mtimeMs;
+    if (st.size > this.offset) this.scan(st.size);
     return this.name();
   }
 
@@ -59,7 +67,26 @@ export class SessionName {
     return undefined;
   }
 
+  /** Whether the transcript still opens with the bytes the last read saw there. */
+  private sameHead(): boolean {
+    if (!this.head.length) return true;
+    try {
+      const fd = fs.openSync(this.file!, 'r');
+      try {
+        const now = Buffer.alloc(this.head.length);
+        const n = fs.readSync(fd, now, 0, now.length, 0);
+        this.bytesRead += n;
+        return n === this.head.length && now.equals(this.head);
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return false;
+    }
+  }
+
   private reset(): void {
+    this.head = Buffer.alloc(0);
     this.offset = 0;
     this.rest = Buffer.alloc(0);
     this.custom = undefined;
@@ -74,6 +101,7 @@ export class SessionName {
       while (this.offset < size) {
         const n = fs.readSync(fd, buf, 0, Math.min(buf.length, size - this.offset), this.offset);
         if (n <= 0) break;
+        if (this.head.length < HEAD) this.head = Buffer.concat([this.head, buf.subarray(0, Math.min(n, HEAD - this.head.length))]);
         this.offset += n;
         this.bytesRead += n;
         let data = this.rest.length ? Buffer.concat([this.rest, buf.subarray(0, n)]) : buf.subarray(0, n);

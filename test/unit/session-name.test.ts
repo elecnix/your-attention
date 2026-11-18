@@ -55,7 +55,8 @@ describe('the session name the channel reads again', () => {
     const record = JSON.stringify({ type: 'custom-title', customTitle: 'release prep' }) + '\n';
     fs.appendFileSync(file, record);
     assert.equal(name.read(), 'release prep');
-    assert.equal(name.bytesRead - first, Buffer.byteLength(record));
+    // The new record, plus the first 256 bytes the reader compares to notice a replaced transcript.
+    assert.equal(name.bytesRead - first, Buffer.byteLength(record) + 256);
   });
 
   it('waits for the rest of a record that is still being written', () => {
@@ -75,6 +76,14 @@ describe('the session name the channel reads again', () => {
     assert.equal(name.read(), 'A long first title for this session');
     fs.writeFileSync(file, JSON.stringify({ type: 'ai-title', aiTitle: 'Short' }) + '\n');
     assert.equal(name.read(), 'Short');
+  });
+
+  it('reads the whole transcript again when another one as long or longer replaced it', () => {
+    const { root, file } = transcript([{ type: 'custom-title', customTitle: 'old name' }]);
+    const name = new SessionName('sid-1', root);
+    assert.equal(name.read(), 'old name');
+    fs.writeFileSync(file, JSON.stringify({ type: 'custom-title', customTitle: 'a much longer new name for this session' }) + '\n');
+    assert.equal(name.read(), 'a much longer new name for this session');
   });
 
   it('finds a transcript that appears after the first read', () => {

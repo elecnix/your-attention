@@ -305,7 +305,6 @@ export class Client {
       : undefined;
     // The watch must not keep a process alive that has nothing else to do.
     watch?.unref?.();
-    signal.addEventListener('abort', () => clearInterval(watch), { once: true });
     let link = 0;
     const noSocket = new Set<string>();
     // A link that answered 410 for its event stream serves events over its socket only. Asking it again every
@@ -338,63 +337,74 @@ export class Client {
       const base = Math.min(30_000, 1000 * 2 ** Math.min(Math.max(failures, 1) - 1, 5));
       return Math.round(base * (0.8 + Math.random() * 0.4));
     };
-    while (!signal.aborted) {
-      const url = this.urls[link % this.urls.length] ?? this.url;
-      let wait = 1000;
-      try {
-        if (this.urls.length > 1 && !(await this.sameInbox(url))) throw new Error('another inbox');
-        this.url = url;
-        // The event stream is a fallback for a link whose socket does not open, and only until it refuses.
-        const overStream = transport === 'sse' || (transport === 'auto' && noSocket.has(url) && !noStream.has(url));
-        let ran = true;
-        if (transport === 'poll') await this.overPoll(url, agent, deliver, signal, params);
-        else if (overStream) {
-          // An event stream has no frame for the client to send, so a new origin opens a new stream that carries it.
-          const restart = new AbortController();
-          const both = AbortSignal.any([signal, restart.signal]);
-          onOrigin = () => restart.abort();
-          try {
-            await this.overSse(url, agent, deliver, both, params());
-          } catch (e) {
-            if (!restart.signal.aborted || signal.aborted) throw e;
-          } finally {
+    try {
+      while (!signal.aborted) {
+        const url = this.urls[link % this.urls.length] ?? this.url;
+        let wait = 1000;
+        try {
+          if (this.urls.length > 1 && !(await this.sameInbox(url))) throw new Error('another inbox');
+          this.url = url;
+          // The event stream is a fallback for a link whose socket does not open, and only until it refuses.
+          const overStream = transport === 'sse' || (transport === 'auto' && noSocket.has(url) && !noStream.has(url));
+          let ran = true;
+          if (transport === 'poll') await this.overPoll(url, agent, deliver, signal, params);
+          else if (overStream) {
+            // An event stream has no frame for the client to send, so a new origin opens a new stream that carries it.
+            const restart = new AbortController();
+            const both = AbortSignal.any([signal, restart.signal]);
+            onOrigin = () => restart.abort();
+            try {
+              await this.overSse(url, agent, deliver, both, params());
+            } catch (e) {
+              if (!restart.signal.aborted || signal.aborted) throw e;
+            } finally {
+              onOrigin = undefined;
+            }
+            if (restart.signal.aborted && !signal.aborted) wait = 0;
+          } else {
+            // A rename between building the address and the socket opening moved `reported` past what the address
+          // carries, so the socket sends it as soon as it opens.
+          const carried = reported;
+          const opened = await this.overSocket(url, agent, deliver, signal, params(), (send) => {
+            onOrigin = send;
+            if (send && reported && JSON.stringify(reported) !== JSON.stringify(carried)) send(reported);
+          });
             onOrigin = undefined;
+            // A socket that never opened on a link that answers means the link cannot carry one. A link that does not answer is down: retry it.
+            if (!opened && transport === 'auto') {
+              if (!(await this.answers(url))) throw new Error('the link is down');
+              noSocket.add(url);
+              ran = false;
+              // Try the stream once when the link has not refused it; otherwise wait before the next socket.
+              wait = noStream.has(url) ? (failures++, backoff()) : 0;
+            }
           }
-          if (restart.signal.aborted && !signal.aborted) wait = 0;
-        } else {
-          const opened = await this.overSocket(url, agent, deliver, signal, params(), (send) => { onOrigin = send; });
-          onOrigin = undefined;
-          // A socket that never opened on a link that answers means the link cannot carry one. A link that does not answer is down: retry it.
-          if (!opened && transport === 'auto') {
-            if (!(await this.answers(url))) throw new Error('the link is down');
-            noSocket.add(url);
-            ran = false;
-            // Try the stream once when the link has not refused it; otherwise wait before the next socket.
-            wait = noStream.has(url) ? (failures++, backoff()) : 0;
+          if (ran) failures = 0;
+        } catch (e) {
+          if (signal.aborted) return;
+          const status = (e as { status?: number }).status;
+          if (status === 410) {
+            // The inbox serves events over its socket only, as a hosted inbox does. An explicit transport asked for
+            // a stream that this link will never serve, so it reports instead of retrying.
+            if (transport !== 'auto') throw e;
+            noStream.add(url);
+            failures++;
+            wait = backoff();
+          } else if (status === 401 || status === 403 || status === 404) {
+            // A token or address the inbox refuses stays refused: report it instead of retrying forever.
+            throw e;
+          } else {
+            link++;
+            failures++;
+            wait = backoff();
           }
         }
-        if (ran) failures = 0;
-      } catch (e) {
-        if (signal.aborted) return;
-        const status = (e as { status?: number }).status;
-        if (status === 410) {
-          // The inbox serves events over its socket only, as a hosted inbox does. An explicit transport asked for
-          // a stream that this link will never serve, so it reports instead of retrying.
-          if (transport !== 'auto') throw e;
-          noStream.add(url);
-          failures++;
-          wait = backoff();
-        } else if (status === 401 || status === 403 || status === 404) {
-          // A token or address the inbox refuses stays refused: report it instead of retrying forever.
-          throw e;
-        } else {
-          link++;
-          failures++;
-          wait = backoff();
-        }
+        if (wait === 0) continue;
+        if (!signal.aborted) await new Promise((r) => setTimeout(r, wait));
       }
-      if (wait === 0) continue;
-      if (!signal.aborted) await new Promise((r) => setTimeout(r, wait));
+    } finally {
+      // A stream that ends by a refusal returns without an abort, and the watch must end with it.
+      clearInterval(watch);
     }
   }
 

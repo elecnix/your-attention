@@ -71,18 +71,30 @@ describe('an agent socket', () => {
   });
 });
 
-/** An inbox that accepts any agent socket, says hello, and records each frame the client sends. */
-async function socketInbox(): Promise<{ url: string; frames: Array<Record<string, unknown>>; urls: string[]; close(): Promise<void> }> {
+describe('an agent socket told the origin its row already has', () => {
+  it('keeps that origin, so a wake rebuilds the connection with it', async () => {
+    const { inbox, agentA } = setup();
+    const sock = agentSocket(inbox, 's1', { send: () => {}, close: () => {} }, agentA, undefined, { origin: { name: 'old' } });
+    // Another connection of the same session reported the rename first.
+    inbox.connect(agentA, 's1', () => {}, undefined, { origin: { name: 'new' } });
+    await sock.message(JSON.stringify({ type: 'origin', origin: { name: 'new' } }));
+    assert.deepEqual(sock.origin, { name: 'new' });
+  });
+});
+
+/** An inbox that accepts any agent socket, says hello, and records each frame the client sends. `delayMs` holds each
+ * upgrade before it opens. */
+async function socketInbox(delayMs = 0): Promise<{ url: string; frames: Array<Record<string, unknown>>; urls: string[]; close(): Promise<void> }> {
   const frames: Array<Record<string, unknown>> = [];
   const urls: string[] = [];
   const server = http.createServer((_req, res) => { res.writeHead(404); res.end(); });
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
     urls.push(req.url ?? '');
-    wss.handleUpgrade(req, socket, head, (ws) => {
+    setTimeout(() => wss.handleUpgrade(req, socket, head, (ws) => {
       ws.on('message', (m) => frames.push(JSON.parse(String(m)) as Record<string, unknown>));
       ws.send(JSON.stringify({ type: 'hello', agent: 's1', version: 1, guidance: 0 }));
-    });
+    }), delayMs);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
@@ -120,6 +132,45 @@ describe('a stream whose origin can change', () => {
     } finally {
       stop.abort();
       await inbox.close();
+    }
+  });
+});
+
+describe('a rename while the socket opens', () => {
+  it('goes out as soon as the socket opens', async () => {
+    const inbox = await socketInbox(150);
+    const stop = new AbortController();
+    let name = 'old name';
+    try {
+      const client = new Client({ url: inbox.url, token: `aaaaaaaaaaaa.${'a'.repeat(64)}` });
+      void client.stream('s1', () => {}, stop.signal, 'auto', { origin: () => ({ name }), originEveryMs: 20 });
+      // The address is built with the old name, and the beats see the new one before the socket opens.
+      name = 'new name';
+      for (let i = 0; i < 200 && !inbox.frames.some((f) => f['type'] === 'origin'); i++) await sleep(10);
+      assert.match(decodeURIComponent(inbox.urls[0] ?? ''), /old name/);
+      assert.deepEqual(inbox.frames.filter((f) => f['type'] === 'origin'), [{ type: 'origin', origin: { name: 'new name' } }]);
+    } finally {
+      stop.abort();
+      await inbox.close();
+    }
+  });
+});
+
+describe('a stream the inbox refuses', () => {
+  it('stops reading the origin once it gives up', async () => {
+    const server = http.createServer((_req, res) => { res.writeHead(401, { 'content-type': 'application/json' }); res.end('{"error":"bad token"}'); });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    let reads = 0;
+    try {
+      const client = new Client({ url: `http://127.0.0.1:${port}`, token: `aaaaaaaaaaaa.${'a'.repeat(64)}` });
+      await assert.rejects(client.stream('s1', () => {}, new AbortController().signal, 'poll', { origin: () => { reads++; return { name: 'x' }; }, originEveryMs: 10 }));
+      const after = reads;
+      await sleep(100);
+      assert.equal(reads, after);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });
