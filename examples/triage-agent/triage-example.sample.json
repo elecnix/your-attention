@@ -15,5 +15,9 @@
     "prVerdictBlockBelow": 0.5
   },
   "maxReturns": 3,
-  "stateFile": "~/.local/state/your-attention/triage-example.json"
+  "stateFile": "~/.local/state/your-attention/triage-example.json",
+  "knownNames": {
+    "Acme API": "the company's public REST service",
+    "Bolt": "the deploy tool that puts each service in production"
+  }
 }

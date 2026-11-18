@@ -20,6 +20,14 @@ export const VALE_INI = path.join(import.meta.dirname, 'vale', '.vale.ini');
 export const CARD_PROMPT = path.join(import.meta.dirname, 'card-prompt.md');
 export const CARD_QUESTION = 'Can the person make the decision this card asks for from the card alone, without opening the agent\'s session, its code or its diff?';
 
+/** The reader question with the names the person knows. They go in the question, which the operator writes, and never
+ * in the card's text, so a card cannot add names of its own. */
+export function classifierQuestion(cfg: ExampleConfig): string {
+  const names = Object.entries(cfg.knownNames ?? {});
+  if (!names.length) return CARD_QUESTION;
+  return `${CARD_QUESTION}\n\nNames the reader already knows, from the operator and not from the card:\n${names.map(([n, d]) => `- ${n}: ${d}`).join('\n')}`;
+}
+
 export interface PrVerdictConfig {
   /** The command and its first arguments. The check appends the pull request's URL and --json. */
   command: string[];
@@ -51,6 +59,8 @@ export interface ExampleConfig {
   maxReturns: number;
   /** Where the agent keeps the return counts and the bypass codes. */
   stateFile: string;
+  /** Names the person knows, each with a one-line definition. The classifier asks about no name on this list. */
+  knownNames: Record<string, string>;
 }
 
 export const DEFAULTS: ExampleConfig = {
@@ -58,6 +68,7 @@ export const DEFAULTS: ExampleConfig = {
   policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', prVerdictBlockBelow: 0.5 },
   maxReturns: 3,
   stateFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'),
+  knownNames: {},
 };
 /** The tag an agent sets, to the code a return notice gave it, to let one urgent card skip triage. */
 export const BYPASS_TAG = 'triage-bypass';
@@ -104,6 +115,19 @@ export function loadConfig(file = defaultConfigPath()): ExampleConfig {
   if (raw['stateFile'] !== undefined) {
     const f = typeof raw['stateFile'] === 'string' ? raw['stateFile'] : bad('stateFile must be a path');
     cfg.stateFile = f.startsWith('~/') ? path.join(os.homedir(), f.slice(2)) : f;
+  }
+  if (raw['knownNames'] !== undefined) {
+    const names = raw['knownNames'];
+    if (typeof names !== 'object' || names === null || Array.isArray(names)) return bad('knownNames must map each name to a short definition, such as {"Acme API": "the company\'s public REST service"}');
+    cfg.knownNames = {};
+    for (const [name, def] of Object.entries(names)) {
+      const key = name.trim();
+      if (!key) return bad('knownNames has an empty name');
+      // A definition is one short line, so the list stays small enough to send with every card.
+      const text = typeof def === 'string' && def.trim() ? def.trim() : bad(`knownNames.${key} must be a definition, a line of text`);
+      if (text.length > 120 || text.includes('\n')) return bad(`knownNames.${key} must be at most 120 characters on one line`);
+      cfg.knownNames[key] = text;
+    }
   }
   const pr = raw['prVerdict'] as Record<string, unknown> | undefined;
   if (pr !== undefined && pr !== null) {
@@ -292,7 +316,7 @@ export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand 
 interface Classification { verdict: string; rationale?: string; clarifyingQuestions?: string[] }
 
 export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport> {
-  const result = await ask('classifier', [...cfg.classifier, '-p', CARD_PROMPT, '-q', CARD_QUESTION, '-'], cardText(card), cfg.classifierTimeoutMs, [0], (out) => {
+  const result = await ask('classifier', [...cfg.classifier, '-p', CARD_PROMPT, '-q', classifierQuestion(cfg), '-'], cardText(card), cfg.classifierTimeoutMs, [0], (out) => {
     const c = JSON.parse(out) as Classification;
     if (c.verdict !== 'COMPLETE' && c.verdict !== 'MISSING_CONTEXT') return undefined;
     if (c.rationale !== undefined && typeof c.rationale !== 'string') return undefined;

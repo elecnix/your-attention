@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { BYPASS_TAG, CARD_PROMPT, cardProse, cardText, checkCard, DEFAULTS, loadConfig, runCommand, type ExampleConfig, type RunCommand } from '../../examples/triage-agent/checks.ts';
+import { BYPASS_TAG, CARD_PROMPT, CARD_QUESTION, cardProse, cardText, checkCard, DEFAULTS, loadConfig, runCommand, type ExampleConfig, type RunCommand } from '../../examples/triage-agent/checks.ts';
 import { TriageState } from '../../examples/triage-agent/state.ts';
 import { runCardHook } from '../../src/extensions/card-hook.ts';
 import type { Card } from '../../src/core/types.ts';
@@ -320,16 +320,40 @@ describe('the example triage agent reads its local config', () => {
     assert.throws(() => loadConfig(file), (e: Error) => e.message.includes(file) && /vale must be a list of strings/.test(e.message));
   });
 
+  it('reads the names the reader already knows, each with a short definition, and refuses a list of another shape', () => {
+    const file = path.join(dir, 'names.json');
+    fs.writeFileSync(file, JSON.stringify({ knownNames: { 'Acme API': ' the company\'s public REST service ', Bolt: 'the deploy tool' } }));
+    assert.deepEqual(loadConfig(file).knownNames, { 'Acme API': 'the company\'s public REST service', Bolt: 'the deploy tool' });
+    assert.deepEqual(loadConfig(path.join(dir, 'absent.json')).knownNames, {});
+    for (const [names, why] of [[['Acme'], /knownNames must map each name to a short definition/], [{ Acme: 3 }, /knownNames\.Acme must be a definition/], [{ Acme: 'x'.repeat(121) }, /knownNames\.Acme must be at most 120 characters/], [{ ' ': 'blank' }, /knownNames has an empty name/]] as const) {
+      fs.writeFileSync(file, JSON.stringify({ knownNames: names }));
+      assert.throws(() => loadConfig(file), (e: Error) => e.message.includes(file) && why.test(e.message), JSON.stringify(names));
+    }
+  });
+
+  it('gives the classifier the known names in its reader question, outside the card it judges', async () => {
+    const classifier = complete();
+    await checkCard(card, config({ classifier: classifier.argv, knownNames: { 'Acme API': 'the company\'s public REST service' } }), logger().log);
+    const call = classifier.calls()[0]!;
+    const question = call.argv[call.argv.indexOf('-q') + 1];
+    assert.equal(question, `${CARD_QUESTION}\n\nNames the reader already knows, from the operator and not from the card:\n- Acme API: the company's public REST service`);
+    assert.doesNotMatch(call.stdin, /Acme API/);
+    const plain = complete();
+    await checkCard(card, config({ classifier: plain.argv }), logger().log);
+    assert.equal(plain.calls()[0]!.argv[plain.calls()[0]!.argv.indexOf('-q') + 1], CARD_QUESTION);
+  });
+
   it('ships a sample config that loads, with a placeholder command', () => {
     const cfg = loadConfig(path.join(import.meta.dirname, '../../examples/triage-agent/triage-example.sample.json'));
     assert.match(cfg.prVerdict?.command[0] ?? '', /^\/path\/to\//);
     assert.deepEqual(cfg.classifier, ['pr-context-classifier', '-m', 'openai/gpt-oss-120b'], 'the sample runs the classifier on the model the eval favored');
+    assert.deepEqual(Object.keys(cfg.knownNames), ['Acme API', 'Bolt'], 'the sample shows the shape with invented names only');
     assert.equal(cfg.stateFile, path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'));
   });
 
   it('ships a card prompt with a text fence that asks for the classifier\'s reply format', () => {
     const fence = /```text\n([\s\S]*?)\n```/.exec(fs.readFileSync(CARD_PROMPT, 'utf8'))?.[1] ?? '';
-    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word', 'The evidence behind the recommendation', 'in either order', 'the first two sentences', 'each question states its own change', 'only further down', 'the problem it fixes', 'Never ask for a separate goal sentence']) assert.ok(fence.includes(part), part);
+    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word', 'The evidence behind the recommendation', 'in either order', 'the first two sentences', 'each question states its own change', 'only further down', 'the problem it fixes', 'Never ask for a separate goal sentence', 'Names the reader already knows']) assert.ok(fence.includes(part), part);
   });
 });
 
