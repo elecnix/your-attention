@@ -741,6 +741,16 @@ test('a link to a card the inbox does not have leaves the card you were reading 
   await expect.poll(() => new URL(page.url()).hash).toBe('#card=miss-read');
 });
 
+test('the address of a card the inbox does not have says so, and keeps its address', async ({ page }) => {
+  const here = inbox.server.url;
+  await inbox.agent.post({ id: 'nf-waiting', agent: 's-nf', title: 'A card waiting for you?', priority: 'now' });
+  await inbox.open(page);
+  await page.goto(`${here}/#card=never-stored-here`);
+  await expect(page.locator('.focus-card.done')).toHaveText(/This inbox has no card never-stored-here\./);
+  await expect(page.locator('.focus-card h2.card-title')).toHaveCount(0);
+  expect(new URL(page.url()).hash).toBe('#card=never-stored-here');
+});
+
 test('a card link shows whether its card was answered, taken back, cleared or is still waiting', async ({ page }) => {
   const here = inbox.server.url;
   const owner = { token: 'test', role: 'owner' as const };

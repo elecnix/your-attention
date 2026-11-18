@@ -425,8 +425,9 @@ export function App() {
   const outsideDetail = outside ? details.get({ id: outside }) : undefined;
   const away = outsideDetail && outsideDetail.card ? { ...outsideDetail.card, rev: outsideDetail.rev ?? 0 } : null;
   const fetchingOutside = outside && !details.tried(outside);
-  const missing = outside && !fetchingOutside && !away ? byId[previousRef.current] : null;
-  const shown = cleared ? null : byId[focus] || away || (fetchingOutside ? null : missing || pinned || lastVisit || firstInSight(pending) || null);
+  // A card the inbox does not have leaves the card the person read before on screen, or the pane says so.
+  const notFound = outside && !fetchingOutside && !away ? outside : null;
+  const shown = cleared ? null : byId[focus] || away || (fetchingOutside ? null : notFound ? byId[previousRef.current] || null : pinned || lastVisit || firstInSight(pending) || null);
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
   details.want([shown, shown && byId[after(order, shown.id)], shown && shown.follows && byId[shown.follows]]);
   const detail = details.get(shown);
@@ -561,6 +562,8 @@ export function App() {
   let main;
   if (!current && fetchingOutside) {
     main = h('div', { className: 'focus-card done', 'aria-busy': 'true' }, 'Loading the card…');
+  } else if (!current && notFound) {
+    main = h('div', { className: 'focus-card done' }, `This inbox has no card ${notFound}. The inbox deletes a cleared card 30 days after you clear it.`);
   } else if (!current) {
     // Every waiting card can sit out of sight in a collapsed group, so the pane says that instead of reporting an empty inbox.
     const allHidden = pending.length > 0 && pending.every((c) => all.hidden.has(c.id));
