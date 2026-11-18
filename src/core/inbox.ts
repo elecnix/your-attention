@@ -2399,6 +2399,20 @@ export class Inbox {
     this.emit({ type: 'presence', agent, online });
   }
 
+  /** A live connection reports where its session runs now, as one does after the person renames the session. Only a
+   * connection of this token for this agent may, so one client cannot relabel another's session. The row and the pages
+   * change only when the kept fields differ, so a client that repeats itself costs a read. Answers whether it changed. */
+  reportOrigin(caller: Caller, agent: string, reported: unknown): boolean {
+    if (!this.agents.get(this.key(caller.token, agent))?.size) throw new InboxError(409, `no connection of yours for ${agent}`);
+    const origin = connectionOrigin(reported);
+    if (!origin) return false;
+    const before = this.store.get<Presence>('presence', agent);
+    if (JSON.stringify(before?.origin ?? {}) === JSON.stringify(origin)) return false;
+    this.store.put<Presence>('presence', agent, { ...before, agent, online: true, lastSeen: this.now(), origin });
+    this.emit({ type: 'presence', agent, online: true });
+    return true;
+  }
+
   /** Write a presence change over what is stored, so the fields a change does not name stay. */
   private putPresence(agent: string, change: Partial<Presence>): void {
     const before = this.store.get<Presence>('presence', agent);

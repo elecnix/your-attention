@@ -278,11 +278,34 @@ export class Client {
    * `auto`, the default, uses a WebSocket and falls back to server-sent events on a link that cannot carry one.
    * `poll` long-polls, for clients that cannot keep a connection. `channelOff` tells the inbox that this session
    * discards channel notifications, so the person sees why an answer does not arrive. `origin` says where the session
-   * runs, so the inbox labels it on a card before it posts one. */
-  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto', opts: { channelOff?: boolean; origin?: Origin } = {}): Promise<void> {
-    // The origin rides in the address, the one place every transport carries it: a browser socket sends no headers,
-    // and the event stream and the long-poll have no frame for it.
-    const params = `${opts.channelOff ? '&channel=off' : ''}${opts.origin ? `&origin=${encodeURIComponent(JSON.stringify(opts.origin))}` : ''}`;
+   * runs, so the inbox labels it on a card before it posts one. An origin given as a function is read again every
+   * `originEveryMs`, 20 seconds unless set, and a change, such as a renamed session, reaches the inbox without a
+   * reconnect: an origin frame over the socket, the address of the next long-poll, or a new event stream. */
+  async stream(agent: string, onEvent: (ev: AgentEvent) => void | Promise<void>, signal: AbortSignal, transport: Transport = 'auto', opts: { channelOff?: boolean; origin?: Origin | (() => Origin | undefined); originEveryMs?: number } = {}): Promise<void> {
+    const originNow = (): Origin | undefined => {
+      if (typeof opts.origin !== 'function') return opts.origin;
+      try { return opts.origin(); } catch { return reported; }
+    };
+    /** The origin the inbox has, or gets with the next connection. */
+    let reported: Origin | undefined;
+    reported = originNow();
+    // The origin rides in the address, the one place every transport carries at connect: a browser socket sends no
+    // headers, and the event stream and the long-poll have no frame for it.
+    const params = (): string => `${opts.channelOff ? '&channel=off' : ''}${reported ? `&origin=${encodeURIComponent(JSON.stringify(reported))}` : ''}`;
+    /** What the open transport does with a changed origin. With none open, the next connection carries it. */
+    let onOrigin: ((o: Origin) => void) | undefined;
+    const watch = typeof opts.origin === 'function'
+      ? setInterval(() => {
+        const o = originNow();
+        // Only a change goes out, so an unchanged name costs the inbox nothing.
+        if (!o || JSON.stringify(o) === JSON.stringify(reported)) return;
+        reported = o;
+        onOrigin?.(o);
+      }, opts.originEveryMs ?? 20_000)
+      : undefined;
+    // The watch must not keep a process alive that has nothing else to do.
+    watch?.unref?.();
+    signal.addEventListener('abort', () => clearInterval(watch), { once: true });
     let link = 0;
     const noSocket = new Set<string>();
     // A link that answered 410 for its event stream serves events over its socket only. Asking it again every
@@ -325,9 +348,22 @@ export class Client {
         const overStream = transport === 'sse' || (transport === 'auto' && noSocket.has(url) && !noStream.has(url));
         let ran = true;
         if (transport === 'poll') await this.overPoll(url, agent, deliver, signal, params);
-        else if (overStream) await this.overSse(url, agent, deliver, signal, params);
-        else {
-          const opened = await this.overSocket(url, agent, deliver, signal, params);
+        else if (overStream) {
+          // An event stream has no frame for the client to send, so a new origin opens a new stream that carries it.
+          const restart = new AbortController();
+          const both = AbortSignal.any([signal, restart.signal]);
+          onOrigin = () => restart.abort();
+          try {
+            await this.overSse(url, agent, deliver, both, params());
+          } catch (e) {
+            if (!restart.signal.aborted || signal.aborted) throw e;
+          } finally {
+            onOrigin = undefined;
+          }
+          if (restart.signal.aborted && !signal.aborted) wait = 0;
+        } else {
+          const opened = await this.overSocket(url, agent, deliver, signal, params(), (send) => { onOrigin = send; });
+          onOrigin = undefined;
           // A socket that never opened on a link that answers means the link cannot carry one. A link that does not answer is down: retry it.
           if (!opened && transport === 'auto') {
             if (!(await this.answers(url))) throw new Error('the link is down');
@@ -391,7 +427,8 @@ export class Client {
   }
 
   /** Resolves when the socket closes: true if it opened first, false if it never did. */
-  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, params: string): Promise<boolean> {
+  /** `setOrigin` receives the function that sends a new origin over the open socket. */
+  private overSocket(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, params: string, setOrigin: (send: ((o: Origin) => void) | undefined) => void = () => {}): Promise<boolean> {
     return new Promise((resolve) => {
       let opened = false;
       const ws = new WebSocket(`${url.replace(/^http/, 'ws')}/v1/ws?agent=${encodeURIComponent(agent)}&instance=${this.instance}${params}`);
@@ -406,6 +443,7 @@ export class Client {
         opened = true;
         ws.send(JSON.stringify({ type: 'auth', token: this.token }));
         beat = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send('{"type":"ping"}'); }, 20_000);
+        setOrigin((origin) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'origin', origin })); });
       });
       ws.addEventListener('message', (m) => {
         let ev: { type?: string } | null;
@@ -419,6 +457,7 @@ export class Client {
         if (ended) return;
         ended = true;
         if (beat !== undefined) clearInterval(beat);
+        setOrigin(undefined);
         signal.removeEventListener('abort', stop);
         ws.close();
         resolve(opened);
@@ -429,9 +468,10 @@ export class Client {
     });
   }
 
-  private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, params: string): Promise<void> {
+  /** Each request reads `params` again, so a changed origin rides on the next one. */
+  private async overPoll(url: string, agent: string, deliver: (ev: AgentEvent) => Promise<void>, signal: AbortSignal, params: () => string): Promise<void> {
     while (!signal.aborted) {
-      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&instance=${this.instance}${params}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
+      const res = await fetch(`${url}/v1/poll?agent=${encodeURIComponent(agent)}&instance=${this.instance}${params()}&wait=25`, { headers: { authorization: `Bearer ${this.token}` }, signal });
       if (!res.ok) throw new TransportRefused('poll', res.status);
       for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }

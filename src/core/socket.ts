@@ -2,9 +2,10 @@
 // `message` for each text frame and `close` when the socket closes.
 //
 // Client to inbox: {type: "auth", token} first when the client cannot send an
-// Authorization header, then {type: "ack", card} and {type: "ping"}.
+// Authorization header, then {type: "ack", card}, {type: "ping"}, and {type: "origin", origin} when the session
+// it runs for changed, such as a rename.
 // Inbox to client: the same events as the stream, and {type: "pong"}.
-import type { Caller, Inbox } from './inbox.ts';
+import { connectionOrigin, type Caller, type Inbox } from './inbox.ts';
 
 /** The frames a socket may send in a minute. A socket past it closes, since each frame wakes the inbox. */
 export const FRAMES_PER_MINUTE = 120;
@@ -30,6 +31,9 @@ export interface AgentSocket {
   readonly authenticated: boolean;
   /** The client, once it authenticated, so a platform can keep it with a hibernating socket. */
   readonly caller: Caller | undefined;
+  /** The origin the client reported last, at connect or in an origin frame, so a platform can keep it with a
+   * hibernating socket and rebuild the connection with the session's current name. */
+  readonly origin: unknown;
 }
 
 /** `resumed` marks a socket that was already open and signed in before the platform rebuilt it, as a Durable Object does
@@ -43,17 +47,18 @@ export interface SocketOpts {
 
 export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?: Caller, instance?: string, opts: SocketOpts = {}): AgentSocket {
   let me = caller;
+  let origin = opts.origin;
   let disconnect: (() => void) | undefined;
   const allow = frameBudget();
   const start = (c: Caller, quiet: boolean): void => {
     me = c;
-    disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)), instance, { resumed: quiet, channelOff: opts.channelOff ?? false, origin: opts.origin });
+    disconnect = inbox.connect(c, agent, (ev) => ws.send(JSON.stringify(ev)), instance, { resumed: quiet, channelOff: opts.channelOff ?? false, origin });
   };
   if (me) start(me, opts.resumed ?? false);
   return {
     async message(text) {
       if (!allow()) return ws.close(4429, `more than ${FRAMES_PER_MINUTE} frames a minute`);
-      let msg: { type?: string; token?: string; card?: string } | null;
+      let msg: { type?: string; token?: string; card?: string; origin?: unknown } | null;
       try { msg = JSON.parse(text) as typeof msg; } catch { return ws.close(1003, 'frames must be JSON'); }
       if (!msg || typeof msg !== 'object') return ws.close(1003, 'frames must be JSON objects');
       if (!me) {
@@ -65,6 +70,9 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
       if (msg.type === 'ack' && msg.card) {
         try { inbox.ack(me, msg.card); } catch (e) { ws.send(JSON.stringify({ type: 'error', error: (e as Error).message })); }
       }
+      if (msg.type === 'origin') {
+        try { if (inbox.reportOrigin(me, agent, msg.origin)) origin = connectionOrigin(msg.origin); } catch (e) { ws.send(JSON.stringify({ type: 'error', error: (e as Error).message })); }
+      }
     },
     close() {
       disconnect?.();
@@ -75,6 +83,9 @@ export function agentSocket(inbox: Inbox, agent: string, ws: SocketLike, caller?
     },
     get caller() {
       return me;
+    },
+    get origin() {
+      return origin;
     },
   };
 }
