@@ -58,13 +58,17 @@ export class TriageState {
   /** The chain a card belongs to, recorded so its revisions and follow-ups find it. */
   chainOf(card: { id: string; agent: string; title: string; follows?: string }): string {
     const now = this.now();
-    const known = this.data.cards[card.id]?.chain ?? (card.follows ? this.data.cards[card.follows]?.chain : undefined)
+    // A chain counts one agent's attempts, so the agent is part of every key: a card joins a chain only from the same
+    // agent, even when another agent posts under the same card id.
+    const key = (id: string): string => `${card.agent} ${id}`;
+    const mine = (chain: string | undefined): string | undefined => chain && this.data.chains[chain]?.agent === card.agent ? chain : undefined;
+    const known = mine(this.data.cards[key(card.id)]?.chain) ?? mine(card.follows ? this.data.cards[key(card.follows)]?.chain : undefined)
       ?? Object.entries(this.data.chains).find(([, c]) => c.agent === card.agent && c.title === normal(card.title) && now - c.at < DAY)?.[0];
-    const chain = known ?? card.id;
+    const chain = known ?? key(card.id);
     this.data.chains[chain] ??= { agent: card.agent, title: normal(card.title), returns: 0, at: now };
     // Seeing a card keeps its chain as fresh as its card entry, so a save never prunes one and keeps the other.
     this.data.chains[chain].at = now;
-    this.data.cards[card.id] = { chain, at: now };
+    this.data.cards[key(card.id)] = { chain, at: now };
     return chain;
   }
 

@@ -348,6 +348,17 @@ describe('the example triage agent limits the returns of one card', () => {
     assert.match((await checkCard({ ...card, id: 'c4', title: 'A new question' }, cfg, logger().log, { state })).reason, /return 1 of 3/);
   });
 
+  it('starts a new chain for a card that follows another agent\'s card', async () => {
+    const state = new TriageState(undefined);
+    const cfg = config(blocked());
+    for (let i = 0; i < 3; i++) await checkCard(card, cfg, logger().log, { state });
+    const other = await checkCard({ ...card, id: 'c9', agent: 's2', follows: 'c1' }, cfg, logger().log, { state });
+    assert.equal(other.verdict, 'return');
+    assert.match(other.reason, /return 1 of 3/);
+    const sameId = await checkCard({ ...card, agent: 's3' }, cfg, logger().log, { state });
+    assert.match(sameId.reason, /return 1 of 3/);
+  });
+
   it('keeps the count in its state file across a restart', async () => {
     const file = path.join(dir, 'state-restart.json');
     const cfg = config(blocked());
@@ -509,7 +520,7 @@ describe('the example triage agent reads a damaged state file', () => {
     fs.writeFileSync(file, JSON.stringify({ chains: 5 }));
     const state = new TriageState(file);
     assert.match(state.warning ?? '', /could not read .*state-shape\.json/);
-    assert.equal(state.chainOf(card), card.id);
+    assert.equal(state.returns(state.chainOf(card)), 0);
   });
 });
 
