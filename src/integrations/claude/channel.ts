@@ -16,7 +16,7 @@ import { Client, describeAnswer, describeReturned, describeSentCard, loadConfig 
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
-import { claudeSessionName } from './session-name.ts';
+import { SessionName } from './session-name.ts';
 import { resetAsks } from './turn-end-hook.ts';
 import { devChannelEnabled, parentArgs } from './channel-flag.ts';
 import { boxState, runHerdr } from '../herdr/approve.ts';
@@ -34,6 +34,9 @@ const session = process.env['CLAUDE_CODE_SESSION_ID'] ?? `pid-${process.ppid}`;
 const agent = `claude:${session}`;
 const pane = process.env['HERDR_PANE_ID'];
 const secrets = new SecretRequests();
+/** The session's name, read again from the transcript on each use: Claude Code titles a session after its first
+ * prompts, and the person can rename it with /rename. A read costs a stat, plus the bytes the transcript gained. */
+const sessionName = new SessionName(session);
 const origin = { harness: 'claude-code', session, host: os.hostname(), cwd: process.env['CLAUDE_PROJECT_DIR'] ?? process.cwd(), herdrPane: pane };
 // Claude Code discards every channel notification of a session started without the flag, so the inbox shows
 // that this session cannot receive an answer. An unreadable command line claims nothing.
@@ -82,8 +85,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const args = (req.params.arguments ?? {}) as Record<string, unknown>;
   const text = (t: unknown) => ({ content: [{ type: 'text' as const, text: typeof t === 'string' ? t : JSON.stringify(t, null, 2) }] });
   try {
-    // Read the name at each call: Claude Code titles a session after its first prompts, and the person can rename it.
-    const place = async () => ({ ...origin, name: claudeSessionName(session), ...(await herdrPlace(pane)) });
+    const place = async () => ({ ...origin, name: sessionName.read(), ...(await herdrPlace(pane)) });
     return text(await runTool({ inbox, secrets, agent, origin: place, arrival: 'as a channel event' }, req.params.name, args));
   } catch (e) {
     return { ...text(String((e as Error).message)), isError: true };
@@ -280,4 +282,4 @@ void inbox.stream(agent, async (ev) => {
   } finally {
     push.pushing = false;
   }
-}, stop.signal, 'auto', { channelOff, origin: { ...origin, name: claudeSessionName(session) } }).catch((e: Error) => log('stream stopped:', e.message));
+}, stop.signal, 'auto', { channelOff, origin: () => ({ ...origin, name: sessionName.read() }) }).catch((e: Error) => log('stream stopped:', e.message));

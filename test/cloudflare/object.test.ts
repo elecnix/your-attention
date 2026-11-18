@@ -141,6 +141,22 @@ describe('the inbox Durable Object', () => {
     });
   }
 
+  it('keeps the name a renamed session reports after it connected, across a wake', async () => {
+    const rt = runtime();
+    let obj = rt.make();
+    const owner = await init(obj);
+    await openSocket(obj, `agent=s1&origin=${encodeURIComponent(JSON.stringify({ harness: 'claude-code', session: 's1', name: 'Cross-platform agent card review tools' }))}`, owner);
+    const renamed = { harness: 'claude-code', session: 's1', name: 'your-attention orchestrator' };
+    await obj.webSocketMessage(rt.sockets[0]! as never, JSON.stringify({ type: 'origin', origin: renamed }));
+    const state = (await (await call(obj, 'GET', '/v1/state', owner)).json()) as { presence: Record<string, { origin?: unknown }> };
+    assert.deepEqual(state.presence['s1']?.origin, renamed);
+    // A wake rebuilds the connection from the socket's attachment, which must hold the new name, not the one in its address.
+    obj = rt.make();
+    await obj.webSocketMessage(rt.sockets[0]! as never, '{"type":"ping"}');
+    const woken = (await (await call(obj, 'GET', '/v1/state', owner)).json()) as { presence: Record<string, { origin?: unknown }> };
+    assert.deepEqual(woken.presence['s1']?.origin, renamed, 'the new name survives a wake');
+  });
+
   it('keeps answering agents across hibernation', async () => {
     const rt = runtime();
     let obj = rt.make();

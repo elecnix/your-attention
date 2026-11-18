@@ -283,6 +283,12 @@ export class InboxObject {
       const a = ws.deserializeAttachment() as SocketAttachment;
       ws.serializeAttachment({ ...a, token: agent.caller.token, role: agent.caller.role } satisfies SocketAttachment);
     }
+    // A session renamed since it connected reports its new origin, and the object rebuilds the connection with it after
+    // a wake, so the presence row keeps the new name instead of the one in the socket's address.
+    if (agent && agent.origin !== undefined && text.includes('"origin"')) {
+      const a = ws.deserializeAttachment() as SocketAttachment;
+      if (JSON.stringify(a.origin) !== JSON.stringify(agent.origin)) ws.serializeAttachment({ ...a, origin: agent.origin as PresenceOrigin } satisfies SocketAttachment);
+    }
     await this.schedule();
   }
 
