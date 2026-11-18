@@ -120,7 +120,8 @@ export function App() {
       }
     }
     knownRef.current = ids;
-    details.keep(ids);
+    // The card on screen keeps its copy even when the state leaves it out, as it does a cleared card opened from a link.
+    details.keep(focusRef.current ? new Set([...ids, focusRef.current]) : ids);
     setState(s);
   }); }, [state, closing, groupBy, pins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
@@ -413,7 +414,14 @@ export function App() {
   // The groups the person collapsed decide this, so the whole inbox's hidden set applies, never the search's.
   const firstInSight = (cards) => cards.find((c) => !all.hidden.has(c.id));
   const lastVisit = firstInSight(pending.filter((c) => c.id === lastVisitRef.current));
-  const shown = cleared ? null : byId[focus] || pinned || lastVisit || firstInSight(pending) || null;
+  // A card the state leaves out, such as a cleared one, opens from a link to it, and the page fetches it on its own. Until
+  // the fetch ends the pane waits for it, and a card the inbox does not have leaves the queue's card on screen.
+  const outside = !cleared && focus && !byId[focus] ? focus : null;
+  if (outside) details.want([{ id: outside, rev: (details.get({ id: outside }) || {}).rev ?? 0 }]);
+  const outsideDetail = outside ? details.get({ id: outside }) : undefined;
+  const away = outsideDetail && outsideDetail.card ? { ...outsideDetail.card, rev: outsideDetail.rev ?? 0 } : null;
+  const fetchingOutside = outside && !details.tried(outside);
+  const shown = cleared ? null : byId[focus] || away || (fetchingOutside ? null : pinned || lastVisit || firstInSight(pending) || null);
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
   details.want([shown, shown && byId[after(order, shown.id)], shown && shown.follows && byId[shown.follows]]);
   const detail = details.get(shown);
@@ -545,7 +553,9 @@ export function App() {
     h(PinControls, { pin, onEdit: () => setPinForm('change'), onLock: () => lockTab().then(() => setAuth('locked')) }));
 
   let main;
-  if (!current) {
+  if (!current && fetchingOutside) {
+    main = h('div', { className: 'focus-card done', 'aria-busy': 'true' }, 'Loading the card…');
+  } else if (!current) {
     // Every waiting card can sit out of sight in a collapsed group, so the pane says that instead of reporting an empty inbox.
     const allHidden = pending.length > 0 && pending.every((c) => all.hidden.has(c.id));
     main = h('div', { className: 'focus-card done' },
@@ -556,7 +566,8 @@ export function App() {
     main = h('div', { className: 'focus-card done', 'aria-busy': 'true' }, `Loading ${current.title}…`);
   } else {
     const a = detail.answer;
-    const s = st(current);
+    // A card the state leaves out has its state in its own copy.
+    const s = st(current) || detail.state;
     const pres = presenceOf(current, state);
     const prevDetail = current.follows ? details.get(byId[current.follows]) : undefined;
     const prev = prevDetail && prevDetail.card;
@@ -578,13 +589,16 @@ export function App() {
         h('span', { className: `prio ${levelOf(current)}`, title: (levels.find((l) => l.id === levelOf(current)) || {}).definition }, label(levelOf(current))),
         current.status && h('span', { className: 'status' }, current.status),
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
-        pres && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
+        pres && !current.archivedAt && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
         h(CardAge, { card: current })),
       h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin, agent: current.agent, name: agentName(current.agent, state.cards, state.presence), agentPinned: isAgentPinned(current.agent) }),
       current.triage && current.triage.state === 'passed' && /did not answer|failed/.test(current.triage.reason || '') && h('div', { className: 'note' }, `Triage did not check this card: ${current.triage.reason}`),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,
         current.triage.state === 'held' && h('button', { className: 'btn', style: { marginLeft: 8 }, onClick: () => api(`${BASE}v1/cards/${current.id}/release`, {}) }, 'Release')),
+      // A cleared card opens only from a link to it. It shows what it asked, under the line that says how it ended, and
+      // takes no answer, since the outbox would never show one.
+      current.archivedAt && h('div', { className: 'note' }, `Cleared on ${new Date(current.archivedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}. It takes no answer.`),
       current.from && h('div', { className: 'from' }, `From ${current.from}`),
       (o.harness || o.host || o.herdrWorkspace || o.herdrTab) && h('div', { className: 'origin' },
         h('span', null, [o.name, o.harness, o.host, o.cwd].filter(Boolean).join(' · ')),
@@ -605,7 +619,8 @@ export function App() {
       h(Changes, { card: current }),
       h(TriagePushback, { card: current }),
       current.approvals && current.approvals.length > 0 && h(Approvals, { card: current, answer: a, picks: picksOf(current), onToggle: (i, on) => toggleApproval(current, i, on) }),
-      current.broadcast && !current.closed
+      current.archivedAt ? null
+        : current.broadcast && !current.closed
         ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip, onDismiss: (comment) => dismiss(current, {}, comment) })
         : current.html !== undefined
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); }, onDismiss: (values, comment) => dismiss(current, values, comment) })
@@ -625,7 +640,7 @@ export function App() {
     // A diagram or a body the page cannot draw goes back to the card's agent.
     main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
       // The summary has the closure as soon as the state does, before the whole card arrives again.
-      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id] }, card)
+      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id], open: !!current.archivedAt }, card)
       : card);
   }
 

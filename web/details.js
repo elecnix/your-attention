@@ -17,6 +17,10 @@ export function cardDetails(load, changed) {
       const copy = summary ? copies.get(summary.id) : undefined;
       return copy ? copy.detail : undefined;
     },
+    /** Whether a fetch of this card has ended, with its copy or without one. */
+    tried(id) {
+      return copies.has(id);
+    },
     /** Fetch each card whose copy is missing or older than its summary. */
     want(summaries) {
       for (const s of summaries) {

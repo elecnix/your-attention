@@ -679,6 +679,38 @@ test('a link to a cleared card shows its title, and every unknown link on the ca
   expect(lookups).toHaveLength(1);
 });
 
+test('a link to a cleared card opens that card, which says it was cleared', async ({ page }) => {
+  const here = inbox.server.url;
+  await inbox.agent.post({ id: 'open-gone', agent: 's-open', title: 'Keep the old index?', priority: 'now', text: 'The old index serves the search page.' });
+  await inbox.agent.close('open-gone', 'retracted', 'Not needed.');
+  inbox.server.inbox.archive({ token: 'test', role: 'owner' });
+  await inbox.agent.post({ id: 'open-next', agent: 's-open', title: 'Drop the old index?', priority: 'now', text: `After [[open-gone]], see [the same card](${here}/#card=open-gone).` });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'Drop the old index?' }).click();
+  const card = page.locator('.focus-card');
+  const link = card.locator('.card-text a.cleared-link', { hasText: 'Keep the old index?' });
+  await expect(link).toHaveCSS('cursor', 'pointer');
+  await link.click();
+  await expect(card.locator('h2.card-title')).toHaveText('Keep the old index?');
+  // The person opened it to read it, so its text shows, under the line that says how it ended.
+  await expect(card.locator('.card-text')).toBeVisible();
+  await expect(card.locator('.card-text')).toContainText('The old index serves the search page.');
+  await expect(page.locator('.closed-line')).toContainText('Not needed.');
+  await expect(page.locator('.closed-line button', { hasText: 'Hide card' })).toBeVisible();
+  await expect(card.locator('.note', { hasText: /^Cleared on / })).toBeVisible();
+  // It takes no answer, so nothing on it says an answer is waiting for the agent.
+  await expect(card.locator('.pill')).toHaveCount(0);
+  expect(new URL(page.url()).hash).toBe('#card=open-gone');
+  // Back returns to the card with the link, and a link by the inbox's own address opens the cleared card too.
+  await page.goBack();
+  await expect(card.locator('h2.card-title')).toHaveText('Drop the old index?');
+  await card.locator('.card-text a.cleared-link', { hasText: 'the same card' }).click();
+  await expect(card.locator('h2.card-title')).toHaveText('Keep the old index?');
+  // So does the card's address, opened in a new tab.
+  await page.goto(`${here}/#card=open-gone`);
+  await expect(page.locator('.focus-card h2.card-title')).toHaveText('Keep the old index?');
+});
+
 test('a card link shows whether its card was answered, taken back, cleared or is still waiting', async ({ page }) => {
   const here = inbox.server.url;
   const owner = { token: 'test', role: 'owner' as const };
@@ -715,16 +747,17 @@ test('a card link shows whether its card was answered, taken back, cleared or is
   await expect(old).toHaveAttribute('href', `${here}/#card=out-gone`);
   await expect(old.locator('.link-outcome')).toHaveText('taken back');
   await expect(old).toHaveAttribute('title', /^Cleared on .+\nTaken back \(retracted by agent\) on /);
-  // A click stays on the page, as for any own-address link, since a new tab would ask a locked inbox for its PIN again.
-  let popups = 0;
-  page.on('popup', () => { popups += 1; });
-  await old.click();
-  await expect(text).toBeVisible();
-  expect(popups).toBe(0);
   // The word reads without a hover, in both themes, from the page's color tokens.
   const [okColor, warnColor] = await page.evaluate(() => ['--ok', '--warn'].map((t) => { const s = document.createElement('span'); s.style.color = `var(${t})`; document.body.append(s); const c = getComputedStyle(s).color; s.remove(); return c; }));
   await expect(answered.locator('.link-outcome')).toHaveCSS('color', okColor!);
   await expect(back.locator('.link-outcome')).toHaveCSS('color', warnColor!);
+  // A click opens the cleared card on the page, as for any own-address link, since a new tab would ask a locked inbox
+  // for its PIN again.
+  let popups = 0;
+  page.on('popup', () => { popups += 1; });
+  await old.click();
+  await expect(page.locator('.focus-card h2.card-title')).toHaveText('Old question?');
+  expect(popups).toBe(0);
 });
 
 test('a link to this inbox\'s own card address opens that card in place, not in a new tab', async ({ page }) => {
