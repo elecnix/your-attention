@@ -328,7 +328,7 @@ describe('the example triage agent reads its local config', () => {
 
   it('ships a card prompt with a text fence that asks for the classifier\'s reply format', () => {
     const fence = /```text\n([\s\S]*?)\n```/.exec(fs.readFileSync(CARD_PROMPT, 'utf8'))?.[1] ?? '';
-    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word']) assert.ok(fence.includes(part), part);
+    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word', 'The evidence behind the recommendation']) assert.ok(fence.includes(part), part);
   });
 });
 

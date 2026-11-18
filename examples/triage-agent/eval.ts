@@ -2,7 +2,7 @@
 // three checks on each, and writes a Markdown report and the raw results as JSON. It sends no verdict, posts nothing
 // and changes nothing in the inbox. Card text is private, so write the report outside any repository:
 //   node examples/triage-agent/eval.ts --out ~/triage-eval/today.md [--since 2026-11-17] [--before TIME] [--config FILE]
-// --before keeps the cards posted up to that time, so a rerun can check the same cards as an earlier one.
+// --before keeps the cards posted up to that time (a date alone is its local midnight), so a rerun can check the same cards as an earlier one.
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -10,16 +10,14 @@ import { Client, ownerConfig } from '../../src/client.ts';
 import type { Card } from '../../src/core/types.ts';
 import { writePrivate } from '../../src/node/home.ts';
 import { defaultConfigPath, loadConfig } from './checks.ts';
-import { evaluate, renderReport } from './eval-report.ts';
+import { evaluate, parseWhen, renderReport } from './eval-report.ts';
 
 const { values } = parseArgs({ options: { out: { type: 'string' }, since: { type: 'string' }, before: { type: 'string' }, config: { type: 'string' }, concurrency: { type: 'string', default: '3' } } });
 const fail = (why: string): never => { console.error(why); process.exit(1); };
 const out = values.out || fail('Give the report path with --out FILE, outside any repository: the report quotes card text.');
-// A date alone means its midnight in local time, and no date means today's.
-const since = values.since ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(values.since) ? `${values.since}T00:00:00` : values.since) : new Date(new Date().setHours(0, 0, 0, 0));
-if (Number.isNaN(since.getTime())) fail(`--since must be a date or a time, such as 2026-11-17: ${values.since}`);
-const until = values.before ? new Date(values.before) : new Date();
-if (Number.isNaN(until.getTime())) fail(`--before must be a time, such as 2026-11-18T00:00:00Z: ${values.before}`);
+// A date alone means its midnight in local time, for both ends, and no --since means today's.
+const since = values.since ? parseWhen(values.since) ?? fail(`--since must be a date or a time, such as 2026-11-17: ${values.since}`) : new Date(new Date().setHours(0, 0, 0, 0));
+const until = values.before ? parseWhen(values.before) ?? fail(`--before must be a date or a time, such as 2026-11-18: ${values.before}`) : new Date();
 const owner = ownerConfig() ?? fail('This machine runs no inbox and is not paired as owner: run `your-attention pair <url> --role owner`.');
 const cfg = loadConfig(values.config ?? defaultConfigPath());
 // Make the report's folder before the run, so a long run never ends without a place to write.

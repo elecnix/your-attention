@@ -7,7 +7,7 @@ import path from 'node:path';
 import { writePrivate } from '../../src/node/home.ts';
 import { describe, it } from 'node:test';
 import { DEFAULTS, type CommandResult, type RunCommand } from '../../examples/triage-agent/checks.ts';
-import { evaluate, renderReport, summarize } from '../../examples/triage-agent/eval-report.ts';
+import { evaluate, parseWhen, renderReport, summarize } from '../../examples/triage-agent/eval-report.ts';
 import type { Card } from '../../src/core/types.ts';
 
 const base = { agent: 's1', kind: 'ask' as const, priority: 'soon' as const, deliver: 'stream' as const, version: 1, createdAt: 1, updatedAt: 1, replies: [] };
@@ -37,6 +37,12 @@ const run: RunCommand = async (argv, input): Promise<CommandResult> => {
 const cfg = { ...DEFAULTS, vale: ['vale'], classifier: ['classifier'], prVerdict: { command: ['verdict'], acceptVerdicts: ['ACCEPT'], timeoutMs: 1000 } };
 
 describe('the triage eval', () => {
+  it('reads a bare date as local midnight for --since and --before alike, and a time as given', () => {
+    assert.equal(parseWhen('2026-11-18')?.getTime(), new Date(2026, 10, 18).getTime());
+    assert.equal(parseWhen('2026-11-18T00:00:50Z')?.toISOString(), '2026-11-18T00:00:50.000Z');
+    assert.equal(parseWhen('soon'), undefined);
+  });
+
   it('counts what each check would block and advise, and how many cards would go back', async () => {
     const results = await evaluate(cards, cfg, { run, concurrency: 2 });
     const s = summarize(results);

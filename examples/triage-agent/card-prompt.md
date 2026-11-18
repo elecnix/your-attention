@@ -11,7 +11,7 @@ A card is complete when it gives the person these parts:
 - An opening sentence, in the title or at the start of the text, that says what the system does today and what the proposed change does.
 - The goal: what the agent is trying to achieve, and why the decision matters now.
 - The options the agent weighed. Each option says, in its own description, what this agent does if the person picks it, for example "This agent reruns the deploy."
-- The evidence behind the options: what the agent measured, read, or ran, with the numbers or names it found.
+- The evidence behind the recommendation: what the agent measured, read, or ran, with the numbers or names it found.
 - A recommendation: which option the agent picks, marked as recommended, and the reasons for it.
 Scale the bar to the decision: a yes-or-no question about a one-line change needs one clear sentence per part, while a change of behavior needs its cause and its effect.
 

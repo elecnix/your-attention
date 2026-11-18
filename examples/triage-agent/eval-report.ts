@@ -6,6 +6,12 @@ import { runChecks, runCommand, type CheckName, type CheckReport, type ExampleCo
 
 const CHECKS: CheckName[] = ['Vale', 'Card classifier', 'PR verdict'];
 
+/** A time for --since or --before: a date alone means its midnight in local time, and anything else goes to Date. */
+export function parseWhen(value: string): Date | undefined {
+  const when = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value);
+  return Number.isNaN(when.getTime()) ? undefined : when;
+}
+
 export interface CardResult { card: Card; ms: number; reports: CheckReport[]; blockedBy: CheckName[]; advisedBy: CheckName[] }
 
 export async function evaluate(cards: Card[], cfg: ExampleConfig, opts: { run?: RunCommand; concurrency?: number; signal?: AbortSignal } = {}): Promise<CardResult[]> {
