@@ -1,12 +1,10 @@
 // The owner's export of triage feedback, through `your-attention triage feedback` against a real inbox and the triage
 // service with a judge that sends every card without a recommendation back.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { after, before, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
 import { runTriage } from '../../src/extensions/triage.ts';
-import { CLI_ARGS, serveForTest, until, type CliServer } from './harness.ts';
+import { runCli, serveForTest, until, type CliServer } from './harness.ts';
 
 let server: CliServer;
 const stop = new AbortController();
@@ -19,8 +17,7 @@ before(async () => {
 });
 after(async () => { stop.abort(); await server.close(); });
 
-const cli = (...args: string[]) =>
-  promisify(execFile)(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, ...args], { env: server.env, encoding: 'utf8' }).then((r) => ({ code: 0, ...r }), (e: { code: number; stdout: string; stderr: string }) => e);
+const cli = (...args: string[]) => runCli(server.env, ...args);
 
 describe('your-attention triage feedback', () => {
   it('prints one line of JSON per card triage pushed back on, with the feedback and how the card ended', async () => {

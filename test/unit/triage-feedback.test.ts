@@ -24,8 +24,7 @@ async function setup() {
   inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'] }, (e) => calls.push(e as CardCall));
   const events: AgentEvent[] = [];
   inbox.connect({ token: http.agentA.split('.')[0]!, role: 'agent' }, 's1', (e) => events.push(e));
-  const post = async (body: Record<string, unknown>, token = http.agentA): Promise<Card> =>
-    (await (await http.call('POST', '/v1/cards', { token, body: { agent: 's1', ...body } })).json()) as Card;
+  const post = (body: Record<string, unknown>, token = http.agentA): Promise<Card> => http.post(token, body);
   /** The extension's verdict on the newest call for this card. */
   const verdict = (id: string, v: 'pass' | 'hold' | 'return', reason: string) => {
     const call = calls.filter((c) => c.card.id === id).at(-1);
