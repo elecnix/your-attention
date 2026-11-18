@@ -78,7 +78,6 @@ describe('a pairing file that carries more than an address', () => {
 
 describe('the owner config of the inbox this machine runs', () => {
   it('falls back to the owner pairing when server.json has no usable address', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-owner-'));
     fs.writeFileSync(path.join(home, 'server.json'), JSON.stringify({ url: 42 }));
     fs.writeFileSync(path.join(home, 'owner-token'), 'local-owner');
     fs.writeFileSync(path.join(home, 'owner.json'), JSON.stringify({ url: 'https://inbox.example/', token: 'paired-owner' }));

@@ -79,7 +79,9 @@ export function loadConfig(file = defaultConfigPath()): ExampleConfig {
   }
   const strings = (name: string, v: unknown): string[] =>
     Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string') ? v : bad(`${name} must be a list of strings, such as ["vale"]`);
-  const ms = (name: string, v: unknown): number => typeof v === 'number' && v > 0 ? v : bad(`${name} must be a positive number of milliseconds`);
+  // The inbox waits at most ten minutes for a verdict, and the agent keeps ten seconds of that to answer.
+  const ms = (name: string, v: unknown): number => typeof v !== 'number' || v <= 0 ? bad(`${name} must be a positive number of milliseconds`)
+    : v > 590_000 ? bad(`${name} must be at most 590000 ms, since the inbox waits at most 600000 ms for a verdict`) : v;
   const level = (name: string, v: unknown): Level => v === 'block' || v === 'advise' || v === 'ignore' ? v : bad(`${name} must be block, advise or ignore`);
   const cfg: ExampleConfig = { ...DEFAULTS, policy: { ...DEFAULTS.policy } };
   if (raw['vale'] !== undefined) cfg.vale = strings('vale', raw['vale']);
@@ -163,16 +165,32 @@ export type RunCommand = (argv: string[], input: string, timeoutMs: number, sign
 
 const STOPPED = 'stopped because the agent is shutting down';
 
-/** Run a command with `input` on stdin. Rejects when it cannot start, runs past `timeoutMs`, or `signal` aborts, and
- * kills the command in the last two cases, so a stopping agent leaves no check running. */
+/** Run a command with `input` on stdin. Rejects when it cannot start, runs past `timeoutMs`, or `signal` aborts. In
+ * the last two cases it stops the command's whole process group: SIGTERM, then SIGKILL two seconds later, so neither
+ * a wrapper's child nor a command that ignores SIGTERM keeps running. Windows has no process groups, so there it ends
+ * the command alone. */
 export const runCommand: RunCommand = (argv, input, timeoutMs, signal) => new Promise((resolve, reject) => {
   const [program, ...args] = argv;
   if (!program) { reject(new Error('the command is empty')); return; }
   if (signal?.aborted) { reject(new Error(STOPPED)); return; }
-  const child = spawn(program, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  const groups = process.platform !== 'win32';
+  const child = spawn(program, args, { stdio: ['pipe', 'pipe', 'pipe'], detached: groups });
   let stdout = '';
   let stderr = '';
-  const stop = (why: string): void => { child.kill(); done(); reject(new Error(why)); };
+  const signalAll = (sig: NodeJS.Signals): void => {
+    try {
+      if (groups && child.pid) process.kill(-child.pid, sig);
+      else child.kill(sig);
+    } catch { /* the command already ended */ }
+  };
+  const stop = (why: string): void => {
+    signalAll('SIGTERM');
+    setTimeout(() => signalAll('SIGKILL'), 2000).unref();
+    child.stdout.destroy();
+    child.stderr.destroy();
+    done();
+    reject(new Error(why));
+  };
   const onAbort = (): void => stop(STOPPED);
   const timer = setTimeout(() => stop(`took longer than ${timeoutMs} ms`), timeoutMs);
   const done = (): void => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };

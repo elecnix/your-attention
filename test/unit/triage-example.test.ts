@@ -258,6 +258,12 @@ describe('the example triage agent reads its local config', () => {
     assert.equal(cfg.maxReturns, 5);
   });
 
+  it('refuses a check timeout the inbox would not wait for', () => {
+    const file = path.join(dir, 'long-timeout.json');
+    fs.writeFileSync(file, JSON.stringify({ classifierTimeoutMs: 900_000 }));
+    assert.throws(() => loadConfig(file), /classifierTimeoutMs must be at most 590000/);
+  });
+
   it('refuses a policy level other than block, advise or ignore', () => {
     const file = path.join(dir, 'bad-policy.json');
     fs.writeFileSync(file, JSON.stringify({ policy: { valeErrors: 'warn' } }));
@@ -410,6 +416,19 @@ describe('the card.created hook runner', () => {
     }, stop.signal);
     assert.deepEqual(verdicts.find((v) => v.route === '/v1/hooks/h1')?.body, { verdict: 'return', reason: 'No goal.' });
     assert.match((verdicts.find((v) => v.route === '/v1/hooks/h2')?.body as { reason: string }).reason, /failed \(boom\), so the card went through/);
+  });
+});
+
+describe('the example triage agent stops a command that ignores SIGTERM', () => {
+  it('kills the whole process group after a grace period', { skip: process.platform === 'win32' ? 'Windows has no process groups' : false }, async () => {
+    const pidFile = path.join(dir, 'stubborn.pid');
+    const stubborn = stub('classifier', `process.on('SIGTERM', () => {}); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`);
+    const ruling = await checkCard(card, config({ classifier: stubborn.argv, classifierTimeoutMs: 500 }), logger().log);
+    assert.equal(ruling.verdict, 'pass');
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    const alive = (): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    for (let i = 0; i < 50 && alive(); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(alive(), false, 'the command still runs after the grace period');
   });
 });
 

@@ -37,7 +37,8 @@ async function usage(): Promise<number | undefined> {
   const key = process.env['OPENROUTER_API_KEY'];
   if (!key) return undefined;
   const res = await fetch('https://openrouter.ai/api/v1/key', { headers: { authorization: `Bearer ${key}` } }).catch(() => undefined);
-  const data = res?.ok ? (await res.json() as { data?: { usage?: number } }).data : undefined;
+  // A reply that isn't the key's JSON, such as a maintenance page, means the spend goes unmeasured.
+  const data = res?.ok ? (await res.json().catch(() => undefined) as { data?: { usage?: number } } | undefined)?.data : undefined;
   return typeof data?.usage === 'number' ? data.usage : undefined;
 }
 
