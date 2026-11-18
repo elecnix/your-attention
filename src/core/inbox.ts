@@ -882,10 +882,12 @@ export class Inbox {
     const triage = verdict === 'hold'
       ? { ...card.triage, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
       : { ...card.triage, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, at: now };
-    const next = { ...card, triage };
+    const tip = verdict === 'pass' ? String(advice ?? '').trim().slice(0, MAX_HOOK_TEXT) : '';
+    // Advice is pushback too, so the card keeps it with a return's entries and the agent can give feedback on it.
+    const pushback = tip ? [...(card.pushback ?? []), { kind: 'advice' as const, by: ext.reg.name, reason: tip, version: card.version, at: now }].slice(-PUSHBACK_LIMIT) : card.pushback;
+    const next = { ...card, triage, ...(pushback ? { pushback } : {}) };
     this.store.put('cards', card.id, next);
     this.emit({ type: 'change', card: card.id });
-    const tip = verdict === 'pass' ? String(advice ?? '').trim().slice(0, MAX_HOOK_TEXT) : '';
     if (tip) this.tellAgent(card, { type: 'advice', id: randomId(6), card: publicCard(next), advice: tip, by: ext.reg.name });
     return next;
   }

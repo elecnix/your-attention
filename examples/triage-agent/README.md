@@ -13,7 +13,7 @@ flowchart LR
 
 ## The checks
 
-Each finding either blocks the card or is advice, by the policy in your local config. A blocking finding sends the card back to its agent. Advice lets the card through to the person, and the inbox sends that advice to the card's agent as an `advice` event. A notice lists the findings check by check, as `Vale, must fix:` or `Card classifier, advice:`.
+Each finding either blocks the card or is advice, by the policy in your local config. A blocking finding sends the card back to its agent. Advice lets the card through to the person, and the inbox sends that advice to the card's agent as an `advice` event. The card keeps the advice beside any return, and the agent can say whether either was right with `card_triage_feedback`. A notice lists the findings check by check, as `Vale, must fix:` or `Card classifier, advice:`.
 
 1. **Vale** reads the card's prose, from the title and the text through the recommendation, each option's label and description, and each question with its options. It uses the rules in [vale/Cards](vale/Cards) and nothing else: the [config](vale/.vale.ini) has no `Packages` line, so vale doesn't download a style when it runs. Each finding gives its field, its line in that field, the rule and the words it matched. By default an error blocks the card and a warning is advice. The rules:
 
