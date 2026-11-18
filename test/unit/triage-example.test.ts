@@ -72,6 +72,11 @@ describe('the example triage agent renders a card', () => {
     assert.equal(fieldAt(lines.indexOf('Which branch?') + 1), 'question 1 text');
   });
 
+  it('writes the card\'s approvals for the classifier, each with its label and the words it sends', () => {
+    const text = cardText({ ...card, approvals: [{ pane: 'w1:p2', label: 'Restart the watcher', text: 'Restart the watcher with the bot on.' }] });
+    assert.ok(text.includes('Approvals:\n- Restart the watcher: "Restart the watcher with the bot on."'), text);
+  });
+
   it('writes the card as text for the classifier, with each option, what it does and the recommended one', () => {
     const text = cardText({ ...card, tags: { pr: 'acme/api#7' } });
     for (const part of [`Title: ${card.title}`, 'Retry once (recommended): This agent adds the retry', 'Keep paging: This agent closes the branch.', `Recommendation: ${card.recommendation}`, 'pr=acme/api#7']) assert.ok(text.includes(part), part);
@@ -100,6 +105,22 @@ describe('the example triage agent checks a card', () => {
     assert.match(ruling.reason, /title, line 1: Cards\.FirstPerson: Write about this agent in the third person, not 'I'\. \("I"\)/);
     assert.match(ruling.reason, /Vale, advice:\n- text, line 1: Cards\.Hedges/);
     assert.equal(classifier.calls().length, 1, 'a vale error does not stop the classifier');
+  });
+
+  it('drops a first-person finding in an option label, which speaks in the person\'s voice, and keeps it elsewhere', async () => {
+    const two = { ...card, title: 'Retry the export', text: 'We retry it once.', options: [{ label: "I'll handle it", description: 'This agent stops.' }, { label: 'Retry', description: 'I retry.' }] };
+    const { doc, fieldAt } = cardProse(two);
+    const lines = doc.split('\n');
+    const at = (field: string): number => lines.findIndex((_, i) => fieldAt(i + 1) === field) + 1;
+    const vale = stub('vale', print({ 'stdin.md': [
+      { Line: at('text'), Span: [1, 2], Check: 'Cards.FirstPerson', Message: "Not 'We'.", Severity: 'error', Match: 'We' },
+      { Line: at('option 1 label'), Span: [1, 1], Check: 'Cards.FirstPerson', Message: "Not 'I'll'.", Severity: 'error', Match: "I'll" },
+      { Line: at('option 2 description'), Span: [1, 1], Check: 'Cards.FirstPerson', Message: "Not 'I'.", Severity: 'error', Match: 'I' },
+    ] }, 1));
+    const ruling = await checkCard(two, config({ vale: vale.argv }), logger().log);
+    assert.match(ruling.reason, /- text, line 1: Cards\.FirstPerson/);
+    assert.match(ruling.reason, /- option 2 description, line 1: Cards\.FirstPerson/);
+    assert.doesNotMatch(ruling.reason, /option 1 label/);
   });
 
   it('passes a card with only vale warnings, and sends the warnings to the agent as advice', async () => {
@@ -303,7 +324,7 @@ describe('the example triage agent reads its local config', () => {
 
   it('ships a card prompt with a text fence that asks for the classifier\'s reply format', () => {
     const fence = /```text\n([\s\S]*?)\n```/.exec(fs.readFileSync(CARD_PROMPT, 'utf8'))?.[1] ?? '';
-    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets']) assert.ok(fence.includes(part), part);
+    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word']) assert.ok(fence.includes(part), part);
   });
 });
 

@@ -153,6 +153,7 @@ export function cardText(card: Card): string {
     if (q.options?.length) lines.push(...q.options.map(option));
     else lines.push('(free-text answer)');
   });
+  if (card.approvals?.length) lines.push('', 'Approvals:', ...card.approvals.map((a) => `- ${a.label ?? 'Approve'}: "${a.text}"`));
   if (card.secrets?.length) lines.push('', `Secret fields: ${card.secrets.join(', ')}`);
   if (card.body) lines.push('', 'Body (OpenUI):', card.body.slice(0, 4000));
   if (card.html) lines.push('', 'HTML:', card.html.slice(0, 4000));
@@ -257,7 +258,7 @@ interface ValeAlert { Line: number; Check: string; Message: string; Severity: st
 export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport> {
   const { doc, fieldAt } = cardProse(card);
   // Vale exits 1 when it finds an error, and still prints its JSON.
-  const alerts = await ask('vale', [...cfg.vale, '--no-global', '--config', VALE_INI, '--output=JSON', '--ext=.md'], doc, cfg.valeTimeoutMs, [0, 1], (out) => {
+  const found = await ask('vale', [...cfg.vale, '--no-global', '--config', VALE_INI, '--output=JSON', '--ext=.md'], doc, cfg.valeTimeoutMs, [0, 1], (out) => {
     const parsed = JSON.parse(out) as unknown;
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
     const lists = Object.values(parsed as Record<string, unknown>);
@@ -267,7 +268,9 @@ export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand 
       && typeof (a as ValeAlert).Line === 'number' && typeof (a as ValeAlert).Check === 'string' && typeof (a as ValeAlert).Message === 'string' && typeof (a as ValeAlert).Severity === 'string';
     return all.every(isAlert) ? all : undefined;
   }, run, signal);
-  if ('skipped' in alerts) return { check: 'Vale', sections: [], skipped: alerts.skipped };
+  if ('skipped' in found) return { check: 'Vale', sections: [], skipped: found.skipped };
+  // An option label is the person's answer, so it speaks in the person's voice, and "I" is right there.
+  const alerts = found.filter((a) => !(a.Check === 'Cards.FirstPerson' && / label$/.test(fieldAt(a.Line))));
   const lines = doc.split('\n');
   const describe = (a: ValeAlert): string => {
     const field = fieldAt(a.Line);
