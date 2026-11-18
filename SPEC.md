@@ -39,7 +39,7 @@ An extension dials in like an agent: `GET /v1/extensions/stream?name=<name>&hook
 | `answer.saved` | After the person saves an answer. | Observe only. |
 | `person.changed` | When a page opens, closes, hides or shows another card. | Observe only. |
 
-While an extension checks a card, the card is `in-triage` and the person does not see it. Every extension on the hook must pass the card. `return` closes the card as `returned` and sends the agent a `returned` event with the reason. `hold` keeps the card `held` until the owner releases it with `POST /v1/cards/<id>/release`.
+While an extension checks a card, the card is `in-triage` and the person does not see it. Every extension on the hook must pass the card. `return` closes the card as `returned` and sends the agent a `returned` event with the reason, and the agent can answer it with [feedback](#feedback-on-triage-pushback). `hold` keeps the card `held` until the owner releases it with `POST /v1/cards/<id>/release`.
 
 A hook call without a verdict by its deadline follows the policy: `fail-open` passes the card, and `fail-closed` holds it. The card shows the extension and the reason. With no extension on `card.created`, cards go straight to the person, and an extension that connects later screens the cards still waiting. The platform alarm resolves deadlines, so the inbox itself doesn't set timers.
 
@@ -48,6 +48,30 @@ A hook call without a verdict by its deadline follows the policy: `fail-open` pa
 ## The triage extension
 
 `your-attention triage` checks that each card states a goal, the options that the agent weighed, evidence, and a recommendation. The prompt includes the card's kind, title, text, recommendation, option labels, questions, secret field names, HTML, body, attachment names and tags, so a guidance rule can check any of them. It also searches earlier answers, and returns a card that an earlier answer covers. It returns a card whose text asks two or more questions above one `options` list, so the agent posts them as `questions`. By default it uses OpenRouter, with the key from `your-attention triage login`, an OAuth PKCE sign-in. `--judge-cmd "claude -p"` uses a coding harness in print mode instead, and `--judge-url` uses any OpenAI-compatible endpoint. A judge that fails or answers in an unreadable form passes the card. `your-attention service triage` writes a launchd or systemd unit for it.
+
+## Feedback on triage pushback
+
+The person tunes the triage gate from what agents say about it. Each time an extension returns a card, the inbox appends `{kind: "returned", by, reason, version, at}` to the card's `pushback` list. `by` is the extension's name and `version` the card version it checked. A revision keeps the list, so the page shows each reason next to the feedback that answers it, even after the card passes. The list keeps the 20 newest entries. The inbox adds nothing when the inbox page sends a card back, since no triage extension judged it.
+
+The `returned` event of a triage return has an `extension` field with the extension's name. Its notice ends with one sentence that points the agent to `card_triage_feedback`, so the person can tune the gate. The notice of a card the page sent back has no such sentence.
+
+An agent sends its feedback with `POST /v1/cards/<id>/triage-feedback`:
+
+```json
+{
+  "verdict": "partly",
+  "comment": "The goal was in the title.",
+  "findings": [{ "index": 1, "verdict": "disagree", "comment": "The title says it." }, { "quote": "Option B has no description", "verdict": "agree" }]
+}
+```
+
+`verdict` is `agree`, `disagree` or `partly`, and every other field is optional. A finding points at a part of the reason by `index`, counting from 1, or by a `quote` from it, and has its own verdict and comment. The inbox adds the feedback, the agent id and the time to the latest pushback, and returns the card. A second call on the same pushback replaces the first, so each pushback keeps one verdict: the agent may change its mind after it revises the card, and a count of verdicts counts each pushback once. Only the token that posted the card may send feedback, so the owner and other agents get 403. A card without a pushback answers 409. The comment takes at most 2,000 characters, a finding's comment 1,000 and its quote 300, and a call at most 20 findings. Past a limit the inbox answers 400, so the record keeps every word the agent wrote. `card_triage_feedback` sends it from a harness.
+
+The page shows a collapsed **Triage pushback** section on the card, next to **What changed**. It opens to each pushback with its version, extension, time and reason, and under each one the agent's verdict, comment and findings, with a line at their left in the ok color for agree, the warn color for partly, or the bad color for disagree.
+
+`GET /v1/search` and `GET /v1/cards` take `triage_feedback=any` to keep the cards with feedback, or `agree`, `disagree` or `partly` to keep one verdict. `card_search` takes the same filter as `triage_feedback`, and each result lists the card's pushback with its verdict.
+
+For mining, `GET /v1/triage-feedback` exports the data to the owner, which takes the same `triage_feedback` filter. It answers `{records}`, one record per card triage pushed back on, oldest first: `{card, title, agent, state, outcome, pushback, followedBy?}`, where each pushback entry has `feedback` set to null when the agent gave none. `outcome` says how the card ended: `answered`, `passed` when triage let a later version through to the person, `returned` while it stays sent back, or the kind it closed with, such as `expired` or `retracted`. Other tokens get 403. `your-attention triage feedback [--verdict any|agree|disagree|partly]` prints each record as one line of JSON.
 
 ## Person presence
 
@@ -676,7 +700,7 @@ The client never runs an HTML card's scripts. For an HTML card, a chart or anoth
 
 `GET /v1/search?q=<words>` matches each word as a prefix, over card text, its tags and answer comments. The laptop build uses SQLite FTS5. The reply is `{results, nextCursor?}`, and each result is `{card, answer?, state}`: the whole card, its answer when it has one, and the card state itself, such as `open` or `orphaned`. A result therefore shows its tags, its agent, and its posted and updated times, so a caller finds the common facts without a read per card. `answered=1` keeps only cards the person answered.
 
-The route takes filters, which combine with the words and with each other, and which work alone. Leave `q` out, or send an asterisk alone, to list every matching card. `state` takes one card state. `tags` takes a tag key alone, `repo`, or a key and value, `priority=P1`, and a call that repeats the parameter keeps only the cards with every tag named. `agent` keeps the cards one agent posted, by its id or its session name. `since` and `before` take epoch milliseconds or an ISO date, and keep the cards posted or updated at or after, or at or before, that time. `links` takes a card id or URL, and keeps the cards whose text links it. A word search returns the best match first. A listing with no words returns the card with the newest change first.
+The route takes filters, which combine with the words and with each other, and which work alone. Leave `q` out, or send an asterisk alone, to list every matching card. `state` takes one card state. `tags` takes a tag key alone, `repo`, or a key and value, `priority=P1`, and a call that repeats the parameter keeps only the cards with every tag named. `agent` keeps the cards one agent posted, by its id or its session name. `since` and `before` take epoch milliseconds or an ISO date, and keep the cards posted or updated at or after, or at or before, that time. `links` takes a card id or URL, and keeps the cards whose text links it. `triage_feedback` keeps the cards with [feedback on triage pushback](#feedback-on-triage-pushback). A word search returns the best match first. A listing with no words returns the card with the newest change first.
 
 `limit` sets the page size, 20 by default, and no call returns more than 100 results. When more cards match, the reply carries a `nextCursor`, and the next call passes it as `cursor` to read on. The cursor records a place in the matching list, so every page says whether more follows.
 

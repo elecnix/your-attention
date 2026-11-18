@@ -48,6 +48,9 @@ const HELP = `your-attention: one inbox for the questions your coding agents ask
   triage [--judge-cmd "claude -p" | --judge-url URL --judge-model M --judge-key-env VAR]
                                                       check each card before you see it (OpenRouter by default)
   triage login                                        sign in to OpenRouter for the default judge
+  triage feedback [--verdict any|agree|disagree|partly]
+                                                      as the owner: one line of JSON per card triage pushed back on, with
+                                                      the reason, the agent's feedback and how the card ended
   service serve|triage [--write]                      print or write a launchd or systemd unit
   bridge [--upstream URL] [--port 4815] [--mdns]      offer a remote inbox on this machine
   offer ssh <host> [--remote-port 4815]               offer this inbox on another machine over SSH
@@ -673,6 +676,18 @@ switch (command) {
     break;
   }
   case 'triage': {
+    if (rest[0] === 'feedback') {
+      const { values } = parseArgs({ args: rest.slice(1), options: { verdict: { type: 'string' } } });
+      const verdict = values.verdict;
+      if (verdict !== undefined && !['any', 'agree', 'disagree', 'partly'].includes(verdict)) fail('Usage: your-attention triage feedback [--verdict any|agree|disagree|partly]');
+      const target = runningHere() ?? ownerPairing() ?? fail('This machine runs no inbox and is not paired with one as owner. Pair it as owner with `your-attention pair <url> --role owner`, or start an inbox with `your-attention start`.');
+      const records = await new Client(target).triageFeedbackRecords(verdict as 'any' | undefined).catch((e: Error) => {
+        // An agent pairing reaches the route, and the inbox answers that only the owner exports.
+        fail(/: 403 /.test(e.message) ? notOwnerAdvice(target.url) : `The inbox at ${target.url} refused: ${e.message}`);
+      });
+      for (const r of records) process.stdout.write(`${JSON.stringify(r)}\n`);
+      break;
+    }
     const triage = await import('./extensions/triage.ts');
     if (rest[0] === 'login') {
       const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';

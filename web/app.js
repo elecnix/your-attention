@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, AgentPin, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, AgentPin, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, agentName, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
@@ -603,6 +603,7 @@ export function App() {
       current.recommendation && !recommendedOptions(current).inside && h('div', { className: 'recommendation' }, h('strong', { className: 'label' }, 'Recommendation'), recommendationText(current.recommendation)),
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
+      h(TriagePushback, { card: current }),
       current.approvals && current.approvals.length > 0 && h(Approvals, { card: current, answer: a, picks: picksOf(current), onToggle: (i, on) => toggleApproval(current, i, on) }),
       current.broadcast && !current.closed
         ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip, onDismiss: (comment) => dismiss(current, {}, comment) })

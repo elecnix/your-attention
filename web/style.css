@@ -278,6 +278,15 @@
   details.changes .step { margin: 6px 0; }
   details.changes .step-head { font-weight: 600; }
   details.changes .field { color: var(--muted); margin-top: 2px; }
+  /* Triage pushback: each reason as the extension wrote it, and the agent's feedback under an accent line, colored by its verdict. */
+  details.pushback .reason { white-space: pre-wrap; margin-top: 2px; }
+  details.pushback .feedback { margin: 6px 0 0; padding-left: 10px; border-left: 3px solid var(--line); }
+  details.pushback .feedback.agree { border-left-color: var(--ok); }
+  details.pushback .feedback.disagree { border-left-color: var(--bad); }
+  details.pushback .feedback.partly { border-left-color: var(--warn); }
+  details.pushback .feedback .comment { white-space: pre-wrap; }
+  details.pushback .findings { margin: 4px 0 0; padding-left: 18px; }
+  details.pushback .finding-name { font-weight: 600; }
 
   /* Light Gill Sans, a little larger and spaced out, for easier reading. OpenUI sets the font on
      each of its elements, so these rules override it with !important. Code stays monospace.
