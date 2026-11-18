@@ -16,6 +16,7 @@ import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
+  FeedbackFinding, FeedbackVerdict, TriageFeedback, TriagePushback,
 } from './types.ts';
 
 export class InboxError extends Error {
@@ -51,6 +52,22 @@ export interface SearchFilters {
   limit?: number;
   /** The `nextCursor` of an earlier call, to read the page after it. */
   cursor?: string;
+  /** Keep only cards whose agent gave feedback on a triage pushback: any feedback, or one verdict. */
+  triageFeedback?: 'any' | FeedbackVerdict;
+}
+
+/** One card triage pushed back on, as the owner's export prints it: what triage said, what the agent answered, and how
+ * the card ended. */
+export interface TriageFeedbackRecord {
+  card: string;
+  title: string;
+  agent: string;
+  state: CardState;
+  /** answered, passed (triage let a later version through, and it waits for the person), returned (still sent back),
+   * or the kind the card closed with, such as expired or retracted. */
+  outcome: string;
+  pushback: (Omit<TriagePushback, 'feedback'> & { feedback: TriageFeedback | null })[];
+  followedBy?: string;
 }
 
 /** One matched card, with its answer when it has one, and the state the inbox shows for it. */
@@ -118,6 +135,15 @@ const PAIRING_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_PAIRINGS = 5;
 const CLOSE_KINDS = new Set<CloseKind>(['retracted', 'self-answered', 'answered-in-terminal', 'resolved']);
 const HISTORY_LIMIT = 20;
+/** How many triage pushbacks a card keeps, newest last. With full feedback on each, they stay under about 300 KB, a cap
+ * of their own beside the card's, as history has. */
+const PUSHBACK_LIMIT = 10;
+/** The longest comment on a triage pushback, as long as a close's outcome. */
+export const MAX_FEEDBACK_CHARS = 2000;
+const MAX_FINDINGS = 20;
+const MAX_FINDING_COMMENT_CHARS = 1000;
+const MAX_FINDING_QUOTE_CHARS = 300;
+const FEEDBACK_VERDICTS = new Set<string>(['agree', 'disagree', 'partly']);
 /** How long an agent stays online after its last connection closes, so a reconnect or the next long-poll keeps it online. */
 export const PRESENCE_GRACE_MS = 2000;
 /** How long the inbox remembers a message id, to apply a message once however many links bring it. */
@@ -653,6 +679,7 @@ export class Inbox {
       expiresAt: input.expiresAt,
       rating: input.rating,
       triage: before?.triage,
+      pushback: before?.pushback,
       history: history.length ? history : undefined,
       broadcast: before?.broadcast,
       origin: cleanOrigin(input.origin),
@@ -672,8 +699,8 @@ export class Inbox {
     };
     // The inbox's own system cards quote an agent's words, such as proposed guidance, and the page shows a diagram there as its source.
     if (!this.clientChecks && (kind !== 'system' || caller.token !== '')) requireChecked(findDiagrams(card), checked);
-    // History has its own cap, and the replies of older cards are stored data the card cap leaves out.
-    const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined })).length;
+    // History and pushback have caps of their own, and the replies of older cards are stored data the card cap leaves out.
+    const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined, pushback: undefined })).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
     this.store.put('cards', id, card);
     this.store.index(id, searchText(card));
@@ -765,11 +792,11 @@ export class Inbox {
     return this.sendBack(card, reason, 'The inbox page');
   }
 
-  /** Close a card as returned and tell its agent why. */
-  private sendBack(card: Card, reason: string, by: string): Card {
+  /** Close a card as returned and tell its agent why. `extension` names the triage extension that sent it back. */
+  private sendBack(card: Card, reason: string, by: string, extension?: string): Card {
     this.closeAs(card, 'returned', reason);
     for (const [k, subs] of this.agents) {
-      if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send({ type: 'returned', id: randomId(6), card: publicCard(card), reason, by });
+      if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send({ type: 'returned', id: randomId(6), card: publicCard(card), reason, by, ...(extension ? { extension } : {}) });
     }
     return this.getCard(card.id);
   }
@@ -840,8 +867,10 @@ export class Inbox {
     const waiting = (card.triage.waiting ?? []).filter((n) => n !== ext.reg.name);
     const now = this.now();
     if (verdict === 'return') {
-      this.store.put('cards', card.id, { ...card, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], at: now } });
-      return this.sendBack(card, clean || 'Triage sent the card back.', 'Triage');
+      const reason = clean || 'Triage sent the card back.';
+      const pushback = [...(card.pushback ?? []), { kind: 'returned' as const, by: ext.reg.name, reason, version: card.version, at: now }].slice(-PUSHBACK_LIMIT);
+      this.store.put('cards', card.id, { ...card, pushback, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], at: now } });
+      return this.sendBack(card, reason, 'Triage', ext.reg.name);
     }
     const triage = verdict === 'hold'
       ? { ...card.triage, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
@@ -850,6 +879,61 @@ export class Inbox {
     this.store.put('cards', card.id, next);
     this.emit({ type: 'change', card: card.id });
     return next;
+  }
+
+  /** The agent that posted a card says whether triage was right to push back on it. The feedback answers the latest
+   * pushback, and a second call on that pushback replaces the first, so each pushback holds one verdict: the agent may
+   * change its mind after it revises the card, and a count of verdicts never counts one pushback twice. */
+  triageFeedback(caller: Caller, id: string, input: unknown): Card {
+    const card = this.getCard(id);
+    if (caller.role !== 'agent' || card.token !== caller.token) throw new InboxError(403, 'only the client that posted this card gives feedback on its triage');
+    const last = card.pushback?.at(-1);
+    if (!last) throw new InboxError(409, `triage has not pushed back on card ${id}, so there is nothing to give feedback on`);
+    const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+    const verdict = feedbackVerdict(body['verdict'], 'verdict');
+    const comment = cappedText(body['comment'], MAX_FEEDBACK_CHARS, 'comment');
+    const raw = body['findings'];
+    if (raw !== undefined && !Array.isArray(raw)) throw new InboxError(400, 'findings must be a list');
+    if (Array.isArray(raw) && raw.length > MAX_FINDINGS) throw new InboxError(400, `feedback takes at most ${MAX_FINDINGS} findings`);
+    const findings = (Array.isArray(raw) ? raw : []).map((f, i): FeedbackFinding => {
+      const o = (f && typeof f === 'object' ? f : {}) as Record<string, unknown>;
+      const at = `finding ${i + 1}`;
+      const idx = o['index'];
+      if (idx !== undefined && !(Number.isInteger(idx) && (idx as number) >= 1)) throw new InboxError(400, `${at}: index must be a whole number from 1`);
+      const quote = cappedText(o['quote'], MAX_FINDING_QUOTE_CHARS, `${at}: quote`);
+      if (idx === undefined && !quote) throw new InboxError(400, `${at}: name the finding by its index in the reason, or by a quote from it`);
+      const note = cappedText(o['comment'], MAX_FINDING_COMMENT_CHARS, `${at}: comment`);
+      return { ...(idx !== undefined ? { index: idx as number } : {}), ...(quote ? { quote } : {}), verdict: feedbackVerdict(o['verdict'], `${at}: verdict`), ...(note ? { comment: note } : {}) };
+    });
+    const feedback: TriageFeedback = { verdict, ...(comment ? { comment } : {}), ...(findings.length ? { findings } : {}), agent: card.agent, at: this.now() };
+    const pushback = [...(card.pushback ?? []).slice(0, -1), { ...last, feedback }];
+    const next = { ...card, pushback };
+    this.store.put('cards', id, next);
+    this.emit({ type: 'change', card: id });
+    return next;
+  }
+
+  /** Every card triage pushed back on, for the owner to mine: what triage said, what the agent answered, and how the
+   * card ended. `filter` keeps the cards with any feedback, or with one verdict. */
+  triageFeedbackRecords(caller: Caller, filter?: SearchFilters['triageFeedback']): TriageFeedbackRecord[] {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner exports triage feedback');
+    checkFeedbackFilter(filter);
+    return this.store.list<Card>('cards')
+      .filter((c) => c.pushback?.length && hasFeedback(c, filter))
+      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1))
+      .map((c) => {
+        const answer = this.store.get<Answer>('answers', c.id);
+        const state = this.shownState(c, this.store.get<Presence>('presence', c.agent), answer);
+        return {
+          card: c.id,
+          title: c.title,
+          agent: c.agent,
+          state,
+          outcome: laterOutcome(c, answer),
+          pushback: (c.pushback ?? []).map((p) => ({ ...p, feedback: p.feedback ?? null })),
+          ...(c.followedBy ? { followedBy: c.followedBy } : {}),
+        };
+      });
   }
 
   /** The owner lets a held card through. */
@@ -2063,6 +2147,7 @@ export class Inbox {
   /** Filter the cards, page them, and give each result its answer and its state. */
   private pageOf(cards: Card[], filters: SearchFilters, defaultLimit?: number): SearchPage {
     if (filters.state !== undefined && !CARD_STATES.has(filters.state)) throw new InboxError(400, `state must be one of ${[...CARD_STATES].join(', ')}`);
+    checkFeedbackFilter(filters.triageFeedback);
     const offset = readCursor(filters.cursor);
     const asked = filters.limit ?? defaultLimit;
     if (asked !== undefined && (!Number.isInteger(asked) || asked < 1)) throw new InboxError(400, 'limit must be a whole number of results');
@@ -2096,6 +2181,7 @@ export class Inbox {
       const needle = f.links.toLowerCase();
       if (!cardLinks(card).some((link) => link.toLowerCase().includes(needle))) return false;
     }
+    if (f.triageFeedback !== undefined && !hasFeedback(card, f.triageFeedback)) return false;
     return true;
   }
 
@@ -2733,6 +2819,39 @@ function cardLinks(card: Card): string[] {
     ...[...text.matchAll(/\[\[([\w.:-]{1,80})\]\]/g)].map((m) => m[1] as string),
     ...[...text.matchAll(/(?:https?|file):\/\/[^\s<>()[\]]+/g)].map((m) => m[0]),
   ];
+}
+
+function feedbackVerdict(v: unknown, field: string): FeedbackVerdict {
+  if (typeof v !== 'string' || !FEEDBACK_VERDICTS.has(v)) throw new InboxError(400, `${field} must be agree, disagree or partly`);
+  return v as FeedbackVerdict;
+}
+
+/** A text field of feedback, trimmed, or undefined when empty. Too long is refused rather than cut, so the record is
+ * what the agent wrote. */
+function cappedText(v: unknown, max: number, field: string): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  const text = String(v).trim();
+  if (text.length > max) throw new InboxError(400, `${field} must be at most ${max} characters`);
+  return text || undefined;
+}
+
+function checkFeedbackFilter(f: SearchFilters['triageFeedback']): void {
+  if (f !== undefined && f !== 'any' && !FEEDBACK_VERDICTS.has(f)) throw new InboxError(400, 'triage_feedback must be any, agree, disagree or partly');
+}
+
+/** Whether any pushback on the card carries feedback, or feedback with this verdict. No filter keeps every card. */
+function hasFeedback(card: Card, f: SearchFilters['triageFeedback']): boolean {
+  if (f === undefined) return true;
+  return (card.pushback ?? []).some((p) => p.feedback && (f === 'any' || p.feedback.verdict === f));
+}
+
+/** How a card triage pushed back on ended: the person answered it, triage let a later version through, it is still
+ * sent back, or it closed another way. */
+function laterOutcome(card: Card, answer: Answer | undefined): string {
+  if (answer) return 'answered';
+  if (card.closed) return card.closed.kind;
+  if (card.triage?.state === 'passed' || card.triage?.state === 'skipped') return 'passed';
+  return card.triage?.state ?? 'open';
 }
 
 /** The text search matches: the card's words, its tags, and its file names. */

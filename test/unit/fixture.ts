@@ -2,7 +2,7 @@
 import { createHandler } from '../../src/core/http.ts';
 import { Inbox, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
-import type { AgentEvent, Answer } from '../../src/core/types.ts';
+import type { AgentEvent, Answer, Card } from '../../src/core/types.ts';
 
 export const agent: Caller = { token: 'ta', role: 'agent' };
 export const owner: Caller = { token: 'to', role: 'owner' };
@@ -46,5 +46,8 @@ export async function httpInbox(inbox: Inbox = new Inbox(new MemoryStorage(), ()
       headers: { ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) },
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     }));
-  return { inbox, handle, call, owner, agentA, agentB, ext };
+  /** Post a card from agent `s1` unless the body names another, and read back the card the inbox stored. */
+  const post = async (token: string, body: Record<string, unknown>): Promise<Card> =>
+    (await (await call('POST', '/v1/cards', { token, body: { agent: 's1', ...body } })).json()) as Card;
+  return { inbox, handle, call, post, owner, agentA, agentB, ext };
 }

@@ -1,20 +1,18 @@
 // `your-attention telemetry`: the person reads, turns off and resets the usage counts of the inbox on this machine.
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { promisify } from 'node:util';
-import { ROOT, stopAndRemove, until } from './harness.ts';
+import { ROOT, stopAndRemove, until, runCli } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
 /** The inbox address, once server.json is complete. A read in the middle of the write waits for the next poll. */
 const serverUrl = (file: string): { url: string } | undefined => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) as { url: string }; } catch { return undefined; }
 };
-const run = (env: NodeJS.ProcessEnv, ...args: string[]) =>
-  promisify(execFile)(process.execPath, [...CLI, ...args], { env, encoding: 'utf8' }).then((r) => ({ code: 0, ...r }), (e: { code: number; stdout: string; stderr: string }) => e);
+const run = runCli;
 
 describe('usage counts from the command line', () => {
   it('starts off, offers the counts, and sends them only after the person turns them on', async () => {

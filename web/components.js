@@ -677,6 +677,31 @@ export function Changes({ card }) {
         f.added.map((l, i) => { const w = i < f.removed.length && wordDiff(f.removed[i], l); return h('div', { key: `a${i}`, className: 'add' }, '+ ', w ? marked(w.add) : l); }))))));
 }
 
+const FEEDBACK_WORD = { agree: 'agrees', disagree: 'disagrees', partly: 'partly agrees' };
+
+// Each time triage pushed back on the card, the reason it gave and what the agent said about it, collapsed until the
+// person opens it. The agent's feedback is how the person tunes the gate, so it sits beside the reason it answers.
+export function TriagePushback({ card }) {
+  const list = card.pushback || [];
+  if (!list.length) return null;
+  const answered = list.filter((p) => p.feedback).length;
+  return h('details', { className: 'changes pushback' },
+    h('summary', null, `Triage pushback (${list.length})${answered ? `, agent feedback on ${answered}` : ''}`),
+    list.map((p) => h('div', { key: `${p.version}:${p.at}`, className: 'step' },
+      h('div', { className: 'step-head' }, `Version ${p.version}: ${p.by} ${p.kind === 'advice' ? 'passed it with advice' : 'sent it back'} at ${time(p.at)}`),
+      h('div', { className: 'reason' }, p.reason),
+      p.feedback
+        ? h('div', { className: `feedback ${p.feedback.verdict}` },
+          h('div', { className: 'field' }, `The agent ${FEEDBACK_WORD[p.feedback.verdict] || p.feedback.verdict} at ${time(p.feedback.at)}`),
+          p.feedback.comment && h('div', { className: 'comment' }, p.feedback.comment),
+          p.feedback.findings && p.feedback.findings.length > 0 && h('ul', { className: 'findings' },
+            p.feedback.findings.map((f, i) => h('li', { key: i },
+              h('span', { className: 'finding-name' }, f.index !== undefined ? `Finding ${f.index}` : `"${f.quote}"`),
+              `: ${FEEDBACK_WORD[f.verdict] || f.verdict}`,
+              f.comment ? `. ${f.comment}` : ''))))
+        : h('div', { className: 'field' }, 'No feedback from the agent on this one.'))));
+}
+
 // The system card for new guidance: the proposal as a diff against the current guidance, the agents to send it to,
 // all of them at first, and the comment, which goes with the answer to the agent that proposed the text.
 export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDone, onSkip, onDismiss }) {

@@ -7,9 +7,7 @@ import type { CardSummary } from '../../src/core/summary.ts';
 import type { Card } from '../../src/core/types.ts';
 
 async function setup() {
-  const { call, owner, agentA, agentB, ext } = await httpInbox();
-  const post = async (token: string, body: Record<string, unknown>): Promise<Card> =>
-    (await (await call('POST', '/v1/cards', { token, body: { agent: 's1', ...body } })).json()) as Card;
+  const { call, post, owner, agentA, agentB, ext } = await httpInbox();
   return { call, post, owner, agentA, agentB, ext };
 }
 

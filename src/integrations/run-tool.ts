@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
 import { typeFromName, type SearchFilters } from '../core/inbox.ts';
-import type { Approval, AskQuestion, CloseKind, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
+import type { Approval, AskQuestion, CloseKind, FeedbackFinding, FeedbackVerdict, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
 import { envRequireCard } from './require-card.ts';
 import { cardTools, removedTools } from './tools.ts';
@@ -156,6 +156,17 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
     case 'card_close':
       await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));
       return 'Closed.';
+    case 'card_triage_feedback': {
+      const findings = Array.isArray(args['findings']) ? (args['findings'] as FeedbackFinding[]) : undefined;
+      const comment = str(args['comment']);
+      const card = await inbox.triageFeedback(String(args['card_id']), {
+        verdict: args['verdict'] as FeedbackVerdict,
+        ...(comment === undefined ? {} : { comment }),
+        ...(findings ? { findings } : {}),
+      });
+      const last = card.pushback?.at(-1);
+      return `Recorded your feedback on the pushback by ${last?.by ?? 'triage'} on card ${card.id}${last ? `, version ${last.version}` : ''}. The person reads it on the card.`;
+    }
     case 'card_search': {
       // A time filter takes what an agent writes: an ISO date, a date-time, or epoch milliseconds.
       const time = (name: string): number | undefined => {
@@ -165,7 +176,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         if (!Number.isSafeInteger(value)) throw new Error(`${name} must be an ISO date or epoch milliseconds, and ${String(raw)} is neither`);
         return value;
       };
-      const filtered = ['state', 'tags', 'agent', 'since', 'before', 'links'].some((k) => args[k] !== undefined);
+      const filtered = ['state', 'tags', 'agent', 'since', 'before', 'links', 'triage_feedback'].some((k) => args[k] !== undefined);
       const page = await inbox.search(String(args['query'] ?? ''), {
         // Words alone keep the tool's own default of answered cards. A filter picks the cards itself, so it lifts it.
         answered: args['include_open'] === true || filtered ? undefined : true,
@@ -175,6 +186,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         since: time('since'),
         before: time('before'),
         links: str(args['links']),
+        triageFeedback: str(args['triage_feedback']) as SearchFilters['triageFeedback'],
         limit: args['limit'] === undefined ? undefined : Number(args['limit']),
         cursor: str(args['cursor']),
       });
@@ -187,6 +199,8 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         posted: new Date(r.card.createdAt).toISOString(),
         updated: new Date(r.card.updatedAt).toISOString(),
         answer: r.answer ? describeAnswer(r.card, r.answer) : null,
+        // Each triage pushback, with the agent's verdict on it, so a search for feedback reads it without a card_read.
+        ...(r.card.pushback?.length ? { triage_pushback: r.card.pushback.map((p) => ({ by: p.by, kind: p.kind, version: p.version, reason: p.reason, feedback: p.feedback?.verdict ?? null })) } : {}),
       }));
       return JSON.stringify({ results, ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}) }, null, 2);
     }

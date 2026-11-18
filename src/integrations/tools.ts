@@ -164,6 +164,29 @@ export const cardTools: CardTool[] = [
     },
   },
   {
+    name: 'card_triage_feedback',
+    description: 'Say whether triage was right to push back on one of your cards. Use it after a triage extension sent your card back, and say what you thought of its reason: agree, disagree, or partly, with a comment and, for a reason that lists several findings, a verdict on each. The person reads it on the card and mines it to tune the triage gate, so a pushback you thought wrong is worth reporting most. It answers the latest pushback on the card, and a second call replaces the first. It does not revise the card: do that with card_patch or card_post.',
+    schema: {
+      type: 'object',
+      properties: {
+        card_id: { type: 'string' },
+        verdict: { type: 'string', enum: ['agree', 'disagree', 'partly'], description: 'agree: the pushback was right. disagree: it was wrong. partly: some of it was right.' },
+        comment: { type: 'string', description: 'Why, in a sentence or two, at most 2,000 characters.' },
+        findings: {
+          type: 'array',
+          description: 'Optional, at most 20: a verdict on each finding of a reason that lists several. Name a finding by its index, counting from 1 in the order the reason lists them, or by a quote from it of at most 300 characters.',
+          items: { type: 'object', properties: {
+            index: { type: 'number' },
+            quote: { type: 'string' },
+            verdict: { type: 'string', enum: ['agree', 'disagree', 'partly'] },
+            comment: { type: 'string', description: 'At most 1,000 characters.' },
+          }, required: ['verdict'] },
+        },
+      },
+      required: ['card_id', 'verdict'],
+    },
+  },
+  {
     name: 'card_search',
     description: 'Search the cards of every session, or list them by filters alone. Search past answers before you post, so the person never answers the same thing twice. A filter works without a query: state "open" lists every card that waits for the person. Each result carries the card\'s state, tags, posting agent, and posted and updated times, so a list answers the common questions without a card_read per card. When the reply carries next_cursor, pass it back as cursor to read the rest of the list.',
     schema: {
@@ -176,6 +199,7 @@ export const cardTools: CardTool[] = [
         since: { type: 'string', description: 'Only cards posted or updated at or after this time: an ISO date or date-time, or epoch milliseconds.' },
         before: { type: 'string', description: 'Only cards posted or updated at or before this time: an ISO date or date-time, or epoch milliseconds.' },
         links: { type: 'string', description: 'Only cards whose text links this card id or URL, such as a pull request address.' },
+        triage_feedback: { type: 'string', enum: ['any', 'agree', 'disagree', 'partly'], description: 'Only cards whose agent gave feedback on a triage pushback: any feedback, or one verdict.' },
         include_open: { type: 'boolean', description: 'Also return cards nobody answered yet. It matters for a search by words alone, because a filter already returns every state it matches.' },
         limit: { type: 'number', description: 'At most this many results: 20 by default, and no call returns more than 100.' },
         cursor: { type: 'string', description: 'The next_cursor of an earlier reply, to read the page after it.' },

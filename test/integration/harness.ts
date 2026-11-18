@@ -1,8 +1,9 @@
 // Starts a real inbox in a temporary home for one test file.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { Client } from '../../src/client.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
 import { serve, type RunningServer, type ServeOptions } from '../../src/node/server.ts';
@@ -92,6 +93,13 @@ export interface CliServer {
 }
 
 export const CLI_ARGS = [path.join(ROOT, 'src', 'cli.ts')];
+
+/** Run the CLI once to its end in `env`, and give its exit code with what it printed. A failure resolves too, so a test
+ * asserts on the code. */
+export function runCli(env: NodeJS.ProcessEnv, ...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return promisify(execFile)(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, ...args], { env, encoding: 'utf8' })
+    .then((r) => ({ code: 0, ...r }), (e: { code: number; stdout: string; stderr: string }) => e);
+}
 
 /** Start `your-attention serve` as its own process in a temporary home, which is what tests of the CLI itself need. */
 export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {

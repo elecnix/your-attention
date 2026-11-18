@@ -1,14 +1,12 @@
 // `your-attention ack <card>` marks an answer read for an agent that took it out of band, as a script reading `watch` does.
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { promisify } from 'node:util';
-import { CLI_ARGS, ROOT, serveForTest, until } from './harness.ts';
+import { CLI_ARGS, ROOT, serveForTest, until, runCli } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src', 'cli.ts')];
-const run = (env: NodeJS.ProcessEnv, ...args: string[]) =>
-  promisify(execFile)(process.execPath, [...CLI, ...args], { env, encoding: 'utf8' }).then((r) => ({ code: 0, ...r }), (e: { code: number; stdout: string; stderr: string }) => e);
+const run = runCli;
 
 describe('marking an answer read from the command line', () => {
   it('sets readAt on every card it is given, and refuses one nobody answered', async () => {

@@ -44,6 +44,7 @@ export function filtersFrom(url: URL): SearchFilters {
   const state = p.get('state');
   const agent = p.get('agent');
   const links = p.get('links');
+  const feedback = p.get('triage_feedback');
   const cursor = p.get('cursor');
   const limit = p.get('limit');
   const since = time('since');
@@ -57,6 +58,7 @@ export function filtersFrom(url: URL): SearchFilters {
     ...(since === undefined ? {} : { since }),
     ...(before === undefined ? {} : { before }),
     ...(links ? { links } : {}),
+    ...(feedback ? { triageFeedback: feedback as SearchFilters['triageFeedback'] } : {}),
     ...(limit === null || limit === '' ? {} : { limit: Number(limit) }),
     ...(cursor ? { cursor } : {}),
   };
@@ -65,7 +67,7 @@ export function filtersFrom(url: URL): SearchFilters {
  * plain array it used to get, so the old answer stays for every request that names none of these parameters. The
  * `format` marker exists because a plain word search and the old client's request are otherwise identical. */
 export function wantsPage(url: URL): boolean {
-  return url.searchParams.get('format') === 'page' || ['cursor', 'state', 'tags', 'agent', 'since', 'before', 'links'].some((name) => url.searchParams.has(name));
+  return url.searchParams.get('format') === 'page' || ['cursor', 'state', 'tags', 'agent', 'since', 'before', 'links', 'triage_feedback'].some((name) => url.searchParams.has(name));
 }
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'text/html']);
@@ -494,6 +496,10 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (!wantsPage(url)) return json(inbox.search(q, filters).results.map(({ card, answer }) => (answer ? { card, answer } : { card })));
       return json(inbox.search(q, filters));
     }
+    if (method === 'GET' && a === 'triage-feedback') {
+      const feedback = url.searchParams.get('triage_feedback');
+      return json({ records: inbox.triageFeedbackRecords(me, (feedback || undefined) as SearchFilters['triageFeedback']) });
+    }
     if (method === 'GET' && a === 'unread') return json(inbox.unread(me, url.searchParams.get('agent') ?? undefined));
     if (method === 'GET' && a === 'dead-letters') return json(inbox.deadLetters());
     if (a === 'templates') {
@@ -713,6 +719,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(withWarning(publicCard(await inbox.patchCardChecked(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined))));
         case 'status':
           return json(publicCard(inbox.setStatus(me, b, String(body['status'] ?? ''))));
+        case 'triage-feedback':
+          return json(publicCard(inbox.triageFeedback(me, b, body)));
         case 'tags':
           // A null JSON body has no tags to merge, and the route says so rather than failing on a property read.
           return json(publicCard(inbox.tagCard(me, b, body?.['tags'])));
