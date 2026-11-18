@@ -246,13 +246,15 @@ function CardBody({ draftKey, response, broken, onAction }) {
 }
 
 // A card the agent closed while you looked at it, or one you dismissed: it collapses to its outcome, and opens again on
-// demand. A dismissal also shows the draft the person had on screen, which no agent reads.
-export function ClosedCard({ closed, card, children, onNext, animate }) {
+// demand. A dismissal also shows the draft the person had on screen, which no agent reads. `open` keeps it open, for a card
+// the person opened from a link to read it.
+export function ClosedCard({ closed, card, children, onNext, animate, open = false }) {
   const ref = React.useRef(null);
   const [collapsed, setCollapsed] = React.useState(false);
   const [height, setHeight] = React.useState(null);
   React.useLayoutEffect(() => {
     setHeight(ref.current.scrollHeight);
+    if (open) return undefined;
     if (!animate) { setCollapsed(true); return undefined; }
     const t = setTimeout(() => setCollapsed(true), 900);
     return () => clearTimeout(t);
@@ -442,7 +444,8 @@ export function FileChip({ card, path }) {
 // A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
 // With a card id in `files`, a file: link is a chip that opens the file in a new tab, which the laptop inbox serves for that card only.
 // Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
-// A link to a card the state leaves out shows what `lookup(id)` finds: a cleared card's title, or the id as plain text.
+// A link to a card the state leaves out shows what `lookup(id)` finds: a cleared card's title, which opens that card, or
+// the id as plain text.
 // Each link to a card that ended carries a marker with how it ended, answered or taken back, from `outcomeOf(id)` for a
 // card on show and from the lookup for one the state leaves out. Its hover names the outcome and when.
 const OUTCOME_ICON = { answered: 'link-answered', 'taken-back': 'link-taken-back', dismissed: 'dismissed', expired: 'link-expired', returned: 'link-taken-back' };
@@ -459,7 +462,7 @@ export function LinkedText({ text, byId, open, diagrams = true, files, lookup = 
     const other = lookup(id);
     if (!other) return h('span', { key, className: 'unknown-link', title: other === null ? 'The inbox does not store this card' : '' }, id);
     const o = linkOutcome(other.outcome);
-    return h('span', { key, className: 'cleared-link', title: leftOutHover(other, o) }, other.title, outcomeMarker(o));
+    return h('a', { key, className: 'cleared-link', title: leftOutHover(other, o), onClick: () => open(id) }, other.title, outcomeMarker(o));
   };
   const cardLink = (id, key) => {
     const target = byId[id];

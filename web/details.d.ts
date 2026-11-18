@@ -6,6 +6,7 @@ export interface CardDetail { card: Card; answer?: Answer; state: CardState; rev
 export interface CardDetails {
   get(summary: CardSummary | null | undefined): CardDetail | undefined;
   want(summaries: (CardSummary | null | undefined)[]): void;
+  tried(id: string): boolean;
   keep(ids: Set<string>): void;
 }
 export function cardDetails(load: (id: string) => Promise<CardDetail>, changed: () => void): CardDetails;
