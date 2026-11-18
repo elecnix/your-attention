@@ -688,7 +688,7 @@ export function TriagePushback({ card }) {
   return h('details', { className: 'changes pushback' },
     h('summary', null, `Triage pushback (${list.length})${answered ? `, agent feedback on ${answered}` : ''}`),
     list.map((p) => h('div', { key: `${p.version}:${p.at}`, className: 'step' },
-      h('div', { className: 'step-head' }, `Version ${p.version}: ${p.by} ${p.kind === 'advice' ? 'let it through with advice' : 'sent it back'} at ${time(p.at)}`),
+      h('div', { className: 'step-head' }, `Version ${p.version}: ${p.by} ${p.kind === 'advice' ? 'passed it with advice' : 'sent it back'} at ${time(p.at)}`),
       h('div', { className: 'reason' }, p.reason),
       p.feedback
         ? h('div', { className: `feedback ${p.feedback.verdict}` },
