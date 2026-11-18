@@ -36,7 +36,9 @@ export class TriageState {
     let warning: string | undefined;
     if (file && fs.existsSync(file)) {
       try {
-        const read = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Stored>;
+        const read = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Stored> | null;
+        const table = (v: unknown): boolean => v === undefined || (typeof v === 'object' && v !== null && !Array.isArray(v));
+        if (!read || typeof read !== 'object' || !table(read.chains) || !table(read.cards) || !table(read.bypass)) throw new Error('it is not a state file');
         this.data = { chains: read.chains ?? {}, cards: read.cards ?? {}, bypass: read.bypass ?? {} };
       } catch (e) {
         // A file cut short by a crash loses its counts and codes, and the agent starts again from none.

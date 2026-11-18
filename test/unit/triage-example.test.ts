@@ -381,6 +381,28 @@ describe('the example vale config', () => {
 });
 
 describe('the card.created hook runner', () => {
+  it('skips a frame it cannot read, logs it, and still answers the next card on the same stream', async () => {
+    const good = `data: ${JSON.stringify({ type: 'hook', version: 1, id: 'h5', hook: 'card.created', card, deadline: Date.now() + 60_000, person: { pages: 0, visible: false, activeAt: null } })}\n\n`;
+    const stop = new AbortController();
+    const lines: string[] = [];
+    let streams = 0;
+    const verdicts: string[] = [];
+    const fetcher = (async (url: string | URL) => {
+      const route = new URL(String(url)).pathname;
+      if (route === '/v1/extensions/stream') {
+        streams++;
+        return new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(`data: x\n\ndata: null\n\n${good}`)); } }));
+      }
+      verdicts.push(route);
+      stop.abort();
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    await runCardHook({ url: 'http://inbox.test', token: 't', name: 'triage-example', fetcher, log: (...a) => lines.push(a.join(' ')) }, async () => ({ verdict: 'pass', reason: 'ok' }), stop.signal);
+    assert.deepEqual(verdicts, ['/v1/hooks/h5']);
+    assert.equal(streams, 1);
+    assert.match(lines.join('\n'), /skipped a frame it could not read/);
+  });
+
   it('logs a verdict the inbox refuses as failed', async () => {
     const event = `data: ${JSON.stringify({ type: 'hook', version: 1, id: 'h9', hook: 'card.created', card, deadline: Date.now() + 60_000, person: { pages: 0, visible: false, activeAt: null } })}\n\n`;
     const stop = new AbortController();
@@ -439,6 +461,14 @@ describe('the example triage agent reads a damaged state file', () => {
     const state = new TriageState(file);
     assert.match(state.warning ?? '', /could not read .*state-damaged\.json/);
     assert.equal(state.returns('c1'), 0);
+  });
+
+  it('starts empty, and says so, when the file is JSON of the wrong shape', () => {
+    const file = path.join(dir, 'state-shape.json');
+    fs.writeFileSync(file, JSON.stringify({ chains: 5 }));
+    const state = new TriageState(file);
+    assert.match(state.warning ?? '', /could not read .*state-shape\.json/);
+    assert.equal(state.chainOf(card), card.id);
   });
 });
 

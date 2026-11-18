@@ -55,6 +55,11 @@ describe('advice on a passed card', () => {
     assert.equal(advice?.type === 'advice' && advice.advice.length, 4000);
   });
 
+  it('names triage when the event does not say which extension gave the advice', () => {
+    const text = describeAdvice({ type: 'advice', id: 'e1', card: { id: 'c1', title: 'T' } as never, advice: 'A.' } as never);
+    assert.match(text, /^Triage let card c1/);
+  });
+
   it('tells the agent the card went to the person, and what the advice is', () => {
     const text = describeAdvice({ type: 'advice', id: 'e1', card: { id: 'c1', title: 'Retry the export?' } as never, advice: 'Say what the export does today.', by: 'triage-example' });
     for (const part of ['triage-example', 'c1', 'Retry the export?', 'Say what the export does today.', 'the person']) assert.ok(text.includes(part), part);

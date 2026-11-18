@@ -96,12 +96,20 @@ export async function runCardHook(cfg: CardHookConfig, check: CardCheck, signal:
             const data = buf.slice(0, end).split('\n').find((l) => l.startsWith('data: '));
             buf = buf.slice(end + 2);
             if (!data) continue;
-            const ev = JSON.parse(data.slice(6)) as HookEvent | { type: 'beat' };
+            let ev: HookEvent | { type: 'beat' } | undefined;
+            try {
+              ev = JSON.parse(data.slice(6)) as HookEvent | { type: 'beat' } | undefined;
+            } catch {
+              ev = undefined;
+            }
+            if (!ev || typeof ev !== 'object') { log('skipped a frame it could not read:', data.slice(0, 100)); continue; }
             if (ev.type === 'hook' && ev.hook === 'card.created') void decide(ev);
           }
         }
       } finally {
         signal.removeEventListener('abort', cancel);
+        // A stream that ends for any reason closes its connection before the next one opens.
+        cancel();
       }
     } catch (e) {
       if (signal.aborted) return;
