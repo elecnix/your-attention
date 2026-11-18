@@ -156,6 +156,26 @@ describe('a rename while the socket opens', () => {
   });
 });
 
+describe('an origin that fails to read', () => {
+  it('connects without one when the first read throws', async () => {
+    const inbox = await socketInbox();
+    const stop = new AbortController();
+    try {
+      const client = new Client({ url: inbox.url, token: `aaaaaaaaaaaa.${'a'.repeat(64)}` });
+      const streaming = client.stream('s1', () => {}, stop.signal, 'auto', { origin: () => { throw new Error('transcript unreadable'); }, originEveryMs: 20 });
+      let failed: unknown;
+      streaming.catch((e: unknown) => { failed = e; });
+      for (let i = 0; i < 200 && !inbox.frames.length; i++) await sleep(10);
+      assert.equal(failed, undefined);
+      assert.equal(inbox.urls.length, 1);
+      assert.doesNotMatch(inbox.urls[0] ?? '', /origin=/);
+    } finally {
+      stop.abort();
+      await inbox.close();
+    }
+  });
+});
+
 describe('a stream the inbox refuses', () => {
   it('stops reading the origin once it gives up', async () => {
     const server = http.createServer((_req, res) => { res.writeHead(401, { 'content-type': 'application/json' }); res.end('{"error":"bad token"}'); });
