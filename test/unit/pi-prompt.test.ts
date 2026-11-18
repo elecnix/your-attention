@@ -1,5 +1,6 @@
-// What a prompt card says, what the person typed on it, whether the prompt still waits on the screen, and the two
-// races a card has to survive: a prompt that ends while its card is posted, and a second answer while the first types.
+// What a prompt card says, what the person typed on it, whether the prompt still waits on the screen, and the races a
+// card has to survive: a prompt that ends while its card is posted, a second answer while the first types, and a close
+// that arrives after the next prompt took the card.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createPromptCards, promptOnScreen, promptText, typedAnswer, type PromptSession } from '../../src/integrations/pi/prompt.ts';
@@ -22,6 +23,9 @@ const TYPED_SCREEN = [
   '│ ❯ SQLite SQLite          │',
   '╰──────────────────────────╯',
 ].join('\n');
+
+/** The box the answered prompt left behind, with the output of the agent that resumed under it. */
+const LEFT_BEHIND = `${SCREEN}\nRunning the migration…\nWrote 3 files.`;
 
 describe('what a prompt card says', () => {
   it('names the session, the prompt and the pane it can be answered in', () => {
@@ -56,9 +60,10 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({ screen: SCREEN }, ''), false);
   });
 
-  it('tells a prompt with no title apart by its box, which stays while the answer is typed inside it', () => {
-    assert.equal(promptOnScreen({ screen: SCREEN }, TYPED_SCREEN), true, 'the same box still waits');
-    assert.equal(promptOnScreen({ screen: SCREEN }, 'Running the migration…\nWrote 3 files.'), false, 'a working agent draws no box');
+  it('tells a prompt with no title apart by the frame that closes the screen, which stays while the answer is typed inside it', () => {
+    assert.equal(promptOnScreen({ screen: SCREEN }, TYPED_SCREEN), true, 'the same frame still closes the screen');
+    assert.equal(promptOnScreen({ screen: SCREEN }, 'Running the migration…\nWrote 3 files.'), false, 'a working agent draws no frame');
+    assert.equal(promptOnScreen({ screen: SCREEN }, LEFT_BEHIND), false, 'an agent that resumed writes its output below the frame it left behind');
     assert.equal(promptOnScreen({}, SCREEN), false, 'a prompt with no title and no screen to compare gets no key');
   });
 });
@@ -131,8 +136,35 @@ describe('two answers on one prompt card', () => {
     const card = s.posted[0]!;
     await Promise.all([cards.answered(card, answer('SQLite')), cards.answered(card, answer('SQLite'))]);
     assert.deepEqual(s.keys.filter((k) => k !== 'enter'), ['SQLite'], 'one keystroke carries the answer');
-    const outcomes = s.closes.map((c) => c.outcome);
-    assert.equal(outcomes.filter((o) => /already being typed/.test(o)).length, 1, 'the second answer is refused with its reason');
-    assert.equal(outcomes.filter((o) => /^Typed your answer/.test(o)).length, 1, 'the first answer closes the card');
+    assert.deepEqual(s.closes.map((c) => [c.id, c.outcome]), [[card.id, 'Typed your answer in its session.']], 'the card closes once, with the answer that reached the pane');
+  });
+});
+
+describe('the close that follows the typed answer', () => {
+  it('closes the span the answer was typed for, and leaves the prompt that follows alone', async () => {
+    const s = fakeSession();
+    const cards = createPromptCards(s.session, s.herdr, 20);
+    await cards.started({ kind: 'select', title: 'Pick a database' });
+    const card = s.posted[0]!;
+    // The terminal takes the answer during the settle, and the same prompt comes back on the same card before the
+    // extension gets to close anything.
+    const typing = cards.answered(card, answer('SQLite'));
+    await cards.ended();
+    await cards.started({ kind: 'select', title: 'Pick a database' });
+    await typing;
+    assert.deepEqual(s.closes.map((c) => [c.id, c.kind]), [[card.id, 'answered-in-terminal']], 'only the span that was answered closes');
+    assert.deepEqual(s.keys, ['SQLite'], 'the prompt that follows takes no Enter');
+  });
+});
+
+describe('a prompt whose card the inbox refuses', () => {
+  it('settles the start with the reason on stderr, so no promise waits for a card that never comes', async () => {
+    const inbox = {
+      post: () => { throw new Error('the inbox closed'); },
+      close: async () => {},
+      ack: async () => {},
+    };
+    const cards = createPromptCards(() => ({ inbox: inbox as never, agent: 'pi:s1', origin: { herdrPane: 'w7:p1' } }), async () => SCREEN, 0);
+    await cards.started({ kind: 'custom' });
   });
 });

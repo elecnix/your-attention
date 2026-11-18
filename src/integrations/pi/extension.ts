@@ -139,9 +139,11 @@ export default function yourAttention(pi: PiApi): void {
   });
 
   // pi draws the prompt and then waits, so the card goes up while nothing moves on the screen. A nested prompt is part
-  // of the same span, which pi reports with one start and one end.
-  pi.on('ui_prompt_start', (event) => prompts.started(event));
-  pi.on('ui_prompt_end', () => prompts.ended());
+  // of the same span, which pi reports with one start and one end. Both handlers resolve: pi catches neither promise,
+  // so a card that fails to post or to close says why on stderr rather than ending the process as an unhandled
+  // rejection nobody waits for.
+  pi.on('ui_prompt_start', (event) => prompts.started(event).catch((e: Error) => log('the prompt card was not posted:', e.message)));
+  pi.on('ui_prompt_end', () => prompts.ended().catch((e: Error) => log('the prompt card was not closed:', e.message)));
 
   // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
   // card. The count resets on any run the request did not start, and it stops at three.

@@ -110,6 +110,11 @@ describe('principles', () => {
     const extension = fs.readFileSync(path.join(ROOT, 'src/integrations/pi/extension.ts'), 'utf8');
     assert.match(extension, /pi\.on\('ui_prompt_start'/, 'the wait is read from the event pi sends when a prompt opens');
     assert.match(extension, /pi\.on\('ui_prompt_end'/, 'the card closes from the event that says the wait is over');
+    // DP16 continues: pi catches neither promise, so each handler settles its own, with the reason on stderr.
+    for (const event of ['ui_prompt_start', 'ui_prompt_end']) {
+      const handler = new RegExp(`pi\\.on\\('${event}',[^\\n]*`).exec(extension)?.[0] ?? '';
+      assert.match(handler, /\.catch\(/, `the ${event} handler resolves, so a prompt card that fails leaves no rejection nobody holds`);
+    }
     const prompt = fs.readFileSync(path.join(ROOT, 'src/integrations/pi/prompt.ts'), 'utf8');
     assert.match(prompt, /kind: 'blocked'/, 'the prompt posts the blocked kind a harness gets');
     assert.match(prompt, /send-keys', open\.pane,/, 'keys go to the pane this session reported');

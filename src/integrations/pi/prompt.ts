@@ -99,29 +99,33 @@ export function typedAnswer(answer: Answer): string {
   return '';
 }
 
-/** The rows of a screen that draw a box edge and carry no words: a prompt's borders, which stay put while the answer
- * is typed inside the box, and so are what a prompt with no title is recognised by. */
-function edges(screen: string): string {
-  return screen.split('\n').filter((l) => /[─━═]/.test(l) && !/[A-Za-z0-9]/.test(l)).join('\n');
+/** The row a frame closes on: the rule that ends the screen. A prompt that waits draws its box last on the pane, so
+ * that row belongs to the prompt alone, and a session that resumed writes its output below the frame it left behind.
+ * The words inside the box change as the answer is typed into it, and the rule below them does not. */
+function closingRule(screen: string): string {
+  const rows = screen.split('\n').filter((l) => l.trim());
+  const foot = rows[rows.length - 1] ?? '';
+  return /[─━═]/.test(foot) && !/[A-Za-z0-9]/.test(foot) ? foot : '';
 }
 
 /** Whether the prompt a card was posted for still waits on the screen just read. pi gives a title for every widget
- * except a custom screen, and a changed prompt loses that title; a prompt with no title has only the box it draws to
- * speak for it, and a screen that shows no box is no prompt this extension types into. */
+ * except a custom screen, and a changed prompt loses that title; a prompt with no title has only the frame it draws,
+ * and a screen whose last row is that frame's closing rule is the only screen it draws. A frame that stays painted
+ * above an agent's new output is a prompt that ended. */
 export function promptOnScreen(prompt: { title?: string; screen?: string }, raw: string): boolean {
   const now = trimScreen(raw);
   if (!now) return false;
   const title = prompt.title?.trim();
   if (title) return now.includes(title);
-  const then = edges(prompt.screen ?? '');
-  return then !== '' && edges(now) === then;
+  const then = closingRule(prompt.screen ?? '');
+  return then !== '' && closingRule(now) === then;
 }
 
 /** Why no key goes out, when the screen no longer shows the prompt the card was posted for. */
 function lostPrompt(prompt: { title?: string; screen?: string }): string {
   return prompt.title?.trim()
     ? 'The prompt changed or closed before your answer arrived, so nothing was typed. Answer it in the terminal.'
-    : 'This prompt has no title, and the screen does not show its box, so nothing was typed. Answer it in the terminal.';
+    : 'This prompt has no title, and the frame it draws no longer ends the screen, so nothing was typed. Answer it in the terminal.';
 }
 
 const paneOf = (pane: string | undefined): string | undefined => (pane && PANE.test(pane) ? pane : undefined);
@@ -151,6 +155,24 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
     await to.ack(card.id).catch(() => {});
     await to.close(card.id, 'resolved', why).catch(() => {});
     log('no key for', card.id, why);
+  };
+
+  /** Record an answer that changes nothing, with the reason on stderr: the card belongs to the answer already on its
+   * way into the pane, so a second answer leaves its outcome alone. */
+  const note = async (to: Client, card: Card, why: string): Promise<void> => {
+    await to.ack(card.id).catch(() => {});
+    log('no key for', card.id, why);
+  };
+
+  /** Post the span's card, resolving to undefined when the inbox refuses it, whether it rejects or throws as it is
+   * called, so the start settles and no span keeps a card that never arrives. */
+  const postCard = async (to: Client, card: NewCard): Promise<Card | undefined> => {
+    try {
+      return await to.post(card);
+    } catch (e) {
+      log('could not post the prompt card:', (e as Error).message);
+      return undefined;
+    }
   };
 
   /** Close a span's card now, or keep the close for the post that is still on its way. */
@@ -184,7 +206,7 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       open.screen = screen || undefined;
       // A blocked card takes no `deliver: 'none'`, or the inbox would keep the answer from the one integration that
       // can type it. The extension reads the answer on the session's stream and never passes it to the model.
-      const card = await connected.inbox.post({
+      const card = await postCard(connected.inbox, {
         id,
         agent: connected.agent,
         kind: 'blocked',
@@ -195,7 +217,7 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
         origin: { ...connected.origin, ...(await herdrPlace(pane, herdr)) },
         // The prompt's labels never reach this extension, so the card offers no options, and the person answers in the
         // terminal or types an answer that the extension forwards.
-      }).catch((e: Error) => { log('could not post the prompt card:', e.message); return undefined; });
+      });
       if (!card) {
         if (span === open) span = undefined;
         return;
@@ -238,8 +260,9 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       if (!open) return refuse(to, card, 'The prompt closed before your answer arrived, so nothing was typed. Answer it in the terminal.');
       if (open.closed === 'typed') return refuse(to, card, 'Your answer was already typed into its session, so nothing more was sent.');
       // The card is marked as being answered before the first await, so a second answer that arrives while this one
-      // reads the pane and sends keys is refused, instead of typing the same words into the session twice.
-      if (open.typing) return refuse(to, card, 'An answer on this card is already being typed into its session, so nothing more was sent.');
+      // reads the pane and sends keys sends nothing, instead of typing the same words into the session twice. It
+      // closes nothing either: the card reports the answer already on its way, not the one that arrived beside it.
+      if (open.typing) return note(to, card, 'An answer on this card is already being typed into its session, so nothing more was sent.');
       if (open.closed) return refuse(to, card, 'The prompt ended before your answer arrived, so nothing was typed.');
       const text = typedAnswer(answer);
       if (!text) return refuse(to, card, 'The answer was empty, so nothing was typed. Type the answer in the terminal.');
@@ -261,10 +284,15 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       // still waits, the way herdr-blocked presses Enter for a number that only moved the selection. A prompt that is
       // gone from the screen gets no Enter, and the card says so, since a key sent to a working agent would interrupt it.
       await new Promise((r) => setTimeout(r, settleMs));
-      const waits = promptOnScreen(open, await read(open.pane));
-      open.closed = 'typed';
-      if (waits) await herdr('agent', 'send-keys', open.pane, 'enter').catch(() => {});
+      // The span can end during the settle, and the prompt that follows it reuses this card. That card belongs to the
+      // span now waiting, so this answer types no Enter into it and leaves it open: the close below goes only to the
+      // span that was answered.
+      const mine = span === open;
+      open.closed ??= 'typed';
+      const waits = mine && promptOnScreen(open, await read(open.pane));
       await to.ack(card.id).catch(() => {});
+      if (!mine) return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
+      if (waits) await herdr('agent', 'send-keys', open.pane, 'enter').catch(() => {});
       await to.close(card.id, 'resolved', waits
         ? 'Typed your answer in its session.'
         : 'Typed your answer in its session, without Enter: the prompt was not on the screen to confirm it.').catch(() => {});
