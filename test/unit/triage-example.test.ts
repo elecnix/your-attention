@@ -323,6 +323,7 @@ describe('the example triage agent reads its local config', () => {
   it('ships a sample config that loads, with a placeholder command', () => {
     const cfg = loadConfig(path.join(import.meta.dirname, '../../examples/triage-agent/triage-example.sample.json'));
     assert.match(cfg.prVerdict?.command[0] ?? '', /^\/path\/to\//);
+    assert.deepEqual(cfg.classifier, ['pr-context-classifier', '-m', 'openai/gpt-oss-120b'], 'the sample runs the classifier on the model the eval favored');
     assert.equal(cfg.stateFile, path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'));
   });
 

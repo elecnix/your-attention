@@ -62,7 +62,7 @@ You don't need a config file. With `--config FILE`, the agent reads FILE. Withou
 | Field | Default | Meaning |
 | -- | -- | -- |
 | `vale` | `["vale"]` | the vale program, then any arguments of yours |
-| `classifier` | `["pr-context-classifier"]` | the classifier program, then any arguments of yours, such as `["pr-context-classifier", "-m", "openai/gpt-oss-120b"]` |
+| `classifier` | `["pr-context-classifier"]` | the classifier program, then any arguments of yours. The sample sets `["pr-context-classifier", "-m", "openai/gpt-oss-120b"]`: on a day of real cards, that model gave the same verdict more often between two runs than the classifier's default, `openai/gpt-oss-20b`, and it answered every card. |
 | `valeTimeoutMs` | `30000` | how long vale may run |
 | `classifierTimeoutMs` | `150000` | how long the classifier may run |
 | `prVerdict.command` | none, so the check is off | the PR-verdict program, then its first arguments |

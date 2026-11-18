@@ -1,6 +1,6 @@
 {
   "vale": ["vale"],
-  "classifier": ["pr-context-classifier"],
+  "classifier": ["pr-context-classifier", "-m", "openai/gpt-oss-120b"],
   "valeTimeoutMs": 30000,
   "classifierTimeoutMs": 150000,
   "prVerdict": {
