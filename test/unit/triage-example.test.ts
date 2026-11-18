@@ -536,12 +536,14 @@ describe('the example triage agent reads a damaged state file', () => {
     assert.equal(new TriageState(file, () => now).returns(new TriageState(file, () => now).chainOf(card)), 3);
   });
 
-  it('starts empty, and says so, when the file is JSON of the wrong shape', () => {
-    const file = path.join(dir, 'state-shape.json');
-    fs.writeFileSync(file, JSON.stringify({ chains: 5 }));
-    const state = new TriageState(file);
-    assert.match(state.warning ?? '', /could not read .*state-shape\.json/);
-    assert.equal(state.returns(state.chainOf(card)), 0);
+  it('starts empty, and says so, when the file is JSON of the wrong shape, an array included', () => {
+    for (const shape of [{ chains: 5 }, [], 7]) {
+      const file = path.join(dir, 'state-shape.json');
+      fs.writeFileSync(file, JSON.stringify(shape));
+      const state = new TriageState(file);
+      assert.match(state.warning ?? '', /could not read .*state-shape\.json/, JSON.stringify(shape));
+      assert.equal(state.returns(state.chainOf(card)), 0);
+    }
   });
 });
 

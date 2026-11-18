@@ -38,7 +38,7 @@ export class TriageState {
       try {
         const read = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Stored> | null;
         const table = (v: unknown): boolean => v === undefined || (typeof v === 'object' && v !== null && !Array.isArray(v));
-        if (!read || typeof read !== 'object' || !table(read.chains) || !table(read.cards) || !table(read.bypass)) throw new Error('it is not a state file');
+        if (!read || typeof read !== 'object' || Array.isArray(read) || !table(read.chains) || !table(read.cards) || !table(read.bypass)) throw new Error('it is not a state file');
         // An entry of the wrong type goes, so its card counts from zero instead of breaking every check of it.
         const keep = <T>(rec: Record<string, unknown> | undefined, ok: (v: Record<string, unknown>) => boolean): Record<string, T> =>
           Object.fromEntries(Object.entries(rec ?? {}).filter(([, v]) => typeof v === 'object' && v !== null && ok(v as Record<string, unknown>))) as Record<string, T>;
