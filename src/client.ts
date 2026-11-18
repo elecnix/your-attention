@@ -5,9 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
-import { InboxError, type SearchFilters, type SearchPage } from './core/inbox.ts';
+import { InboxError, type SearchFilters, type SearchPage, type TriageFeedbackRecord } from './core/inbox.ts';
 import { isSealed } from './core/sealed.ts';
-import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, NewCard, Origin, PublicSubscription, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, NewCard, Origin, PublicSubscription, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 
@@ -255,6 +255,15 @@ export class Client {
   proposeRequireCard(input: { on: boolean; reminders?: number; agent: string }): Promise<Card> {
     return this.call('POST', '/v1/settings/require-card', { scope: 'all', ...input });
   }
+  /** Tell the inbox whether triage was right to push back on this client's card. */
+  triageFeedback(id: string, feedback: { verdict: FeedbackVerdict; comment?: string; findings?: FeedbackFinding[] }): Promise<Card> {
+    return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/triage-feedback`, feedback);
+  }
+  /** For the owner: every card triage pushed back on, with the agent's feedback and how the card ended. */
+  async triageFeedbackRecords(filter?: SearchFilters['triageFeedback']): Promise<TriageFeedbackRecord[]> {
+    const reply = await this.call<{ records?: TriageFeedbackRecord[] }>('GET', `/v1/triage-feedback${filter ? `?triage_feedback=${encodeURIComponent(filter)}` : ''}`);
+    return Array.isArray(reply?.records) ? reply.records : [];
+  }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
   /** Cards that match the words and the filters. An empty query, or `*`, lists by the filters alone, and a
@@ -458,6 +467,7 @@ function filterParams(opts: SearchFilters & { q?: string }): string {
   if (opts.since !== undefined) p.set('since', String(opts.since));
   if (opts.before !== undefined) p.set('before', String(opts.before));
   if (opts.links) p.set('links', opts.links);
+  if (opts.triageFeedback) p.set('triage_feedback', opts.triageFeedback);
   if (opts.limit !== undefined) p.set('limit', String(opts.limit));
   if (opts.cursor) p.set('cursor', opts.cursor);
   const query = p.toString();
@@ -476,7 +486,9 @@ class TransportRefused extends Error {
 /** Plain text for an answer, as an agent reads it. */
 /** What an integration tells the agent about a card that triage or the inbox page sent back. */
 export function describeReturned(ev: Extract<AgentEvent, { type: 'returned' }>): string {
-  return `${ev.by ?? 'Triage'} sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`;
+  const notice = `${ev.by ?? 'Triage'} sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`;
+  // Only a triage extension's return takes feedback, so only its notice asks for it.
+  return ev.extension ? `${notice} If this pushback was wrong, or right only in part, say so with card_triage_feedback, so the person can tune the gate.` : notice;
 }
 
 /** What an integration tells the agent about advice that triage gave on a card it let through to the person. */

@@ -1,16 +1,14 @@
 // `your-attention clear` clears the cards you dealt with, and `your-attention reset --yes` empties the inbox.
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { promisify } from 'node:util';
-import { callAt, ROOT, stopAndRemove, until } from './harness.ts';
+import { callAt, ROOT, stopAndRemove, until, runCli } from './harness.ts';
 
 const CLI = ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts')];
-const run = (env: NodeJS.ProcessEnv, ...args: string[]) =>
-  promisify(execFile)(process.execPath, [...CLI, ...args], { env, encoding: 'utf8' }).then((r) => ({ code: 0, ...r }), (e: { code: number; stdout: string; stderr: string }) => e);
+const run = runCli;
 
 describe('clearing the inbox from the command line', () => {
   it('clears answered cards, keeps waiting ones, and resets only with --yes', async () => {

@@ -492,6 +492,32 @@ describe('sockets that cost the inbox', () => {
   });
 });
 
+describe('triage feedback on a hosted inbox', () => {
+  it('keeps the pushback and the agent\'s feedback in Durable Object storage, across hibernation', async () => {
+    const rt = runtime();
+    let obj = rt.make();
+    const owner = await init(obj);
+    // The hosted inbox serves no extension stream, so the test connects one to the inbox inside the object.
+    const core = (obj as unknown as { inbox: import('../../src/core/inbox.ts').Inbox }).inbox;
+    const agent = (await core.createToken('agent', 'agent')).secret;
+    const ext = (await core.createToken('triage', 'extension')).token.id;
+    const calls: { id: string }[] = [];
+    core.connectExtension({ token: ext, role: 'extension' }, { name: 'triage', hooks: ['card.created'] }, (e) => calls.push(e as { id: string }));
+    assert.equal((await call(obj, 'POST', '/v1/cards', agent, { id: 'c1', agent: 's1', title: 'Ship it?' })).status, 201);
+    core.hookVerdict({ token: ext, role: 'extension' }, calls[0]!.id, 'return', 'The card states no goal.');
+    assert.equal((await call(obj, 'POST', '/v1/cards/c1/triage-feedback', agent, { verdict: 'disagree', comment: 'The title is the goal.' })).status, 200);
+
+    obj = rt.make(); // hibernation: memory is gone, storage remains
+    const { card } = (await (await call(obj, 'GET', '/v1/cards/c1', owner)).json()) as { card: { pushback: { by: string; reason: string; feedback: { verdict: string; comment: string } }[] } };
+    assert.deepEqual(card.pushback.map((p) => [p.by, p.reason, p.feedback.verdict, p.feedback.comment]), [['triage', 'The card states no goal.', 'disagree', 'The title is the goal.']]);
+    const found = (await (await call(obj, 'GET', '/v1/search?format=page&triage_feedback=disagree', agent)).json()) as { results: { card: { id: string } }[] };
+    assert.deepEqual(found.results.map((r) => r.card.id), ['c1']);
+    const exported = (await (await call(obj, 'GET', '/v1/triage-feedback', owner)).json()) as { records: { card: string; outcome: string }[] };
+    assert.deepEqual(exported.records.map((r) => [r.card, r.outcome]), [['c1', 'returned']]);
+    assert.equal((await call(obj, 'GET', '/v1/triage-feedback', agent)).status, 403);
+  });
+});
+
 describe('fixes from the review of the limits', () => {
   it('answers 401 to a page socket with a malformed cookie', async () => {
     const obj = runtime().make();

@@ -1,4 +1,4 @@
-import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText } from '../components.js';
+import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, TriagePushback } from '../components.js';
 import { h } from '../env.js';
 import { installPaste } from '../paste-images.js';
 import { PNG, card, dataUrl, mount } from './render.js';
@@ -51,6 +51,19 @@ export const Attached = {
 
 export const WhatChanged = {
   render: () => mount(h(Changes, { card: card({ text: 'Use SQLite with FTS5 for storage.', version: 2, history: [{ version: 1, title: 'Store sessions in SQLite or Postgres?', text: 'Use SQLite for storage.', at: Date.now() - 60000 }] }) })),
+};
+
+// Two returns by triage, and the agent's feedback on each. The section opens on a click.
+export const TriagePushbackFeedback = {
+  render: () => {
+    const at = Date.now() - 120000;
+    return mount(h(TriagePushback, { card: card({ version: 3, pushback: [
+      { kind: 'returned', by: 'triage', reason: 'The card states no goal, and option B has no description.', version: 1, at,
+        feedback: { verdict: 'partly', comment: 'The goal was in the title.', findings: [{ index: 1, verdict: 'disagree', comment: 'The title says it.' }, { index: 2, verdict: 'agree' }], agent: 'pi:release', at: at + 30000 } },
+      { kind: 'returned', by: 'triage', reason: 'An earlier answer covers this card.', version: 2, at: at + 60000,
+        feedback: { verdict: 'disagree', comment: 'The earlier answer was about another branch.', agent: 'pi:release', at: at + 90000 } },
+    ] }) }));
+  },
 };
 
 // The secret widget, placed beside a question, as the inbox expands it. The key is a stand-in: the story never seals.

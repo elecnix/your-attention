@@ -139,6 +139,40 @@ export interface Triage {
   at: number;
 }
 
+/** What the agent that posted a card thinks of a triage pushback: right, wrong, or right in part. */
+export type FeedbackVerdict = 'agree' | 'disagree' | 'partly';
+
+/** The agent's verdict on one finding of a pushback, named by its place in the reason or by a quote from it. */
+export interface FeedbackFinding {
+  index?: number;
+  quote?: string;
+  verdict: FeedbackVerdict;
+  comment?: string;
+}
+
+/** The agent's answer to one pushback. A second call on the same pushback replaces it. */
+export interface TriageFeedback {
+  verdict: FeedbackVerdict;
+  comment?: string;
+  findings?: FeedbackFinding[];
+  /** The agent id that posted the card. */
+  agent: string;
+  at: number;
+}
+
+/** One time triage pushed back on a card: it sent the card back, or passed it with advice. The card keeps each one
+ * across revisions, so the reason stays beside the feedback that answers it. */
+export interface TriagePushback {
+  kind: 'returned' | 'advice';
+  /** The extension that pushed back. */
+  by: string;
+  reason: string;
+  /** The card version the extension checked. */
+  version: number;
+  at: number;
+  feedback?: TriageFeedback;
+}
+
 export interface PriorityLevel {
   id: string;
   label: string;
@@ -320,6 +354,8 @@ export interface Card {
   /** How much the agent thinks the card matters, from 1 to 5. */
   rating?: number;
   triage?: Triage;
+  /** Each triage pushback on this card, oldest first, with the agent's feedback on it. */
+  pushback?: TriagePushback[];
   history?: CardVersion[];
   /** On a system card that proposes new guidance: the text, the agent that proposed it, which receives the answer, and
    * the guidance the proposal starts from, so the card can say when it changed since. `agents` is on cards stored
@@ -477,8 +513,9 @@ export type AgentEvent =
   | { type: 'guidance'; id: string; guidance: Guidance }
   /** The inbox's require-a-card rule changed. A session holding an environment override ignores it. */
   | { type: 'settings'; id: string; requireCard: RequireCardSettings }
-  /** `by` names who sent the card back: triage, or the inbox page when it could not draw the card. */
-  | { type: 'returned'; id: string; card: Card; reason: string; by?: string }
+  /** `by` names who sent the card back: triage, or the inbox page when it could not draw the card. `extension` names
+   * the triage extension, and only a card it sent back takes feedback. */
+  | { type: 'returned'; id: string; card: Card; reason: string; by?: string; extension?: string }
   /** A triage extension passed this agent's card to the person, with advice for the agent. `by` names the extension. */
   | { type: 'advice'; id: string; card: Card; advice: string; by: string }
   /** A card the person sent to this agent, as the panel in the page sends it. */
