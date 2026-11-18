@@ -7,6 +7,7 @@ import { Client, describeAnswer, describeReturned, describeSentCard, loadConfig 
 import type { NewCard } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
+import { createPromptCards, type PromptEvent } from './prompt.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { parseTagsFlag } from '../tags.ts';
@@ -53,6 +54,9 @@ interface PiApi {
   on(event: 'context', handler: (event: { messages: unknown[] }, ctx: PiContext) => void | Promise<void>): void;
   on(event: 'agent_start', handler: (event: unknown, ctx: PiContext) => void | Promise<void>): void;
   on(event: 'agent_settled', handler: (event: { aborted?: boolean }, ctx: PiContext) => void | Promise<void>): void;
+  // A prompt that an extension drew in the terminal: the session waits until that prompt is answered.
+  on(event: 'ui_prompt_start', handler: (event: PromptEvent, ctx: PiContext) => void | Promise<void>): void;
+  on(event: 'ui_prompt_end', handler: (event: PromptEvent, ctx: PiContext) => void | Promise<void>): void;
   registerTool(tool: {
     name: string;
     label: string;
@@ -73,6 +77,9 @@ export default function yourAttention(pi: PiApi): void {
   // Receipt id -> card id, for answers sent but not yet in the model context.
   const pending = new Map<string, string>();
   const secrets = new SecretRequests();
+  // A session waiting on a prompt draws no output, so only pi's own lifecycle tells it apart from a session that
+  // thinks. One card reports the span, and an answer on it is typed into this session's pane.
+  const prompts = createPromptCards(() => (inbox && origin ? { inbox, agent, origin } : undefined));
 
   pi.on('session_start', async (_event, ctx) => {
     const config = loadConfig();
@@ -113,6 +120,8 @@ export default function yourAttention(pi: PiApi): void {
         return;
       }
       if (ev.type !== 'answer') return;
+      // An answer to a prompt card is typed into the pane, and the model hears nothing: the prompt already asked it.
+      if (prompts.owns(ev.card.id)) { await prompts.answered(ev.card, ev.answer); return; }
       pending.set(ev.id, ev.card.id);
       const sealed = await secrets.receive(ev.card, ev.answer);
       const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}${sealed ? `\n${sealed}` : ''}`;
@@ -124,9 +133,15 @@ export default function yourAttention(pi: PiApi): void {
   });
 
   pi.on('session_shutdown', () => {
+    void prompts.shutdown();
     stop?.abort();
     stop = undefined;
   });
+
+  // pi draws the prompt and then waits, so the card goes up while nothing moves on the screen. A nested prompt is part
+  // of the same span, which pi reports with one start and one end.
+  pi.on('ui_prompt_start', (event) => prompts.started(event));
+  pi.on('ui_prompt_end', () => prompts.ended());
 
   // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
   // card. The count resets on any run the request did not start, and it stops at three.
