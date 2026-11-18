@@ -56,6 +56,17 @@ describe('the triage eval', () => {
     for (const part of ['Cards checked: 3', 'Would go back: 2', 'Cards.FirstPerson', '[1]', 'acme/api#7', '20 in 100', '1.2 s', '$0.12', 'Bump the TTL?']) assert.ok(text.includes(part), part);
   });
 
+  it('gives the quartiles of the PR-verdict confidences by nearest rank', async () => {
+    const four = ['10', '20', '30', '90'].map((c, i): Card => ({ ...base, id: `p${i}`, title: `PR ${i}`, tags: { pr: `acme/api#${c}` } }));
+    const at: RunCommand = async (argv) => {
+      if (argv[0] !== 'verdict') return { code: 0, stdout: JSON.stringify(argv[0] === 'vale' ? { 'stdin.md': [] } : { verdict: 'COMPLETE' }), stderr: '' };
+      const n = Number(argv.find((a) => a.includes('/pull/'))?.split('/').pop());
+      return { code: 1, stdout: JSON.stringify({ verdict: 'PUSHBACK', confidence_accept: n / 100, items: [] }), stderr: '' };
+    };
+    const text = renderReport(await evaluate(four, cfg, { run: at }), { since: new Date(0), ms: 1 });
+    assert.match(text, /min 10, quartiles 10 \/ 20 \/ 30, max 90/);
+  });
+
   it('leaves the report readable by its owner only, even when the file existed before', { skip: process.platform === 'win32' ? 'Windows has no file modes' : false }, () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ya-eval-')), 'report.md');
     fs.writeFileSync(file, 'old', { mode: 0o644 });

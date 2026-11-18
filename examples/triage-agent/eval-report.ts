@@ -56,7 +56,8 @@ const pct = (n: number, of: number): string => (of ? `${Math.round((n / of) * 10
 export function renderReport(results: CardResult[], meta: { since: Date; ms: number; usageUsd?: number }): string {
   const s = summarize(results);
   const confidences = s.prVerdicts.map((p) => p.confidence).filter((c): c is number => c !== undefined).sort((a, b) => a - b);
-  const at = (q: number): string => confidences.length ? `${Math.round((confidences[Math.min(confidences.length - 1, Math.floor(q * confidences.length))] ?? 0) * 100)}` : '-';
+  // Nearest rank: the smallest value with at least q of the values at or below it.
+  const at = (q: number): string => confidences.length ? `${Math.round((confidences[Math.max(0, Math.ceil(q * confidences.length) - 1)] ?? 0) * 100)}` : '-';
   const examples = [...results.filter((r) => r.blockedBy.length), ...results.filter((r) => !r.blockedBy.length && r.advisedBy.length)].slice(0, 15);
   return [
     `# Triage eval of the cards posted since ${meta.since.toISOString()}`,

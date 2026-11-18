@@ -271,6 +271,12 @@ describe('the example triage agent reads its local config', () => {
     assert.equal(cfg.maxReturns, 5);
   });
 
+  it('refuses a config file that is JSON but not an object, and names the file', () => {
+    const file = path.join(dir, 'null.json');
+    fs.writeFileSync(file, 'null');
+    assert.throws(() => loadConfig(file), (e: Error) => e.message.includes(file) && /must be a JSON object/.test(e.message));
+  });
+
   it('refuses a check timeout the inbox would not wait for', () => {
     const file = path.join(dir, 'long-timeout.json');
     fs.writeFileSync(file, JSON.stringify({ classifierTimeoutMs: 900_000 }));
@@ -482,6 +488,20 @@ describe('the example triage agent reads a damaged state file', () => {
     const state = new TriageState(file);
     const cfg = config({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: [] })).argv });
     assert.match((await checkCard(card, cfg, logger().log, { state })).reason, /return 1 of 3/);
+  });
+
+  it('keeps the count of a card it still sees, when a week passes after its last return', () => {
+    const file = path.join(dir, 'state-prune.json');
+    const DAY = 24 * 60 * 60 * 1000;
+    let now = 1_000_000_000_000;
+    const state = new TriageState(file, () => now);
+    const chain = state.chainOf(card);
+    for (let i = 0; i < 3; i++) state.recordReturn(chain, card);
+    now += 6 * DAY;
+    state.chainOf(card);
+    now += 2 * DAY;
+    state.recordReturn(state.chainOf({ ...card, id: 'other', title: 'Another card' }), { ...card, id: 'other' });
+    assert.equal(new TriageState(file, () => now).returns(new TriageState(file, () => now).chainOf(card)), 3);
   });
 
   it('starts empty, and says so, when the file is JSON of the wrong shape', () => {

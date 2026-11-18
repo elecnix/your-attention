@@ -62,6 +62,8 @@ export class TriageState {
       ?? Object.entries(this.data.chains).find(([, c]) => c.agent === card.agent && c.title === normal(card.title) && now - c.at < DAY)?.[0];
     const chain = known ?? card.id;
     this.data.chains[chain] ??= { agent: card.agent, title: normal(card.title), returns: 0, at: now };
+    // Seeing a card keeps its chain as fresh as its card entry, so a save never prunes one and keeps the other.
+    this.data.chains[chain].at = now;
     this.data.cards[card.id] = { chain, at: now };
     return chain;
   }

@@ -77,6 +77,7 @@ export function loadConfig(file = defaultConfigPath()): ExampleConfig {
   } catch (e) {
     return bad(`not readable JSON (${(e as Error).message})`);
   }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return bad('the config must be a JSON object, such as {"vale": ["vale"]}');
   const strings = (name: string, v: unknown): string[] =>
     Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string') ? v : bad(`${name} must be a list of strings, such as ["vale"]`);
   // The inbox waits at most ten minutes for a verdict, and the agent keeps ten seconds of that to answer.
