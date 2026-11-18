@@ -196,6 +196,8 @@ describe('finding the feedback', () => {
     assert.deepEqual(ids(await get('triage_feedback=any')), ['agreed', 'disputed']);
     assert.deepEqual(ids(await get('triage_feedback=disagree')), ['disputed']);
     assert.equal((await call('GET', '/v1/search?triage_feedback=sometimes', { token: agentB })).status, 400);
+    const alone = (await (await call('GET', '/v1/search?triage_feedback=any', { token: agentB })).json()) as { results: { card: Card }[] };
+    assert.deepEqual(ids(alone), ['agreed', 'disputed'], 'the filter alone asks for the paged reply, as every filter does');
   });
 
   it('the export gives the owner one record per card triage pushed back on, with its later outcome', async () => {

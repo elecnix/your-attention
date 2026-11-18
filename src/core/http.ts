@@ -67,7 +67,7 @@ export function filtersFrom(url: URL): SearchFilters {
  * plain array it used to get, so the old answer stays for every request that names none of these parameters. The
  * `format` marker exists because a plain word search and the old client's request are otherwise identical. */
 export function wantsPage(url: URL): boolean {
-  return url.searchParams.get('format') === 'page' || ['cursor', 'state', 'tags', 'agent', 'since', 'before', 'links'].some((name) => url.searchParams.has(name));
+  return url.searchParams.get('format') === 'page' || ['cursor', 'state', 'tags', 'agent', 'since', 'before', 'links', 'triage_feedback'].some((name) => url.searchParams.has(name));
 }
 /** File types the page shows in place. Any other file is served as a download. */
 const INLINE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'text/html']);
