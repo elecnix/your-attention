@@ -503,6 +503,36 @@ describe('the card.created hook runner', () => {
     assert.deepEqual(verdicts.find((v) => v.route === '/v1/hooks/h1')?.body, { verdict: 'return', reason: 'No goal.' });
     assert.match((verdicts.find((v) => v.route === '/v1/hooks/h2')?.body as { reason: string }).reason, /failed \(boom\), so the card went through/);
   });
+
+  it('frees the slot of a check that never settles at its card\'s deadline, tells the check to stop, and skips a card that waited past its own', async () => {
+    const event = (id: string, inMs: number): string => `data: ${JSON.stringify({ type: 'hook', version: 1, id, hook: 'card.created', card: { ...card, id }, deadline: Date.now() + inMs, person: { pages: 0, visible: false, activeAt: null } })}\n\n`;
+    const verdicts: { route: string; body: { verdict: string; reason: string } }[] = [];
+    const stop = new AbortController();
+    const fetcher = (async (url: string | URL, init?: RequestInit) => {
+      const route = new URL(String(url)).pathname;
+      if (route === '/v1/extensions/stream') return new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(event('hung', 200) + event('queued', 100) + event('next', 60_000))); } }));
+      verdicts.push({ route, body: JSON.parse(String(init?.body)) });
+      if (verdicts.length === 3) stop.abort();
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    let told = false;
+    const checked: string[] = [];
+    await runCardHook({ url: 'http://inbox.test', token: 't', name: 'triage-example', fetcher, concurrency: 1, log: () => {} }, (ev, _call, signal) => {
+      checked.push(ev.card.id);
+      if (ev.card.id !== 'hung') return Promise.resolve({ verdict: 'return', reason: 'No goal.' });
+      signal.addEventListener('abort', () => { told = true; });
+      return new Promise(() => {});
+    }, stop.signal);
+    const by = Object.fromEntries(verdicts.map((v) => [v.route.split('/').pop(), v.body]));
+    assert.deepEqual(Object.keys(by).sort(), ['hung', 'next', 'queued']);
+    for (const late of ['hung', 'queued']) {
+      assert.equal(by[late]!.verdict, 'pass');
+      assert.match(by[late]!.reason, /did not finish before the card's deadline/);
+    }
+    assert.equal(by['next']!.verdict, 'return');
+    assert.deepEqual(checked, ['hung', 'next'], 'the card that waited past its deadline never reached the check');
+    assert.ok(told, 'the hung check heard that its card ran out of time');
+  });
 });
 
 describe('the example triage agent stops a command that ignores SIGTERM', () => {
@@ -533,6 +563,24 @@ describe('the example triage agent reads a damaged state file', () => {
     const state = new TriageState(file);
     const cfg = config({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: [] })).argv });
     assert.match((await checkCard(card, cfg, logger().log, { state })).reason, /return 1 of 3/);
+  });
+
+  it('joins a new card to the most recently seen chain when two chains of one agent share its title', () => {
+    const HOUR = 60 * 60 * 1000;
+    let now = 1_000_000_000_000;
+    const state = new TriageState(undefined, () => now);
+    const first = state.chainOf(card);
+    for (let i = 0; i < 3; i++) state.recordReturn(first, card);
+    now += 25 * HOUR;
+    const second = state.chainOf({ ...card, id: 'c2' });
+    assert.notEqual(second, first, 'a day later, the same title starts a new chain');
+    now += 60_000;
+    state.chainOf(card);
+    now += 60_000;
+    state.chainOf({ ...card, id: 'c2' });
+    now += 60_000;
+    assert.equal(state.chainOf({ ...card, id: 'c3' }), second);
+    assert.equal(state.returns(second), 0);
   });
 
   it('keeps the count of a card it still sees, when a week passes after its last return', () => {

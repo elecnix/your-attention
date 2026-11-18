@@ -16,12 +16,15 @@ export interface CardResult { card: Card; ms: number; reports: CheckReport[]; bl
 
 export async function evaluate(cards: Card[], cfg: ExampleConfig, opts: { run?: RunCommand; concurrency?: number; signal?: AbortSignal } = {}): Promise<CardResult[]> {
   const limit = limiter(opts.concurrency ?? 3);
-  return Promise.all(cards.map((card) => limit(async () => {
+  const results = await Promise.all(cards.map((card) => limit(async () => {
     const started = Date.now();
     const reports = await runChecks(card, cfg, opts.run ?? runCommand, opts.signal);
     const by = (level: 'block' | 'advise'): CheckName[] => CHECKS.filter((c) => reports.some((r) => r.check === c && r.sections.some((s) => s.level === level)));
     return { card, ms: Date.now() - started, reports, blockedBy: by('block'), advisedBy: by('advise') };
   })));
+  // A stopped check finds nothing, so the cards it was checking would count as clean in a report.
+  if (opts.signal?.aborted) throw new Error('the eval stopped before every card was checked, so it wrote no report');
+  return results;
 }
 
 const tally = (items: string[]): [string, number][] => {

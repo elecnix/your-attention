@@ -15,7 +15,7 @@ export type CardCreated = Extract<HookEvent, { hook: 'card.created' }>;
 /** A GET (no body) or POST to the inbox with the extension's token. */
 export type InboxCall = <T>(route: string, body?: unknown) => Promise<T>;
 
-/** `signal` aborts when the extension stops, so a check can cancel the work it started. */
+/** `signal` aborts when the extension stops or the card's deadline passes, so a check can cancel the work it started. */
 export type CardCheck = (ev: CardCreated, call: InboxCall, signal: AbortSignal) => Promise<Ruling>;
 
 export interface CardHookConfig {
@@ -63,10 +63,25 @@ export async function runCardHook(cfg: CardHookConfig, check: CardCheck, signal:
   };
   const decide = async (ev: CardCreated): Promise<void> => {
     let ruling: Ruling;
+    // By its deadline the inbox has passed the card, so a check still running then gives up its slot: a check that
+    // never settles must not keep every later card from its turn.
+    const late = new AbortController();
+    const timer = setTimeout(() => late.abort(), Math.max(0, ev.deadline - Date.now()));
+    const ends = AbortSignal.any([signal, late.signal]);
     try {
-      ruling = await run(() => check(ev, call, signal));
+      const tooLate = (): Error => new Error('it did not finish before the card\'s deadline');
+      ruling = await run(() => {
+        // A card whose deadline passed while it waited for a slot skips its check.
+        if (late.signal.aborted) return Promise.reject(tooLate());
+        return Promise.race([
+          check(ev, call, ends),
+          new Promise<never>((_, reject) => { late.signal.addEventListener('abort', () => reject(tooLate()), { once: true }); }),
+        ]);
+      });
     } catch (e) {
       ruling = { verdict: 'pass', reason: `${cfg.name} failed (${(e as Error).message}), so the card went through.` };
+    } finally {
+      clearTimeout(timer);
     }
     try {
       await call(`/v1/hooks/${ev.id}`, ruling);

@@ -48,7 +48,7 @@ const stop = new AbortController();
 process.on('SIGINT', () => stop.abort());
 const before = await usage();
 const started = Date.now();
-const results = await evaluate(cards, cfg, { concurrency: Number(values.concurrency) || 3, signal: stop.signal });
+const results = await evaluate(cards, cfg, { concurrency: Number(values.concurrency) || 3, signal: stop.signal }).catch((e: Error) => fail(`Stopped: ${e.message}.`));
 const ms = Date.now() - started;
 const after = await usage();
 const spent = before !== undefined && after !== undefined ? after - before : undefined;

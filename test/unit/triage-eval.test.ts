@@ -43,6 +43,12 @@ describe('the triage eval', () => {
     assert.equal(parseWhen('soon'), undefined);
   });
 
+  it('refuses to finish a run that was stopped, so no report counts the cut-short cards as clean', async () => {
+    const stop = new AbortController();
+    stop.abort();
+    await assert.rejects(evaluate(cards, cfg, { run, signal: stop.signal }), /stopped before every card was checked/);
+  });
+
   it('counts what each check would block and advise, and how many cards would go back', async () => {
     const results = await evaluate(cards, cfg, { run, concurrency: 2 });
     const s = summarize(results);

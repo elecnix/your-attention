@@ -63,7 +63,8 @@ export class TriageState {
     const key = (id: string): string => JSON.stringify([card.agent, id]);
     const mine = (chain: string | undefined): string | undefined => chain && this.data.chains[chain]?.agent === card.agent ? chain : undefined;
     const known = mine(this.data.cards[key(card.id)]?.chain) ?? mine(card.follows ? this.data.cards[key(card.follows)]?.chain : undefined)
-      ?? Object.entries(this.data.chains).find(([, c]) => c.agent === card.agent && c.title === normal(card.title) && now - c.at < DAY)?.[0];
+      // Of the same agent's chains with this title seen in the last day, the most recently seen one.
+      ?? Object.entries(this.data.chains).filter(([, c]) => c.agent === card.agent && c.title === normal(card.title) && now - c.at < DAY).sort((a, b) => b[1].at - a[1].at)[0]?.[0];
     const chain = known ?? key(card.id);
     this.data.chains[chain] ??= { agent: card.agent, title: normal(card.title), returns: 0, at: now };
     // Seeing a card keeps its chain as fresh as its card entry, so a save never prunes one and keeps the other.
