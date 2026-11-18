@@ -448,4 +448,22 @@ describe('the limiter', () => {
     const run = limiter(0);
     assert.equal(await run(async () => 'ran'), 'ran');
   });
+
+  it('never runs more tasks than its limit, when new tasks arrive as others finish', async () => {
+    const { limiter } = await import('../../src/extensions/card-hook.ts');
+    const run = limiter(2);
+    let running = 0;
+    let most = 0;
+    const task = (ms: number) => async (): Promise<void> => {
+      running++;
+      most = Math.max(most, running);
+      await new Promise((r) => setTimeout(r, ms));
+      running--;
+    };
+    const all: Promise<void>[] = [];
+    for (let i = 0; i < 12; i++) all.push(run(task(i % 3)).then(() => { all.push(run(task(1))); }));
+    while (all.length < 24) await new Promise((r) => setTimeout(r, 5));
+    await Promise.all(all);
+    assert.equal(most, 2);
+  });
 });

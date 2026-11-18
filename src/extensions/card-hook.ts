@@ -36,13 +36,15 @@ export function limiter(asked: number): <T>(task: () => Promise<T>) => Promise<T
   let active = 0;
   const queue: (() => void)[] = [];
   return async (task) => {
+    // A finishing task hands its slot to the first waiter, so a task that arrives meanwhile can't take it too.
     if (active >= limit) await new Promise<void>((r) => queue.push(r));
-    active++;
+    else active++;
     try {
       return await task();
     } finally {
-      active--;
-      queue.shift()?.();
+      const next = queue.shift();
+      if (next) next();
+      else active--;
     }
   };
 }

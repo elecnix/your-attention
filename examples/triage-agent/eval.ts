@@ -12,7 +12,7 @@ import { evaluate, renderReport } from './eval-report.ts';
 
 const { values } = parseArgs({ options: { out: { type: 'string' }, since: { type: 'string' }, config: { type: 'string' }, concurrency: { type: 'string', default: '3' } } });
 const fail = (why: string): never => { console.error(why); process.exit(1); };
-const out = values.out ?? fail('Give the report path with --out FILE, outside any repository: the report quotes card text.');
+const out = values.out || fail('Give the report path with --out FILE, outside any repository: the report quotes card text.');
 // A date alone means its midnight in local time, and no date means today's.
 const since = values.since ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(values.since) ? `${values.since}T00:00:00` : values.since) : new Date(new Date().setHours(0, 0, 0, 0));
 if (Number.isNaN(since.getTime())) fail(`--since must be a date or a time, such as 2026-11-17: ${values.since}`);
