@@ -31,6 +31,8 @@ export interface Glyphs {
   marker: string; waiting: string; onScreen: string; triage: string; held: string;
   stored: string; delivered: string; read: string; closed: string;
   radioOn: string; radioOff: string; checkOn: string; checkOff: string;
+  /** The bullet of a list nested at each depth, the deepest one repeating below. */
+  bullets: string[];
   bullet: string; quote: string; rule: string; ellipsis: string; session: string; select: string;
   more: string; up: string; down: string; open: string; shut: string;
   box: { tl: string; tr: string; bl: string; br: string; h: string; v: string };
@@ -42,6 +44,7 @@ const UNICODE: Glyphs = {
   marker: '▶', waiting: '●', onScreen: '◉', triage: '◌', held: '‖',
   stored: '○', delivered: '◑', read: '✓', closed: '×',
   radioOn: '(•)', radioOff: '( )', checkOn: '[x]', checkOff: '[ ]',
+  bullets: ['•', '◦', '▪'],
   bullet: '•', quote: '│', rule: '─', ellipsis: '…', session: '❯', select: '▾',
   more: '…', up: '▲', down: '▼', open: '▾', shut: '▸',
   box: { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' },
@@ -53,6 +56,7 @@ const ASCII: Glyphs = {
   marker: '>', waiting: '*', onScreen: '@', triage: '~', held: '=',
   stored: 'o', delivered: 'd', read: 'v', closed: 'x',
   radioOn: '(*)', radioOff: '( )', checkOn: '[x]', checkOff: '[ ]',
+  bullets: ['*', '-', '+'],
   bullet: '*', quote: '|', rule: '-', ellipsis: '...', session: '>', select: 'v',
   more: '...', up: '^', down: 'v', open: 'v', shut: '>',
   box: { tl: '+', tr: '+', bl: '+', br: '+', h: '-', v: '|' },

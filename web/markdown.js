@@ -100,14 +100,77 @@ export function linkHrefs(src) {
   return hrefs;
 }
 
+// A table starts with a row of cells and a row of dashes. It can follow a line of text with no blank line between.
+const tableStart = (lines, n) => /^\|.*\|\s*$/.test(lines[n] || '') && /^\|[\s:|-]+\|\s*$/.test(lines[n + 1] || '');
+/** Whether line `n` starts a block other than a paragraph, which ends the paragraph before it. */
+const blockStart = (lines, n) => /^(```|#{1,6}\s|>|\s*([-*+]|\d+\.)\s)/.test(lines[n]) || tableStart(lines, n);
+
+/** A line with its leading tabs as spaces, to the next multiple of 4 columns, as CommonMark counts them. */
+function expandIndent(line, upTo = Infinity) {
+  let out = '';
+  let i = 0;
+  for (; i < line.length && /[ \t]/.test(line[i]) && out.length < upTo; i++) out += line[i] === '\t' ? ' '.repeat(4 - (out.length % 4)) : ' ';
+  return out + line.slice(i);
+}
+const indentOf = (line) => /^ */.exec(expandIndent(line))[0].length;
+
+/**
+ * The list item a line opens, or undefined: its marker's kind, its start number, and the column its text starts at.
+ * As in CommonMark, the text starts one to four spaces after the marker, and five or more spaces count as one.
+ */
+function listItem(line) {
+  const m = /^(\s*)([-*+]|(\d{1,9})\.)([ \t]+)(.*)$/.exec(line);
+  if (!m) return undefined;
+  const indent = expandIndent(m[1]).length;
+  const markerEnd = indent + m[2].length;
+  const gap = expandIndent(' '.repeat(markerEnd) + m[4]).length - markerEnd;
+  const text = m[5].trim() && gap <= 4 ? markerEnd + gap : markerEnd + 1;
+  return { ordered: m[3] !== undefined, start: m[3] !== undefined ? Number(m[3]) : undefined, indent, text, rest: m[5] };
+}
+
+/**
+ * The list that starts at line `start`: its kind, its start number, and each item's lines with the item's indent
+ * taken off, so a nested list in an item reads as a list of its own. A line indented to an item's text column
+ * belongs to that item, a marker of the same kind further left starts its next sibling, and anything else ends the list.
+ */
+function readList(lines, start) {
+  const first = listItem(lines[start]);
+  const items = [];
+  let i = start;
+  while (i < lines.length) {
+    const item = listItem(lines[i]);
+    if (!item || item.ordered !== first.ordered || (i > start && item.indent >= first.text)) break;
+    const body = [item.rest];
+    for (i++; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) {
+        // A blank line stays in the item only when the next line with text is indented under it.
+        let n = i + 1;
+        while (n < lines.length && !lines[n].trim()) n++;
+        if (n < lines.length && indentOf(lines[n]) >= item.text) { body.push(''); continue; }
+        break;
+      }
+      if (indentOf(line) < item.text) break;
+      body.push(expandIndent(line, item.text).slice(item.text));
+    }
+    items.push(body);
+    // A blank line between two items keeps them in one list.
+    let n = i;
+    while (n < lines.length && !lines[n].trim()) n++;
+    const next = n < lines.length ? listItem(lines[n]) : undefined;
+    if (n > i && !(next && next.ordered === first.ordered && next.indent < first.text)) break;
+    i = n;
+  }
+  return { ordered: first.ordered, start: first.start, items, end: i };
+}
+
 export function renderMarkdown(h, src, opts = {}) {
   const ins = (text, k) => inline(h, text, k, opts);
   const lines = String(src).replace(/\r\n/g, '\n').split('\n');
   const blocks = [];
   let i = 0;
   const key = () => `b${blocks.length}`;
-  // A table starts with a row of cells and a row of dashes. It can follow a line of text with no blank line between.
-  const tableAt = (n) => /^\|.*\|\s*$/.test(lines[n] || '') && /^\|[\s:|-]+\|\s*$/.test(lines[n + 1] || '');
+  const tableAt = (n) => tableStart(lines, n);
   while (i < lines.length) {
     const line = lines[i];
     if (/^```/.test(line)) {
@@ -120,11 +183,19 @@ export function renderMarkdown(h, src, opts = {}) {
       const level = /^#+/.exec(line)[0].length;
       blocks.push(h(`h${Math.min(level + 2, 6)}`, { key: key() }, ins(line.replace(/^#+\s*/, ''), key())));
       i++;
-    } else if (/^\s*([-*+]|\d+\.)\s/.test(line)) {
-      const ordered = /^\s*\d+\./.test(line);
-      const items = [];
-      for (; i < lines.length && /^\s*([-*+]|\d+\.)\s/.test(lines[i]); i++) items.push(lines[i].replace(/^\s*([-*+]|\d+\.)\s/, ''));
-      blocks.push(h(ordered ? 'ol' : 'ul', { key: key() }, items.map((t, j) => h('li', { key: j }, ins(t, `${key()}.${j}`)))));
+    } else if (listItem(line)) {
+      const list = readList(lines, i);
+      i = list.end;
+      const k = key();
+      const items = list.items.map((item, j) => {
+        // The item's first lines are its text, as a tight list draws it, and any block after them, such as a nested
+        // list, renders as Markdown of its own.
+        const rest = item.findIndex((l, n) => !l.trim() || (n > 0 && blockStart(item, n)));
+        const lead = blockStart(item, 0) ? 0 : rest < 0 ? item.length : rest;
+        const text = item.slice(0, lead).map((l) => l.trim()).join(opts.breaks ? '\n' : ' ');
+        return h('li', { key: j }, ins(text, `${k}.${j}`), renderMarkdown(h, item.slice(lead).join('\n'), opts));
+      });
+      blocks.push(h(list.ordered ? 'ol' : 'ul', list.start !== undefined && list.start !== 1 ? { key: k, start: list.start } : { key: k }, items));
     } else if (/^>\s?/.test(line)) {
       const quote = [];
       for (; i < lines.length && /^>\s?/.test(lines[i]); i++) quote.push(lines[i].replace(/^>\s?/, ''));
@@ -141,7 +212,7 @@ export function renderMarkdown(h, src, opts = {}) {
       i++;
     } else {
       const para = [];
-      for (; i < lines.length && lines[i].trim() && !/^(```|#{1,6}\s|>|\s*([-*+]|\d+\.)\s)/.test(lines[i]) && !tableAt(i); i++) para.push(lines[i]);
+      for (; i < lines.length && lines[i].trim() && !blockStart(lines, i); i++) para.push(lines[i]);
       blocks.push(h('p', { key: key() }, ins(para.join(opts.breaks ? '\n' : ' '), key())));
     }
   }
