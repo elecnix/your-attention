@@ -69,6 +69,8 @@ export function defaultConfigPath(): string {
 
 /** The local config, over the defaults. A missing file gives the defaults, which have no PR-verdict command. */
 export function loadConfig(file = defaultConfigPath()): ExampleConfig {
+  // An empty path, such as --config "$CFG" with CFG unset, would otherwise run the default policy without a word.
+  if (!file) throw new Error('--config needs a file path, and it was empty');
   if (!fs.existsSync(file)) return { ...DEFAULTS, policy: { ...DEFAULTS.policy } };
   const bad = (what: string): never => { throw new Error(`${file}: ${what}`); };
   let raw: Record<string, unknown>;

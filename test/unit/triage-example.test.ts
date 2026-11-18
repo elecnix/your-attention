@@ -292,6 +292,10 @@ describe('the example triage agent reads its local config', () => {
     assert.equal(cfg.maxReturns, 5);
   });
 
+  it('refuses an empty config path, such as --config "$CFG" with CFG unset', () => {
+    assert.throws(() => loadConfig(''), /--config needs a file path/);
+  });
+
   it('refuses a config file that is JSON but not an object, and names the file', () => {
     const file = path.join(dir, 'null.json');
     fs.writeFileSync(file, 'null');
@@ -378,6 +382,15 @@ describe('the example triage agent limits the returns of one card', () => {
     assert.match(other.reason, /return 1 of 3/);
     const sameId = await checkCard({ ...card, agent: 's3' }, cfg, logger().log, { state });
     assert.match(sameId.reason, /return 1 of 3/);
+  });
+
+  it('keeps two agents apart when a space in an agent name or card id would join them into one key', async () => {
+    const state = new TriageState(undefined);
+    const cfg = config(blocked());
+    for (let i = 0; i < 3; i++) await checkCard({ ...card, agent: 'a b', id: 'c' }, cfg, logger().log, { state });
+    const other = await checkCard({ ...card, agent: 'a', id: 'b c' }, cfg, logger().log, { state });
+    assert.equal(other.verdict, 'return');
+    assert.match(other.reason, /return 1 of 3/);
   });
 
   it('keeps the count in its state file across a restart', async () => {

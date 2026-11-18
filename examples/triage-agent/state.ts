@@ -3,7 +3,7 @@
 // lets a card skip triage. Without a file, it keeps them in memory, which the eval and the tests use.
 //
 // A card's attempts form a chain, and the chain counts the returns:
-//   - a revision keeps its card id, so it stays in the chain of that id;
+//   - a revision keeps its card id, so it stays in the chain of that agent and id;
 //   - a new card that `follows` a card in a chain joins that chain;
 //   - a new card from the same agent with the same title as a chain seen in the last day joins that chain, since an
 //     agent often posts its fix as a new card without `follows`.
@@ -59,8 +59,8 @@ export class TriageState {
   chainOf(card: { id: string; agent: string; title: string; follows?: string }): string {
     const now = this.now();
     // A chain counts one agent's attempts, so the agent is part of every key: a card joins a chain only from the same
-    // agent, even when another agent posts under the same card id.
-    const key = (id: string): string => `${card.agent} ${id}`;
+    // agent, even when another agent posts under the same card id. JSON keeps the two apart when either holds a space.
+    const key = (id: string): string => JSON.stringify([card.agent, id]);
     const mine = (chain: string | undefined): string | undefined => chain && this.data.chains[chain]?.agent === card.agent ? chain : undefined;
     const known = mine(this.data.cards[key(card.id)]?.chain) ?? mine(card.follows ? this.data.cards[key(card.follows)]?.chain : undefined)
       ?? Object.entries(this.data.chains).find(([, c]) => c.agent === card.agent && c.title === normal(card.title) && now - c.at < DAY)?.[0];
