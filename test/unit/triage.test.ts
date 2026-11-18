@@ -122,6 +122,19 @@ describe('triage under load', () => {
     await assert.rejects(asked, /aborted/);
   });
 
+  it('kills every process of a command judge on abort, not only its shell', { skip: process.platform === 'win32' ? 'POSIX process groups' : false }, async () => {
+    const pidFile = path.join(os.tmpdir(), `judge-child-${process.pid}.pid`);
+    const stop = new AbortController();
+    const asked = commandJudge(`sleep 30 & echo $! > ${pidFile}; wait`)('p', stop.signal);
+    for (let i = 0; i < 50 && !fs.existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 20));
+    const child = Number(fs.readFileSync(pidFile, 'utf8'));
+    stop.abort();
+    await assert.rejects(asked, /stopped/);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.throws(() => process.kill(child, 0), 'the command the shell started is gone too');
+    fs.rmSync(pidFile, { force: true });
+  });
+
   it('kills a command judge when the card\'s signal aborts', { skip: process.platform === 'win32' ? 'the test command is POSIX sleep' : false }, async () => {
     const stop = new AbortController();
     const started = Date.now();

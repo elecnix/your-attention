@@ -95,10 +95,12 @@ export function parseRuling(text: string): Ruling {
 export function commandJudge(command: string, timeoutMs = 120_000): Judge {
   return (prompt, signal) => new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error(`${command} stopped before it started: the card's check was aborted`)); return; }
-    const child = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    // The command runs in a shell, and a pipeline or a chain runs as that shell's children, so it gets a process group
+    // of its own and every process in it ends together.
+    const child = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'ignore'], detached: process.platform !== 'win32' });
     let out = '';
-    const timer = setTimeout(() => { child.kill(); reject(new Error(`${command} took longer than ${timeoutMs} ms`)); }, timeoutMs);
-    const stop = (): void => { clearTimeout(timer); child.kill(); reject(new Error(`${command} stopped: the card's check was aborted`)); };
+    const timer = setTimeout(() => { killTree(child); reject(new Error(`${command} took longer than ${timeoutMs} ms`)); }, timeoutMs);
+    const stop = (): void => { clearTimeout(timer); killTree(child); reject(new Error(`${command} stopped: the card's check was aborted`)); };
     signal?.addEventListener('abort', stop, { once: true });
     child.on('close', () => signal?.removeEventListener('abort', stop));
     child.stdout.on('data', (d) => { out += String(d); });
@@ -108,6 +110,20 @@ export function commandJudge(command: string, timeoutMs = 120_000): Judge {
     child.stdin.on('error', () => {});
     child.stdin.end(prompt);
   });
+}
+
+/** End a judge command with everything it started: its process group on POSIX, then SIGKILL after 2 s, and its tree on
+ * Windows. */
+function killTree(child: ReturnType<typeof spawn>): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }).on('error', () => child.kill());
+    return;
+  }
+  const signal = (s: NodeJS.Signals): void => { try { process.kill(-pid, s); } catch { /* the group has already ended */ } };
+  signal('SIGTERM');
+  setTimeout(() => signal('SIGKILL'), 2000).unref();
 }
 
 /** A judge on an OpenAI-compatible chat endpoint: OpenRouter, Ollama Cloud, or a local model. */
