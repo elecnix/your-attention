@@ -106,13 +106,23 @@ const tableStart = (lines, n) => /^\|.*\|\s*$/.test(lines[n] || '') && /^\|[\s:|
 const blockStart = (lines, n) => /^(```|#{1,6}\s|>|\s*([-*+]|\d+\.)\s)/.test(lines[n]) || tableStart(lines, n);
 
 /** A line with its leading tabs as spaces, to the next multiple of 4 columns, as CommonMark counts them. */
-function expandIndent(line, upTo = Infinity) {
+function expandIndent(line) {
   let out = '';
   let i = 0;
-  for (; i < line.length && /[ \t]/.test(line[i]) && out.length < upTo; i++) out += line[i] === '\t' ? ' '.repeat(4 - (out.length % 4)) : ' ';
+  for (; i < line.length && /[ \t]/.test(line[i]); i++) out += line[i] === '\t' ? ' '.repeat(4 - (out.length % 4)) : ' ';
   return out + line.slice(i);
 }
 const indentOf = (line) => /^ */.exec(expandIndent(line))[0].length;
+/**
+ * A line with each tab in its indent, and after a list marker there, as spaces to the tab stop of the column where
+ * it stands. Slicing an item's indent off keeps no tab, since a tab counted again from column 0 would move.
+ */
+function expandPrefix(line) {
+  const m = /^[ \t]*(?:(?:[-*+]|\d{1,9}\.)[ \t]+)?/.exec(line);
+  let out = '';
+  for (const c of m[0]) out += c === '\t' ? ' '.repeat(4 - (out.length % 4)) : c;
+  return out + line.slice(m[0].length);
+}
 
 /**
  * The list item a line opens, or undefined: its marker's kind, its start number, and the column its text starts at.
@@ -151,7 +161,7 @@ function readList(lines, start) {
         break;
       }
       if (indentOf(line) < item.text) break;
-      body.push(expandIndent(line, item.text).slice(item.text));
+      body.push(expandPrefix(line).slice(item.text));
     }
     items.push(body);
     // A blank line between two items keeps them in one list.

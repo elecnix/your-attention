@@ -145,6 +145,15 @@ describe('nested lists, by indentation as CommonMark reads them', () => {
     assert.deepEqual(lists('- Fruit\n\t- apple'), want);
   });
 
+  it('measures a tab from its own column when the parent item does not start at column 0', () => {
+    // The tab starts at column 2, under b's text column, so it stops at column 4, and cont at column 6 continues c.
+    assert.deepEqual(lists('- a\n  - b\n  \t- c\n      cont'), [
+      { list: 'ul', items: [{ text: 'a', lists: [{ list: 'ul', items: [{ text: 'b', lists: [{ list: 'ul', items: [leaf('c cont')] }] }] }] }] },
+    ]);
+    // A tab after a nested marker counts from the marker's own column too.
+    assert.deepEqual(lists('- a\n  -\tb\n    cont'), [{ list: 'ul', items: [{ text: 'a', lists: [{ list: 'ul', items: [leaf('b cont')] }] }] }]);
+  });
+
   it('nests three levels', () => {
     assert.deepEqual(lists('- one\n  - two\n    - three\n- four'), [
       { list: 'ul', items: [{ text: 'one', lists: [{ list: 'ul', items: [{ text: 'two', lists: [{ list: 'ul', items: [leaf('three')] }] }] }] }, leaf('four')] },
