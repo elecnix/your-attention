@@ -390,10 +390,13 @@ export interface CheckOptions { signal?: AbortSignal; run?: RunCommand; state?: 
 /** Check a card and decide: return it with every finding, pass it with advice, or pass it. */
 export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unknown[]) => void, opts: CheckOptions = {}): Promise<Ruling> {
   const state = opts.state ?? new TriageState(undefined);
+  // A state file it cannot write leaves the verdict alone, and the log says why the counts live in memory.
+  const logWriteError = (): void => { const why = state.takeWriteError(); if (why) log(card.id, why); };
   let note = '';
   const code = card.tags?.[BYPASS_TAG];
   if (code) {
     const used = state.useBypass(code, card.agent, card.id);
+    logWriteError();
     if (used.ok) {
       log(card.id, `bypass used by agent ${card.agent} on card ${card.id}, with the code from card ${used.issuedFor}`);
       return { verdict: 'pass', reason: 'Passed without checks: the agent used a triage bypass code for an urgent card.' };
@@ -410,6 +413,7 @@ export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unkn
   const chain = state.chainOf(card);
   if (blocking && state.returns(chain) < cfg.maxReturns) {
     const { returns, code: next } = state.recordReturn(chain, card);
+    logWriteError();
     const head = [note, 'Triage sent this card back. Fix everything below in one revision, then post the card again.'].filter(Boolean).join('\n');
     const tail = [
       `This is return ${returns} of ${cfg.maxReturns}. After that, triage lets the card through and sends these findings as advice.`,

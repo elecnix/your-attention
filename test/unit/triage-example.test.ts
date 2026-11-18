@@ -622,6 +622,24 @@ describe('the example triage agent reads a damaged state file', () => {
     assert.equal(new TriageState(file, () => now).returns(new TriageState(file, () => now).chainOf(card)), 3);
   });
 
+  it('still returns a card, and logs why, when it cannot write its state file', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs a folder this user cannot write' : false }, async () => {
+    const locked = path.join(dir, 'locked');
+    fs.mkdirSync(locked, { recursive: true });
+    fs.chmodSync(locked, 0o500);
+    try {
+      const state = new TriageState(path.join(locked, 'state.json'));
+      const cfg = config({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: [] })).argv });
+      const log = logger();
+      const ruling = await checkCard(card, cfg, log.log, { state });
+      assert.equal(ruling.verdict, 'return');
+      assert.match(ruling.reason, /return 1 of 3/);
+      assert.match(log.lines.join('\n'), /could not write .*state\.json/);
+      assert.match((await checkCard(card, cfg, log.log, { state })).reason, /return 2 of 3/, 'the count goes on in memory');
+    } finally {
+      fs.chmodSync(locked, 0o700);
+    }
+  });
+
   it('starts empty, and says so, when the file is JSON of the wrong shape, an array included', () => {
     for (const shape of [{ chains: 5 }, [], 7]) {
       const file = path.join(dir, 'state-shape.json');

@@ -29,6 +29,7 @@ export class TriageState {
   readonly warning: string | undefined;
   private readonly file: string | undefined;
   private readonly now: () => number;
+  private writeError: string | undefined;
 
   constructor(file: string | undefined, now: () => number = Date.now) {
     this.file = file;
@@ -111,9 +112,23 @@ export class TriageState {
     drop(this.data.chains, (c) => c.at);
     drop(this.data.cards, (c) => c.at);
     drop(this.data.bypass, (b) => b.usedAt ?? b.issuedAt);
-    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
-    fs.renameSync(tmp, this.file);
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
+      fs.renameSync(tmp, this.file);
+    } catch (e) {
+      // A folder it cannot write, or a full disk, must not change a verdict: the counts and codes stay in memory, and the
+      // next save tries again.
+      fs.rmSync(tmp, { force: true });
+      this.writeError = `could not write ${this.file} (${(e as Error).message}), so the return counts and bypass codes stay in memory until a write works`;
+    }
+  }
+
+  /** Why the last save failed, once, so the agent logs it. */
+  takeWriteError(): string | undefined {
+    const why = this.writeError;
+    this.writeError = undefined;
+    return why;
   }
 }
