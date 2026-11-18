@@ -196,6 +196,8 @@
   .card-text { white-space: pre-wrap; margin: 0 0 12px; }
   .card-text > :first-child { margin-top: 0; }
   .card-text p, .card-text ul, .card-text ol { margin: 0 0 8px; }
+  /* A list nested in an item hangs under the item's text, as tight as its parent, and the browser picks a bullet per level. */
+  .markdown li > :is(ul, ol) { margin: 2px 0 0; padding-left: 24px; }
   .recommendation { border-left: 3px solid var(--accent); padding: 2px 0 2px 12px; margin: 0 0 12px; }
   .check-with-text .row { display: flex; align-items: center; gap: 8px; }
   .check-with-text .reveal { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; text-align: left; }

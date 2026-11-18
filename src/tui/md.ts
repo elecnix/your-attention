@@ -89,15 +89,26 @@ export function markdown(doc: Doc, text: string, ctx: MdContext, indent = 0, bas
   });
 }
 
-function block(doc: Doc, b: MdNode, ctx: MdContext, pad: Span[], width: number, base: Style, s: Theme['s'], g: Theme['g']): void {
+/** The elements the renderer makes a block of, as against inline text. */
+const BLOCKS = /^(h[1-6]|p|ul|ol|blockquote|diagram|div|pre|table)$/;
+
+function block(doc: Doc, b: MdNode, ctx: MdContext, pad: Span[], width: number, base: Style, s: Theme['s'], g: Theme['g'], depth = 0): void {
   const kids = (n: MdNode, style: Style = base) => spansOf(n.children, ctx, style);
   if (/^h[1-6]$/.test(b.type)) { doc.para(kids(b, { ...base, ...s.heading }), { first: pad }); return; }
   if (b.type === 'p') { doc.para(kids(b), { first: pad }); return; }
   if (b.type === 'ul' || b.type === 'ol') {
+    const start = Number(b.props['start'] ?? 1);
     b.children.forEach((li, j) => {
       if (typeof li === 'string') return;
-      const mark = b.type === 'ol' ? `${j + 1}. ` : `${g.bullet} `;
-      doc.para(kids(li), { first: [...pad, { text: mark, style: s.dim }], rest: [...pad, { text: ' '.repeat(textWidth(mark)) }] });
+      const mark = b.type === 'ol' ? `${start + j}. ` : `${g.bullets[Math.min(depth, g.bullets.length - 1)]} `;
+      const under: Span[] = [...pad, { text: ' '.repeat(textWidth(mark)) }];
+      // An item's own text comes first, then its blocks, such as a nested list, indented under that text.
+      const nested = li.children.filter((c): c is MdNode => typeof c !== 'string' && BLOCKS.test(c.type));
+      doc.para(spansOf(li.children.filter((c) => !nested.includes(c as MdNode)), ctx, base), { first: [...pad, { text: mark, style: s.dim }], rest: under });
+      nested.forEach((n) => {
+        if (n.type !== 'ul' && n.type !== 'ol') doc.gap();
+        block(doc, n, ctx, under, width, base, s, g, depth + 1);
+      });
     });
     return;
   }
@@ -110,7 +121,7 @@ function block(doc: Doc, b: MdNode, ctx: MdContext, pad: Span[], width: number, 
   // A fenced block comes with the page's Copy button around it. The terminal draws only its code.
   if (b.type === 'div' && b.props['className'] === 'code-block') {
     const pre = b.children.find((c): c is MdNode => typeof c !== 'string' && c.type === 'pre');
-    if (pre) block(doc, pre, ctx, pad, width, base, s, g);
+    if (pre) block(doc, pre, ctx, pad, width, base, s, g, depth);
     return;
   }
   if (b.type === 'pre') {
