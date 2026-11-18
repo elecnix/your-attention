@@ -12,7 +12,8 @@ import { limiter, runCardHook, type Ruling } from './card-hook.ts';
 
 export { limiter, type Ruling };
 
-export type Judge = (prompt: string) => Promise<string>;
+/** `signal` aborts when the card's deadline passes or triage stops, and the judge then ends its call. */
+export type Judge = (prompt: string, signal?: AbortSignal) => Promise<string>;
 
 export interface TriageConfig {
   url: string;
@@ -25,16 +26,18 @@ export interface TriageConfig {
   log?: (...a: unknown[]) => void;
 }
 
-/** Call the judge, and retry with backoff when it is busy, until `deadline`. */
-export async function judgeWithRetry(judge: Judge, prompt: string, deadline: number, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<string> {
+/** Call the judge, and retry with backoff when it is busy, until `deadline` or until `signal` aborts. */
+export async function judgeWithRetry(judge: Judge, prompt: string, deadline: number, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), signal?: AbortSignal): Promise<string> {
   let wait = 1000;
   for (;;) {
     try {
-      return await judge(prompt);
+      return await judge(prompt, signal);
     } catch (e) {
       const busy = /\b(429|50[23])\b/.test((e as Error).message);
       if (!busy || Date.now() + wait > deadline - 1000) throw e;
       await sleep(wait);
+      // A card whose deadline passed while the judge was busy needs no more calls.
+      if (signal?.aborted) throw new Error('triage stopped judging the card: it was aborted');
       wait = Math.min(wait * 2, 15_000);
     }
   }
@@ -90,10 +93,14 @@ export function parseRuling(text: string): Ruling {
 
 /** A judge that runs a harness in print mode, such as "claude -p" or "pi -p", with the prompt on stdin. */
 export function commandJudge(command: string, timeoutMs = 120_000): Judge {
-  return (prompt) => new Promise((resolve, reject) => {
+  return (prompt, signal) => new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error(`${command} stopped before it started: the card's check was aborted`)); return; }
     const child = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'ignore'] });
     let out = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error(`${command} took longer than ${timeoutMs} ms`)); }, timeoutMs);
+    const stop = (): void => { clearTimeout(timer); child.kill(); reject(new Error(`${command} stopped: the card's check was aborted`)); };
+    signal?.addEventListener('abort', stop, { once: true });
+    child.on('close', () => signal?.removeEventListener('abort', stop));
     child.stdout.on('data', (d) => { out += String(d); });
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve(out) : reject(new Error(`${command} exited with ${code}`)); });
@@ -106,12 +113,12 @@ export function commandJudge(command: string, timeoutMs = 120_000): Judge {
 /** A judge on an OpenAI-compatible chat endpoint: OpenRouter, Ollama Cloud, or a local model. */
 export function chatJudge(opts: { baseUrl: string; apiKey: string; model: string; fetcher?: typeof fetch }): Judge {
   const fetcher = opts.fetcher ?? fetch;
-  return async (prompt) => {
+  return async (prompt, signal) => {
     const res = await fetcher(`${opts.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${opts.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({ model: opts.model, messages: [{ role: 'user', content: prompt }], temperature: 0 }),
-      signal: AbortSignal.timeout(120_000),
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(120_000), signal]) : AbortSignal.timeout(120_000),
     });
     if (!res.ok) throw new Error(`judge answered ${res.status}`);
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
@@ -159,13 +166,13 @@ export function defaultJudge(model = 'openrouter/auto'): Judge {
 
 /** Run triage until `signal` aborts. Reconnects after a drop, and the inbox resends calls it missed. */
 export async function runTriage(cfg: TriageConfig, signal: AbortSignal): Promise<void> {
-  await runCardHook({ url: cfg.url, token: cfg.token, name: cfg.name ?? 'triage', timeoutMs: cfg.timeoutMs, concurrency: cfg.concurrency, log: cfg.log }, async (ev, call) => {
+  await runCardHook({ url: cfg.url, token: cfg.token, name: cfg.name ?? 'triage', timeoutMs: cfg.timeoutMs, concurrency: cfg.concurrency, log: cfg.log }, async (ev, call, signal) => {
     const guidance = (await call<{ text: string }>('/v1/guidance')).text;
     const words = ev.card.title.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).join(' ');
     // A bare word search, so an inbox from before the paged reply and one after both answer the array.
     const hits = words ? await call<{ card: Card; answer?: { comment: string; values: Record<string, unknown> } }[]>(`/v1/search?q=${encodeURIComponent(words)}`) : [];
     const earlier = hits.filter((h) => h.card.id !== ev.card.id && h.answer).slice(0, 3)
       .map((h) => ({ title: h.card.title, answer: [JSON.stringify(h.answer?.values), h.answer?.comment].filter(Boolean).join(' ') }));
-    return parseRuling(await judgeWithRetry(cfg.judge, triagePrompt(ev.card, guidance, earlier, ev.person), ev.deadline));
+    return parseRuling(await judgeWithRetry(cfg.judge, triagePrompt(ev.card, guidance, earlier, ev.person), ev.deadline, undefined, signal));
   }, signal);
 }

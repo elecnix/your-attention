@@ -100,6 +100,36 @@ describe('triage under load', () => {
     await assert.rejects(judgeWithRetry(async () => { throw new Error('judge answered 429'); }, 'p', Date.now() + 1500, async () => {}), /429/);
     await assert.rejects(judgeWithRetry(async () => { throw new Error('judge answered 400'); }, 'p', Date.now() + 60_000, async () => {}), /400/, 'only a busy judge is retried');
   });
+
+  it('gives the judge the card\'s signal, and stops retrying once it aborts', async () => {
+    const { judgeWithRetry } = await import('../../src/extensions/triage.ts');
+    const stop = new AbortController();
+    const seen: (AbortSignal | undefined)[] = [];
+    const busy = async (_p: string, signal?: AbortSignal) => { seen.push(signal); throw new Error('judge answered 429'); };
+    await assert.rejects(judgeWithRetry(busy, 'p', Date.now() + 60_000, async () => { stop.abort(); }, stop.signal), /aborted|429/);
+    assert.equal(seen.length, 1, 'no retry after the abort');
+    assert.equal(seen[0], stop.signal);
+  });
+
+  it('ends a chat judge\'s request when the card\'s signal aborts', async () => {
+    const { chatJudge } = await import('../../src/extensions/triage.ts');
+    const fetcher = ((_url: string, init?: RequestInit) => new Promise((_, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('the request was aborted')), { once: true });
+    })) as unknown as typeof fetch;
+    const stop = new AbortController();
+    const asked = chatJudge({ baseUrl: 'http://judge.test', apiKey: 'k', model: 'm', fetcher })('p', stop.signal);
+    stop.abort();
+    await assert.rejects(asked, /aborted/);
+  });
+
+  it('kills a command judge when the card\'s signal aborts', { skip: process.platform === 'win32' ? 'the test command is POSIX sleep' : false }, async () => {
+    const stop = new AbortController();
+    const started = Date.now();
+    const asked = commandJudge('sleep 30')('p', stop.signal);
+    setTimeout(() => stop.abort(), 100);
+    await assert.rejects(asked, /stopped/);
+    assert.ok(Date.now() - started < 5000);
+  });
 });
 
 describe('triage prompts by card kind', () => {
