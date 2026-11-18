@@ -7,6 +7,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { Client, ownerConfig } from '../../src/client.ts';
 import type { Card } from '../../src/core/types.ts';
+import { writePrivate } from '../../src/node/home.ts';
 import { defaultConfigPath, loadConfig } from './checks.ts';
 import { evaluate, renderReport } from './eval-report.ts';
 
@@ -50,6 +51,7 @@ const results = await evaluate(cards, cfg, { concurrency: Number(values.concurre
 const ms = Date.now() - started;
 const after = await usage();
 const spent = before !== undefined && after !== undefined ? after - before : undefined;
-fs.writeFileSync(out, renderReport(results, { since, ms, ...(spent === undefined ? {} : { usageUsd: spent }) }), { mode: 0o600 });
-fs.writeFileSync(out.replace(/\.md$/, '') + '.json', JSON.stringify(results.map((r) => ({ id: r.card.id, title: r.card.title, ms: r.ms, blockedBy: r.blockedBy, advisedBy: r.advisedBy, reports: r.reports })), null, 1), { mode: 0o600 });
+// writePrivate sets mode 0600 on a file that already exists too, since the report quotes card text.
+writePrivate(out, renderReport(results, { since, ms, ...(spent === undefined ? {} : { usageUsd: spent }) }));
+writePrivate(out.replace(/\.md$/, '') + '.json', JSON.stringify(results.map((r) => ({ id: r.card.id, title: r.card.title, ms: r.ms, blockedBy: r.blockedBy, advisedBy: r.advisedBy, reports: r.reports })), null, 1));
 console.error(`wrote ${out}`);

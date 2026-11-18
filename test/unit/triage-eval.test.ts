@@ -1,6 +1,10 @@
 // The dry-run eval of the example triage agent: it checks cards with the same three checks, and counts what each would
 // block or advise, without sending a verdict or keeping any state.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { writePrivate } from '../../src/node/home.ts';
 import { describe, it } from 'node:test';
 import { DEFAULTS, type CommandResult, type RunCommand } from '../../examples/triage-agent/checks.ts';
 import { evaluate, renderReport, summarize } from '../../examples/triage-agent/eval-report.ts';
@@ -50,5 +54,13 @@ describe('the triage eval', () => {
     const results = await evaluate(cards, cfg, { run, concurrency: 1 });
     const text = renderReport(results, { since: new Date(0), ms: 1234, usageUsd: 0.12 });
     for (const part of ['Cards checked: 3', 'Would go back: 2', 'Cards.FirstPerson', '[1]', 'acme/api#7', '20 in 100', '1.2 s', '$0.12', 'Bump the TTL?']) assert.ok(text.includes(part), part);
+  });
+
+  it('leaves the report readable by its owner only, even when the file existed before', { skip: process.platform === 'win32' ? 'Windows has no file modes' : false }, () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ya-eval-')), 'report.md');
+    fs.writeFileSync(file, 'old', { mode: 0o644 });
+    writePrivate(file, 'card text');
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
   });
 });
