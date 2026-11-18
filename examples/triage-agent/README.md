@@ -31,7 +31,7 @@ Each finding either blocks the card or is advice, by the policy in your local co
 
 ## Returns, and the way out
 
-**At most three returns.** After triage has sent one card back `maxReturns` times, 3 by default, its next attempt goes to the person, with the findings as advice. Attempts count by chain, and a chain holds the cards of one agent. Since a revision keeps its card id, it stays in its chain. Following a card in a chain with `follows` joins that chain, and so does posting a card with the same agent and the same title as a chain from the last day. Any other card starts a chain. Each notice says which return it is, such as `return 2 of 3`.
+**At most three returns.** After triage has sent one card back `maxReturns` times, 3 by default, its next attempt goes to the person, with the findings as advice. Attempts count by chain, and each chain contains the cards of one agent. Since a revision keeps its card id, it stays in its chain. Following a card in a chain with `follows` joins that chain, and so does posting a card with the same agent and the same title as a chain from the last day. Any other card starts a chain. Each notice says which return it is, such as `return 2 of 3`.
 
 **A bypass code for an urgent card.** Each return notice ends with one sentence that gives a code: `If the card is urgent, post it again with the tag triage-bypass: <code> to skip triage once.` The code is 128 random bits, works once, and only for the agent that got it. A card with a valid code skips every check, and its triage reason tells the person so. A used, unknown or foreign code doesn't skip anything, and the notice says why. The agent logs each use and each refusal. The code skips this agent only: when the built-in triage runs too, it still checks the card.
 
