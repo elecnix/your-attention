@@ -876,19 +876,29 @@ export class Inbox {
     if (verdict === 'return') {
       const reason = clean || 'Triage sent the card back.';
       const pushback = [...(card.pushback ?? []), { kind: 'returned' as const, by: ext.reg.name, reason, version: card.version, at: now }].slice(-PUSHBACK_LIMIT);
-      this.store.put('cards', card.id, { ...card, pushback, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], at: now } });
+      this.store.put('cards', card.id, { ...card, pushback, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], advice: undefined, at: now } });
       return this.sendBack(card, reason, 'Triage', ext.reg.name);
     }
-    const triage = verdict === 'hold'
-      ? { ...card.triage, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
-      : { ...card.triage, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, at: now };
     const tip = verdict === 'pass' ? String(advice ?? '').trim().slice(0, MAX_HOOK_TEXT) : '';
-    // Advice is pushback too, so the card keeps it with a return's entries and the agent can give feedback on it.
-    const pushback = tip ? [...(card.pushback ?? []), { kind: 'advice' as const, by: ext.reg.name, reason: tip, version: card.version, at: now }].slice(-PUSHBACK_LIMIT) : card.pushback;
-    const next = { ...card, triage, ...(pushback ? { pushback } : {}) };
-    this.store.put('cards', card.id, next);
+    // Advice waits on the card until every extension has passed it, since another one may still hold it or send it back.
+    const { advice: waitingAdvice = [], ...rest } = card.triage;
+    const kept = [...waitingAdvice, ...(tip ? [{ by: ext.reg.name, text: tip }] : [])];
+    const triage = verdict === 'hold'
+      ? { ...rest, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
+      : { ...rest, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, ...(waiting.length && kept.length ? { advice: kept } : {}), at: now };
+    const next = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? kept : []);
     this.emit({ type: 'change', card: card.id });
-    if (tip) this.tellAgent(card, { type: 'advice', id: randomId(6), card: publicCard(next), advice: tip, by: ext.reg.name });
+    return next;
+  }
+
+  /** Store a card that triage just decided on, and when it passed, give its agent the advice of each extension. Advice is
+   * pushback too, so the card keeps it beside a return's entries and the agent can give feedback on it. */
+  private passWithAdvice(card: Card, advice: { by: string; text: string }[]): Card {
+    const at = this.now();
+    const pushback = advice.length ? [...(card.pushback ?? []), ...advice.map((a) => ({ kind: 'advice' as const, by: a.by, reason: a.text, version: card.version, at }))].slice(-PUSHBACK_LIMIT) : card.pushback;
+    const next = { ...card, ...(pushback ? { pushback } : {}) };
+    this.store.put('cards', card.id, next);
+    for (const a of advice) this.tellAgent(card, { type: 'advice', id: randomId(6), card: publicCard(next), advice: a.text, by: a.by });
     return next;
   }
 
@@ -2536,10 +2546,11 @@ export class Inbox {
       const t = card.triage;
       if (t?.state === 'pending' && t.deadline && t.deadline <= now) {
         const late = (t.waiting ?? []).join(', ') || 'triage';
+        const { advice = [], ...rest } = t;
         const triage = t.policy === 'fail-closed'
-          ? { ...t, state: 'held' as const, reason: `${late} did not answer in time, and its policy holds the card.`, waiting: [], at: now }
-          : { ...t, state: 'passed' as const, reason: `${late} did not answer in time, so the card went through.`, waiting: [], at: now };
-        this.store.put('cards', card.id, { ...card, triage });
+          ? { ...rest, state: 'held' as const, reason: `${late} did not answer in time, and its policy holds the card.`, waiting: [], at: now }
+          : { ...rest, state: 'passed' as const, reason: `${late} did not answer in time, so the card went through.`, waiting: [], at: now };
+        this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? advice : []);
         this.emit({ type: 'change', card: card.id });
       }
       if (card.expiresAt && card.expiresAt <= now && !card.closed && !this.store.get('answers', card.id)) {

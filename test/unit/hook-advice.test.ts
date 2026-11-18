@@ -64,4 +64,52 @@ describe('advice on a passed card', () => {
     const text = describeAdvice({ type: 'advice', id: 'e1', card: { id: 'c1', title: 'Retry the export?' } as never, advice: 'Say what the export does today.', by: 'triage-example' });
     for (const part of ['triage-example', 'c1', 'Retry the export?', 'Say what the export does today.', 'the person']) assert.ok(text.includes(part), part);
   });
+
+  it('waits for the last extension to pass the card before it sends advice and keeps it as pushback', () => {
+    const { inbox, agent, ext, calls, heard, second } = setupTwo();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Retry the export?' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'pass', '', 'Say what the export does today.');
+    assert.equal(inbox.getCard('c1').triage?.state, 'pending');
+    assert.equal(heard.filter((e) => e.type === 'advice').length, 0, 'no advice while the other extension checks the card');
+    assert.equal(inbox.getCard('c1').pushback, undefined);
+    inbox.hookVerdict(second.caller, second.calls[0]!.id, 'pass', '', 'Name the export job.');
+    assert.deepEqual(heard.filter((e) => e.type === 'advice').map((e) => e.type === 'advice' && [e.by, e.advice]), [['triage-example', 'Say what the export does today.'], ['second', 'Name the export job.']]);
+    assert.deepEqual(inbox.getCard('c1').pushback?.map((p) => [p.kind, p.by]), [['advice', 'triage-example'], ['advice', 'second']]);
+  });
+
+  it('drops the advice when another extension sends the card back', () => {
+    const { inbox, agent, ext, calls, heard, second } = setupTwo();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Retry the export?' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'pass', '', 'Say what the export does today.');
+    inbox.hookVerdict(second.caller, second.calls[0]!.id, 'return', 'No goal.');
+    assert.equal(heard.filter((e) => e.type === 'advice').length, 0);
+    assert.deepEqual(inbox.getCard('c1').pushback?.map((p) => p.kind), ['returned']);
+    assert.equal(inbox.getCard('c1').triage?.advice, undefined, 'the card keeps no advice it never gave');
+  });
+
+  it('sends the advice when the card goes through because the other extension did not answer in time', () => {
+    const { inbox, agent, ext, calls, heard, tick } = setupTwo();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Retry the export?' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'pass', '', 'Say what the export does today.');
+    tick(10 * 60_000);
+    inbox.sweep();
+    assert.equal(inbox.getCard('c1').triage?.state, 'passed');
+    assert.equal(heard.filter((e) => e.type === 'advice').length, 1);
+    assert.deepEqual(inbox.getCard('c1').pushback?.map((p) => p.kind), ['advice']);
+  });
 });
+
+/** Two extensions on card.created, so a card passes only when both have passed it. */
+function setupTwo() {
+  let now = 1_000_000;
+  const inbox = new Inbox(new MemoryStorage(), () => now);
+  const agent: Caller = { token: 'ta', role: 'agent' };
+  const ext: Caller = { token: 'tx', role: 'extension' };
+  const calls: CardCall[] = [];
+  const heard: AgentEvent[] = [];
+  const second = { caller: { token: 'ty', role: 'extension' } as Caller, calls: [] as CardCall[] };
+  inbox.connect(agent, 's1', (e) => heard.push(e));
+  inbox.connectExtension(ext, { name: 'triage-example', hooks: ['card.created'] }, (e) => calls.push(e as CardCall));
+  inbox.connectExtension(second.caller, { name: 'second', hooks: ['card.created'] }, (e) => second.calls.push(e as CardCall));
+  return { inbox, agent, ext, calls, heard, second, tick: (ms: number) => { now += ms; } };
+}
