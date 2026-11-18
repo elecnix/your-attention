@@ -38,7 +38,8 @@ console.error(`${cards.length} cards since ${since.toISOString()}`);
 async function usage(): Promise<number | undefined> {
   const key = process.env['OPENROUTER_API_KEY'];
   if (!key) return undefined;
-  const res = await fetch('https://openrouter.ai/api/v1/key', { headers: { authorization: `Bearer ${key}` } }).catch(() => undefined);
+  // A request that stalls leaves the spend unmeasured after 10 seconds instead of holding the eval open.
+  const res = await fetch('https://openrouter.ai/api/v1/key', { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
   // A reply that isn't the key's JSON, such as a maintenance page, means the spend goes unmeasured.
   const data = res?.ok ? (await res.json().catch(() => undefined) as { data?: { usage?: number } } | undefined)?.data : undefined;
   return typeof data?.usage === 'number' ? data.usage : undefined;
@@ -50,6 +51,8 @@ const before = await usage();
 const started = Date.now();
 const results = await evaluate(cards, cfg, { concurrency: Number(values.concurrency) || 3, signal: stop.signal }).catch((e: Error) => fail(`Stopped: ${e.message}.`));
 const ms = Date.now() - started;
+// Once the checks are done, Ctrl-C ends the process as Node does by default, so it never writes the report it stopped.
+process.removeAllListeners('SIGINT');
 const after = await usage();
 const spent = before !== undefined && after !== undefined ? after - before : undefined;
 // writePrivate sets mode 0600 on a file that already exists too, since the report quotes card text.
