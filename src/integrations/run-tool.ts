@@ -158,9 +158,10 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return 'Closed.';
     case 'card_triage_feedback': {
       const findings = Array.isArray(args['findings']) ? (args['findings'] as FeedbackFinding[]) : undefined;
+      const comment = str(args['comment']);
       const card = await inbox.triageFeedback(String(args['card_id']), {
         verdict: args['verdict'] as FeedbackVerdict,
-        ...(args['comment'] === undefined ? {} : { comment: String(args['comment']) }),
+        ...(comment === undefined ? {} : { comment }),
         ...(findings ? { findings } : {}),
       });
       const last = card.pushback?.at(-1);

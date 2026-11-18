@@ -286,7 +286,7 @@
   details.pushback .feedback.partly { border-left-color: var(--warn); }
   details.pushback .feedback .comment { white-space: pre-wrap; }
   details.pushback .findings { margin: 4px 0 0; padding-left: 18px; }
-  details.pushback .finding-name { font-weight: 600; }
+  details.pushback .finding-name { font-weight: 600 !important; }
 
   /* Light Gill Sans, a little larger and spaced out, for easier reading. OpenUI sets the font on
      each of its elements, so these rules override it with !important. Code stays monospace.

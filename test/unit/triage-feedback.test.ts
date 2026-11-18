@@ -158,6 +158,23 @@ describe('POST /v1/cards/<id>/triage-feedback', () => {
   });
 });
 
+describe('the size of the pushback', () => {
+  it('keeps the newest pushbacks, and full feedback on each never blocks a revision', async () => {
+    const { inbox, post, verdict, feedback } = await setup();
+    const full = { verdict: 'partly', comment: 'c'.repeat(2000), findings: Array.from({ length: 20 }, (_, i) => ({ index: i + 1, quote: 'q'.repeat(300), verdict: 'agree', comment: 'f'.repeat(1000) })) };
+    await post({ id: 'c1', title: 'Ship it?' });
+    for (let i = 0; i < 12; i++) {
+      verdict('c1', 'return', `${'r'.repeat(990)} ${i}`);
+      assert.equal((await feedback('c1', full)).status, 200);
+      const revised = await post({ id: 'c1', title: 'Ship it?', text: `Try ${i}.` });
+      assert.equal(revised.version, i + 2, `revision ${i + 2} went in`);
+    }
+    const pushback = inbox.getCard('c1').pushback ?? [];
+    assert.equal(pushback.length, 10);
+    assert.match(pushback.at(-1)!.reason, / 11$/);
+  });
+});
+
 describe('finding the feedback', () => {
   async function three() {
     const s = await setup();
@@ -233,5 +250,13 @@ describe('the card_triage_feedback tool', () => {
     const text = await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_triage_feedback', { card_id: 'c1', verdict: 'disagree', comment: 'The goal is in the title.', findings: [{ index: 1, verdict: 'disagree' }] });
     assert.deepEqual(sent, [['c1', { verdict: 'disagree', comment: 'The goal is in the title.', findings: [{ index: 1, verdict: 'disagree' }] }]]);
     assert.match(text, /triage/);
+  });
+
+  it('leaves a null comment out rather than storing the word null', async () => {
+    const { runTool } = await import('../../src/integrations/run-tool.ts');
+    const sent: unknown[] = [];
+    const inbox = { triageFeedback: async (id: string, body: unknown) => { sent.push(body); return { id, pushback: [] }; } } as never;
+    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_triage_feedback', { card_id: 'c1', verdict: 'agree', comment: null, findings: null });
+    assert.deepEqual(sent, [{ verdict: 'agree' }]);
   });
 });

@@ -135,8 +135,9 @@ const PAIRING_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_PAIRINGS = 5;
 const CLOSE_KINDS = new Set<CloseKind>(['retracted', 'self-answered', 'answered-in-terminal', 'resolved']);
 const HISTORY_LIMIT = 20;
-/** How many triage pushbacks a card keeps, newest last. */
-const PUSHBACK_LIMIT = 20;
+/** How many triage pushbacks a card keeps, newest last. With full feedback on each, they stay under about 300 KB, a cap
+ * of their own beside the card's, as history has. */
+const PUSHBACK_LIMIT = 10;
 /** The longest comment on a triage pushback, as long as a close's outcome. */
 export const MAX_FEEDBACK_CHARS = 2000;
 const MAX_FINDINGS = 20;
@@ -698,8 +699,8 @@ export class Inbox {
     };
     // The inbox's own system cards quote an agent's words, such as proposed guidance, and the page shows a diagram there as its source.
     if (!this.clientChecks && (kind !== 'system' || caller.token !== '')) requireChecked(findDiagrams(card), checked);
-    // History has its own cap, and the replies of older cards are stored data the card cap leaves out.
-    const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined })).length;
+    // History and pushback have caps of their own, and the replies of older cards are stored data the card cap leaves out.
+    const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined, pushback: undefined })).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
     this.store.put('cards', id, card);
     this.store.index(id, searchText(card));
