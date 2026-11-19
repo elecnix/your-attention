@@ -122,11 +122,16 @@ function fakeSession(options: { duringAck?: () => Promise<void>; gatePostAfter?:
   const closes: { id: string; kind: string; outcome: string }[] = [];
   const keys: string[] = [];
   let posts = 0;
+  // The gate stays open once the test opens it, so a post that reaches it later does not wait for ever.
+  let open = false;
   let release: (() => void) | undefined;
   const inbox = {
     post: async (card: NewCard) => {
       if (options.gatePostAfter !== undefined && ++posts > options.gatePostAfter) {
-        await new Promise<void>((r) => { release = r; });
+        await new Promise<void>((r) => {
+          release = r;
+          if (open) r();
+        });
       }
       const made = { ...card, id: card.id ?? 'prompt-x', version: 1, createdAt: 1 } as Card;
       posted.push(made);
@@ -147,7 +152,7 @@ function fakeSession(options: { duringAck?: () => Promise<void>; gatePostAfter?:
     closes,
     keys,
     herdr,
-    openPost: () => release?.(),
+    openPost: () => { open = true; release?.(); },
   };
 }
 
