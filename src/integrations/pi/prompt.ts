@@ -146,7 +146,11 @@ function frameShape(screen: string): { marks: string[]; rows: number } {
  * except a custom screen, and a changed prompt loses that title; a prompt with no title has only the frame it draws,
  * and the screen it draws ends on that frame. A frame that stays painted above an agent's new output is a prompt
  * that ended, and a frame of another shape is another prompt. */
-export function promptOnScreen(prompt: { title?: string; screen?: string }, raw: string): boolean {
+export function promptOnScreen(
+  prompt: { title?: string; screen?: string },
+  raw: string,
+  options: { grown?: boolean } = {},
+): boolean {
   const now = trimScreen(raw);
   if (!now) return false;
   const title = prompt.title?.trim();
@@ -154,12 +158,11 @@ export function promptOnScreen(prompt: { title?: string; screen?: string }, raw:
   if (closingRule(now) === '') return false;
   const then = frameShape(prompt.screen ?? '');
   const drawn = frameShape(now);
-  // The borders have to match row for row, and the box can only grow: an answer that wraps or takes a second line adds
-  // a row inside the box, while a box of another size shows fewer rows than the one the card recorded.
-  return then.marks.length > 0
-    && drawn.marks.length === then.marks.length
-    && then.marks.every((row, i) => row === drawn.marks[i])
-    && drawn.rows >= then.rows;
+  // The borders have to match row for row. The box stands the same height while the card is checked before a key goes
+  // out, and it can only have grown once the answer sits inside it: a wrapped line adds a row, so that check runs with
+  // `grown`. A shorter box, or a taller one before anything is typed, is another prompt.
+  const size = options.grown ? drawn.rows >= then.rows : drawn.rows === then.rows;
+  return then.marks.length > 0 && drawn.marks.length === then.marks.length && then.marks.every((row, i) => row === drawn.marks[i]) && size;
 }
 
 /** Why no key goes out, when the screen no longer shows the prompt the card was posted for. */
@@ -330,7 +333,7 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       // span that was answered.
       const mine = span === open;
       open.closed ??= 'typed';
-      const waits = mine && promptOnScreen(open, await read(open.pane));
+      const waits = mine && promptOnScreen(open, await read(open.pane), { grown: true });
       await to.ack(card.id).catch(() => {});
       // The span can also end during that acknowledgement, which is a round trip to the inbox: re-read it here, or a
       // prompt that ended inside that window takes an Enter it no longer needs. A later span that holds this card keeps

@@ -122,7 +122,8 @@ describe('whether the prompt still waits on the screen', () => {
       '│   and Postgres           │',
       '╰──────────────────────────╯',
     ].join('\n');
-    assert.equal(promptOnScreen({ screen: SCREEN }, grown), true, 'a taller box keeps the same borders, so the Enter goes out');
+    assert.equal(promptOnScreen({ screen: SCREEN }, grown), false, 'a taller box is another prompt before anything is typed');
+    assert.equal(promptOnScreen({ screen: SCREEN }, grown, { grown: true }), true, 'and the answer that grew it still gets its Enter');
   });
 
   it('closes on a rule that carries a caption between its corners', () => {
