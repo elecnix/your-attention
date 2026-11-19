@@ -115,8 +115,16 @@ describe('principles', () => {
       // The whole registration, wherever its lines end: the call may wrap and its catch may sit on any of those lines.
       const start = extension.indexOf(`pi.on('${event}'`);
       assert.ok(start >= 0, `the ${event} registration is read`);
-      const next = extension.indexOf("pi.on('", start + 1);
-      const handler = extension.slice(start, next < 0 ? undefined : next);
+      // The call ends where its parentheses balance, so nothing after it counts, whether another call follows or not.
+      let depth = 0;
+      let handler = extension.slice(start);
+      for (let i = start; i < extension.length; i++) {
+        if (extension[i] === '(') depth++;
+        else if (extension[i] === ')' && --depth === 0) {
+          handler = extension.slice(start, i + 1);
+          break;
+        }
+      }
       assert.match(handler, /\.catch\(/, `the ${event} handler resolves, so a prompt card that fails leaves no rejection nobody holds`);
     }
     const prompt = fs.readFileSync(path.join(ROOT, 'src/integrations/pi/prompt.ts'), 'utf8');
