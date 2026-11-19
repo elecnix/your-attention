@@ -31,6 +31,8 @@
   .pasted-remove { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--ink); font: inherit; line-height: 1; cursor: pointer; }
   .notify { display: inline-flex; align-items: center; gap: 6px; font-size: calc(13px * var(--text-scale)); color: var(--muted); cursor: pointer; }
   .notify input { accent-color: var(--accent); }
+  .notify.off { cursor: not-allowed; opacity: 0.75; }
+  .notify-why { font-size: calc(12px * var(--text-scale)); font-style: italic; }
   /* The search field is as quiet as the other bar controls: small, hairline outline, no fill, muted until it has focus. */
   .bar-search { flex: 0 1 190px; min-width: 110px; margin-left: auto; height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale)); transition: border-color .15s; }
   .bar-search::placeholder { color: var(--muted); }

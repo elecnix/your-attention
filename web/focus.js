@@ -1,6 +1,6 @@
 // Focus mode: the open card fills the screen while the person reads it. The page counts the cards that arrive meanwhile
 // and raises one notification for them when focus ends. The page uses this file, and the unit tests read it without a browser.
-import { buildQueue } from './queue.js';
+import { notifies } from './queue.js';
 
 const WAITING = ['open', 'orphaned', 'held'];
 
@@ -13,9 +13,7 @@ export function arrivals(ids, live, cardId) {
 
 /** The cards among `cards` that raise a notification: a card in a collapsed group stays quiet, unless it is at the highest level. */
 export function notifiable(live, cards, groupBy, pins, collapsed) {
-  const q = buildQueue(live, groupBy, pins, collapsed);
-  const top = (live.levels || [])[0];
-  return cards.filter((c) => !q.hidden.has(c.id) || (top && q.levelOf(c) === top.id));
+  return cards.filter((c) => notifies(live, c, collapsed, groupBy, pins));
 }
 
 /** The one notification the page raises when focus ends, or null when no card arrived. */

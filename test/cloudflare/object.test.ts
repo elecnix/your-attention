@@ -32,6 +32,7 @@ g['Response'] = class extends NodeResponse {
 
 const { InboxObject, uploadLimit } = await import('../../src/cloudflare/inbox-object.ts');
 const { PURGE_AFTER_MS } = await import('../../src/core/inbox.ts');
+const webpush = await import('../../src/core/webpush.ts');
 
 function runtime(extra: Record<string, unknown> = {}) {
   const db = new DatabaseSync(':memory:');
@@ -620,5 +621,112 @@ describe('usage counts of a hosted inbox', () => {
     const status = (await (await call(obj, 'GET', '/v1/telemetry', owner)).json()) as { notice: boolean; blocked: string };
     assert.equal(status.notice, false);
     assert.match(status.blocked, /single/);
+  });
+});
+
+describe('Web Push from the inbox Durable Object', () => {
+  const { b64urlEncode, decryptPayload } = webpush;
+
+  /** A subscriber as a browser makes one. */
+  async function device(name: string) {
+    const pair = (await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])) as CryptoKeyPair;
+    const jwk = (await crypto.subtle.exportKey('jwk', pair.privateKey)) as JsonWebKey;
+    return {
+      endpoint: `https://push.example.invalid/send/${name}`,
+      keys: { p256dh: b64urlEncode(new Uint8Array((await crypto.subtle.exportKey('raw', pair.publicKey)) as ArrayBuffer)), auth: b64urlEncode(crypto.getRandomValues(new Uint8Array(16))) },
+      privateKey: String(jwk.d),
+    };
+  }
+
+  /** Stand in for the push service: each request it gets, and the status it answers, which a test can hold back. */
+  function pushService(status: (url: string) => number = () => 201, gate?: Promise<void>) {
+    const seen: { url: string; headers: Headers; body: Uint8Array<ArrayBuffer> }[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      seen.push({ url, headers: new Headers(init.headers), body: new Uint8Array(init.body as Uint8Array) });
+      await gate;
+      return new Response(null, { status: status(url) });
+    }) as unknown as typeof fetch;
+    return { seen, restore: () => { globalThis.fetch = real; } };
+  }
+
+  it('keeps its key and its devices across a hibernation, and pushes from the woken object', async () => {
+    const service = pushService();
+    try {
+      const rt = runtime();
+      let obj = rt.make();
+      const owner = await init(obj);
+      const key = ((await (await call(obj, 'GET', '/v1/push', owner)).json()) as { publicKey: string }).publicKey;
+      const phone = await device('phone');
+      assert.equal((await call(obj, 'PUT', '/v1/push', owner, phone)).status, 200);
+      obj = rt.make();
+      assert.equal(((await (await call(obj, 'GET', '/v1/push', owner)).json()) as { publicKey: string }).publicKey, key, 'the same key after a wake');
+      assert.equal((await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 's', title: 'Deploy now?' })).status, 201);
+      await Promise.all(rt.waits);
+      assert.equal(service.seen.length, 1);
+      assert.equal(service.seen[0]?.url, phone.endpoint);
+      assert.match(service.seen[0]?.headers.get('authorization') ?? '', new RegExp(`k=${key}$`));
+      const plain = await decryptPayload(service.seen[0]!.body, { publicKey: phone.keys.p256dh, privateKey: phone.privateKey, auth: phone.keys.auth });
+      assert.deepEqual(JSON.parse(new TextDecoder().decode(plain)), { id: 'c1', title: 'Deploy now?' });
+    } finally {
+      service.restore();
+    }
+  });
+
+  it('answers the post before a slow push service answers, and hands the push to the platform to finish', async () => {
+    let release: () => void = () => {};
+    const service = pushService(() => 201, new Promise<void>((r) => { release = r; }));
+    try {
+      const rt = runtime();
+      const obj = rt.make();
+      const owner = await init(obj);
+      await call(obj, 'PUT', '/v1/push', owner, await device('slow'));
+      const posted = await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 's', title: 'Slow' });
+      assert.equal(posted.status, 201, 'the card did not wait for the push service');
+      assert.equal(rt.waits.length, 1, 'the push runs under waitUntil');
+      let finished = false;
+      void Promise.all(rt.waits).then(() => { finished = true; });
+      await new Promise((r) => setImmediate(r));
+      assert.equal(finished, false);
+      release();
+      await Promise.all(rt.waits);
+      assert.equal(service.seen.length, 1);
+    } finally {
+      service.restore();
+    }
+  });
+
+  it('forgets a device the push service answers 410 for, and sends it nothing after', async () => {
+    const service = pushService(() => 410);
+    try {
+      const rt = runtime();
+      const obj = rt.make();
+      const owner = await init(obj);
+      await call(obj, 'PUT', '/v1/push', owner, await device('gone'));
+      await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 's', title: 'One' });
+      await Promise.all(rt.waits);
+      await call(obj, 'POST', '/v1/cards', owner, { id: 'c2', agent: 's', title: 'Two' });
+      await Promise.all(rt.waits);
+      assert.equal(service.seen.length, 1);
+    } finally {
+      service.restore();
+    }
+  });
+
+  it('applies a device\'s collapsed groups with the page\'s own rule', async () => {
+    const service = pushService();
+    try {
+      const rt = runtime();
+      const obj = rt.make();
+      const owner = await init(obj);
+      await call(obj, 'PUT', '/v1/settings', owner, { groupBy: 'tag:topic' });
+      await call(obj, 'PUT', '/v1/push', owner, { ...(await device('quiet')), collapsed: ['tag: topic: billing'] });
+      await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 's', title: 'Invoice', priority: 'soon', tags: { topic: 'billing' } });
+      await call(obj, 'POST', '/v1/cards', owner, { id: 'c2', agent: 's', title: 'Search', priority: 'soon', tags: { topic: 'search' } });
+      await Promise.all(rt.waits);
+      assert.equal(service.seen.length, 1);
+    } finally {
+      service.restore();
+    }
   });
 });

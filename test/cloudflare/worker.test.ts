@@ -115,6 +115,31 @@ describe('the hosted Cloudflare build', () => {
     assert.equal((await fetch(`${inbox}/v1/state`, { headers: { authorization: `Bearer ${owner}` } })).status, 200);
   });
 
+  it('serves the worker, manifest and icons under the inbox address, so Web Push is scoped to that inbox', async () => {
+    const worker = await fetch(`${inbox}/sw.js`);
+    assert.equal(worker.status, 200);
+    assert.match(worker.headers.get('content-type') ?? '', /javascript/);
+    const manifest = await fetch(`${inbox}/manifest.webmanifest`);
+    assert.equal(manifest.status, 200);
+    const { start_url, icons } = (await manifest.json()) as { start_url: string; icons: { src: string }[] };
+    assert.equal(start_url, './');
+    for (const icon of icons) assert.equal((await fetch(`${inbox}/${icon.src}`)).headers.get('content-type'), 'image/png');
+    assert.equal((await fetch(`${inbox}/apple-touch-icon.png`)).status, 200);
+  });
+
+  it('keeps a push key and the owner\'s devices in the Durable Object, for the owner only', async () => {
+    assert.equal((await fetch(`${inbox}/v1/push`)).status, 401);
+    const get = () => fetch(`${inbox}/v1/push`, { headers: { authorization: `Bearer ${owner}` } });
+    const { publicKey } = (await (await get()).json()) as { publicKey: string };
+    assert.match(publicKey, /^[\w-]{87}$/);
+    assert.equal(((await (await get()).json()) as { publicKey: string }).publicKey, publicKey, 'one key for the life of the inbox');
+    const device = { endpoint: 'https://push.example.invalid/send/ci', keys: { p256dh: publicKey, auth: 'AAAAAAAAAAAAAAAAAAAAAA' } };
+    const put = (token: string) => fetch(`${inbox}/v1/push`, { method: 'PUT', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(device) });
+    assert.equal((await put('not-a-token')).status, 401);
+    assert.equal((await put(owner)).status, 200);
+    assert.equal((await fetch(`${inbox}/v1/push`, { method: 'DELETE', headers: { authorization: `Bearer ${owner}` }, body: JSON.stringify({ endpoint: device.endpoint }) })).status, 200);
+  });
+
   it('pairs an agent through a system card', async () => {
     const { id } = (await (await fetch(`${inbox}/v1/pair`, { method: 'POST', body: JSON.stringify({ name: 'ci agent' }) })).json()) as { id: string };
     await fetch(`${inbox}/v1/cards/pair-${id}/answer`, { method: 'POST', headers: { authorization: `Bearer ${owner}` }, body: JSON.stringify({ values: { choice: 'approve' } }) });
