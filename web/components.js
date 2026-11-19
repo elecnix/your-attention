@@ -844,7 +844,9 @@ export function NotifyToggle({ collapsed = new Set() } = {}) {
       store.set(PUSH_KEY, false);
       setOn(false);
       // Whatever the page can do now, a device it saved earlier must go: disablePush finds the browser's subscription itself.
-      await disablePush({ base: BASE, api }).catch(() => {});
+      // The switch waits meanwhile, so turning it on again cannot start before this finishes.
+      setBusy(true);
+      try { await disablePush({ base: BASE, api }); } catch { /* the inbox or the browser did not answer */ } finally { setBusy(false); }
       return;
     }
     setBusy(true);

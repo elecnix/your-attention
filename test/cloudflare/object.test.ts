@@ -720,11 +720,15 @@ describe('Web Push from the inbox Durable Object', () => {
       const obj = rt.make();
       const owner = await init(obj);
       await call(obj, 'PUT', '/v1/settings', owner, { groupBy: 'tag:topic' });
-      await call(obj, 'PUT', '/v1/push', owner, { ...(await device('quiet')), collapsed: ['tag: topic: billing'] });
+      const quiet = await device('quiet');
+      await call(obj, 'PUT', '/v1/push', owner, { ...quiet, collapsed: ['tag: topic: billing'] });
       await call(obj, 'POST', '/v1/cards', owner, { id: 'c1', agent: 's', title: 'Invoice', priority: 'soon', tags: { topic: 'billing' } });
       await call(obj, 'POST', '/v1/cards', owner, { id: 'c2', agent: 's', title: 'Search', priority: 'soon', tags: { topic: 'search' } });
       await Promise.all(rt.waits);
       assert.equal(service.seen.length, 1);
+      // The one push is the card outside the collapsed group. A reversed rule would also send exactly one.
+      const plain = await decryptPayload(service.seen[0]!.body, { publicKey: quiet.keys.p256dh, privateKey: quiet.privateKey, auth: quiet.keys.auth });
+      assert.deepEqual(JSON.parse(new TextDecoder().decode(plain)), { id: 'c2', title: 'Search' });
     } finally {
       service.restore();
     }
