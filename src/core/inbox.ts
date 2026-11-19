@@ -722,6 +722,7 @@ export class Inbox {
       pushback: before?.pushback,
       history: history.length ? history : undefined,
       broadcast: before?.broadcast,
+      pushed: before?.pushed,
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
       tags: mergedTags.tags,
@@ -742,7 +743,10 @@ export class Inbox {
     // History and pushback have caps of their own, and the replies of older cards are stored data the card cap leaves out.
     const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined, pushback: undefined })).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
-    this.store.put('cards', id, card);
+    // A card no triage hook screens reaches the person at once. An agent's ask or secret card waits for the hook.
+    const screened = (kind === 'ask' || kind === 'secret') && caller.token !== '';
+    const shown = screened ? { card, first: false } : this.reached(card);
+    this.store.put('cards', id, shown.card);
     this.store.index(id, searchText(card));
     if (card.version === 1 && caller.token !== '') {
       this.usage.record('cards');
@@ -756,10 +760,10 @@ export class Inbox {
       }
     }
     this.emit({ type: 'change', card: id });
-    if (card.version === 1 && !card.closed) this.pushNew(card);
-    // Agent cards go through the card.created hook before the person sees them.
-    if ((kind === 'ask' || kind === 'secret') && caller.token !== '') return this.requestTriage(card);
-    return card;
+    // Agent cards go through the card.created hook before the person sees them, and push once it lets them through.
+    if (screened) return this.requestTriage(card);
+    if (shown.first) this.pushNew(shown.card);
+    return shown.card;
   }
 
   /** An inbox with a limit shows at most that many cards, so its state fits the hosted inbox's CPU time. The limit counts
@@ -881,9 +885,10 @@ export class Inbox {
     const now = this.now();
     if (!targets.length) {
       // Fail-open when triage is down: the card goes straight to the person, and a returning extension screens it.
-      const next = { ...card, triage: { state: 'skipped' as const, reason: 'No triage extension was connected.', at: now } };
-      this.store.put('cards', card.id, next);
-      return next;
+      const shown = this.reached({ ...card, triage: { state: 'skipped' as const, reason: 'No triage extension was connected.', at: now } });
+      this.store.put('cards', card.id, shown.card);
+      if (shown.first) this.pushNew(shown.card);
+      return shown.card;
     }
     const request = randomId(8);
     const deadline = now + Math.max(...targets.map((t) => t.reg.timeoutMs));
@@ -916,10 +921,11 @@ export class Inbox {
     const triage = verdict === 'hold'
       ? { ...card.triage, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
       : { ...card.triage, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, at: now };
-    const next = { ...card, triage };
-    this.store.put('cards', card.id, next);
+    const shown = triage.state === 'passed' ? this.reached({ ...card, triage }) : { card: { ...card, triage }, first: false };
+    this.store.put('cards', card.id, shown.card);
     this.emit({ type: 'change', card: card.id });
-    return next;
+    if (shown.first) this.pushNew(shown.card);
+    return shown.card;
   }
 
   /** The agent that posted a card says whether triage was right to push back on it. The feedback answers the latest
@@ -981,10 +987,11 @@ export class Inbox {
   release(id: string): Card {
     const card = this.getCard(id);
     if (!card.triage || card.triage.state !== 'held') return card;
-    const next = { ...card, triage: { ...card.triage, state: 'passed' as const, reason: `Released by you. ${card.triage.reason ?? ''}`.trim(), at: this.now() } };
-    this.store.put('cards', id, next);
+    const shown = this.reached({ ...card, triage: { ...card.triage, state: 'passed' as const, reason: `Released by you. ${card.triage.reason ?? ''}`.trim(), at: this.now() } });
+    this.store.put('cards', id, shown.card);
     this.emit({ type: 'change', card: id });
-    return next;
+    if (shown.first) this.pushNew(shown.card);
+    return shown.card;
   }
 
   addWebhook(hook: string, url: string, secret: string): Webhook {
@@ -1049,9 +1056,14 @@ export class Inbox {
     if (url.protocol !== 'https:') throw new InboxError(400, 'endpoint must be an https address');
     const p256dh = String(input.keys?.p256dh ?? '');
     const auth = String(input.keys?.auth ?? '');
-    const point = /^[\w-]+$/.test(p256dh) ? b64urlDecode(p256dh) : undefined;
+    const bytes = (text: string): Uint8Array | undefined => {
+      // A length that base64url cannot have, such as one more than a multiple of four, makes atob throw.
+      if (!/^[\w-]+$/.test(text) || text.length % 4 === 1) return undefined;
+      try { return b64urlDecode(text); } catch { return undefined; }
+    };
+    const point = bytes(p256dh);
     if (point?.length !== 65 || point[0] !== 4) throw new InboxError(400, 'keys.p256dh must be the browser\'s 65-byte P-256 public key, in base64url');
-    if (!/^[\w-]+$/.test(auth) || b64urlDecode(auth).length !== 16) throw new InboxError(400, 'keys.auth must be 16 bytes in base64url');
+    if (bytes(auth)?.length !== 16) throw new InboxError(400, 'keys.auth must be 16 bytes in base64url');
     const collapsed = input.collapsed ?? [];
     if (!Array.isArray(collapsed) || collapsed.length > MAX_COLLAPSED || collapsed.some((g) => typeof g !== 'string' || g.length > 300)) {
       throw new InboxError(400, `collapsed must list at most ${MAX_COLLAPSED} group ids, as text`);
@@ -1071,11 +1083,19 @@ export class Inbox {
     return this.store.list<PushDevice>('pushes').length;
   }
 
+  /** The card as stored once it has reached the person, and whether this is the first time. A card pushes once, when it
+   * first reaches the person: not while a triage hook screens it, and not again when the agent revises it. The mark is
+   * written with the change that shows the card, so it costs no write of its own. */
+  private reached(card: Card): { card: Card; first: boolean } {
+    return card.pushed ? { card, first: false } : { card: { ...card, pushed: true }, first: true };
+  }
+
   /** A card that would notify the person today also pushes to each saved device. The push runs on, tracked like a webhook,
    * so the platform can wait for it while the post answers at once, and a failed push never touches the card. */
   private pushNew(card: Card): void {
     const devices = this.store.list<PushDevice>('pushes');
     if (!devices.length) return;
+    if (card.closed || card.archivedAt) return;
     // The state is read once, and only when a device has collapsed groups for the rule to apply.
     let state: ReturnType<Inbox['summaryState']> | undefined;
     const summary = (): CardSummary | undefined => {
@@ -2668,8 +2688,10 @@ export class Inbox {
         const triage = t.policy === 'fail-closed'
           ? { ...t, state: 'held' as const, reason: `${late} did not answer in time, and its policy holds the card.`, waiting: [], at: now }
           : { ...t, state: 'passed' as const, reason: `${late} did not answer in time, so the card went through.`, waiting: [], at: now };
-        this.store.put('cards', card.id, { ...card, triage });
+        const shown = triage.state === 'passed' ? this.reached({ ...card, triage }) : { card: { ...card, triage }, first: false };
+        this.store.put('cards', card.id, shown.card);
         this.emit({ type: 'change', card: card.id });
+        if (shown.first) this.pushNew(shown.card);
       }
       if (card.expiresAt && card.expiresAt <= now && !card.closed && !this.store.get('answers', card.id)) {
         this.closeAs(card, 'expired', 'The agent stopped waiting for an answer.');
@@ -3143,7 +3165,7 @@ function webhookHeaders(headers: unknown): Record<string, string> {
 /** A card without what only the person reads: the id of the token that posted it, and the draft they left on a card
  * they dismissed. */
 export function publicCard(card: Card): Card {
-  const { token: _token, ...rest } = card;
+  const { token: _token, pushed: _pushed, ...rest } = card;
   if (!rest.closed?.draft) return rest;
   const { kind, outcome, at } = rest.closed;
   return { ...rest, closed: { kind, outcome, at } };

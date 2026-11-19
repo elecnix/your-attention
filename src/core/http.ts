@@ -618,7 +618,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (a === 'push' && !b) {
       owner();
       if (method === 'GET') return json({ publicKey: await inbox.pushKey() });
-      const body = await readJson<(PushInput & { endpoint?: unknown }) | null>(req, BODY_LIMIT.open);
+      const body = await readJson<(PushInput & { endpoint?: unknown }) | null>(req);
       if (method === 'PUT') {
         if (!body || typeof body !== 'object') throw new InboxError(400, 'send the browser\'s push subscription: {endpoint, keys: {p256dh, auth}, collapsed?}');
         inbox.savePush(me, body);

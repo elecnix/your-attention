@@ -678,7 +678,7 @@ The inbox pushes each new card to the owner's devices, so a phone gets a notific
 
 The `pushes` collection stores each device with the id of the owner token that saved it. Revoking that token removes its devices, so a signed-out phone stops getting titles.
 
-**Which cards push.** A new card pushes to every device when it is version 1 and not closed. The rule matches the open page's rule for the Notification API. A card in a collapsed group of the device does not push, except at the highest priority level, so muting a group never hides an urgent card. The rule is `notifies` in `web/queue.js`, shared by the page and both servers, and it reads the inbox's Group by and pins. Each device sends its collapsed group ids with `PUT /v1/push` when they change. A device with none collapsed skips the rule, and a revision of a card never pushes. The inbox's own cards, such as a pairing request, push like any other. Their priority is the highest level. Focus mode belongs to one tab, which the inbox cannot see, so pushes keep coming while a tab focuses.
+**Which cards push.** A card pushes to every device once, when it first reaches the person. A card posted while no triage hook is connected reaches the person at once. A card a `card.created` hook screens reaches the person when the hook passes it, when the owner releases it, or when the hook runs out of time and the card goes through. A card the hook sends back or holds does not push before that. A revision of a card that already pushed never pushes again, and a card that triage sent back pushes when its revision passes. The rule matches the open page's rule for the Notification API. A card in a collapsed group of the device does not push, except at the highest priority level, so muting a group never hides an urgent card. The rule is `notifies` in `web/queue.js`, shared by the page and both servers, and it reads the inbox's Group by and pins. Each device sends its collapsed group ids with `PUT /v1/push` when they change. A device with none collapsed skips the rule, and a revision of a card never pushes. The inbox's own cards, such as a pairing request, push like any other. Their priority is the highest level. Focus mode belongs to one tab, which the inbox cannot see, so pushes keep coming while a tab focuses.
 
 **Message.** The plaintext is JSON with two fields, `{id, title}`: the card id, and the title cut to 100 characters with `…`. The text, the options, the agent and the tags stay in the inbox. The inbox encrypts the message to the device's `p256dh` and `auth` secret, with a fresh salt and one-time key each time. The push service cannot read it. The request is `POST <endpoint>` with `Content-Encoding: aes128gcm`, `TTL: 86400`, `Urgency: high` and `Authorization: vapid t=<ES256 token>, k=<public key>`. The token's `aud` is the endpoint's origin, `exp` is 12 hours away, and `sub` is the project's public address, which says nothing about the owner.
 
@@ -698,14 +698,14 @@ The inbox records nothing about a failed push, so the next card tries again. The
 
 The **Notify me** switch stays on the page and picks its state in this order:
 
-1. A page that is not a secure context, which means plain http other than `localhost`, shows the switch greyed out with "needs an https address".
+1. A page that is not a secure context, which means plain http other than `localhost` and `127.0.0.1`, shows the switch greyed out with "needs an https address".
 2. An iPhone or iPad page outside an installed app shows "add this page to your Home Screen first".
 3. A browser with neither push nor the Notification API shows "this browser cannot show notifications".
 4. A denied permission shows "the browser blocks notifications".
 
 Where push is missing but the Notification API works, the switch keeps its older job, and the page notifies while it is open. Everywhere else, the first tap on the switch requests permission, registers the worker and subscribes the browser. The page then sends `PUT /v1/push`. Turning it off sends `DELETE /v1/push` and unsubscribes. A page that opens with push already on sends `PUT /v1/push` again with the groups it collapsed, so an inbox that dropped the device learns it back. A page that had the older switch on keeps its older notifications until the person flips the switch, so an upgrade never starts sending titles to a push service on its own. While a device gets pushes, the page does not raise a notification of its own, so a card notifies once.
 
-The laptop inbox serves its page over plain http, so a phone on the local network cannot turn push on. Over an https relay, or on `localhost`, it can. The inbox sends each push from the laptop, which must reach the push service.
+The laptop inbox serves its page over plain http, so a phone on the local network cannot turn push on. Over an https relay, or at `localhost` or `127.0.0.1`, it can. The inbox sends each push from the laptop, which must reach the push service.
 
 ## Pages
 

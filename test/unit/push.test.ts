@@ -70,6 +70,13 @@ describe('push subscriptions', () => {
     assert.equal(inbox.pushCount(), 0);
   });
 
+  it('answers 400, not a crash, for a key that is not valid base64url', async () => {
+    const { inbox, owner } = setup();
+    const a = await device('a');
+    assert.throws(() => inbox.savePush(owner, { ...a, keys: { ...a.keys, p256dh: 'A' } }), rejects(400, /p256dh/));
+    assert.throws(() => inbox.savePush(owner, { ...a, keys: { ...a.keys, auth: 'A' } }), rejects(400, /auth/));
+  });
+
   it('keeps at most 20 devices', async () => {
     const { inbox, owner } = setup();
     for (let i = 0; i < 20; i++) inbox.savePush(owner, { ...(await device(`d${i}`)) });
@@ -253,6 +260,66 @@ describe('which cards push, the rules the open page follows', () => {
   });
 });
 
+describe('a push waits for triage, and goes once', () => {
+  const ext = { token: 'tx', role: 'extension' as const };
+  async function screened() {
+    const t = setup();
+    const calls: { id: string }[] = [];
+    t.inbox.savePush(t.owner, await device('a'));
+    t.inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'], timeoutMs: 5000 }, (e) => calls.push(e as { id: string }));
+    return { ...t, calls };
+  }
+
+  it('sends nothing while a card.created hook screens the card, and sends once the hook passes it', async () => {
+    const { inbox, agent, sent, settle, calls } = await screened();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Screened' });
+    await settle();
+    assert.equal(sent.length, 0);
+    inbox.hookVerdict(ext, calls[0]!.id, 'pass', '');
+    await settle();
+    assert.equal(sent.length, 1);
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Screened, revised' }, undefined, undefined, undefined, { revise: true });
+    await settle();
+    assert.equal(sent.length, 1, 'one card, one push');
+  });
+
+  it('never pushes a card the hook sends back', async () => {
+    const { inbox, agent, sent, settle, calls } = await screened();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Sent back' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'return', 'No recommendation.');
+    await settle();
+    assert.equal(sent.length, 0);
+  });
+
+  it('pushes a held card when the owner releases it', async () => {
+    const { inbox, agent, sent, settle, calls } = await screened();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Held' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'hold', 'Check this one.');
+    await settle();
+    assert.equal(sent.length, 0);
+    inbox.release('c1');
+    await settle();
+    assert.equal(sent.length, 1);
+  });
+
+  it('pushes a card that passes because the hook never answered', async () => {
+    const { inbox, agent, sent, settle, clock } = await screened();
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Slow hook' });
+    clock.advance(6000);
+    inbox.sweep();
+    await settle();
+    assert.equal(sent.length, 1);
+  });
+
+  it('keeps the flag that remembers a push out of what clients read', async () => {
+    const { inbox, agent, settle } = setup();
+    inbox.savePush({ token: 'to', role: 'owner' }, await device('a'));
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Plain' });
+    await settle();
+    assert.ok(!('pushed' in inbox.cardDetail('c1').card));
+  });
+});
+
 describe('push routes', () => {
   async function http() {
     const t = setup();
@@ -286,6 +353,14 @@ describe('push routes', () => {
     assert.equal((await call('DELETE', '/v1/push', agent, { endpoint: a.endpoint })).status, 403);
     assert.equal((await call('DELETE', '/v1/push', owner, { endpoint: a.endpoint })).status, 200);
     assert.equal(inbox.pushCount(), 0);
+  });
+
+  it('takes a subscription with many long group ids, past the small-body limit', async () => {
+    const { call, owner, inbox } = await http();
+    const collapsed = Array.from({ length: 40 }, (_, i) => `tag: topic: ${'x'.repeat(250)}${i}`);
+    const res = await call('PUT', '/v1/push', owner, { ...(await device('big')), collapsed });
+    assert.equal(res.status, 200);
+    assert.equal(inbox.pushCount(), 1);
   });
 
   it('answers a bad subscription with 400 and a reason', async () => {
