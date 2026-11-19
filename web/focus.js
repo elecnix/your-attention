@@ -5,20 +5,19 @@ import { buildQueue } from './queue.js';
 
 const WAITING = ['open', 'orphaned', 'held'];
 
-/** The state the page draws while focus is on: the held state, with the open card's summary, state, priority and answer from the live one. */
+/** The state the page draws while focus is on: the held state, with the open card's summary, state and answer from the
+ * live one. The open card keeps its held priority, so a revision that raises it does not move the card in the queue. */
 export function holdView(held, live, cardId) {
   const now = live.cards.find((c) => c.id === cardId);
-  if (!now) return held;
+  const before = held.cards.find((c) => c.id === cardId);
+  if (!now || !before) return held;
   const answers = { ...held.answers };
   if (live.answers[cardId]) answers[cardId] = live.answers[cardId]; else delete answers[cardId];
-  const priorities = { ...(held.priorities || {}) };
-  if (live.priorities && live.priorities[cardId] !== undefined) priorities[cardId] = live.priorities[cardId]; else delete priorities[cardId];
   return {
     ...held,
-    cards: held.cards.map((c) => (c.id === cardId ? now : c)),
+    cards: held.cards.map((c) => (c.id === cardId ? { ...now, priority: before.priority } : c)),
     states: { ...held.states, [cardId]: live.states[cardId] },
     answers,
-    priorities,
   };
 }
 

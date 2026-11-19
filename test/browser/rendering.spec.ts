@@ -643,8 +643,9 @@ test('the card shows its rough age at the top right, and the age moves on with t
   // The focus mode button closes the row, right after the age.
   const toggle = page.locator('.focus-card .meta .focus-toggle');
   const [right, left, end, meta] = await Promise.all([age.evaluate((el) => el.getBoundingClientRect().right), toggle.evaluate((el) => el.getBoundingClientRect().left), toggle.evaluate((el) => el.getBoundingClientRect().right), page.locator('.focus-card .meta').evaluate((el) => el.getBoundingClientRect().right)]);
+  expect(left - right).toBeGreaterThanOrEqual(0);
   expect(left - right).toBeLessThan(10);
-  expect(meta - end).toBeLessThan(2);
+  expect(Math.abs(meta - end)).toBeLessThan(2);
 });
 
 test('a reply an agent sent before linked follow-ups draws its Markdown on the card', async ({ page }) => {

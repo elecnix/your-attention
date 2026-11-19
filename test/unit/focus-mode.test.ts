@@ -41,10 +41,12 @@ describe('focus mode holds the queue', () => {
   });
 
   it('keeps the open card in its place in the list after a revision raises its priority', () => {
-    const live = state([card('a'), card('b'), card('c', { priority: 'now' })]);
+    const live = state([card('a'), card('b'), card('c', { priority: 'now', title: 'Card c, now urgent' })]);
+    live.priorities = { c: 'now' };
+    assert.deepEqual(ids(live), ['c', 'a', 'b']);
     const view = holdView(held, live, 'c');
-    assert.deepEqual(view.cards.map((c) => c.id), ['a', 'b', 'c']);
-    assert.equal(view.cards[2]?.priority, 'now');
+    assert.deepEqual(ids(view), ['a', 'b', 'c']);
+    assert.equal(view.cards.find((c) => c.id === 'c')?.title, 'Card c, now urgent');
   });
 
   it('keeps the held copy of the open card when the inbox no longer lists it', () => {

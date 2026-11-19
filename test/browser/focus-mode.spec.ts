@@ -3,8 +3,9 @@ import { expect, test, type Page } from '@playwright/test';
 import { startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
-test.beforeAll(async () => { inbox = await startInbox(); });
-test.afterAll(async () => { await inbox.close(); });
+// Each test gets its own inbox, so the cards one test leaves open never decide the next card in another.
+test.beforeEach(async () => { inbox = await startInbox(); });
+test.afterEach(async () => { await inbox.close(); });
 
 /** Browser notifications the test can read, turned on as the person turns them on. */
 async function readNotifications(page: Page) {
@@ -124,4 +125,17 @@ test('on a phone, the card stays put and the count above it holds while focus is
   expect((await page.locator('.focus-card .card-title').boundingBox())!.y).toBe(top);
   await toggle(page).click();
   await expect(page.locator('.to-queue')).not.toHaveText(count!);
+});
+
+test('a Group by choice made during focus mode stays when the next card arrives', async ({ page }) => {
+  await post('fm-group', 'A card read while regrouping');
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'A card read while regrouping' }).click();
+  await page.getByRole('button', { name: 'Focus on this card' }).click();
+  const select = page.locator('.group-by select');
+  await select.selectOption('priority');
+  await expect.poll(async () => (await inbox.state() as unknown as { settings?: { groupBy?: string } }).settings?.groupBy).toBe('priority');
+  await post('fm-group-new', 'A card that arrives after the regrouping');
+  await expect(page.locator('.focus-card .focus-count')).toHaveText('1');
+  await expect(select).toHaveValue('priority');
 });

@@ -160,12 +160,13 @@ export function App() {
   }, [auth]);
 
   // Each state carries the inbox's Group by and pins, so a change on another page reaches this one without a reload.
+  // The settings are the person's, so they come from the live state even while focus mode holds the queue.
   React.useEffect(() => {
-    if (!state) return;
-    const s = state.settings || {};
+    if (!liveState) return;
+    const s = liveState.settings || {};
     if (!savingGroupBy.current) setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
     if (!savingPins.current) setPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
-  }, [state]);
+  }, [liveState]);
 
   // A page that finds Group by or the pins in this device's storage and none in the inbox copies them over once,
   // then reads the inbox. A value the inbox already has is never overwritten, and each device copies once.
@@ -646,6 +647,7 @@ export function App() {
     const draftKey = `draft:${current.id}:${current.version}`;
     const backlinks = visible.filter((c) => c.id !== current.id && (c.links || []).includes(current.id));
     const o = current.origin || {};
+    const currentLevel = (liveState.priorities || {})[current.id] || current.priority;
     const recommendationText = (text) => h(LinkedText, { ...links, text, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined });
     const card = h('div', { className: 'focus-card', ref: (el) => {
       if (!el || scrollToRef.current !== current.id) return;
@@ -653,7 +655,8 @@ export function App() {
       requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }));
     } },
       h('div', { className: 'meta' },
-        h('span', { className: `prio ${levelOf(current)}`, title: (levels.find((l) => l.id === levelOf(current)) || {}).definition }, label(levelOf(current))),
+        // The open card's own priority comes from the live state, since focus mode holds its place in the queue only.
+        h('span', { className: `prio ${currentLevel}`, title: (levels.find((l) => l.id === currentLevel) || {}).definition }, label(currentLevel)),
         current.status && h('span', { className: 'status' }, current.status),
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && !current.archivedAt && h('span', { className: `pill small ${pres[0]}` }, pres[1]),

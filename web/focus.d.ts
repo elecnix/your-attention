@@ -2,7 +2,7 @@ import type { CardSummary } from '../src/core/summary.ts';
 import type { Pin } from '../src/core/types.ts';
 import type { InboxState } from './queue.js';
 
-/** The state the page draws while focus is on: the held state, with the open card's summary, state, priority and answer from the live one. */
+/** The state the page draws while focus is on: the held state, with the open card's summary, state and answer from the live one, at its held priority. */
 export function holdView(held: InboxState, live: InboxState, cardId: string): InboxState;
 /** The held state after a reload: the live state with only the cards that were listed when focus began. */
 export function heldFrom(live: InboxState, ids: string[]): InboxState;
