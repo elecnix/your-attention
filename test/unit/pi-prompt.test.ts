@@ -101,6 +101,20 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({ screen: SCREEN }, heavy), false, 'and stays apart from the light one');
   });
 
+  it('keeps the top border when an answer carries a corner glyph of its own', () => {
+    assert.equal(
+      promptOnScreen({ screen: SCREEN }, TYPED_SCREEN.replace('SQLite SQLite', '┌ pick this ╭ one')),
+      true,
+      'a corner inside the box is text, not the top of another frame',
+    );
+  });
+
+  it('closes on a rule that carries a caption between its corners', () => {
+    const captioned = ['┌──────────────────────────┐', '│ Pick a database          │', '└──── Enter to accept ─────┘'].join('\n');
+    assert.equal(promptOnScreen({ screen: captioned }, captioned), true, 'a captioned rule is still the foot of the box');
+    assert.equal(promptOnScreen({ screen: captioned }, TYPED_SCREEN), false, 'and a captionless frame is another shape');
+  });
+
   it('refuses a nested prompt of another height that ends on the same rule as the one outside it', () => {
     assert.equal(promptOnScreen({ screen: SCREEN }, NESTED), false, 'the inner frame is not the frame the card was posted for');
     assert.equal(promptOnScreen({ screen: NESTED }, SCREEN), false, 'and the outer frame is not the inner one either');

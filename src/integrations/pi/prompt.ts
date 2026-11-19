@@ -105,10 +105,16 @@ export function typedAnswer(answer: Answer): string {
 function closingRule(screen: string): string {
   const rows = screen.split('\n').filter((l) => l.trim());
   const foot = rows[rows.length - 1] ?? '';
-  return /[─━═]/.test(foot) && !/[A-Za-z0-9]/.test(foot) ? foot : '';
+  // A corner on each end says the row is the bottom of a box, whatever words a caption puts between them. A row with
+  // no corner at either end is an agent's output that happens to carry a rule, and that is no frame.
+  const ruled = /[─━═\u2500-\u257f]/.test(foot);
+  return ruled && (FOOT_LEFT.test(foot) || FOOT_RIGHT.test(foot)) ? foot : '';
 }
 
-const TOP_CORNER = /[\u250c-\u250f\u2552-\u2554\u256d]/;
+const FOOT_LEFT = /^\s*[\u2514\u2515\u2516\u2517\u2558\u2559\u255a\u255b\u2570\u2569]/;
+const FOOT_RIGHT = /[\u2518\u2519\u251a\u251b\u255c\u255d\u255e\u255f\u256c\u256f]\s*$/;
+
+const TOP_CORNER = /^\s*[\u250c-\u250f\u2552-\u2554\u256d]/;
 
 /** The shape of the frame that ends a screen: every row from its top corner to the closing rule, reduced to the box
  * drawing characters it draws and nothing else. Text typed into the box leaves the shape alone, whatever it contains,
