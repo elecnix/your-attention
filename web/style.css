@@ -191,7 +191,7 @@
   .code-signin { margin: 12px 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
   .code-signin label { display: block; font-weight: 600; margin-bottom: 6px; }
   .code-signin-row { display: flex; gap: 8px; flex-wrap: wrap; }
-  .code-signin input { flex: 1 1 12em; min-width: 0; font: 16px/1.2 var(--font-code); letter-spacing: .08em; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  .signin .code-signin input { flex: 1 1 12em; min-width: 0; font: 16px/1.2 var(--font-code); letter-spacing: .08em !important; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
   .code-signin input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .code-signin .muted { font-size: calc(13px * var(--text-scale)); margin: 8px 0 0; }
   .code-signin .note { margin: 8px 0 0; }
@@ -341,7 +341,7 @@
      Sizes scale by --text-scale rather than CSS zoom, which misplaces clicks inside an HTML card's frame. */
   body, body * { font-family: var(--font-text) !important; font-weight: 200 !important; letter-spacing: .02em !important; }
   h1, h2, h3, h4, h5, h6, strong, b, th { font-weight: 300 !important; }
-  code, code *, pre, pre *, kbd, samp, .qr-address,
+  code, code *, pre, pre *, kbd, samp, .qr-address, .signin-code, .code-signin input,
   .openui-tool-call__request, .openui-tool-call__response, .openui-tool-code-block__code, .openui-tool-result__output {
     font-family: var(--font-code) !important; letter-spacing: normal !important;
   }
@@ -410,7 +410,7 @@
   .qr svg { width: min(260px, 100%); height: auto; aspect-ratio: 1; border-radius: 8px; }
   .qr-address { font-family: var(--font-code); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
   .signin-code-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 4px 12px; margin: 0 0 10px; text-align: center; }
-  .signin-code { font: 600 calc(24px * var(--text-scale))/1.2 var(--font-code); letter-spacing: .12em; user-select: all; }
+  .qr-dialog .signin-code { font: 600 calc(24px * var(--text-scale))/1.2 var(--font-code); letter-spacing: .12em !important; user-select: all; }
   /* The dialog scrolls on a short screen, and its buttons stay at its bottom edge, in reach. */
   .qr-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin: 12px -20px -20px; padding: 12px 20px 20px; position: sticky; bottom: -20px; background: var(--panel); border-top: 1px solid var(--line); }
   .to-queue { display: none; }
