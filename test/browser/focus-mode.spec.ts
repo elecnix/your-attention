@@ -75,7 +75,10 @@ test('focus mode fills the screen with the card, counts arrivals without a notif
   // The button sits at the card's top right, and stays on screen at the end of the card.
   const corner = await box(page, '.focus-card .focus-toggle');
   expect(width - corner.x - corner.width).toBeLessThan(24);
+  // The page scrolls the card, so scrolling to the end takes the card's title off screen, and the button stays.
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect.poll(() => pageY(page)).toBeGreaterThan(500);
+  await expect(page.locator('.focus-card .card-title')).not.toBeInViewport();
   await expect(toggle(page)).toBeInViewport();
 
   // A card that ranks above every other, a plain one, a revision of a card in the queue, a retraction, and a revision of the open card.
