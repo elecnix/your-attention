@@ -1,4 +1,5 @@
-// Focus mode: the open card stays put while cards arrive, change and close, and the queue catches up when focus ends.
+// Focus mode: the open card fills the screen, with nothing else drawn but the button that leaves it, and the page
+// comes back as the person left it.
 import { expect, test, type Page } from '@playwright/test';
 import { startInbox, type TestInbox } from './inbox.ts';
 
@@ -25,47 +26,81 @@ async function readNotifications(page: Page) {
 const post = (id: string, title: string, extra: Record<string, unknown> = {}) =>
   inbox.agent.post({ id, agent: `s-${id}`, title, priority: 'soon', options: [{ id: 'o1', label: 'Yes' }], ...extra });
 const dense = Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1} of the dense card, with enough words to wrap across the column.`).join('\n\n');
-const queueTitles = (page: Page) => page.locator('.queue .q .t-title').allTextContents();
 const toggle = (page: Page) => page.locator('.focus-card .focus-toggle');
+const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
+const pageY = (page: Page) => page.evaluate(() => window.scrollY);
+const queueY = (page: Page) => page.locator('.queue').evaluate((el) => el.scrollTop);
 
-test('focus mode holds arrivals, changes and notifications, shows a revision of the open card in place, and catches up on leaving', async ({ page }) => {
+/** Only the open card shows: no bar, no queue, no border to resize it, and the card spans the viewport. */
+async function expectFullScreen(page: Page) {
+  await expect(page.locator('.bar')).toBeHidden();
+  await expect(page.locator('.queue')).toBeHidden();
+  await expect(page.locator('.resizer')).toBeHidden();
+  await expect(page.locator('.to-queue')).toBeHidden();
+  const width = page.viewportSize()!.width;
+  const card = await box(page, '.focus-card');
+  expect(card.x).toBe(0);
+  expect(card.width).toBe(width);
+}
+
+test('focus mode fills the screen with the card, counts arrivals without a notification, and gives the page back as the person left it', async ({ page }) => {
   const notes = await readNotifications(page);
   await post('fm-dense', 'A dense card to read', { text: dense });
-  await post('fm-other', 'Another card that waits');
+  for (let i = 1; i <= 24; i++) await post(`fm-fill-${i}`, `A card that waits, number ${i}`);
   await post('fm-gone', 'A card its agent will retract');
+  await post('fm-sent', 'A card already answered');
+  await inbox.agent.close('fm-sent', 'resolved', 'Done.');
   await inbox.open(page);
   await page.locator('.q', { hasText: 'A dense card to read' }).click();
   await expect(page.locator('.focus-card .card-title')).toHaveText('A dense card to read');
+  // The person collapses Sent, scrolls the queue and the page, then turns focus on.
+  const sentFold = page.locator('.queue h3.sent .fold', { hasText: 'Sent' });
+  await sentFold.click();
+  await expect(sentFold).toHaveAttribute('aria-expanded', 'false');
+  await page.locator('.queue').evaluate((el) => { el.scrollTop = 150; });
   await page.evaluate(() => window.scrollTo(0, 400));
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await expect.poll(() => pageY(page)).toBe(400);
+  const before = { page: await pageY(page), queue: await queueY(page) };
+  expect(before.queue).toBe(150);
 
-  await page.getByRole('button', { name: 'Focus on this card' }).click();
+  // The shortcut, since a click on the button would first scroll the page up to it.
+  await page.keyboard.press('ControlOrMeta+.');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
-  const before = { queue: await queueTitles(page), y: await page.evaluate(() => window.scrollY), top: (await page.locator('.focus-card .card-title').boundingBox())!.y, icon: await page.locator('link[rel="icon"]').getAttribute('href') };
+  await expectFullScreen(page);
+  // The text keeps a reading width, centered in the card.
+  const width = page.viewportSize()!.width;
+  const title = await box(page, '.focus-card .card-title');
+  expect(title.width).toBeLessThan(900);
+  expect(Math.abs(title.x - (width - title.x - title.width))).toBeLessThan(2);
+  // The button sits at the card's top right, and stays on screen at the end of the card.
+  const corner = await box(page, '.focus-card .focus-toggle');
+  expect(width - corner.x - corner.width).toBeLessThan(24);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect(toggle(page)).toBeInViewport();
 
   // A card that ranks above every other, a plain one, a revision of a card in the queue, a retraction, and a revision of the open card.
   await post('fm-urgent', 'An urgent card arrives', { priority: 'now' });
   await post('fm-plain', 'A plain card arrives');
-  await post('fm-other', 'Another card that waits, revised');
+  await post('fm-fill-1', 'A card that waits, number 1, revised');
   await inbox.agent.close('fm-gone', 'retracted', 'Not needed.');
   await post('fm-dense', 'A dense card to read', { text: `${dense}\n\nA paragraph the agent added at the end.` });
 
   await expect(page.locator('.focus-card')).toContainText('A paragraph the agent added at the end.');
   await expect(page.locator('.focus-card .focus-count')).toHaveText('2');
   await expect(toggle(page)).toHaveAccessibleName('Leave focus mode, 2 new cards waiting');
-  expect(await queueTitles(page)).toEqual(before.queue);
-  expect(await page.evaluate(() => window.scrollY)).toBe(before.y);
-  expect((await page.locator('.focus-card .card-title').boundingBox())!.y).toBe(before.top);
-  expect(await page.locator('link[rel="icon"]').getAttribute('href')).toBe(before.icon);
+  await expectFullScreen(page);
   expect(await notes()).toEqual([]);
 
   await toggle(page).click();
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('.queue .q', { hasText: 'An urgent card arrives' })).toBeVisible();
+  await expect(page.locator('.bar')).toBeVisible();
+  await expect(page.locator('.queue')).toBeVisible();
+  await expect.poll(() => pageY(page)).toBe(before.page);
+  await expect.poll(() => queueY(page)).toBe(before.queue);
+  await expect(sentFold).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('.queue .q').first()).toContainText('An urgent card arrives');
   await expect(page.locator('.queue .q', { hasText: 'A plain card arrives' })).toContainText('new');
-  await expect(page.locator('.queue .q', { hasText: 'Another card that waits, revised' })).toBeVisible();
-  await expect(page.locator('.queue .sent ~ .q.dim', { hasText: 'A card its agent will retract' })).toBeVisible();
-  expect((await queueTitles(page))[0]).toBe('An urgent card arrives');
+  await expect(page.locator('.queue .q', { hasText: 'A card that waits, number 1, revised' })).toHaveCount(1);
   await expect(page.locator('.focus-card .card-title')).toHaveText('A dense card to read');
   expect(await notes()).toEqual([{ title: '2 cards arrived while you focused', body: 'An urgent card arrives · A plain card arrives' }]);
 });
@@ -80,9 +115,9 @@ test('focus mode lasts through a reload, in this tab only, and Escape ends it wi
   await page.reload();
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.focus-card .card-title')).toHaveText('A card read across a reload');
+  await expectFullScreen(page);
   await post('fm-late', 'A card that arrives after the reload');
   await expect(page.locator('.focus-card .focus-count')).toHaveText('1');
-  await expect(page.locator('.queue .q', { hasText: 'A card that arrives after the reload' })).toHaveCount(0);
 
   // Another tab of the same browser has focus mode off, and shows the new card.
   const other = await context.newPage();
@@ -108,34 +143,25 @@ test('answering the card in focus ends focus mode and opens the next card of the
   await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
   await expect(page.locator('.focus-card .card-title')).toHaveText('The next card, posted during focus');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.queue')).toBeVisible();
 });
 
-test('on a phone, the card stays put and the count above it holds while focus is on', async ({ page }) => {
+test('on a phone, focus mode fills the screen too, and leaving it scrolls back to where the person was', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await post('fm-phone', 'A card read on a phone', { text: dense, priority: 'now' });
+  // The only card opens by itself. A click on it would scroll the page to the card, after the scroll below.
   await inbox.open(page);
-  await page.locator('.q', { hasText: 'A card read on a phone' }).click();
   await expect(page.locator('.focus-card .card-title')).toHaveText('A card read on a phone');
-  await page.getByRole('button', { name: 'Focus on this card' }).click();
-  const count = await page.locator('.to-queue').textContent();
-  const top = (await page.locator('.focus-card .card-title').boundingBox())!.y;
+  await expect(page.locator('.to-queue')).toHaveText('1 waiting · show the queue');
+  await page.evaluate(() => window.scrollTo(0, 600));
+  await expect.poll(() => pageY(page)).toBe(600);
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await expectFullScreen(page);
+  await expect(toggle(page)).toBeInViewport();
   await post('fm-phone-new', 'A card that arrives on the phone', { priority: 'now' });
   await expect(page.locator('.focus-card .focus-count')).toHaveText('1');
-  expect(await page.locator('.to-queue').textContent()).toBe(count);
-  expect((await page.locator('.focus-card .card-title').boundingBox())!.y).toBe(top);
   await toggle(page).click();
-  await expect(page.locator('.to-queue')).not.toHaveText(count!);
-});
-
-test('a Group by choice made during focus mode stays when the next card arrives', async ({ page }) => {
-  await post('fm-group', 'A card read while regrouping');
-  await inbox.open(page);
-  await page.locator('.q', { hasText: 'A card read while regrouping' }).click();
-  await page.getByRole('button', { name: 'Focus on this card' }).click();
-  const select = page.locator('.group-by select');
-  await select.selectOption('priority');
-  await expect.poll(async () => (await inbox.state() as unknown as { settings?: { groupBy?: string } }).settings?.groupBy).toBe('priority');
-  await post('fm-group-new', 'A card that arrives after the regrouping');
-  await expect(page.locator('.focus-card .focus-count')).toHaveText('1');
-  await expect(select).toHaveValue('priority');
+  await expect(page.locator('.to-queue')).toHaveText('2 waiting · show the queue');
+  await expect.poll(() => pageY(page)).toBe(600);
 });

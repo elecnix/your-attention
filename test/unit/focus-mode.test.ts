@@ -1,9 +1,9 @@
-// Focus mode holds the queue still while the person reads one card, and lets everything it held through when focus ends.
+// Focus mode fills the screen with one card, counts the cards that arrive meanwhile, and raises one notification when it ends.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { summarize } from '../../src/core/summary.ts';
 import type { Card, CardState } from '../../src/core/types.ts';
-import { arrivals, heldFrom, holdView, notifiable, readFocusMode, releaseNotice } from '../../web/focus.js';
+import { arrivals, notifiable, readFocusMode, releaseNotice } from '../../web/focus.js';
 import { buildQueue, type InboxState } from '../../web/queue.js';
 
 const card = (id: string, extra: Partial<Card> = {}): Card => ({ id, agent: 'a', kind: 'ask', title: `Card ${id}`, priority: 'soon', deliver: 'stream', version: 1, createdAt: id.charCodeAt(0), updatedAt: 1, replies: [], ...extra });
@@ -17,60 +17,21 @@ function state(cards: Card[], states: Record<string, CardState> = {}): InboxStat
     levels: [{ id: 'now', label: 'Decide now', color: '#f00', definition: '' }, { id: 'soon', label: 'Soon', color: '#fa0', definition: '' }],
   };
 }
-const ids = (s: InboxState) => buildQueue(s, 'none').order.map((c) => c.id);
 
-describe('focus mode holds the queue', () => {
-  const held = state([card('a'), card('b'), card('c')]);
-
-  it('keeps the queue as it stood, while cards arrive, rank higher, close or leave', () => {
-    const live = state([card('a'), card('n', { priority: 'now' }), card('c', { priority: 'now' }), card('z')], { c: 'closed' });
-    const view = holdView(held, live, 'a');
-    assert.deepEqual(ids(view), ['a', 'b', 'c']);
+describe('focus mode counts the cards that arrive', () => {
+  it('counts the waiting cards the inbox did not list when focus began, and leaves out the open card and the closed ones', () => {
+    const live = state([card('a'), card('b'), card('c'), card('n'), card('m'), card('x'), card('h')], { x: 'closed', m: 'in-triage', h: 'held' });
+    assert.deepEqual(arrivals(['a', 'b', 'c'], live, 'a').map((c) => c.id), ['n', 'h']);
+    assert.deepEqual(arrivals(['a', 'b', 'c'], state([card('a'), card('b')]), 'a'), []);
   });
 
-  it('shows the open card as it is now: a revision, its state and its answer', () => {
-    const live = state([card('a', { title: 'Card a, revised', version: 2 }), card('b')], { a: 'answered' });
-    live.answers['a'] = { version: 2, savedAt: 5, deliveredAt: null, readAt: null, forcedAt: null };
-    const view = holdView(held, live, 'a');
-    const a = view.cards.find((c) => c.id === 'a');
-    assert.equal(a?.title, 'Card a, revised');
-    assert.equal(a?.version, 2);
-    assert.equal(view.states['a'], 'answered');
-    assert.deepEqual(view.answers['a'], live.answers['a']);
-    assert.equal(view.states['b'], 'open');
-  });
-
-  it('keeps the open card in its place in the list after a revision raises its priority', () => {
-    const live = state([card('a'), card('b'), card('c', { priority: 'now', title: 'Card c, now urgent' })]);
-    live.priorities = { c: 'now' };
-    assert.deepEqual(ids(live), ['c', 'a', 'b']);
-    const view = holdView(held, live, 'c');
-    assert.deepEqual(ids(view), ['a', 'b', 'c']);
-    assert.equal(view.cards.find((c) => c.id === 'c')?.title, 'Card c, now urgent');
-  });
-
-  it('keeps the held copy of the open card when the inbox no longer lists it', () => {
-    const view = holdView(held, state([card('b'), card('c')]), 'a');
-    assert.equal(view.cards.find((c) => c.id === 'a')?.title, 'Card a');
-    assert.equal(view.states['a'], 'open');
-  });
-
-  it('counts the waiting cards that arrived, and leaves out the open card and the closed ones', () => {
-    const live = state([card('a'), card('b'), card('c'), card('n'), card('m'), card('x')], { x: 'closed', m: 'in-triage' });
-    assert.deepEqual(arrivals(held, live, 'a').map((c) => c.id), ['n']);
-    assert.deepEqual(arrivals(held, held, 'a'), []);
-  });
-
-  it('rebuilds the held queue after a reload from the ids it held', () => {
-    const live = state([card('a'), card('b'), card('n')]);
-    const rebuilt = heldFrom(live, ['a', 'b', 'c']);
-    assert.deepEqual(rebuilt.cards.map((c) => c.id), ['a', 'b']);
-    assert.deepEqual(arrivals(rebuilt, live, 'a').map((c) => c.id), ['n']);
+  it('leaves out the open card when it was not listed when focus began, such as a cleared card opened from a link', () => {
+    assert.deepEqual(arrivals([], state([card('a')]), 'a'), []);
   });
 });
 
-describe('focus mode lets the queue through when it ends', () => {
-  it('raises one notification for every card that arrived, or none', () => {
+describe('focus mode raises one notification when it ends', () => {
+  it('names every card that arrived, or raises none', () => {
     assert.equal(releaseNotice([]), null);
     const one = releaseNotice([summarize(card('n', { title: 'Pick a database' }), undefined)]);
     assert.deepEqual(one, { title: 'A card arrived while you focused', body: 'Pick a database' });
@@ -78,14 +39,24 @@ describe('focus mode lets the queue through when it ends', () => {
     assert.deepEqual(two, { title: '2 cards arrived while you focused', body: 'Pick a database · Approve the deploy' });
   });
 
-  it('leaves out of the notification a card in a muted group, unless it is at the highest level', () => {
+  it('leaves out a card in a muted group, unless it is at the highest level', () => {
     const live = state([card('a', { tags: { topic: 'billing' } }), card('b', { tags: { topic: 'billing' }, priority: 'now' }), card('c', { tags: { topic: 'search' } })]);
     const muted = new Set([buildQueue(live, 'tag:topic').groupOf['a']!]);
     assert.deepEqual(notifiable(live, live.cards, 'tag:topic', [], muted).map((c) => c.id), ['b', 'c']);
   });
+});
 
-  it('reads a stored focus mode, and anything else as off', () => {
-    assert.deepEqual(readFocusMode({ card: 'a', ids: ['a', 'b'] }), { card: 'a', ids: ['a', 'b'] });
+describe('focus mode as a tab stores it', () => {
+  it('reads the card, the cards listed when focus began, and where the page and the queue were scrolled', () => {
+    assert.deepEqual(readFocusMode({ card: 'a', ids: ['a', 'b'], pageY: 120, queueY: 40 }), { card: 'a', ids: ['a', 'b'], pageY: 120, queueY: 40 });
+  });
+
+  it('reads a missing or bad scroll position as the top', () => {
+    assert.deepEqual(readFocusMode({ card: 'a', ids: ['a'] }), { card: 'a', ids: ['a'], pageY: 0, queueY: 0 });
+    assert.deepEqual(readFocusMode({ card: 'a', ids: ['a'], pageY: -3, queueY: 'x' }), { card: 'a', ids: ['a'], pageY: 0, queueY: 0 });
+  });
+
+  it('reads anything else as off', () => {
     for (const bad of [null, 'a', { card: '' }, { card: 'a' }, { card: 'a', ids: [1] }, []]) assert.equal(readFocusMode(bad), null);
   });
 });

@@ -104,6 +104,15 @@
   .meta .age + .focus-toggle { margin-left: -2px; }
   .focus-toggle.on { color: var(--accent); border-color: var(--accent); }
   .focus-count { position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--panel); font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
+  /* Focus mode fills the screen with the open card. The bar, the queue, the count above the card on a phone and the notices
+     hide, and the page scrolls the card alone. The card spans the width, and its text keeps a line length that reads well,
+     at the center. The focus button stays at the card's top right, and on screen as the card scrolls, to leave. */
+  body.focus-mode .bar, body.focus-mode .queue, body.focus-mode .resizer, body.focus-mode .to-queue, body.focus-mode .usage-notice { display: none; }
+  body.focus-mode .layout { display: block; padding: 0; }
+  body.focus-mode .focus-card { min-height: 100vh; min-height: 100dvh; border: 0; border-radius: 0; padding: 20px max(16px, calc((100% - 72ch) / 2)) 48px; }
+  body.focus-mode .closed-line, body.focus-mode .dismiss-draft { max-width: 72ch; margin: 16px auto 0; }
+  @media (max-width: 900px) { body.focus-mode .meta { padding-right: 44px; } }
+  body.focus-mode .meta .focus-toggle { position: fixed; top: 12px; right: 16px; z-index: 10; background: var(--panel); }
   /* A card's tags, under the meta row. The pin sits right after each label: dim until the value is pinned. */
   .tags { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 8px; font-size: calc(13px * var(--text-scale)); color: var(--body-text); }
   .tags .tag { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 0 2px 0 8px; }
