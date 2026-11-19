@@ -47,6 +47,9 @@ describe('the usage table', () => {
     assert.equal(problem(['--wait=1'], { wait: { type: 'boolean' } }), '--wait takes no value');
     assert.equal(problem(['extra']), 'unexpected argument extra');
     assert.equal(parseProblem(new TypeError('a real crash')), undefined);
+    // A message this code does not know is passed on as Node wrote it, never guessed as a missing value.
+    const repeated = Object.assign(new TypeError("Option '--name <value>' cannot be used multiple times"), { code: 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE' });
+    assert.equal(parseProblem(repeated), "Option '--name <value>' cannot be used multiple times");
   });
 
   it('treats --help as a request for help, except where it names a harness, and never after --', () => {

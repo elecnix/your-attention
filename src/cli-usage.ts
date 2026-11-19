@@ -228,7 +228,10 @@ export function parseProblem(e: unknown): string | undefined {
     case 'ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL': return `unexpected argument ${quoted}`;
     case 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE': {
       const option = quoted.split(' ')[0] ?? quoted;
-      return /does not take an argument/.test(err.message ?? '') ? `${option} takes no value` : `${option} needs a value`;
+      if (/argument missing/.test(err.message ?? '')) return `${option} needs a value`;
+      if (/does not take an argument/.test(err.message ?? '')) return `${option} takes no value`;
+      // Another Node version may word a new case differently, so its own words are the safest line to print.
+      return err.message ?? 'an invalid option value';
     }
     default: return undefined;
   }
