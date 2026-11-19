@@ -75,6 +75,11 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({ screen: SCREEN }, TYPED_SCREEN), true, 'the same frame still closes the screen');
     assert.equal(promptOnScreen({ screen: SCREEN }, 'Running the migration…\nWrote 3 files.'), false, 'a working agent draws no frame');
     assert.equal(promptOnScreen({ screen: SCREEN }, LEFT_BEHIND), false, 'an agent that resumed writes its output below the frame it left behind');
+    assert.equal(
+      promptOnScreen({ screen: SCREEN }, TYPED_SCREEN.replace('SQLite SQLite', 'SQLite, please.')),
+      true,
+      'an answer with punctuation still finds the prompt, so the Enter goes out',
+    );
     assert.equal(promptOnScreen({}, SCREEN), false, 'a prompt with no title and no screen to compare gets no key');
   });
 

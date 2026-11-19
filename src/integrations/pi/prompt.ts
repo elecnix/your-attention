@@ -110,9 +110,9 @@ function closingRule(screen: string): string {
 
 const TOP_CORNER = /[\u256d\u250c\u2554]/;
 
-/** The shape of the frame that ends a screen: every row from its top corner to the closing rule, reduced to the marks
- * it draws. Text typed into the box leaves the shape alone, so an answer still finds its prompt, while a box of
- * another height, width or set of corners has a shape of its own. Comparing every row is what keeps a nested prompt
+/** The shape of the frame that ends a screen: every row from its top corner to the closing rule, reduced to the box
+ * drawing characters it draws and nothing else. Text typed into the box leaves the shape alone, whatever it contains,
+ * so an answer still finds its prompt, while a box of another height, width or set of corners has a shape of its own. Comparing every row is what keeps a nested prompt
  * from passing for the one outside it: pi folds the two spans into one, so the inner frame can replace the outer. */
 function frameShape(screen: string): string[] {
   const rows = screen.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim());
@@ -120,7 +120,7 @@ function frameShape(screen: string): string[] {
   rows.forEach((l, i) => {
     if (TOP_CORNER.test(l)) top = i;
   });
-  return top < 0 ? [] : rows.slice(top).map((l) => l.replace(/[\p{L}\p{N}\s]/gu, ''));
+  return top < 0 ? [] : rows.slice(top).map((l) => l.replace(/[^\u2500-\u257f]/g, ''));
 }
 
 /** Whether the prompt a card was posted for still waits on the screen just read. pi gives a title for every widget
