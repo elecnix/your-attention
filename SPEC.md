@@ -787,6 +787,12 @@ Command+K on a Mac and Control+K elsewhere focus the field and select its text, 
 
 On a LAN the inbox advertises `_cardinbox._tcp` over mDNS, with the TXT record `v=1`, `id=<inbox id>`, `pair=/v1/pair`. `your-attention serve --no-mdns` turns the advertisement off.
 
+## The command line
+
+One table in `src/cli-usage.ts` lists each command of `your-attention`, its usage lines and one sentence for each option. `your-attention help` prints the list from that table, and `your-attention <command> --help`, `-h`, or `your-attention help <command>` prints one command's entry and exits 0. The command prints its help before it reads any required argument, so `your-attention pair --help` works without a url.
+
+Every command reads its arguments through one parser. An unknown option, an option without its value, or a wrong or missing positional argument prints `your-attention <command>: <problem>` and the usage lines to stderr, and the command exits 2. An unknown command exits 2 as well. Other failures keep exit status 1, and an unexpected error keeps its stack trace.
+
 ## Starting and stopping the laptop build
 
 `your-attention serve` runs the inbox in the foreground. `your-attention start` runs `serve` in the background with the same options, and returns once the inbox answers. Its output goes to `serve.log`. The inbox writes its address to `server.json` and removes the file when it closes.
