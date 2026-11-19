@@ -192,10 +192,14 @@ export interface CommandResult { code: number | null; stdout: string; stderr: st
 export type RunCommand = (argv: string[], input: string, timeoutMs: number, signal?: AbortSignal) => Promise<CommandResult>;
 
 const STOPPED = 'stopped because the agent is shutting down';
+/** The most output the agent keeps from one stream of a command. A command that prints more is stopped, so a runaway
+ * command can't fill the agent's memory. A classifier's or a PR-verdict command's answer is a few kilobytes. */
+export const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
 /** Run a command with `input` on stdin. Rejects when it cannot start, runs past `timeoutMs`, or `signal` aborts. In
  * the last two cases it stops the command's whole process group: SIGTERM, then SIGKILL two seconds later, so neither
- * a wrapper's child nor a command that ignores SIGTERM keeps running. Windows has no process groups, so there it ends
+ * a wrapper's child nor a command that ignores SIGTERM keeps running. It does the same when the command prints more
+ * than MAX_OUTPUT_BYTES on stdout or stderr. Windows has no process groups, so there it ends
  * the command alone. */
 export const runCommand: RunCommand = (argv, input, timeoutMs, signal) => new Promise((resolve, reject) => {
   const [program, ...args] = argv;
@@ -203,8 +207,7 @@ export const runCommand: RunCommand = (argv, input, timeoutMs, signal) => new Pr
   if (signal?.aborted) { reject(new Error(STOPPED)); return; }
   const groups = process.platform !== 'win32';
   const child = spawn(program, args, { stdio: ['pipe', 'pipe', 'pipe'], detached: groups });
-  let stdout = '';
-  let stderr = '';
+  const out = { stdout: '', stderr: '' };
   const signalAll = (sig: NodeJS.Signals): void => {
     try {
       if (groups && child.pid) process.kill(-child.pid, sig);
@@ -223,10 +226,16 @@ export const runCommand: RunCommand = (argv, input, timeoutMs, signal) => new Pr
   const timer = setTimeout(() => stop(`took longer than ${timeoutMs} ms`), timeoutMs);
   const done = (): void => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };
   signal?.addEventListener('abort', onAbort, { once: true });
-  child.stdout.on('data', (d) => { stdout += String(d); });
-  child.stderr.on('data', (d) => { stderr += String(d); });
+  for (const name of ['stdout', 'stderr'] as const) {
+    let bytes = 0;
+    child[name].on('data', (d: Buffer) => {
+      bytes += d.length;
+      if (bytes > MAX_OUTPUT_BYTES) stop(`printed more than ${MAX_OUTPUT_BYTES} bytes`);
+      else out[name] += String(d);
+    });
+  }
   child.on('error', (e) => { done(); reject(new Error(`could not run (${e.message})`)); });
-  child.on('close', (code) => { done(); resolve({ code, stdout, stderr }); });
+  child.on('close', (code) => { done(); resolve({ code, ...out }); });
   // A command that exits without reading its input closes the pipe: its exit code is the answer, not EPIPE.
   child.stdin.on('error', () => {});
   child.stdin.end(input);

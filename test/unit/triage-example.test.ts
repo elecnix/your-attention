@@ -151,7 +151,8 @@ describe('the example triage agent fails open', () => {
     ['the classifier finds no key', () => ({ classifier: stub('classifier', "process.stderr.write('error: config file not found'); process.exit(1);").argv }), /classifier exited with 1: error: config file not found/],
     ['the classifier takes too long', () => ({ classifier: stub('classifier', 'setTimeout(() => {}, 10_000);').argv, classifierTimeoutMs: 300 }), /classifier took longer than 300 ms/],
     ['the classifier prints something other than its JSON', () => ({ classifier: stub('classifier', print('VERDICT: maybe')).argv }), /classifier gave output it could not read/],
-    ['the classifier gives its questions as a string', () => ({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: 'Which branch?' })).argv }), /classifier gave output it could not read/],
+    ['the classifier prints without end', () => ({ classifier: stub('classifier', "const s = 'x'.repeat(65536); const w = () => process.stdout.write(s, w); w();").argv, classifierTimeoutMs: 20_000 }), /classifier printed more than \d+ bytes/],
+    ['the classifier gives its questions as a string',() => ({ classifier: stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: 'Which branch?' })).argv }), /classifier gave output it could not read/],
   ];
   for (const [what, over, why] of cases) itFailsOpen(what, card, over, why);
 
