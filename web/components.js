@@ -1,5 +1,5 @@
 // The parts of the page, each one renderable alone, as the stories do.
-import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, store, time } from './env.js';
+import { BASE, CLOSED_LABEL, ICONS, Icon, J, PUSH_KEY, api, h, store, time } from './env.js';
 import { disablePush, enablePush, isIos, pushSupport } from './push.js';
 import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
@@ -825,16 +825,16 @@ export function NotifyToggle({ collapsed = new Set() } = {}) {
   // collapsed, so a card in a muted group raises no push. A device the inbox dropped, such as after its token was revoked, is saved again.
   React.useEffect(() => {
     // Only a device that already turned push on: a page from before push keeps its old notifications until the person flips the switch.
-    if (!active || !push || store.get('notify:push') !== true) return;
+    if (!active || !push || store.get(PUSH_KEY) !== true) return;
     let stale = false;
-    enablePush({ base: BASE, collapsed, api }).then(() => store.set('notify:push', true), (e) => { if (!stale) setError(e.message); });
+    enablePush({ base: BASE, collapsed, api }).then(() => { store.set(PUSH_KEY, true); if (!stale) setError(''); }, (e) => { if (!stale) setError(e.message); });
     return () => { stale = true; };
   }, [active, push, groups]);
   async function toggle() {
     setError('');
     if (on) {
       store.set('notify:on', false);
-      store.set('notify:push', false);
+      store.set(PUSH_KEY, false);
       setOn(false);
       if (push) await disablePush({ base: BASE, api }).catch(() => {});
       return;
@@ -843,7 +843,7 @@ export function NotifyToggle({ collapsed = new Set() } = {}) {
     try {
       if (push) {
         await enablePush({ base: BASE, collapsed, api });
-        store.set('notify:push', true);
+        store.set(PUSH_KEY, true);
       } else {
         const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
         if (perm !== 'granted') throw new Error('the browser blocks notifications');
