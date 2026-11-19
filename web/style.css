@@ -115,8 +115,9 @@
   body.focus-mode .focus-card { min-height: 100vh; min-height: 100dvh; border: 0; border-radius: 0; padding: 20px max(16px, calc((100% - var(--focus-column)) / 2)) 48px; }
   body.focus-mode .closed-line, body.focus-mode .dismiss-draft { max-width: var(--focus-column); margin: 16px auto 0; }
   /* The column is half again as wide as a line of text that reads well, so tables, code and diagrams get room. Paragraphs,
-     lists and quotes keep that line length, at the column's left edge. */
-  body.focus-mode .focus-card :is(p, ul, ol, blockquote) { max-width: var(--focus-prose); }
+     lists and quotes keep that line length, at the column's left edge, and so does the summary of your answer to the card
+     before this one, which is plain text with no paragraph around it. */
+  body.focus-mode .focus-card :is(p, ul, ol, blockquote, .turn .ans) { max-width: var(--focus-prose); }
   body.focus-mode .focus-card :is(li, td, th, label) :is(p, ul, ol, blockquote) { max-width: none; }
   @media (max-width: 900px) { body.focus-mode .meta { padding-right: 44px; } }
   body.focus-mode .meta .focus-toggle { position: fixed; top: 12px; right: 16px; z-index: 10; background: var(--panel); }

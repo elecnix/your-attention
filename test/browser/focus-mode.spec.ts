@@ -207,3 +207,22 @@ test('the focus column is half again as wide as a paragraph, so a wide table get
   expect(narrow.width).toBeCloseTo(390 - 32, 0);
   expect((await box(page, '.focus-card .card-text p')).width).toBeCloseTo(390 - 32, 0);
 });
+
+test('in focus mode, your answer to the card before this one keeps the 72ch line of the text around it', async ({ page }) => {
+  const comment = 'A long comment on the first card, which the panel of the card before this one repeats in full. '.repeat(4).trim();
+  await post('fm-before', 'The card before', { priority: 'now' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('The card before');
+  await page.locator('.focus-card').getByPlaceholder('Anything to add?').fill(comment);
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  await post('fm-after', 'The card after', { priority: 'now', follows: 'fm-before', text: 'A follow-up to your answer.' });
+  await page.locator('.q', { hasText: 'The card after' }).click();
+  await expect(page.locator('.focus-card .card-title')).toHaveText('The card after');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('.focus-card details.earlier summary').click();
+  const answer = page.locator('.focus-card details.earlier .ans');
+  await expect(answer).toContainText('A long comment on the first card');
+  const ch = await chWidth(page);
+  expect((await answer.boundingBox())!.width).toBeLessThanOrEqual(72 * ch + 1);
+});
