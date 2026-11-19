@@ -7,11 +7,27 @@ import { Approvals, AgentPin, Attachments, BroadcastForm, CardAge, CardTags, Car
 import { after, agentName, buildQueue, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
+import { arrivals, heldFrom, holdView, notifiable, readFocusMode, releaseNotice } from './focus.js';
 
 const { React, createRoot } = window.__OpenUI;
 
 export function App() {
-  const [state, setState] = React.useState(null);
+  // The state as the inbox last sent it. While focus mode is on, the page draws `state` instead: the queue held as it
+  // stood when focus began, with the open card as it is now.
+  const [liveState, setState] = React.useState(null);
+  // Focus mode, `{card, ids}`: the card the person reads and the cards listed when focus began. Each tab keeps its own, under
+  // its viewer id, so a reload keeps it and another tab does not share it.
+  const [focusMode, setFocusMode] = React.useState(() => readFocusMode(store.get(FOCUS_KEY)));
+  const focusModeRef = React.useRef(focusMode);
+  focusModeRef.current = focusMode;
+  // The state focus mode holds. After a reload it is the first state, cut to the cards that were listed when focus began.
+  const heldRef = React.useRef(null);
+  if (!focusMode) heldRef.current = null;
+  else if (!heldRef.current && liveState) heldRef.current = heldFrom(liveState, focusMode.ids);
+  const state = React.useMemo(() => (focusMode && heldRef.current && liveState ? holdView(heldRef.current, liveState, focusMode.card) : liveState), [liveState, focusMode]);
+  // Leaving focus mode is defined with each render, because it reads the live state and the queue settings.
+  const leaveFocusRef = React.useRef(() => {});
+  const toggleFocusRef = React.useRef(() => {});
   // The approvals the person turned on, by card version: a revision may change the sentences, so it starts with all off.
   // They live in the device store, so an idle reload of the page for new code keeps them, as it keeps a comment draft.
   const [approvalPicks, setApprovalPicks] = React.useState(() => { try { return JSON.parse(store.get('approvalPicks') || '{}'); } catch { return {}; } });
@@ -113,7 +129,8 @@ export function App() {
         // muting a group must never hide an urgent card.
         const q = buildQueue(s, groupBy, pins, collapsedGroups);
         const top = (s.levels || [])[0];
-        added.forEach((c) => {
+        // Focus mode raises none: when it ends, one notification names every card that arrived meanwhile.
+        if (!focusModeRef.current) added.forEach((c) => {
           if (q.hidden.has(c.id) && (!top || q.levelOf(c) !== top.id)) return;
           notify(c.kind === 'blocked' ? 'An agent is blocked' : 'An agent asked you something', c.title);
         });
@@ -200,6 +217,17 @@ export function App() {
     return () => document.removeEventListener('keydown', key, true);
   }, []);
 
+  // Command+period on a Mac, Control+period elsewhere, turns focus mode on or off, from anywhere on the page.
+  React.useEffect(() => {
+    const key = (e) => {
+      if (e.key !== '.' || (IS_MAC ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.isComposing) return;
+      e.preventDefault();
+      toggleFocusRef.current();
+    };
+    document.addEventListener('keydown', key, true);
+    return () => document.removeEventListener('keydown', key, true);
+  }, []);
+
   // Command+K on a Mac, Control+K elsewhere, focuses the search field from anywhere on the page, a field of the card included.
   // The other modifier is left alone: Control+K on a Mac deletes to the end of the line in a text field.
   React.useEffect(() => {
@@ -222,6 +250,8 @@ export function App() {
     const busy = () => { last = Date.now(); };
     const editing = () => !!(document.activeElement && document.activeElement.closest('input, textarea, select, [contenteditable]'));
     const check = () => {
+      // Focus mode holds new page code too: the reload waits until focus ends.
+      if (focusModeRef.current) return;
       if (document.visibilityState === 'hidden' || (Date.now() - last >= IDLE_RELOAD_MS && !editing())) reloadPage();
     };
     const events = ['keydown', 'pointerdown', 'input', 'focusin', 'focusout'];
@@ -241,6 +271,8 @@ export function App() {
     // Escape in a field belongs to the field, so a half-typed answer stays on screen.
     const escape = (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented || (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]'))) return;
+      // In focus mode, Escape ends focus and leaves the card on screen. A second Escape clears the pane.
+      if (focusModeRef.current) { leaveFocusRef.current(); return; }
       // The sign-in token or code stays in the address until the sign-in request has used it.
       const token = /(?:token|signin)=[^&]*/.exec(location.hash);
       if (!(history.state && history.state.cleared)) history.pushState({ cleared: true }, '', location.pathname + (token ? `#${token[0]}` : ''));
@@ -443,6 +475,30 @@ export function App() {
   }
   if (current && cardInAddress() !== current.id && !/(?:token|signin)=/.test(location.hash)) history.replaceState({ card: current.id }, '', cardAddress(current.id));
 
+  // Focus mode. Turning it on holds the state as it is and keeps the card on screen. Turning it off lets the held changes
+  // through at once, with one notification for the cards that arrived meanwhile.
+  const arrived = focusMode && heldRef.current ? arrivals(heldRef.current, liveState, focusMode.card) : [];
+  const enterFocus = () => {
+    if (!current) return;
+    const mode = { card: current.id, ids: liveState.cards.map((c) => c.id) };
+    heldRef.current = liveState;
+    store.set(FOCUS_KEY, mode);
+    setFocus(current.id);
+    setFocusMode(mode);
+  };
+  const leaveFocus = () => {
+    if (!focusModeRef.current) return;
+    const notice = releaseNotice(notifiable(liveState, arrived, groupBy, pins, collapsedGroups));
+    if (notice) notify(notice.title, notice.body);
+    focusModeRef.current = null;
+    store.del(FOCUS_KEY);
+    setFocusMode(null);
+  };
+  leaveFocusRef.current = leaveFocus;
+  toggleFocusRef.current = () => (focusModeRef.current ? leaveFocus() : enterFocus());
+  // Focus belongs to one card: moving on from it, by an answer, Skip, another card or the back button, ends focus.
+  if (focusMode && !fetchingOutside && (!current || current.id !== focusMode.card)) setTimeout(leaveFocus, 0);
+
   // Each card you open is a step in the browser's history, so back and forward move between them.
   const go = (id) => {
     if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id));
@@ -452,8 +508,10 @@ export function App() {
     // On a phone the card sits above the queue, so the page scrolls up to the card that opened.
     if (id && window.matchMedia('(max-width: 760px)').matches) scrollToRef.current = id;
   };
-  // The card after this one, in the order the queue shows, wrapping around at the end.
-  const next = (id) => after(order, id);
+  // The card after this one, in the order the queue shows, wrapping around at the end. In focus mode the order is the
+  // live one, since focus ends as the next card opens.
+  const liveOrder = focusMode ? (terms.length ? buildQueue({ ...liveState, cards: liveState.cards.filter((c) => matchCard(terms, c, details.get(c))) }, groupBy, pins, collapsedGroups) : buildQueue(liveState, groupBy, pins, collapsedGroups)).order : order;
+  const next = (id) => after(liveOrder, id);
   // Skip opens the next card.
   const skip = () => { pinnedRef.current = null; go(next(current && current.id)); };
   // An answer shows its receipt for a moment, then opens the card after the answered one, so a card you skipped stays skipped.
@@ -599,7 +657,8 @@ export function App() {
         current.status && h('span', { className: 'status' }, current.status),
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && !current.archivedAt && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
-        h(CardAge, { card: current })),
+        h(CardAge, { card: current }),
+        h(FocusToggle, { on: !!focusMode, arrived: arrived.length, onToggle: () => toggleFocusRef.current() })),
       h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin, agent: current.agent, name: agentName(current.agent, state.cards, state.presence), agentPinned: isAgentPinned(current.agent) }),
       current.triage && current.triage.state === 'passed' && /did not answer|failed/.test(current.triage.reason || '') && h('div', { className: 'note' }, `Triage did not check this card: ${current.triage.reason}`),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
@@ -649,7 +708,7 @@ export function App() {
     // A diagram or a body the page cannot draw goes back to the card's agent.
     main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
       // The summary has the closure as soon as the state does, before the whole card arrives again.
-      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id], open: !!current.archivedAt }, card)
+      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id], open: !!current.archivedAt || !!focusMode }, card)
       : card);
   }
 
@@ -696,6 +755,7 @@ export function App() {
 }
 
 const IDLE_RELOAD_MS = 3000;
+const FOCUS_KEY = `focusMode:${VIEWER}`;
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 // An inbox at a loopback, private network or .local address runs on a computer, where `your-attention open` signs in.
 const LAPTOP_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|\[f[cd][0-9a-f:]*\]|\[fe80:[0-9a-f:]*\]|[\w-]+\.local)$/i;
@@ -717,6 +777,17 @@ function storedTagPins() {
 function storedCollapsedGroups() {
   const groups = store.get('collapsedGroups');
   return new Set(Array.isArray(groups) ? groups.filter((x) => typeof x === 'string' && x) : []);
+}
+
+// The button at the top right of the open card that turns focus mode on and off. While focus is on, a count on it says
+// how many cards arrived meanwhile.
+const FOCUS_SHORTCUT = IS_MAC ? '⌘.' : 'Ctrl+.';
+function FocusToggle({ on, arrived, onToggle }) {
+  const waiting = arrived ? `, ${arrived} new card${arrived === 1 ? '' : 's'} waiting` : '';
+  const tip = on ? `Leave focus mode${waiting} (${FOCUS_SHORTCUT} or Escape)` : `Focus on this card: hold new cards and notifications until you leave (${FOCUS_SHORTCUT})`;
+  return h('button', { type: 'button', className: `icon-btn focus-toggle${on ? ' on' : ''}`, title: tip, 'aria-label': on ? `Leave focus mode${waiting}` : 'Focus on this card', 'aria-pressed': on, 'aria-keyshortcuts': IS_MAC ? 'Meta+.' : 'Control+.', onClick: onToggle },
+    h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.focus.map((d) => h('path', { key: d, d }))),
+    on && arrived > 0 && h('span', { className: 'focus-count', 'aria-hidden': 'true' }, arrived > 99 ? '99+' : String(arrived)));
 }
 
 // A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.
