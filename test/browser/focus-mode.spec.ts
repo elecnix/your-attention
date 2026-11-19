@@ -35,7 +35,7 @@ test('focus mode holds arrivals, changes and notifications, shows a revision of 
   await inbox.open(page);
   await page.locator('.q', { hasText: 'A dense card to read' }).click();
   await expect(page.locator('.focus-card .card-title')).toHaveText('A dense card to read');
-  await page.mouse.wheel(0, 400);
+  await page.evaluate(() => window.scrollTo(0, 400));
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 
   await page.getByRole('button', { name: 'Focus on this card' }).click();
