@@ -233,6 +233,8 @@ test('in focus mode, a list inside a list item takes no cap of its own, since th
   await expect(page.locator('.focus-card .card-title')).toHaveText('A card with a nested list');
   await page.keyboard.press('ControlOrMeta+.');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.focus-card .card-text > ul')).toHaveCSS('max-width', `${72 * await chWidth(page)}px`);
+  // The cap reads as a fraction of a pixel that differs between font builds, so it compares as a number.
+  const cap = await page.locator('.focus-card .card-text > ul').evaluate((el) => parseFloat(getComputedStyle(el).maxWidth));
+  expect(cap).toBeCloseTo(72 * await chWidth(page), 0);
   await expect(page.locator('.focus-card .card-text li ul')).toHaveCSS('max-width', 'none');
 });
