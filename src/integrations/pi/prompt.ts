@@ -308,7 +308,14 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       open.closed ??= 'typed';
       const waits = mine && promptOnScreen(open, await read(open.pane));
       await to.ack(card.id).catch(() => {});
-      if (!mine) return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
+      // The span can also end during that acknowledgement, which is a round trip to the inbox: re-read it here, or a
+      // prompt that ended inside that window takes an Enter it no longer needs. A later span that holds this card keeps
+      // it, and any other card closes, since the answer did reach the pane of the span it belongs to.
+      if (span !== open) {
+        if (span?.card?.id === card.id) return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
+        await to.close(card.id, 'resolved', 'Typed your answer in its session.').catch(() => {});
+        return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
+      }
       if (waits) await herdr('agent', 'send-keys', open.pane, 'enter').catch(() => {});
       await to.close(card.id, 'resolved', waits
         ? 'Typed your answer in its session.'

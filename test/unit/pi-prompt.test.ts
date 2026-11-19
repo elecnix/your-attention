@@ -96,7 +96,7 @@ describe('whether the prompt still waits on the screen', () => {
 });
 
 /** A prompt session with a stand-in inbox and terminal, so a race can be run in the order a test picks. */
-function fakeSession(): {
+function fakeSession(options: { duringAck?: () => Promise<void> } = {}): {
   session: () => PromptSession;
   screen(screen: string): void;
   posted: Card[];
@@ -115,7 +115,7 @@ function fakeSession(): {
       return made;
     },
     close: async (id: string, kind: string, outcome: string) => { closes.push({ id, kind, outcome }); },
-    ack: async () => {},
+    ack: async () => { await options.duringAck?.(); },
   };
   const herdr: Herdr = async (...args) => {
     if (args[0] === 'pane' && args[1] === 'read') return screen;
@@ -181,6 +181,19 @@ describe('the close that follows the typed answer', () => {
     await typing;
     assert.deepEqual(s.closes.map((c) => [c.id, c.kind]), [[card.id, 'answered-in-terminal']], 'only the span that was answered closes');
     assert.deepEqual(s.keys, ['SQLite'], 'the prompt that follows takes no Enter');
+  });
+});
+
+describe('a prompt that ends during the acknowledgement', () => {
+  it('takes no Enter and closes no other card, because the span it belonged to has ended', async () => {
+    let cards: ReturnType<typeof createPromptCards> | undefined;
+    const s = fakeSession({ duringAck: async () => { await cards!.ended(); } });
+    cards = createPromptCards(s.session, s.herdr, 0);
+    await cards.started({ kind: 'select', title: 'Pick a database' });
+    const card = s.posted[0]!;
+    await cards.answered(card, answer('SQLite'));
+    assert.deepEqual(s.keys, ['SQLite'], 'a prompt that ended inside the acknowledgement takes no Enter');
+    assert.deepEqual(s.closes.map((c) => [c.id, c.kind]), [[card.id, 'resolved']], 'the card of the span that ended still reports the answer it took');
   });
 });
 
