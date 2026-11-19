@@ -820,6 +820,8 @@ export function NotifyToggle({ collapsed = new Set() } = {}) {
   });
   const push = support.ok && support.mode === 'push';
   const active = on && support.ok;
+  // A switch that is already on stays usable where push is now impossible, so the person can turn the old notifications off.
+  const locked = !support.ok && !on;
   const groups = [...collapsed].sort().join('\n');
   // A page that opens with the switch on makes sure the inbox still has this device, and tells it which groups this device
   // collapsed, so a card in a muted group raises no push. A device the inbox dropped, such as after its token was revoked, is saved again.
@@ -863,8 +865,8 @@ export function NotifyToggle({ collapsed = new Set() } = {}) {
   }
   const why = support.ok ? error : support.reason;
   const tip = support.ok ? (push ? 'Get a notification for each new card, even when this page is closed' : 'Show a browser notification for new cards while this page is open') : NOTIFY_HELP[support.reason] || support.reason;
-  return h('label', { className: `notify${support.ok ? '' : ' off'}`, title: tip },
-    h('input', { type: 'checkbox', role: 'switch', checked: active, disabled: !support.ok || busy, onChange: toggle, 'aria-describedby': why ? 'notify-why' : undefined }),
+  return h('label', { className: `notify${locked ? ' off' : ''}`, title: tip },
+    h('input', { type: 'checkbox', role: 'switch', checked: on, disabled: locked || busy, onChange: toggle, 'aria-describedby': why ? 'notify-why' : undefined }),
     'Notify me',
     why && h('span', { id: 'notify-why', className: 'notify-why' }, why));
 }

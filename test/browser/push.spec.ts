@@ -123,6 +123,19 @@ test('Notify me stays on the page, greyed out, and says why where push is imposs
   }
 });
 
+test('an older Notify me that is on stays on and can be turned off where push is impossible', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(window, 'isSecureContext', { value: false }); localStorage.setItem('notify:on', 'true'); });
+  await inbox.open(page);
+  const toggle = page.getByRole('switch', { name: 'Notify me' });
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  expect(await page.evaluate(() => localStorage.getItem('notify:on'))).toBe('false');
+  await expect(toggle).toBeDisabled();
+  await expect(page.locator('.notify-why')).toHaveText('needs an https address');
+});
+
 test('a device the push service forgot is removed, and the page saves it again when it opens', async ({ page }) => {
   const phone = await newPhone();
   await stubBrowserPush(page, phone);

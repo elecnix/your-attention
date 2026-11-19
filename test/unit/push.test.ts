@@ -290,6 +290,18 @@ describe('a push waits for triage, and goes once', () => {
     assert.equal(sent.length, 1, 'one card, one push');
   });
 
+  it('does not push a revision of a card stored before pushes existed, which has no mark', async () => {
+    const { inbox, owner, agent, sent, settle, store } = setup();
+    inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Before the deploy' });
+    const stored = store.get<Record<string, unknown>>('cards', 'old')!;
+    delete stored['pushed'];
+    store.put('cards', 'old', stored);
+    inbox.savePush(owner, await device('a'));
+    inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Revised after the deploy' }, undefined, undefined, undefined, { revise: true });
+    await settle();
+    assert.equal(sent.length, 0, 'the person already had this card');
+  });
+
   it('never pushes a card the hook sends back', async () => {
     const { inbox, agent, sent, settle, calls } = await screened();
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Sent back' });

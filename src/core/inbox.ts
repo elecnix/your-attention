@@ -722,7 +722,7 @@ export class Inbox {
       pushback: before?.pushback,
       history: history.length ? history : undefined,
       broadcast: before?.broadcast,
-      pushed: before?.pushed,
+      pushed: before ? hadReached(before) || undefined : undefined,
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
       tags: mergedTags.tags,
@@ -3172,6 +3172,14 @@ export function publicCard(card: Card): Card {
   if (!rest.closed?.draft) return rest;
   const { kind, outcome, at } = rest.closed;
   return { ...rest, closed: { kind, outcome, at } };
+}
+
+/** Whether the person already had this card, so a revision of it never pushes. A card stored before pushes existed has no
+ * mark, and the person had it, unless triage still screens it, holds it or sent it back. */
+function hadReached(card: Card): boolean {
+  if (card.pushed) return true;
+  const t = card.triage?.state;
+  return t !== 'pending' && t !== 'held' && t !== 'returned' && card.closed?.kind !== 'returned';
 }
 
 /** The stored lines that share the most words with a text that matched nothing, so an error can name what is there. */
