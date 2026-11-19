@@ -221,18 +221,21 @@ describe('a prompt that comes back while its own card is still posting', () => {
     let cards: ReturnType<typeof createPromptCards> | undefined;
     // The span ends during the acknowledgement, and the same prompt comes back on the same card id, with its post
     // still in flight while the answer path looks for a card the later span has not been given yet.
+    let later: Promise<void> | undefined;
     const s = fakeSession({
       gatePostAfter: 1,
       duringAck: async () => {
         await cards!.ended();
-        void cards!.started({ kind: 'select', title: 'Pick a database' });
+        later = cards!.started({ kind: 'select', title: 'Pick a database' });
       },
     });
     cards = createPromptCards(s.session, s.herdr, 0);
     await cards.started({ kind: 'select', title: 'Pick a database' });
     const card = s.posted[0]!;
     await cards.answered(card, answer('SQLite'));
+    // The gated post resumes in a microtask once the gate opens, so the span that came back has to finish first.
     s.openPost();
+    await later;
     assert.deepEqual(s.keys, ['SQLite'], 'the prompt that came back takes no Enter');
     assert.deepEqual(s.closes, [], 'the card the later span adopted stays open for it');
   });
