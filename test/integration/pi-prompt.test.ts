@@ -201,6 +201,30 @@ describe('a prompt a pi session waits on', () => {
     assert.match(outcome, /without Enter: the prompt was not on the screen/);
   });
 
+  it('sends no Enter into an agent that resumed behind the frame the prompt left on the screen', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
+    // The terminal answers the prompt with the words typed on the card, and the agent that resumes prints under the
+    // frame it left behind, so the screen still shows the same borders.
+    herdr = fakeHerdr(`${PROMPT_SCREEN}\nRunning the migration…\nWrote 3 files.\n`);
+    await connect('pi-prompt-custom-left-behind', { pane: 'w7:p1', herdr: herdr.bin });
+    await startPrompt('custom');
+    const card = await oneCard();
+    await h.owner('POST', `/v1/cards/${card.id}/answer`, { comment: 'SQLite' });
+    const outcome = (await closed(card.id))?.outcome ?? '';
+    assert.match(outcome, /without Enter: the prompt was not on the screen/);
+    assert.deepEqual(herdr.calls().filter((c) => c.startsWith('agent send-keys')), ['agent send-keys w7:p1 SQLite'], 'no Enter follows the frame the prompt left behind');
+  });
+
+  it('refuses an answer for a prompt with no title whose frame no longer closes the screen', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
+    await connect('pi-prompt-custom-moved-on', { pane: 'w7:p1', herdr: herdr.bin });
+    await startPrompt('custom');
+    const card = await oneCard();
+    herdr.screen(`${PROMPT_SCREEN}\nRunning the migration…\nWrote 3 files.\n`);
+    await h.owner('POST', `/v1/cards/${card.id}/answer`, { comment: 'SQLite' });
+    const outcome = (await closed(card.id))?.outcome ?? '';
+    assert.match(outcome, /has no title/);
+    assert.deepEqual(herdr.calls().filter((c) => c.startsWith('agent send-keys')), [], 'nothing goes into an agent that resumed');
+  });
+
   it('refuses an answer on a prompt card older than the last five, instead of handing it to the model', { skip: process.platform === 'win32' ? 'the fake herdr is a shell script' : false }, async () => {
     await connect('pi-prompt-old', { pane: 'w7:p1', herdr: herdr.bin });
     const ids: string[] = [];

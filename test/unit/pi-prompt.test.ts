@@ -1,5 +1,6 @@
-// What a prompt card says, what the person typed on it, whether the prompt still waits on the screen, and the two
-// races a card has to survive: a prompt that ends while its card is posted, and a second answer while the first types.
+// What a prompt card says, what the person typed on it, whether the prompt still waits on the screen, and the races a
+// card has to survive: a prompt that ends while its card is posted, a second answer while the first types, and a close
+// that arrives after the next prompt took the card.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createPromptCards, promptOnScreen, promptText, typedAnswer, type PromptSession } from '../../src/integrations/pi/prompt.ts';
@@ -22,6 +23,20 @@ const TYPED_SCREEN = [
   '│ ❯ SQLite SQLite          │',
   '╰──────────────────────────╯',
 ].join('\n');
+
+/** A nested prompt drawn at the outer frame's width and one row shorter, which pi folds into the same span: every
+ * border row of it matches the outer frame except the top one, and the last row matches. */
+const NESTED = [
+  '╭──────────────────────────╮',
+  '│ Pick a database          │',
+  '╰──────────────────────────╯',
+  '╭──────────────────────────╮',
+  '│ Confirm?                 │',
+  '╰──────────────────────────╯',
+].join('\n');
+
+/** The box the answered prompt left behind, with the output of the agent that resumed under it. */
+const LEFT_BEHIND = `${SCREEN}\nRunning the migration…\nWrote 3 files.`;
 
 describe('what a prompt card says', () => {
   it('names the session, the prompt and the pane it can be answered in', () => {
@@ -56,34 +71,111 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({ screen: SCREEN }, ''), false);
   });
 
-  it('tells a prompt with no title apart by its box, which stays while the answer is typed inside it', () => {
-    assert.equal(promptOnScreen({ screen: SCREEN }, TYPED_SCREEN), true, 'the same box still waits');
-    assert.equal(promptOnScreen({ screen: SCREEN }, 'Running the migration…\nWrote 3 files.'), false, 'a working agent draws no box');
+  it('tells a prompt with no title apart by the frame that closes the screen, which stays while the answer is typed inside it', () => {
+    assert.equal(promptOnScreen({ screen: SCREEN }, TYPED_SCREEN), true, 'the same frame still closes the screen');
+    assert.equal(promptOnScreen({ screen: SCREEN }, 'Running the migration…\nWrote 3 files.'), false, 'a working agent draws no frame');
+    assert.equal(promptOnScreen({ screen: SCREEN }, LEFT_BEHIND), false, 'an agent that resumed writes its output below the frame it left behind');
+    assert.equal(
+      promptOnScreen({ screen: SCREEN }, TYPED_SCREEN.replace('SQLite SQLite', 'SQLite, please.')),
+      true,
+      'an answer with punctuation still finds the prompt, so the Enter goes out',
+    );
+    assert.equal(
+      promptOnScreen({ screen: SCREEN }, TYPED_SCREEN.replace('SQLite SQLite', '│ yes ─ really')),
+      true,
+      'an answer that contains a box character leaves the shape of the frame where it was',
+    );
     assert.equal(promptOnScreen({}, SCREEN), false, 'a prompt with no title and no screen to compare gets no key');
+  });
+
+  it('recognises every top corner a box can start with, not only the light one', () => {
+    for (const [top, side, foot] of [['┌', '│', '└'], ['┍', '│', '┕'], ['┎', '┃', '┖']]) {
+      const box = [`${top}──────────────────────────┐`, `${side} Pick a database          ${side}`, `${foot}──────────────────────────┘`].join('\n');
+      assert.equal(promptOnScreen({ screen: box }, box), true, `a frame that starts with ${top} matches its own shape`);
+    }
+  });
+
+  it('recognises a frame drawn with heavy corners, which the closing rule already accepts', () => {
+    const heavy = ['┏━━━━━━━━━━━━━━━━━━━━━━━━━┓', '┃ Pick a database          ┃', '┗━━━━━━━━━━━━━━━━━━━━━━━━━┛'].join('\n');
+    assert.equal(promptOnScreen({ screen: heavy }, heavy), true, 'a heavy frame matches its own shape');
+    assert.equal(promptOnScreen({ screen: SCREEN }, heavy), false, 'and stays apart from the light one');
+  });
+
+  it('reads a frame drawn with dashed horizontals, and refuses an output row with one corner', () => {
+    const dashed = ['╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮', '│ Pick a database          │', '╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯'].join('\n');
+    assert.equal(promptOnScreen({ screen: dashed }, dashed), true, 'a dashed frame matches its own shape');
+    assert.equal(promptOnScreen({ screen: SCREEN }, `${SCREEN}\n╰── wrote 3 files`), false, 'a line with one corner and words is output, not a foot');
+  });
+
+  it('keeps the top border when an answer carries a corner glyph of its own', () => {
+    assert.equal(
+      promptOnScreen({ screen: SCREEN }, TYPED_SCREEN.replace('SQLite SQLite', '┌ pick this ╭ one')),
+      true,
+      'a corner inside the box is text, not the top of another frame',
+    );
+  });
+
+  it('finds an indented frame, which a nested prompt draws inside another one', () => {
+    const indented = SCREEN.split('\n').map((l) => `    ${l}`).join('\n');
+    assert.equal(promptOnScreen({ screen: indented }, indented), true, 'a box at an indent matches its own shape');
+  });
+
+  it('finds the frame when an answer wraps to a second line inside the box', () => {
+    const grown = [
+      '╭──────────────────────────╮',
+      '│ Pick a database          │',
+      '│ ❯ SQLite                 │',
+      '│   and Postgres           │',
+      '╰──────────────────────────╯',
+    ].join('\n');
+    assert.equal(promptOnScreen({ screen: SCREEN }, grown), false, 'a taller box is another prompt before anything is typed');
+    assert.equal(promptOnScreen({ screen: SCREEN }, grown, { grown: true }), true, 'and the answer that grew it still gets its Enter');
+  });
+
+  it('closes on a rule that carries a caption between its corners', () => {
+    const captioned = ['┌──────────────────────────┐', '│ Pick a database          │', '└──── Enter to accept ─────┘'].join('\n');
+    assert.equal(promptOnScreen({ screen: captioned }, captioned), true, 'a captioned rule is still the foot of the box');
+    assert.equal(promptOnScreen({ screen: captioned }, TYPED_SCREEN), false, 'and a captionless frame is another shape');
+  });
+
+  it('refuses a nested prompt of another height that ends on the same rule as the one outside it', () => {
+    assert.equal(promptOnScreen({ screen: SCREEN }, NESTED), false, 'the inner frame is not the frame the card was posted for');
+    assert.equal(promptOnScreen({ screen: NESTED }, SCREEN), false, 'and the outer frame is not the inner one either');
   });
 });
 
 /** A prompt session with a stand-in inbox and terminal, so a race can be run in the order a test picks. */
-function fakeSession(): {
+function fakeSession(options: { duringAck?: () => Promise<void>; gatePostAfter?: number } = {}): {
   session: () => PromptSession;
   screen(screen: string): void;
   posted: Card[];
   closes: { id: string; kind: string; outcome: string }[];
   keys: string[];
   herdr: Herdr;
+  openPost(): void;
 } {
   let screen = SCREEN;
   const posted: Card[] = [];
   const closes: { id: string; kind: string; outcome: string }[] = [];
   const keys: string[] = [];
+  let posts = 0;
+  // The gate stays open once the test opens it, so a post that reaches it later does not wait for ever.
+  let open = false;
+  let release: (() => void) | undefined;
   const inbox = {
     post: async (card: NewCard) => {
+      if (options.gatePostAfter !== undefined && ++posts > options.gatePostAfter) {
+        await new Promise<void>((r) => {
+          release = r;
+          if (open) r();
+        });
+      }
       const made = { ...card, id: card.id ?? 'prompt-x', version: 1, createdAt: 1 } as Card;
       posted.push(made);
       return made;
     },
     close: async (id: string, kind: string, outcome: string) => { closes.push({ id, kind, outcome }); },
-    ack: async () => {},
+    ack: async () => { await options.duringAck?.(); },
   };
   const herdr: Herdr = async (...args) => {
     if (args[0] === 'pane' && args[1] === 'read') return screen;
@@ -97,6 +189,7 @@ function fakeSession(): {
     closes,
     keys,
     herdr,
+    openPost: () => { open = true; release?.(); },
   };
 }
 
@@ -131,8 +224,74 @@ describe('two answers on one prompt card', () => {
     const card = s.posted[0]!;
     await Promise.all([cards.answered(card, answer('SQLite')), cards.answered(card, answer('SQLite'))]);
     assert.deepEqual(s.keys.filter((k) => k !== 'enter'), ['SQLite'], 'one keystroke carries the answer');
-    const outcomes = s.closes.map((c) => c.outcome);
-    assert.equal(outcomes.filter((o) => /already being typed/.test(o)).length, 1, 'the second answer is refused with its reason');
-    assert.equal(outcomes.filter((o) => /^Typed your answer/.test(o)).length, 1, 'the first answer closes the card');
+    assert.deepEqual(s.closes.map((c) => [c.id, c.outcome]), [[card.id, 'Typed your answer in its session.']], 'the card closes once, with the answer that reached the pane');
+  });
+});
+
+describe('the close that follows the typed answer', () => {
+  it('closes the span the answer was typed for, and leaves the prompt that follows alone', async () => {
+    const s = fakeSession();
+    const cards = createPromptCards(s.session, s.herdr, 20);
+    await cards.started({ kind: 'select', title: 'Pick a database' });
+    const card = s.posted[0]!;
+    // The terminal takes the answer during the settle, and the same prompt comes back on the same card before the
+    // extension gets to close anything.
+    const typing = cards.answered(card, answer('SQLite'));
+    await cards.ended();
+    // Another title, so the prompt that follows gets a card of its own and the close below names the one it belongs to.
+    await cards.started({ kind: 'select', title: 'Pick a server' });
+    await typing;
+    assert.deepEqual(s.closes.map((c) => [c.id, c.kind]), [[card.id, 'answered-in-terminal']], 'only the span that was answered closes');
+    assert.deepEqual(s.keys, ['SQLite'], 'the prompt that follows takes no Enter');
+  });
+});
+
+describe('a prompt that ends during the acknowledgement', () => {
+  it('takes no Enter and closes no other card, because the span it belonged to has ended', async () => {
+    let cards: ReturnType<typeof createPromptCards> | undefined;
+    const s = fakeSession({ duringAck: async () => { await cards!.ended(); } });
+    cards = createPromptCards(s.session, s.herdr, 0);
+    await cards.started({ kind: 'select', title: 'Pick a database' });
+    const card = s.posted[0]!;
+    await cards.answered(card, answer('SQLite'));
+    assert.deepEqual(s.keys, ['SQLite'], 'a prompt that ended inside the acknowledgement takes no Enter');
+    assert.deepEqual(s.closes.map((c) => [c.id, c.kind]), [[card.id, 'resolved']], 'the card of the span that ended still reports the answer it took');
+  });
+});
+
+describe('a prompt that comes back while its own card is still posting', () => {
+  it('keeps that card, since the span that comes back is the one waiting', async () => {
+    let cards: ReturnType<typeof createPromptCards> | undefined;
+    // The span ends during the acknowledgement, and the same prompt comes back on the same card id, with its post
+    // still in flight while the answer path looks for a card the later span has not been given yet.
+    let later: Promise<void> | undefined;
+    const s = fakeSession({
+      gatePostAfter: 1,
+      duringAck: async () => {
+        await cards!.ended();
+        later = cards!.started({ kind: 'select', title: 'Pick a database' });
+      },
+    });
+    cards = createPromptCards(s.session, s.herdr, 0);
+    await cards.started({ kind: 'select', title: 'Pick a database' });
+    const card = s.posted[0]!;
+    await cards.answered(card, answer('SQLite'));
+    // The gated post resumes in a microtask once the gate opens, so the span that came back has to finish first.
+    s.openPost();
+    await later;
+    assert.deepEqual(s.keys, ['SQLite'], 'the prompt that came back takes no Enter');
+    assert.deepEqual(s.closes, [], 'the card the later span adopted stays open for it');
+  });
+});
+
+describe('a prompt whose card the inbox refuses', () => {
+  it('settles the start with the reason on stderr, so no promise waits for a card that never comes', async () => {
+    const inbox = {
+      post: () => { throw new Error('the inbox closed'); },
+      close: async () => {},
+      ack: async () => {},
+    };
+    const cards = createPromptCards(() => ({ inbox: inbox as never, agent: 'pi:s1', origin: { herdrPane: 'w7:p1' } }), async () => SCREEN, 0);
+    await cards.started({ kind: 'custom' });
   });
 });
