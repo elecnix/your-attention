@@ -24,6 +24,17 @@ const TYPED_SCREEN = [
   '╰──────────────────────────╯',
 ].join('\n');
 
+/** A nested prompt of another height that ends on the same rule as the box outside it, which pi folds into the same
+ * span: its last row matches the outer frame, and the rows above it do not. */
+const NESTED = [
+  '╭──────────────────────────╮',
+  '│ Pick a database          │',
+  '╰──────────────────────────╯',
+  '╭──────────────────────────╮',
+  '│ Confirm the migration?   │',
+  '╰──────────────────────────╯',
+].join('\n');
+
 /** The box the answered prompt left behind, with the output of the agent that resumed under it. */
 const LEFT_BEHIND = `${SCREEN}\nRunning the migration…\nWrote 3 files.`;
 
@@ -65,6 +76,11 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({ screen: SCREEN }, 'Running the migration…\nWrote 3 files.'), false, 'a working agent draws no frame');
     assert.equal(promptOnScreen({ screen: SCREEN }, LEFT_BEHIND), false, 'an agent that resumed writes its output below the frame it left behind');
     assert.equal(promptOnScreen({}, SCREEN), false, 'a prompt with no title and no screen to compare gets no key');
+  });
+
+  it('refuses a nested prompt of another height that ends on the same rule as the one outside it', () => {
+    assert.equal(promptOnScreen({ screen: SCREEN }, NESTED), false, 'the inner frame is not the frame the card was posted for');
+    assert.equal(promptOnScreen({ screen: NESTED }, SCREEN), false, 'and the outer frame is not the inner one either');
   });
 });
 

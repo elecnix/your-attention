@@ -108,17 +108,34 @@ function closingRule(screen: string): string {
   return /[─━═]/.test(foot) && !/[A-Za-z0-9]/.test(foot) ? foot : '';
 }
 
+const TOP_CORNER = /[\u256d\u250c\u2554]/;
+
+/** The shape of the frame that ends a screen: every row from its top corner to the closing rule, reduced to the marks
+ * it draws. Text typed into the box leaves the shape alone, so an answer still finds its prompt, while a box of
+ * another height, width or set of corners has a shape of its own. Comparing every row is what keeps a nested prompt
+ * from passing for the one outside it: pi folds the two spans into one, so the inner frame can replace the outer. */
+function frameShape(screen: string): string[] {
+  const rows = screen.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim());
+  let top = -1;
+  rows.forEach((l, i) => {
+    if (TOP_CORNER.test(l)) top = i;
+  });
+  return top < 0 ? [] : rows.slice(top).map((l) => l.replace(/[\p{L}\p{N}\s]/gu, ''));
+}
+
 /** Whether the prompt a card was posted for still waits on the screen just read. pi gives a title for every widget
  * except a custom screen, and a changed prompt loses that title; a prompt with no title has only the frame it draws,
- * and a screen whose last row is that frame's closing rule is the only screen it draws. A frame that stays painted
- * above an agent's new output is a prompt that ended. */
+ * and the screen it draws ends on that frame. A frame that stays painted above an agent's new output is a prompt
+ * that ended, and a frame of another shape is another prompt. */
 export function promptOnScreen(prompt: { title?: string; screen?: string }, raw: string): boolean {
   const now = trimScreen(raw);
   if (!now) return false;
   const title = prompt.title?.trim();
   if (title) return now.includes(title);
-  const then = closingRule(prompt.screen ?? '');
-  return then !== '' && closingRule(now) === then;
+  if (closingRule(now) === '') return false;
+  const then = frameShape(prompt.screen ?? '');
+  const drawn = frameShape(now);
+  return then.length > 0 && drawn.length === then.length && then.every((row, i) => row === drawn[i]);
 }
 
 /** Why no key goes out, when the screen no longer shows the prompt the card was posted for. */
