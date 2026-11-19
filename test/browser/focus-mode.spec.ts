@@ -238,3 +238,27 @@ test('in focus mode, a list inside a list item takes no cap of its own, since th
   expect(cap).toBeCloseTo(72 * await chWidth(page), 0);
   await expect(page.locator('.focus-card .card-text li ul')).toHaveCSS('max-width', 'none');
 });
+
+test('in focus mode, the closing note and the unsent draft of a closed card keep the 72ch line of the text around them', async ({ page }) => {
+  const long = (what: string) => `${what}, long enough to run past a 72ch line when the column gives it room to. `.repeat(3).trim();
+  await post('fm-draft', 'A card to dismiss with a draft', { priority: 'now', text: 'A card the person dismisses.' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('A card to dismiss with a draft');
+  await page.locator('.focus-card').getByPlaceholder('Anything to add?').fill(long('A draft the person typed'));
+  await page.locator('.focus-card .openui-buttons').getByRole('button', { name: 'Dismiss without telling the agent' }).click();
+  await page.locator('nav.queue .q.dim', { hasText: 'A card to dismiss with a draft' }).click();
+  await expect(page.locator('.dismiss-draft')).toContainText('A draft the person typed');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  const ch = await chWidth(page);
+  expect((await box(page, '.dismiss-draft-body')).width).toBeLessThanOrEqual(72 * ch + 1);
+  await page.keyboard.press('ControlOrMeta+.');
+
+  await post('fm-note', 'A card its agent closes', { priority: 'now', text: 'A card the agent closes.' });
+  await page.locator('.q', { hasText: 'A card its agent closes' }).click();
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await inbox.agent.close('fm-note', 'resolved', long('A closing note from the agent'));
+  await expect(page.locator('.closed-line .o')).toContainText('A closing note from the agent');
+  expect((await box(page, '.closed-line .o')).width).toBeLessThanOrEqual(72 * ch + 1);
+});

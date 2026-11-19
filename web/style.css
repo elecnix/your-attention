@@ -120,6 +120,8 @@
      classes would raise the cap above the reset below, and nested lists would stay capped. */
   body.focus-mode .focus-card :is(p, ul, ol, blockquote) { max-width: var(--focus-prose); }
   body.focus-mode .focus-card .turn .ans { max-width: var(--focus-prose); }
+  /* A closed card's note and your unsent draft are plain text too, in boxes as wide as the column. */
+  body.focus-mode .closed-line .o, body.focus-mode .dismiss-draft-body { max-width: var(--focus-prose); }
   body.focus-mode .focus-card :is(li, td, th, label) :is(p, ul, ol, blockquote) { max-width: none; }
   @media (max-width: 900px) { body.focus-mode .meta { padding-right: 44px; } }
   body.focus-mode .meta .focus-toggle { position: fixed; top: 12px; right: 16px; z-index: 10; background: var(--panel); }
