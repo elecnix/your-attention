@@ -30,6 +30,14 @@ const toggle = (page: Page) => page.locator('.focus-card .focus-toggle');
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
 const pageY = (page: Page) => page.evaluate(() => window.scrollY);
 const queueY = (page: Page) => page.locator('.queue').evaluate((el) => el.scrollTop);
+/** The width of 1ch in the card's text, in pixels. */
+const chWidth = (page: Page) => page.locator('.focus-card .card-text').first().evaluate((el) => {
+  const probe = el.appendChild(document.createElement('div'));
+  probe.style.width = '100ch';
+  const width = probe.getBoundingClientRect().width / 100;
+  probe.remove();
+  return width;
+});
 
 /** Only the open card shows: no bar, no queue, no border to resize it, and the card spans the viewport. */
 async function expectFullScreen(page: Page) {
@@ -67,11 +75,15 @@ test('focus mode fills the screen with the card, counts arrivals without a notif
   await page.keyboard.press('ControlOrMeta+.');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
   await expectFullScreen(page);
-  // The text keeps a reading width, centered in the card.
+  // The content sits in a column at the center, 108ch wide, and paragraphs keep a 72ch line.
   const width = page.viewportSize()!.width;
   const title = await box(page, '.focus-card .card-title');
-  expect(title.width).toBeLessThan(900);
+  const ch = await chWidth(page);
+  expect(title.width).toBeCloseTo(108 * ch, 0);
   expect(Math.abs(title.x - (width - title.x - title.width))).toBeLessThan(2);
+  const paragraph = await box(page, '.focus-card .card-text p');
+  expect(paragraph.width).toBeCloseTo(72 * ch, 0);
+  expect(paragraph.x).toBeCloseTo(title.x, 0);
   // The button sits at the card's top right, and stays on screen at the end of the card.
   const corner = await box(page, '.focus-card .focus-toggle');
   expect(width - corner.x - corner.width).toBeLessThan(24);
@@ -167,4 +179,31 @@ test('on a phone, focus mode fills the screen too, and leaving it scrolls back t
   await toggle(page).click();
   await expect(page.locator('.to-queue')).toHaveText('2 waiting · show the queue');
   await expect.poll(() => pageY(page)).toBe(600);
+});
+
+const WIDE = `A paragraph above the table, long enough to wrap: ${'the column gives tables room while prose keeps the line length that reads well, '.repeat(4)}\n\n`
+  + `| ${Array.from({ length: 8 }, (_, i) => `Column ${i + 1}`).join(' | ')} |\n|${' --- |'.repeat(8)}\n`
+  + `| ${Array.from({ length: 8 }, (_, i) => `value-${i + 1}-with-a-long-name`).join(' | ')} |`;
+
+test('the focus column is half again as wide as a paragraph, so a wide table gets the room and the text keeps its line length', async ({ page }) => {
+  await post('fm-wide', 'A card with a wide table', { text: WIDE, priority: 'now' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('A card with a wide table');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  const ch = await chWidth(page);
+  const title = await box(page, '.focus-card .card-title');
+  const table = await box(page, '.focus-card .card-text table');
+  const paragraph = await box(page, '.focus-card .card-text p');
+  expect(title.width).toBeCloseTo(108 * ch, 0);
+  expect(table.width).toBeGreaterThan(72 * ch + 10);
+  expect(table.width).toBeLessThanOrEqual(title.width + 1);
+  expect(paragraph.width).toBeCloseTo(72 * ch, 0);
+
+  // On a phone the column is the screen less its 16px gutters.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrow = await box(page, '.focus-card .card-title');
+  expect(narrow.x).toBeCloseTo(16, 0);
+  expect(narrow.width).toBeCloseTo(390 - 32, 0);
+  expect((await box(page, '.focus-card .card-text p')).width).toBeCloseTo(390 - 32, 0);
 });
