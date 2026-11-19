@@ -136,6 +136,20 @@ test('an older Notify me that is on stays on and can be turned off where push is
   await expect(page.locator('.notify-why')).toHaveText('needs an https address');
 });
 
+test('turning the switch off removes the device even after the browser started blocking notifications', async ({ page }) => {
+  await stubBrowserPush(page, await newPhone());
+  await inbox.open(page);
+  const toggle = page.getByRole('switch', { name: 'Notify me' });
+  await toggle.click();
+  await expect.poll(() => inbox.server.inbox.pushCount()).toBe(1);
+  await page.evaluate(() => { (window.Notification as unknown as { permission: string }).permission = 'denied'; });
+  // A new card makes the page draw again, with the browser now blocking notifications.
+  await inbox.agent.post({ agent: 'push-agent', title: 'Redraw the page' });
+  await expect(page.locator('.notify-why')).toHaveText('the browser blocks notifications');
+  await toggle.click();
+  await expect.poll(() => inbox.server.inbox.pushCount()).toBe(0);
+});
+
 test('a device the push service forgot is removed, and the page saves it again when it opens', async ({ page }) => {
   const phone = await newPhone();
   await stubBrowserPush(page, phone);

@@ -302,6 +302,20 @@ describe('a push waits for triage, and goes once', () => {
     assert.equal(sent.length, 0, 'the person already had this card');
   });
 
+  it('does not push a card stored before pushes existed when a hook that connects later passes it', async () => {
+    const { inbox, owner, agent, sent, settle, store } = setup();
+    inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Seen days ago' });
+    const stored = store.get<Record<string, unknown>>('cards', 'old')!;
+    delete stored['pushed'];
+    store.put('cards', 'old', stored);
+    inbox.savePush(owner, await device('a'));
+    const calls: { id: string }[] = [];
+    inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'], timeoutMs: 5000 }, (e) => calls.push(e as { id: string }));
+    inbox.hookVerdict(ext, calls[0]!.id, 'pass', '');
+    await settle();
+    assert.equal(sent.length, 0, 'the person already had this card');
+  });
+
   it('never pushes a card the hook sends back', async () => {
     const { inbox, agent, sent, settle, calls } = await screened();
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'Sent back' });

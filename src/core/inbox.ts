@@ -861,7 +861,7 @@ export class Inbox {
         if (t?.state === 'pending' && t.request && t.deadline && t.waiting?.includes(name)) {
           // A call this extension missed while it reconnected.
           send({ type: 'hook', version: HOOK_VERSION, id: t.request, hook: 'card.created', card: publicCard(card), deadline: t.deadline, person: this.person() });
-        } else if (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length)) this.requestTriage(card);
+        } else if (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length)) this.requestTriage(card, true);
       }
     }
     return () => { if (this.extensions.get(name) === entry) this.extensions.delete(name); };
@@ -880,7 +880,9 @@ export class Inbox {
     return { name, hooks: hooks as HookName[], policy, timeoutMs };
   }
 
-  private requestTriage(card: Card): Card {
+  /** `rescreen` is for a card the person already had, which a hook that connects later screens again. It is not new, so it never pushes. */
+  private requestTriage(card: Card, rescreen = false): Card {
+    if (rescreen && !card.pushed && hadReached(card)) card = { ...card, pushed: true };
     const targets = [...this.extensions.values()].filter((e) => e.reg.hooks.includes('card.created'));
     const now = this.now();
     if (!targets.length) {

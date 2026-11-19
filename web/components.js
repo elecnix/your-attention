@@ -843,7 +843,8 @@ export function NotifyToggle({ collapsed = new Set() } = {}) {
       store.set('notify:on', false);
       store.set(PUSH_KEY, false);
       setOn(false);
-      if (push) await disablePush({ base: BASE, api }).catch(() => {});
+      // Whatever the page can do now, a device it saved earlier must go: disablePush finds the browser's subscription itself.
+      await disablePush({ base: BASE, api }).catch(() => {});
       return;
     }
     setBusy(true);
