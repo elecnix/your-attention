@@ -32,6 +32,12 @@ describe('your-attention open --link', () => {
       assert.equal((await login()).ok, false);
       const byCode = await fetch(`${info.url}/v1/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: typed[1] }) });
       assert.equal(byCode.status, 401);
+      // A fresh code, typed as printed with its dash, signs in, so the 401 above comes from the used link.
+      const again = spawnSync(process.execPath, [...CLI, 'open', '--link'], { env, encoding: 'utf8' });
+      const fresh = /type this code on the sign-in page: (\S+)$/m.exec(again.stdout);
+      assert.ok(fresh, again.stdout);
+      const typedFresh = await fetch(`${info.url}/v1/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: fresh[1] }) });
+      assert.equal(typedFresh.status, 200);
       serve.kill();
       await until(async () => (await fetch(`${info.url}/v1/info`).then(() => false, () => true)) || undefined);
       const down = spawnSync(process.execPath, [...CLI, 'open', '--link'], { env, encoding: 'utf8' });
