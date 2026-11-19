@@ -108,6 +108,13 @@ describe('the VAPID key', () => {
     assert.notEqual(await new Inbox(new MemoryStorage()).pushKey(), key, 'each inbox has its own');
   });
 
+  it('is made once even when two Inbox objects over the same storage ask at the same moment', async () => {
+    const store = new MemoryStorage();
+    const [a, b] = await Promise.all([new Inbox(store).pushKey(), new Inbox(store).pushKey()]);
+    assert.equal(a, b, 'the second to finish uses the key the first stored');
+    assert.equal(await new Inbox(store).pushKey(), a);
+  });
+
   it('is made once even when two requests ask at the same moment', async () => {
     const inbox = new Inbox(new MemoryStorage());
     const [a, b] = await Promise.all([inbox.pushKey(), inbox.pushKey()]);

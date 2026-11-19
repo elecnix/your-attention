@@ -1041,6 +1041,9 @@ export class Inbox {
       const kept = this.store.get<Vapid>('meta', 'vapid');
       if (kept) return kept;
       const made = await generateVapid();
+      // Another object over the same storage may have stored a key while this one generated. Read again, with no await before the write.
+      const raced = this.store.get<Vapid>('meta', 'vapid');
+      if (raced) return raced;
       this.store.put('meta', 'vapid', made);
       return made;
     })().catch((e: unknown) => { this.vapid = undefined; throw e; });
