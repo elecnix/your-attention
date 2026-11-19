@@ -105,16 +105,21 @@ export function typedAnswer(answer: Answer): string {
 function closingRule(screen: string): string {
   const rows = screen.split('\n').filter((l) => l.trim());
   const foot = rows[rows.length - 1] ?? '';
-  // A corner on each end says the row is the bottom of a box, whatever words a caption puts between them. A row with
-  // no corner at either end is an agent's output that happens to carry a rule, and that is no frame.
-  const ruled = /[─━═\u2500-\u257f]/.test(foot);
-  return ruled && (FOOT_LEFT.test(foot) || FOOT_RIGHT.test(foot)) ? foot : '';
+  // A corner at each end says the row is the bottom of a box, whatever words a caption puts between them. A rule row
+  // with no corner is one too, while an agent's output that carries words and a single corner is no frame.
+  const ruled = /[\u2500-\u257f]/.test(foot);
+  const corners = FOOT_LEFT.test(foot) && FOOT_RIGHT.test(foot);
+  return ruled && (corners || !/[A-Za-z0-9]/.test(foot)) ? foot : '';
 }
 
 const FOOT_LEFT = /^\s*[\u2514\u2515\u2516\u2517\u2558\u2559\u255a\u255b\u2570\u2569]/;
 const FOOT_RIGHT = /[\u2518\u2519\u251a\u251b\u255c\u255d\u255e\u255f\u256c\u256f]\s*$/;
 
 const TOP_CORNER = /^\s*[\u250c-\u250f\u2552-\u2554\u256d]/;
+
+/** The marks that draw a horizontal line, whichever weight or dash a box uses. A border row carries one of them at its
+ * left edge, while a body row carries a side there. */
+const HORIZONTAL = /[\u2500\u2501\u2504\u2505\u2508\u2509\u254c\u254d\u254e\u254f\u2550]/;
 
 /** The shape of the frame that ends a screen: the border rows from its top corner down, reduced to the box drawing
  * characters at their two ends. Text typed into the box leaves the shape alone, whatever it contains and however many
@@ -137,7 +142,7 @@ function frameShape(screen: string): { marks: string[]; rows: number } {
     // A box can sit at any indent, so its left edge is read past the spaces in front of it.
     const lead = /^[\u2500-\u257f]+/.exec(row.trimStart())?.[0] ?? '';
     const trail = /[\u2500-\u257f]+$/.exec(row)?.[0] ?? '';
-    if (/[\u2500\u2501\u2550]/.test(lead)) marks.push(`${lead}|${trail}`);
+    if (HORIZONTAL.test(lead)) marks.push(`${lead}|${trail}`);
   }
   return { marks, rows: rows.length - top };
 }

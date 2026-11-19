@@ -101,6 +101,12 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({ screen: SCREEN }, heavy), false, 'and stays apart from the light one');
   });
 
+  it('reads a frame drawn with dashed horizontals, and refuses an output row with one corner', () => {
+    const dashed = ['╭╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮', '│ Pick a database          │', '╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯'].join('\n');
+    assert.equal(promptOnScreen({ screen: dashed }, dashed), true, 'a dashed frame matches its own shape');
+    assert.equal(promptOnScreen({ screen: SCREEN }, `${SCREEN}\n╰── wrote 3 files`), false, 'a line with one corner and words is output, not a foot');
+  });
+
   it('keeps the top border when an answer carries a corner glyph of its own', () => {
     assert.equal(
       promptOnScreen({ screen: SCREEN }, TYPED_SCREEN.replace('SQLite SQLite', '┌ pick this ╭ one')),
