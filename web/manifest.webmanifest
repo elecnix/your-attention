@@ -1,0 +1,14 @@
+{
+  "name": "Your Attention",
+  "short_name": "Attention",
+  "description": "One inbox for the questions your coding agents ask you.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#141413",
+  "theme_color": "#3b4cca",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

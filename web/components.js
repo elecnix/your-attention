@@ -1,5 +1,6 @@
 // The parts of the page, each one renderable alone, as the stories do.
-import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, notifyOn, store, time } from './env.js';
+import { BASE, CLOSED_LABEL, ICONS, Icon, J, PUSH_KEY, api, h, store, time } from './env.js';
+import { disablePush, enablePush, isIos, pushSupport } from './push.js';
 import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
@@ -794,18 +795,83 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
       error && h('div', { className: 'note warn' }, error)));
 }
 
-export function NotifyToggle() {
-  const [on, setOn] = React.useState(notifyOn());
-  if (!('Notification' in window)) return null;
+// What each reason for a greyed-out switch means, in words for someone new to this.
+const NOTIFY_HELP = {
+  'needs an https address': 'Notifications on a phone or in a closed browser need a secure address that starts with https. Use the hosted inbox, or serve this inbox through an https relay.',
+  'add this page to your Home Screen first': 'An iPhone sends notifications only to a page on its Home Screen. In Safari tap Share, then Add to Home Screen, open Your Attention from there, and turn this on.',
+  'the browser blocks notifications': 'This browser blocks notifications for this page. Allow them in the browser\'s site settings, then reload.',
+  'this browser cannot show notifications': 'This browser has no notifications that a page can use.',
+};
+
+// The Notify me switch. With a secure page and a browser that has push, the inbox sends each new card to this device even when
+// the page is closed. Where push is impossible the switch stays, greyed out, with the reason beside it.
+export function NotifyToggle({ collapsed = new Set() } = {}) {
+  const [on, setOn] = React.useState(store.get('notify:on') === true);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const hasNotification = 'Notification' in window;
+  const support = pushSupport({
+    secure: window.isSecureContext === true,
+    ios: isIos(navigator.userAgent, navigator.maxTouchPoints),
+    standalone: (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true,
+    hasPush: 'serviceWorker' in navigator && 'PushManager' in window,
+    hasNotification,
+    permission: hasNotification ? Notification.permission : 'default',
+  });
+  const push = support.ok && support.mode === 'push';
+  const active = on && support.ok;
+  // A switch that is already on stays usable where push is now impossible, so the person can turn the old notifications off.
+  const locked = !support.ok && !on;
+  const groups = [...collapsed].sort().join('\n');
+  // A page that opens with the switch on makes sure the inbox still has this device, and tells it which groups this device
+  // collapsed, so a card in a muted group raises no push. A device the inbox dropped, such as after its token was revoked, is saved again.
+  React.useEffect(() => {
+    // Only a device that already turned push on: a page from before push keeps its old notifications until the person flips the switch.
+    if (!active || !push || store.get(PUSH_KEY) !== true) return;
+    let stale = false;
+    enablePush({ base: BASE, collapsed, api }).then(() => {
+      // The person may have switched it off while this ran. The device the call just saved must then go again.
+      if (store.get('notify:on') !== true) return disablePush({ base: BASE, api });
+      store.set(PUSH_KEY, true);
+      if (!stale) setError('');
+    }, (e) => { if (!stale) setError(e.message); });
+    return () => { stale = true; };
+  }, [active, push, groups]);
   async function toggle() {
-    if (on) { store.set('notify:on', false); return setOn(false); }
-    const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
-    store.set('notify:on', perm === 'granted');
-    setOn(perm === 'granted');
+    setError('');
+    if (on) {
+      store.set('notify:on', false);
+      store.set(PUSH_KEY, false);
+      setOn(false);
+      // Whatever the page can do now, a device it saved earlier must go: disablePush finds the browser's subscription itself.
+      // The switch waits meanwhile, so turning it on again cannot start before this finishes.
+      setBusy(true);
+      try { await disablePush({ base: BASE, api }); } catch { /* the inbox or the browser did not answer */ } finally { setBusy(false); }
+      return;
+    }
+    setBusy(true);
+    try {
+      if (push) {
+        await enablePush({ base: BASE, collapsed, api });
+        store.set(PUSH_KEY, true);
+      } else {
+        const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+        if (perm !== 'granted') throw new Error('the browser blocks notifications');
+      }
+      store.set('notify:on', true);
+      setOn(true);
+    } catch (e) {
+      setError(e && e.message ? e.message : 'Notifications did not turn on.');
+    } finally {
+      setBusy(false);
+    }
   }
-  const blocked = Notification.permission === 'denied';
-  return h('label', { className: 'notify', title: blocked ? 'The browser blocks notifications for this page' : 'Show a browser notification for new cards' },
-    h('input', { type: 'checkbox', role: 'switch', checked: on, disabled: blocked, onChange: toggle }), 'Notify me');
+  const why = support.ok ? error : support.reason;
+  const tip = support.ok ? (push ? 'Get a notification for each new card, even when this page is closed' : 'Show a browser notification for new cards while this page is open') : NOTIFY_HELP[support.reason] || support.reason;
+  return h('label', { className: `notify${locked ? ' off' : ''}`, title: tip },
+    h('input', { type: 'checkbox', role: 'switch', checked: on, disabled: locked || busy, onChange: toggle, 'aria-describedby': why ? 'notify-why' : undefined }),
+    'Notify me',
+    why && h('span', { id: 'notify-why', className: 'notify-why' }, why));
 }
 
 // The usage counts of this inbox: GET /v1/telemetry, and PUT to change them. Null where the inbox sends none.

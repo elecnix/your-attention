@@ -56,8 +56,11 @@ export function report(fields) {
 document.addEventListener('visibilitychange', () => report({ visible: document.visibilityState === 'visible', active: true }));
 for (const ev of ['keydown', 'pointerdown', 'scroll']) window.addEventListener(ev, () => report({ active: true }), { passive: true });
 
-// Browser notifications, only after you turn them on.
-export const notifyOn = () => store.get('notify:on') === true && 'Notification' in window && Notification.permission === 'granted';
+// Browser notifications while the page is open, only after you turn them on. Once this device gets pushes, the service
+// worker shows each new card, so the page shows none of its own: one card never notifies twice.
+// The hosted service serves every inbox on one origin, so the push flag carries the inbox's own address, as the unlock token does.
+export const PUSH_KEY = `notify:push:${BASE}`;
+export const notifyOn = () => store.get('notify:on') === true && store.get(PUSH_KEY) !== true && 'Notification' in window && Notification.permission === 'granted';
 export function notify(title, body) {
   if (!notifyOn()) return;
   try { new Notification(title, { body, tag: `card:${body}` }); } catch {}

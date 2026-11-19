@@ -664,6 +664,49 @@ To stop, the agent posts `system: {type: "unsubscribe"}` with its agent id and g
 
 `your-attention subscribe --agent cli:deploy --webhook URL --header-file FILE` posts the request and prints `{id, status, card, secret}`. `--webhook-file FILE` reads the address from a file instead, for an address with a secret in its path. Each line of the file, or of stdin with `--header-file -`, is one `NAME: VALUE` header, and `--header 'NAME: VALUE'` adds one from the command line. A secret belongs in the file, since `ps` shows the arguments to every user of the machine. `your-attention unsubscribe --agent cli:deploy` stops it. `your-attention status` lists each webhook with its agent, its host, whether the person approved it, and its last failure. It prints the host and the header names without their values, because the address and the header values can contain a secret.
 
+## Web Push
+
+The inbox pushes each new card to the owner's devices, so a phone gets a notification while the page is closed. It follows RFC 8030 (the protocol), RFC 8291 (message encryption, `aes128gcm`) and RFC 8292 (VAPID). `src/core/webpush.ts` encrypts and signs with Web Crypto, so one file runs on Node 22 and in Workers. The other choice was a library, but `web-push` needs `node:crypto`, which Workers lack, and the two RFCs take about 150 lines.
+
+**Key.** An inbox makes one VAPID key pair, P-256, on the first `GET /v1/push`. It stores the pair in `meta` under `vapid`, beside its tokens. The private half stays in storage. It never appears in a route reply or a log, and the repository contains none. A browser ties its subscription to the public key. A subscription made for another key, such as one from before a reset, stops working, and the page subscribes again.
+
+**Routes.** The owner calls all three. An agent token or an extension gets 403.
+
+- `GET /v1/push` returns `{publicKey}`, the 65-byte public point in base64url. The page passes it to `pushManager.subscribe` as `applicationServerKey`.
+- `PUT /v1/push` saves a device. The body is the browser's `PushSubscription.toJSON()`, plus the group ids from its collapsed groups: `{endpoint, keys: {p256dh, auth}, collapsed?}`. The `endpoint` is an https address of at most 2048 characters. The `p256dh` key is 65 bytes and `auth` is 16 bytes, both in base64url. `collapsed` lists at most 100 group ids. The endpoint identifies the device, so a second `PUT` with the same endpoint replaces the first. An inbox keeps at most 20 devices, and a new one past that gets 400. The answer is `{ok: true}`.
+- `DELETE /v1/push` with `{endpoint}` removes the device. Removing a device that is already gone is not an error.
+
+The `pushes` collection stores each device with the id of the owner token that saved it. Revoking that token removes its devices, so a signed-out phone stops getting titles.
+
+**Which cards push.** A card pushes to every device once, when it first reaches the person. A card posted while no triage hook is connected reaches the person at once. A card a `card.created` hook screens reaches the person when the hook passes it, when the owner releases it, or when the hook runs out of time and the card goes through. A card the hook sends back or holds does not push before that. Since a card pushes once, a revision never pushes it again. The one exception is a card that triage sent back before the person had it: it pushes when a revision first passes. The rule matches the open page's rule for the Notification API. A card in a collapsed group of the device does not push, except at the highest priority level, so muting a group never hides an urgent card. The rule is `notifies` in `web/queue.js`, shared by the page and both servers, and it reads the inbox's Group by and pins. Each device sends its collapsed group ids with `PUT /v1/push` when they change. A device with none collapsed skips the rule, and a revision of a card that already pushed never pushes again. The inbox's own cards, such as a pairing request, push like any other. Their priority is the highest level. Focus mode belongs to one tab, which the inbox cannot see, so pushes keep coming while a tab focuses.
+
+**Message.** The plaintext is JSON with two fields, `{id, title}`: the card id, and the title cut to 100 characters with `…`. The text, the options, the agent and the tags stay in the inbox. The inbox encrypts the message to the device's `p256dh` and `auth` secret, with a fresh salt and one-time key each time. The push service cannot read it. The request is `POST <endpoint>` with `Content-Encoding: aes128gcm`, `TTL: 86400`, `Urgency: high` and `Authorization: vapid t=<ES256 token>, k=<public key>`. The token's `aud` is the endpoint's origin, `exp` is 12 hours away, and `sub` is the project's public address, which says nothing about the owner.
+
+**Delivery.** The post answers at once, and the push runs on in the background. A failed push never changes, delays or fails a card.
+
+- A 201 ends the try.
+- A 404 or 410 says the push service forgot the device, and the inbox deletes it.
+- A 429, a 5xx or a network error gets a retry after 0.5 seconds and another after 1.5 seconds, three tries in all, each limited to 8 seconds.
+- Any other status ends the try and leaves the device saved.
+
+The inbox records nothing about a failed push, so the next card tries again. The laptop inbox lets the push run as a plain promise. The Durable Object hands it to `ctx.waitUntil` through the set of deliveries that webhooks use.
+
+**Page.** The page serves these files from its own path, so the worker's scope is the inbox's address: `/` on a laptop, and `/i/<inbox id>/` on a hosted inbox or behind a relay.
+
+- `sw.js` is the service worker. On `push` it shows a notification titled "A card is waiting for you", with the card's title as its text and the tag `card:<id>`. A push it cannot read still shows the title alone, since a browser requires a notification for each push. On a click it closes the notification, then focuses an open page of the inbox and moves it to `#card=<id>`, or else opens a window at that address. It does not cache anything or answer any request.
+- `manifest.webmanifest` sets `display: standalone`, a `start_url` and `scope` of `./`, and the icons `icon-192.png` and `icon-512.png`. `apple-touch-icon.png` is the iPhone's Home Screen icon, and `icon.svg` is the source of all three. An iPhone delivers push only to a page on its Home Screen, from iOS 16.4.
+
+The **Notify me** switch stays on the page and picks its state in this order:
+
+1. A page that is not a secure context, which means plain http other than a loopback address such as `localhost`, `127.0.0.1` or `[::1]`, shows the switch greyed out with "needs an https address".
+2. An iPhone or iPad page outside an installed app shows "add this page to your Home Screen first".
+3. A browser with neither push nor the Notification API shows "this browser cannot show notifications".
+4. A denied permission shows "the browser blocks notifications".
+
+A switch that is already on stays usable in each of these states, so the person can turn it off. Where push is missing but the Notification API works, the switch keeps its older job, and the page notifies while it is open. Everywhere else, the first tap on the switch requests permission, registers the worker and subscribes the browser. The page then sends `PUT /v1/push`. Turning it off sends `DELETE /v1/push` and unsubscribes. A page that opens with push already on sends `PUT /v1/push` again with the groups it collapsed, so an inbox that dropped the device learns it back. A page that had the older switch on keeps its older notifications until the person flips the switch, so an upgrade never starts sending titles to a push service on its own. While a device gets pushes, the page does not raise a notification of its own, so a card notifies once. That includes the notification that ends focus mode, which the push already replaced.
+
+The laptop inbox serves its page over plain http, so a phone on the local network cannot turn push on. Over an https relay, or at a loopback address, it can. The inbox sends each push from the laptop, which must reach the push service.
+
 ## Pages
 
 `GET /v1/state` returns `{cards, answers, presence, states, priorities, levels, settings, guidance}`. `cards` has one summary for each card except the cleared ones, enough for the queue, the levels, presence and the answer states:
@@ -757,6 +800,7 @@ With `MODE` set to `single`, the Worker serves one inbox, whose owner token is t
 - The operator manages invites with `wrangler kv key put invite:<code> <uses> --binding INVITES --remote`. Codes need 20 characters or more, such as the 128 random bits of `openssl rand -hex 16`, and the Worker refuses a shorter one before any lookup.
 - An address is 20 random hex digits and 12 hex digits of an HMAC over them, keyed by the `INBOX_ID_SECRET` secret. The Worker checks the HMAC, so a guessed address costs no KV read and reaches no Durable Object. Changing the secret makes every address invalid.
 - Each inbox's sign-in cookie has the path `/i/<id>/`, so signing in to one inbox leaves another one's cookie alone.
+- Each inbox keeps its own VAPID key and push devices in its Durable Object, and the Worker serves the service worker, manifest and icons under `/i/<id>/` like the rest of the page. [Web Push](#web-push) says what pushes. A push runs under `ctx.waitUntil`, so a slow push service never delays the card, and it costs a request to the push service for each device.
 
 The Worker counts each request before it reaches a Durable Object, with two Workers rate limiting bindings, and answers 429 past them. `LIMITER` counts signed-in calls per inbox and client address, 300 a minute. `ANON_LIMITER` counts calls without a token per client address, 100 a minute, including `POST /new`. So a stranger without a token can't use up the owner's budget. Both limits are approximate, since Cloudflare counts per location. The hard limits are the budgets each inbox applies itself:
 

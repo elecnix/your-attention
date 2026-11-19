@@ -4,7 +4,7 @@ import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
 import { Approvals, AgentPin, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
-import { after, agentName, buildQueue, SECTION_ID } from './queue.js';
+import { after, agentName, buildQueue, notifies, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
 import { arrivals, notifiable, readFocusMode, releaseNotice } from './focus.js';
@@ -121,12 +121,10 @@ export function App() {
       if (added.length) {
         setFresh((f) => ({ ...f, ...Object.fromEntries(added.map((c) => [c.id, true])) }));
         // A card that arrives in a collapsed group raises no notification, unless it is at the highest level:
-        // muting a group must never hide an urgent card.
-        const q = buildQueue(s, groupBy, pins, collapsedGroups);
-        const top = (s.levels || [])[0];
+        // muting a group must never hide an urgent card. The inbox applies the same rule to each push.
         // Focus mode raises none: when it ends, one notification names every card that arrived meanwhile.
         if (!focusModeRef.current) added.forEach((c) => {
-          if (q.hidden.has(c.id) && (!top || q.levelOf(c) !== top.id)) return;
+          if (!notifies(s, c, collapsedGroups, groupBy, pins)) return;
           notify(c.kind === 'blocked' ? 'An agent is blocked' : 'An agent asked you something', c.title);
         });
       }
@@ -744,7 +742,7 @@ export function App() {
           if (back && back.isConnected && back !== document.body) back.focus(); else e.currentTarget.blur();
         },
       }),
-      h(NotifyToggle),
+      h(NotifyToggle, { collapsed: collapsedGroups }),
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable')),
       h(DevicesLink),
       h(PhoneLink),

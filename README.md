@@ -221,6 +221,34 @@ A cloud inbox works from anywhere, and a laptop inbox from a phone on the same n
 
 If the phone cannot open the inbox, check for a VPN on the laptop. A VPN that sends your home network's IPv4 traffic into its tunnel breaks every connection from the phone to the laptop over IPv4. The inbox still answers over IPv6, which most home networks and phones use. Otherwise, exclude your home network from the VPN, or use a cloud inbox.
 
+## Phone notifications
+
+Your phone can buzz when an agent posts a card, even with the page closed. This is Web Push. It works on an https address only, so the inbox page must come from one of these:
+
+- the hosted inbox, which is https already;
+- a laptop inbox behind an https relay: `your-attention serve --relay https://relay.example`, as in step 5;
+- the laptop itself, at `http://localhost`, for notifications on the same computer.
+
+A laptop inbox opened over plain http, such as `http://my-laptop.local:4815` from a phone, cannot send them. Its **Notify me** switch stays greyed out and says "needs an https address".
+
+**Android, or a computer:**
+
+1. Open the https inbox in Chrome, Edge, Firefox or Safari, signed in.
+2. Turn on **Notify me**, and allow notifications when the browser asks.
+
+**iPhone or iPad** (iOS 16.4 or newer):
+
+1. Open the https inbox in Safari.
+2. Tap Share, then **Add to Home Screen**.
+3. Open Your Attention from the new Home Screen icon, not from Safari. If it shows the sign-in steps, scan the phone QR code from a signed-in page, as in step 6.
+4. Turn on **Notify me**, and tap Allow.
+
+Before step 3, the switch on an iPhone is grey and says "add this page to your Home Screen first". If you tap Don't Allow, it says "the browser blocks notifications". Change that in the phone's Settings.
+
+The notification shows the card's title, and a tap opens the inbox on that card. The inbox encrypts the title for your device before it sends it. The push service of your browser maker (Apple, Google or Mozilla) carries the message and cannot read it, but it sees that your inbox messaged your device, and when. A PIN does not hide the title on a locked phone screen, so turn **Notify me** off on a phone you share.
+
+The rules match the page's own notifications. A card in a group you collapsed does not push, unless its priority is the highest level. Each device keeps its own switch. Turn it off to stop that device, or sign the device out under the devices button. The inbox drops a device that the push service forgot. Open the page with the switch on, and it saves the device again.
+
 ## Day to day
 
 Answer cards on the inbox page. Each answer reaches its agent within a second, or when its session resumes.

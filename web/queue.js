@@ -100,6 +100,16 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   return { byId, st, levelOf, label, waiting, pending, systems, checking, pinned, outbox, sent, tagKeys, dealt, groups, groupOf, hidden, order };
 }
 
+/** Whether a card that just arrived raises a notification. A card in a collapsed group raises none, unless it is at the highest
+ * level: muting a group must never hide an urgent card. The page decides this for the Notification API, and the inbox for
+ * each device it pushes to, so both follow one rule. `groupBy` and `pins` default to the inbox's settings. */
+export function notifies(state, card, collapsed = new Set(), groupBy = (state.settings || {}).groupBy || 'none', pins = (state.settings || {}).pins || []) {
+  if (!collapsed.size) return true;
+  const q = buildQueue(state, groupBy, pins, collapsed);
+  const top = (state.levels || [])[0];
+  return !q.hidden.has(card.id) || (!!top && q.levelOf(card) === top.id);
+}
+
 /** The card after `id` in queue order, wrapping around at the end. */
 export function after(order, id) {
   const i = order.findIndex((c) => c.id === id);

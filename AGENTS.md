@@ -90,7 +90,7 @@ flowchart TB
     ET["extension-token: extension"]
   end
   subgraph INBOX["inbox: laptop server, or hosted Durable Object at /i/inbox-id/"]
-    DB[("SHA-256 of each token, SHA-256 of the PIN key, PIN salt, sign-in codes, pairings, answer webhook headers and signing secrets")]
+    DB[("SHA-256 of each token, SHA-256 of the PIN key, PIN salt, sign-in codes, pairings, answer webhook headers and signing secrets, the VAPID private key, and the push subscriptions of the owner's devices")]
   end
   subgraph WORKER["hosted Worker"]
     KV[("invite codes, uses left")]
@@ -143,6 +143,7 @@ flowchart TB
 - The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. The new tab opens the file at the address of a folder ticket, and that address is the credential, since a sandboxed page loads its assets without the cookie. A ticket for an HTML file opens the files in its folder and below, except hidden ones, and never a symlink that leaves the folder. It ends when its card is cleared, and with a PIN, when the unlock of the tab that asked for it ends. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
 - The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. When the inbox has a PIN, the new tab opens the file only with a ticket that an unlocked tab asked for, which works once within 60 seconds. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
 - An agent's answer webhook gets nothing until the person approves it on its system card. The inbox keeps the header values the agent gave, and sends them only to that webhook, never to a client or a page. The signing secret goes to the agent once.
+- The inbox makes its own VAPID key pair for Web Push and keeps the private half in its storage, never in a route, a log or the repository. Each push device belongs to the owner token that saved it, and revoking the token removes it. A push contains only the card's title and id, encrypted for the device, so the service that relays it cannot read it.
 - An invite code is the operator's secret. The hosted inbox keeps only its invite id, the first 16 hex digits of the code's SHA-256, for usage counts.
 
 ## Commands
