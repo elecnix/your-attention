@@ -24,15 +24,15 @@ const TYPED_SCREEN = [
   '╰──────────────────────────╯',
 ].join('\n');
 
-/** A nested prompt of another height that ends on the same rule as the box outside it, which pi folds into the same
- * span: its last row matches the outer frame, and the rows above it do not. */
+/** A nested prompt drawn at the outer frame's width and one row shorter, which pi folds into the same span: every
+ * border row of it matches the outer frame except the top one, and the last row matches. */
 const NESTED = [
   '╭──────────────────────────╮',
   '│ Pick a database          │',
   '╰──────────────────────────╯',
-  '╭───────────────────╮',
-  '│ Confirm?          │',
-  '╰───────────────────╯',
+  '╭──────────────────────────╮',
+  '│ Confirm?                 │',
+  '╰──────────────────────────╯',
 ].join('\n');
 
 /** The box the answered prompt left behind, with the output of the agent that resumed under it. */
