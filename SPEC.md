@@ -698,14 +698,14 @@ The inbox records nothing about a failed push, so the next card tries again. The
 
 The **Notify me** switch stays on the page and picks its state in this order:
 
-1. A page that is not a secure context, which means plain http other than `localhost` and `127.0.0.1`, shows the switch greyed out with "needs an https address".
+1. A page that is not a secure context, which means plain http other than a loopback address such as `localhost`, `127.0.0.1` or `[::1]`, shows the switch greyed out with "needs an https address".
 2. An iPhone or iPad page outside an installed app shows "add this page to your Home Screen first".
 3. A browser with neither push nor the Notification API shows "this browser cannot show notifications".
 4. A denied permission shows "the browser blocks notifications".
 
 Where push is missing but the Notification API works, the switch keeps its older job, and the page notifies while it is open. Everywhere else, the first tap on the switch requests permission, registers the worker and subscribes the browser. The page then sends `PUT /v1/push`. Turning it off sends `DELETE /v1/push` and unsubscribes. A page that opens with push already on sends `PUT /v1/push` again with the groups it collapsed, so an inbox that dropped the device learns it back. A page that had the older switch on keeps its older notifications until the person flips the switch, so an upgrade never starts sending titles to a push service on its own. While a device gets pushes, the page does not raise a notification of its own, so a card notifies once.
 
-The laptop inbox serves its page over plain http, so a phone on the local network cannot turn push on. Over an https relay, or at `localhost` or `127.0.0.1`, it can. The inbox sends each push from the laptop, which must reach the push service.
+The laptop inbox serves its page over plain http, so a phone on the local network cannot turn push on. Over an https relay, or at a loopback address, it can. The inbox sends each push from the laptop, which must reach the push service.
 
 ## Pages
 
