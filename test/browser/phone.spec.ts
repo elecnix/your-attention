@@ -251,6 +251,9 @@ test.describe('the sign-in link and code in the phone dialog', () => {
     await inbox.open(page);
     const dialog = await openDialog(page, 'Open this inbox on your phone');
     await expect(dialog.locator('.signin-code')).toHaveText(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/);
+    // Bold and monospace, so each character reads clearly from across a desk.
+    await expect(dialog.locator('.signin-code')).toHaveCSS('font-weight', '600');
+    await expect(dialog.locator('.signin-code')).toHaveCSS('font-family', /mono|Menlo|Courier|Code/i);
   });
 
   test('a new code replaces the old one while the dialog stays open, and the copy follows it', async ({ page, context }) => {

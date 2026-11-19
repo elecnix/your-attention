@@ -191,9 +191,10 @@ async function signInLink(): Promise<{ link: string; short?: string }> {
   if (!res) fail(local ? 'No inbox runs on this machine. Start one with `your-attention start`.' : `The inbox this machine paired with, ${target.url}, did not answer.`);
   // An agent token cannot sign a browser in: only the owner's can.
   if (res.status === 403 && !local) fail(notOwnerAdvice(target.url));
-  const { code, short, error } = (await res.json().catch(() => ({}))) as { code?: string; short?: string; error?: string };
+  const { code, short, error } = (await res.json().catch(() => ({}))) as { code?: string; short?: unknown; error?: string };
   if (!res.ok || !code) fail(`Could not make a sign-in code: ${error ?? res.status}`);
-  return { link: `${target.url}/#signin=${encodeURIComponent(code)}`, ...(short ? { short } : {}) };
+  // An inbox from before short codes answers without one, so the command prints the link alone.
+  return { link: `${target.url}/#signin=${encodeURIComponent(code)}`, ...(typeof short === 'string' && short.length === 8 ? { short } : {}) };
 }
 
 /** The inbox the PIN commands change: the one this machine runs, or else the one this machine paired with as owner. */

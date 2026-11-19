@@ -6,7 +6,12 @@ export function readSignIn(text) {
   const s = String(text ?? '').trim();
   if (!s) return null;
   const m = /[#&](signin|token)=([^&\s]+)/.exec(s);
-  if (m) return m[1] === 'token' ? { token: decodeURIComponent(m[2]) } : { code: decodeURIComponent(m[2]) };
+  if (m) {
+    // A broken escape, from a link cut short, stays as typed, and the inbox refuses it in its own words.
+    let value = m[2];
+    try { value = decodeURIComponent(value); } catch {}
+    return m[1] === 'token' ? { token: value } : { code: value };
+  }
   return { code: s };
 }
 

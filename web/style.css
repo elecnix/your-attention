@@ -410,7 +410,7 @@
   .qr svg { width: min(260px, 100%); height: auto; aspect-ratio: 1; border-radius: 8px; }
   .qr-address { font-family: var(--font-code); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
   .signin-code-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 4px 12px; margin: 0 0 10px; text-align: center; }
-  .qr-dialog .signin-code { font: 600 calc(24px * var(--text-scale))/1.2 var(--font-code); letter-spacing: .12em !important; user-select: all; }
+  .qr-dialog .signin-code { font: 600 calc(24px * var(--text-scale))/1.2 var(--font-code); letter-spacing: .12em !important; font-weight: 600 !important; user-select: all; }
   /* The dialog scrolls on a short screen, and its buttons stay at its bottom edge, in reach. */
   .qr-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin: 12px -20px -20px; padding: 12px 20px 20px; position: sticky; bottom: -20px; background: var(--panel); border-top: 1px solid var(--line); }
   .to-queue { display: none; }

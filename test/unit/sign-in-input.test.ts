@@ -18,6 +18,10 @@ describe('the sign-in field', () => {
     assert.deepEqual(readSignIn(' 0123456789abcdef0123456789abcdef '), { code: '0123456789abcdef0123456789abcdef' });
   });
 
+  it('keeps a code with a broken percent escape as typed, so the inbox refuses it with its own words', () => {
+    assert.deepEqual(readSignIn('https://inbox.example/#signin=abc%E'), { code: 'abc%E' });
+  });
+
   it('takes nothing from an empty field', () => {
     assert.equal(readSignIn('   '), null);
   });
