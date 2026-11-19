@@ -262,3 +262,15 @@ test('in focus mode, the closing note and the unsent draft of a closed card keep
   await expect(page.locator('.closed-line .o')).toContainText('A closing note from the agent');
   expect((await box(page, '.closed-line .o')).width).toBeLessThanOrEqual(72 * ch + 1);
 });
+
+test('in focus mode, an agent reply keeps the 72ch line, since its text reads as paragraphs', async ({ page }) => {
+  const reply = 'A reply from the agent, long enough to run past a 72ch line when the column gives it room to. '.repeat(3).trim();
+  await post('fm-reply', 'A card with a reply', { priority: 'now', text: 'A card the agent replied to.' });
+  inbox.seedReplies('fm-reply', [reply]);
+  await inbox.open(page);
+  await expect(page.locator('.reply-msg')).toContainText('A reply from the agent');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  const ch = await chWidth(page);
+  expect((await box(page, '.reply-msg p')).width).toBeLessThanOrEqual(72 * ch + 1);
+});
