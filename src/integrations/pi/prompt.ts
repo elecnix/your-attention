@@ -108,7 +108,7 @@ function closingRule(screen: string): string {
   return /[─━═]/.test(foot) && !/[A-Za-z0-9]/.test(foot) ? foot : '';
 }
 
-const TOP_CORNER = /[\u256d\u250c\u2554\u250f\u2552\u2553]/;
+const TOP_CORNER = /[\u250c-\u250f\u2552-\u2554\u256d]/;
 
 /** The shape of the frame that ends a screen: every row from its top corner to the closing rule, reduced to the box
  * drawing characters it draws and nothing else. Text typed into the box leaves the shape alone, whatever it contains,
@@ -312,7 +312,8 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       // prompt that ended inside that window takes an Enter it no longer needs. A later span that holds this card keeps
       // it, and any other card closes, since the answer did reach the pane of the span it belongs to.
       if (span !== open) {
-        if (span?.card?.id === card.id) return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
+        // A span knows its id before its post returns, so the id, not the card, is what says a later span took this one.
+        if (span?.id === card.id) return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
         await to.close(card.id, 'resolved', 'Typed your answer in its session.').catch(() => {});
         return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
       }

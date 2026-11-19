@@ -83,6 +83,13 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({}, SCREEN), false, 'a prompt with no title and no screen to compare gets no key');
   });
 
+  it('recognises every top corner a box can start with, not only the light one', () => {
+    for (const [top, side, foot] of [['┌', '│', '└'], ['┍', '│', '┕'], ['┎', '┃', '┖']]) {
+      const box = [`${top}──────────────────────────┐`, `${side} Pick a database          ${side}`, `${foot}──────────────────────────┘`].join('\n');
+      assert.equal(promptOnScreen({ screen: box }, box), true, `a frame that starts with ${top} matches its own shape`);
+    }
+  });
+
   it('recognises a frame drawn with heavy corners, which the closing rule already accepts', () => {
     const heavy = ['┏━━━━━━━━━━━━━━━━━━━━━━━━━┓', '┃ Pick a database          ┃', '┗━━━━━━━━━━━━━━━━━━━━━━━━━┛'].join('\n');
     assert.equal(promptOnScreen({ screen: heavy }, heavy), true, 'a heavy frame matches its own shape');
@@ -96,20 +103,26 @@ describe('whether the prompt still waits on the screen', () => {
 });
 
 /** A prompt session with a stand-in inbox and terminal, so a race can be run in the order a test picks. */
-function fakeSession(options: { duringAck?: () => Promise<void> } = {}): {
+function fakeSession(options: { duringAck?: () => Promise<void>; gatePostAfter?: number } = {}): {
   session: () => PromptSession;
   screen(screen: string): void;
   posted: Card[];
   closes: { id: string; kind: string; outcome: string }[];
   keys: string[];
   herdr: Herdr;
+  openPost(): void;
 } {
   let screen = SCREEN;
   const posted: Card[] = [];
   const closes: { id: string; kind: string; outcome: string }[] = [];
   const keys: string[] = [];
+  let posts = 0;
+  let release: (() => void) | undefined;
   const inbox = {
     post: async (card: NewCard) => {
+      if (options.gatePostAfter !== undefined && ++posts > options.gatePostAfter) {
+        await new Promise<void>((r) => { release = r; });
+      }
       const made = { ...card, id: card.id ?? 'prompt-x', version: 1, createdAt: 1 } as Card;
       posted.push(made);
       return made;
@@ -129,6 +142,7 @@ function fakeSession(options: { duringAck?: () => Promise<void> } = {}): {
     closes,
     keys,
     herdr,
+    openPost: () => release?.(),
   };
 }
 
@@ -194,6 +208,28 @@ describe('a prompt that ends during the acknowledgement', () => {
     await cards.answered(card, answer('SQLite'));
     assert.deepEqual(s.keys, ['SQLite'], 'a prompt that ended inside the acknowledgement takes no Enter');
     assert.deepEqual(s.closes.map((c) => [c.id, c.kind]), [[card.id, 'resolved']], 'the card of the span that ended still reports the answer it took');
+  });
+});
+
+describe('a prompt that comes back while its own card is still posting', () => {
+  it('keeps that card, since the span that comes back is the one waiting', async () => {
+    let cards: ReturnType<typeof createPromptCards> | undefined;
+    // The span ends during the acknowledgement, and the same prompt comes back on the same card id, with its post
+    // still in flight while the answer path looks for a card the later span has not been given yet.
+    const s = fakeSession({
+      gatePostAfter: 1,
+      duringAck: async () => {
+        await cards!.ended();
+        void cards!.started({ kind: 'select', title: 'Pick a database' });
+      },
+    });
+    cards = createPromptCards(s.session, s.herdr, 0);
+    await cards.started({ kind: 'select', title: 'Pick a database' });
+    const card = s.posted[0]!;
+    await cards.answered(card, answer('SQLite'));
+    s.openPost();
+    assert.deepEqual(s.keys, ['SQLite'], 'the prompt that came back takes no Enter');
+    assert.deepEqual(s.closes, [], 'the card the later span adopted stays open for it');
   });
 });
 
