@@ -1,7 +1,7 @@
 // The page on a phone, and the QR code that brings the inbox there.
 import { chromium, devices, expect, test, type Page } from '@playwright/test';
 import * as jsqr from 'jsqr';
-import { startInbox, type TestInbox } from './inbox.ts';
+import { openDialog, startInbox, type TestInbox } from './inbox.ts';
 
 // jsQR is a CommonJS package; its function is the default export, once or twice wrapped depending on the loader.
 type Decode = (data: Uint8ClampedArray, width: number, height: number) => { data: string } | null;
@@ -40,8 +40,9 @@ test('the phone button shows a QR code of the inbox address with a one-time sign
   await phone.click();
   const dialog = page.getByRole('dialog', { name: 'Open this inbox on your phone' });
   await expect(dialog).toBeVisible();
-  expect(await readQr(page)).toMatch(new RegExp(`^${inbox.server.url}/#signin=[0-9a-f]{32}$`));
-  await expect(dialog.locator('.qr-address')).toHaveText(`${inbox.server.url}/`);
+  const scanned = await readQr(page);
+  expect(scanned).toMatch(new RegExp(`^${inbox.server.url}/#signin=[0-9a-f]{32}$`));
+  await expect(dialog.locator('.qr-address')).toHaveText(scanned!);
   // The test inbox listens on 127.0.0.1, which a phone cannot reach.
   await expect(dialog).toContainText('a phone cannot open it');
   await page.keyboard.press('Escape');
@@ -166,8 +167,9 @@ test('on a laptop inbox, the code opens the computer\'s network name, which the 
   await inbox.open(page);
   await page.getByRole('button', { name: 'Open this inbox on your phone' }).click();
   const dialog = page.getByRole('dialog', { name: 'Open this inbox on your phone' });
-  expect(await readQr(page)).toMatch(/^http:\/\/example-mac\.local:4815\/#signin=[0-9a-f]{32}$/);
-  await expect(dialog.locator('.qr-address')).toHaveText('http://example-mac.local:4815/');
+  const scanned = await readQr(page);
+  expect(scanned).toMatch(/^http:\/\/example-mac\.local:4815\/#signin=[0-9a-f]{32}$/);
+  await expect(dialog.locator('.qr-address')).toHaveText(scanned!);
   await expect(dialog).toContainText('192.168.1.20');
   await expect(dialog).not.toContainText('a phone cannot open it');
 });
@@ -220,4 +222,127 @@ test('the sign-in page of a cloud inbox says the address alone does not sign in,
   } finally {
     await cloud.close();
   }
+});
+
+/** What the page put on the clipboard. */
+const clipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText());
+
+test.describe('the sign-in link and code in the phone dialog', () => {
+  // Each opening of the dialog makes a code, and an owner holds five at a time, so these tests share an inbox of their own.
+  let inbox: TestInbox;
+  test.beforeAll(async () => { inbox = await startInbox(); });
+  test.afterAll(async () => { await inbox.close(); });
+
+  test('the copy button copies the sign-in link the QR code encodes, code included, and the plain address on request', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await inbox.open(page);
+    const dialog = await openDialog(page, 'Open this inbox on your phone');
+    const scanned = await readQr(page);
+    expect(scanned).toContain('#signin=');
+    await dialog.getByRole('button', { name: 'Copy the sign-in link' }).click();
+    await expect(dialog.getByRole('button', { name: 'Copied the sign-in link' })).toBeVisible();
+    expect(await clipboard(page)).toBe(scanned);
+    await expect(dialog).toContainText('signs one device in, once, within five minutes');
+    await dialog.getByRole('button', { name: 'Copy the address only' }).click();
+    expect(await clipboard(page)).toBe(`${inbox.server.url}/`);
+  });
+
+  test('the dialog shows a short code to type, grouped, with no character that reads as another', async ({ page }) => {
+    await inbox.open(page);
+    const dialog = await openDialog(page, 'Open this inbox on your phone');
+    await expect(dialog.locator('.signin-code')).toHaveText(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/);
+  });
+
+  test('a new code replaces the old one while the dialog stays open, and the copy follows it', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.clock.install();
+    await inbox.open(page);
+    const dialog = await openDialog(page, 'Open this inbox on your phone');
+    const first = await readQr(page);
+    const firstShort = await dialog.locator('.signin-code').textContent();
+    await dialog.getByRole('button', { name: 'Copy the sign-in link' }).click();
+    expect(await clipboard(page)).toBe(first);
+    // The dialog asks for a new code 30 seconds before the five minutes end.
+    await page.clock.fastForward('04:31');
+    await expect.poll(() => readQr(page)).not.toBe(first);
+    const second = await readQr(page);
+    await expect(dialog.locator('.qr-address')).toHaveText(second!);
+    await expect(dialog.locator('.signin-code')).not.toHaveText(firstShort!);
+    // A copy from before the change no longer shows as copied.
+    await expect(dialog.getByRole('button', { name: 'Copy the sign-in link' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Copy the sign-in link' }).click();
+    expect(await clipboard(page)).toBe(second);
+  });
+
+  test('without a sign-in code, the dialog says so and copies the address', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.route('**/v1/sign-in-codes', (route) => route.fulfill({ status: 500, json: { error: 'internal error' } }));
+    await inbox.open(page);
+    const dialog = await openDialog(page, 'Open this inbox on your phone');
+    await expect(dialog).toContainText('no sign-in code');
+    await expect(dialog.locator('.signin-code')).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Copy the address' }).click();
+    expect(await clipboard(page)).toBe(`${inbox.server.url}/`);
+  });
+
+});
+
+test.describe('the sign-in field, for a device with no address bar', () => {
+  let inbox: TestInbox;
+  test.beforeAll(async () => { inbox = await startInbox(); });
+  test.afterAll(async () => { await inbox.close(); });
+
+  test('a typed short code signs the device in, and a used one is refused', async ({ page, browser }) => {
+    await inbox.agent.post({ id: 'typed-1', agent: 'typed', title: 'Seen after typing the code', priority: 'now' });
+    await inbox.open(page);
+    const dialog = await openDialog(page, 'Open this inbox on your phone');
+    const short = (await dialog.locator('.signin-code').textContent())!;
+    const phone = await browser.newContext();
+    const p = await phone.newPage();
+    await p.goto(`${inbox.server.url}/`);
+    await p.getByLabel('Sign-in code or link').fill(short.toLowerCase());
+    await p.getByRole('button', { name: 'Sign in' }).click();
+    await expect(p.getByText('Seen after typing the code').first()).toBeVisible();
+    const other = await browser.newContext();
+    const q = await other.newPage();
+    await q.goto(`${inbox.server.url}/`);
+    await q.getByLabel('Sign-in code or link').fill(short);
+    await q.getByRole('button', { name: 'Sign in' }).click();
+    await expect(q.getByRole('alert')).toContainText('not valid or has expired');
+    await phone.close();
+    await other.close();
+  });
+
+  test('a pasted sign-in link signs the device in', async ({ page, browser }) => {
+    await inbox.open(page);
+    await openDialog(page, 'Open this inbox on your phone');
+    const link = await readQr(page);
+    const phone = await browser.newContext();
+    const p = await phone.newPage();
+    await p.goto(`${inbox.server.url}/`);
+    await p.getByLabel('Sign-in code or link').fill(link!);
+    await p.getByRole('button', { name: 'Sign in' }).click();
+    await expect(p.getByRole('heading', { name: 'Sign in to your inbox' })).toBeHidden();
+    await expect(p.locator('.bar .pill.on')).toBeVisible();
+    await phone.close();
+  });
+
+  test('wrong codes stop being checked for a while, and the page says how to sign in meanwhile', async ({ browser }) => {
+    const own = await startInbox();
+    try {
+      const phone = await browser.newContext();
+      const p = await phone.newPage();
+      await p.goto(`${own.server.url}/`);
+      const field = p.getByLabel('Sign-in code or link');
+      for (let i = 0; i < 11; i++) {
+        await field.fill('ZZZZ-ZZZZ');
+        await p.getByRole('button', { name: 'Sign in' }).click();
+        await expect(p.getByRole('alert')).toHaveText(/\S/);
+      }
+      await expect(p.getByRole('alert')).toContainText('too many wrong sign-in codes');
+      await phone.close();
+    } finally {
+      await own.close();
+    }
+  });
 });

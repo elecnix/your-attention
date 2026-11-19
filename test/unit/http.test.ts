@@ -286,6 +286,21 @@ describe('signing a phone in', () => {
   });
 });
 
+describe('signing a device in with a typed code', () => {
+  it('takes the short code at POST /v1/login, and answers 429 with retry-after once wrong codes pile up', async () => {
+    const { call, owner } = await setup();
+    const { short } = (await (await call('POST', '/v1/sign-in-codes', { token: owner })).json()) as { short: string };
+    assert.match(short, /^[2-9A-HJKMNP-Z]{8}$/);
+    assert.equal((await call('POST', '/v1/login', { body: { code: `${short.slice(0, 4)}-${short.slice(4)}` } })).status, 200);
+    assert.equal((await call('POST', '/v1/login', { body: { code: short } })).status, 401, 'a used code');
+    let last: Response | undefined;
+    for (let i = 0; i < 11; i++) last = await call('POST', '/v1/login', { body: { code: 'ZZZZZZZZ' } });
+    assert.equal(last!.status, 429);
+    assert.ok(Number(last!.headers.get('retry-after')) > 0);
+    assert.match(((await last!.json()) as { error: string }).error, /try again in/);
+  });
+});
+
 describe('network addresses', () => {
   it('tells the owner where a phone on the network reaches the inbox, and nobody else', async () => {
     const inbox = new Inbox(new MemoryStorage());

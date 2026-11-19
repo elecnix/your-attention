@@ -763,7 +763,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     try {
       return await route(req);
     } catch (e) {
-      if (e instanceof InboxError) return json({ error: e.message }, e.status);
+      if (e instanceof InboxError) return json({ error: e.message }, e.status, e.retryAfter ? { 'retry-after': String(e.retryAfter) } : {});
       return json({ error: 'internal error' }, 500);
     }
   };
