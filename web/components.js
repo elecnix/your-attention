@@ -827,7 +827,12 @@ export function NotifyToggle({ collapsed = new Set() } = {}) {
     // Only a device that already turned push on: a page from before push keeps its old notifications until the person flips the switch.
     if (!active || !push || store.get(PUSH_KEY) !== true) return;
     let stale = false;
-    enablePush({ base: BASE, collapsed, api }).then(() => { store.set(PUSH_KEY, true); if (!stale) setError(''); }, (e) => { if (!stale) setError(e.message); });
+    enablePush({ base: BASE, collapsed, api }).then(() => {
+      // The person may have switched it off while this ran. The device the call just saved must then go again.
+      if (store.get('notify:on') !== true) return disablePush({ base: BASE, api });
+      store.set(PUSH_KEY, true);
+      if (!stale) setError('');
+    }, (e) => { if (!stale) setError(e.message); });
     return () => { stale = true; };
   }, [active, push, groups]);
   async function toggle() {
