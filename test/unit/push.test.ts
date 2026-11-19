@@ -290,6 +290,17 @@ describe('a push waits for triage, and goes once', () => {
     assert.equal(sent.length, 1, 'one card, one push');
   });
 
+  it('pushes once when the hook passes the card with advice, and keeps the advice on the card', async () => {
+    const { inbox, agent, sent, settle, calls, store } = await screened();
+    inbox.postCard(agent, { id: 'c2', agent: 's1', title: 'Screened with advice' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'pass', '', 'Say which branch.');
+    await settle();
+    assert.equal(sent.length, 1);
+    const stored = store.get<{ pushed?: boolean; pushback?: { kind: string; reason: string }[] }>('cards', 'c2')!;
+    assert.equal(stored.pushed, true);
+    assert.deepEqual(stored.pushback?.map((p) => [p.kind, p.reason]), [['advice', 'Say which branch.']]);
+  });
+
   it('does not push a revision of a card stored before pushes existed, which has no mark', async () => {
     const { inbox, owner, agent, sent, settle, store } = setup();
     inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Before the deploy' });

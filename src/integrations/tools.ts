@@ -165,7 +165,7 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_triage_feedback',
-    description: 'Say whether triage was right to push back on one of your cards. Use it after a triage extension sent your card back, and say what you thought of its reason: agree, disagree, or partly, with a comment and, for a reason that lists several findings, a verdict on each. The person reads it on the card and mines it to tune the triage gate, so a pushback you thought wrong is worth reporting most. It answers the latest pushback on the card, and a second call replaces the first. It does not revise the card: do that with card_patch or card_post.',
+    description: 'Say whether triage was right to push back on one of your cards. Use it after a triage extension sent your card back or passed it with advice, and say what you thought of its reason or advice: agree, disagree, or partly, with a comment and, for a reason that lists several findings, a verdict on each. The person reads it on the card and mines it to tune the triage gate, so a pushback you thought wrong is worth reporting most. It answers the latest pushback on the card, and a second call replaces the first. It does not revise the card: do that with card_patch or card_post.',
     schema: {
       type: 'object',
       properties: {

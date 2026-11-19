@@ -212,6 +212,8 @@ export const DEFAULT_GUIDANCE = [
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
+/** The longest reason or advice an extension's verdict keeps. One triage reason may list the findings of several checks. */
+export const MAX_HOOK_TEXT = 4000;
 export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_ANSWER_IMAGES = 10;
 /** How many card ids `unread` names before it only counts. A command line has a length. */
@@ -840,10 +842,15 @@ export class Inbox {
   /** Close a card as returned and tell its agent why. `extension` names the triage extension that sent it back. */
   private sendBack(card: Card, reason: string, by: string, extension?: string): Card {
     this.closeAs(card, 'returned', reason);
-    for (const [k, subs] of this.agents) {
-      if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send({ type: 'returned', id: randomId(6), card: publicCard(card), reason, by, ...(extension ? { extension } : {}) });
-    }
+    this.tellAgent(card, { type: 'returned', id: randomId(6), card: publicCard(card), reason, by, ...(extension ? { extension } : {}) });
     return this.getCard(card.id);
+  }
+
+  /** Send an event to the streams of the agent that posted `card`, with the token that posted it. */
+  private tellAgent(card: Card, ev: AgentEvent): void {
+    for (const [k, subs] of this.agents) {
+      if (k === this.key(card.token ?? '', card.agent)) for (const send of subs) send(ev);
+    }
   }
 
   // ---- extensions and hooks ----
@@ -903,31 +910,47 @@ export class Inbox {
     return next;
   }
 
-  /** An extension answers a card.created call. */
-  hookVerdict(caller: Caller, request: string, verdict: Verdict, reason: string): Card {
+  /** An extension answers a card.created call. A pass may carry advice, which goes to the card's agent. */
+  hookVerdict(caller: Caller, request: string, verdict: Verdict, reason: string, advice = ''): Card {
     const card = this.store.list<Card>('cards').find((c) => c.triage?.request === request);
     if (!card?.triage) throw new InboxError(404, 'unknown hook call');
     const ext = [...this.extensions.values()].find((e) => e.token === caller.token && card.triage?.waiting?.includes(e.reg.name));
     if (!ext) throw new InboxError(403, 'this hook call does not wait for this extension');
     if (!(HOOKS['card.created'].verdicts as readonly string[]).includes(verdict)) throw new InboxError(400, 'verdict must be pass, hold or return');
     if (card.triage.state !== 'pending') return card;
-    const clean = String(reason ?? '').slice(0, 1000);
+    const clean = String(reason ?? '').slice(0, MAX_HOOK_TEXT);
     const waiting = (card.triage.waiting ?? []).filter((n) => n !== ext.reg.name);
     const now = this.now();
     if (verdict === 'return') {
       const reason = clean || 'Triage sent the card back.';
       const pushback = [...(card.pushback ?? []), { kind: 'returned' as const, by: ext.reg.name, reason, version: card.version, at: now }].slice(-PUSHBACK_LIMIT);
-      this.store.put('cards', card.id, { ...card, pushback, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], at: now } });
+      this.store.put('cards', card.id, { ...card, pushback, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], advice: undefined, at: now } });
       return this.sendBack(card, reason, 'Triage', ext.reg.name);
     }
+    const tip = verdict === 'pass' ? String(advice ?? '').trim().slice(0, MAX_HOOK_TEXT) : '';
+    // Advice waits on the card until every extension has passed it, since another one may still hold it or send it back.
+    const { advice: waitingAdvice = [], ...rest } = card.triage;
+    const kept = [...waitingAdvice, ...(tip ? [{ by: ext.reg.name, text: tip }] : [])];
     const triage = verdict === 'hold'
-      ? { ...card.triage, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
-      : { ...card.triage, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, at: now };
-    const shown = triage.state === 'passed' ? this.reached({ ...card, triage }) : { card: { ...card, triage }, first: false };
-    this.store.put('cards', card.id, shown.card);
+      ? { ...rest, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
+      : { ...rest, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, ...(waiting.length && kept.length ? { advice: kept } : {}), at: now };
+    const shown = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? kept : []);
     this.emit({ type: 'change', card: card.id });
     if (shown.first) this.pushNew(shown.card);
     return shown.card;
+  }
+
+  /** Store a card that triage just decided on, and when it passed, mark it as reaching the person and give its agent the
+   * advice of each extension. Advice is pushback too, so the card keeps it beside a return's entries and the agent can
+   * give feedback on it. `first` says the card reached the person for the first time, so the caller pushes it. */
+  private passWithAdvice(card: Card, advice: { by: string; text: string }[]): { card: Card; first: boolean } {
+    const at = this.now();
+    const pushback = advice.length ? [...(card.pushback ?? []), ...advice.map((a) => ({ kind: 'advice' as const, by: a.by, reason: a.text, version: card.version, at }))].slice(-PUSHBACK_LIMIT) : card.pushback;
+    const withAdvice = { ...card, ...(pushback ? { pushback } : {}) };
+    const shown = card.triage?.state === 'passed' ? this.reached(withAdvice) : { card: withAdvice, first: false };
+    this.store.put('cards', card.id, shown.card);
+    for (const a of advice) this.tellAgent(card, { type: 'advice', id: randomId(6), card: publicCard(shown.card), advice: a.text, by: a.by });
+    return shown;
   }
 
   /** The agent that posted a card says whether triage was right to push back on it. The feedback answers the latest
@@ -2690,11 +2713,11 @@ export class Inbox {
       const t = card.triage;
       if (t?.state === 'pending' && t.deadline && t.deadline <= now) {
         const late = (t.waiting ?? []).join(', ') || 'triage';
+        const { advice = [], ...rest } = t;
         const triage = t.policy === 'fail-closed'
-          ? { ...t, state: 'held' as const, reason: `${late} did not answer in time, and its policy holds the card.`, waiting: [], at: now }
-          : { ...t, state: 'passed' as const, reason: `${late} did not answer in time, so the card went through.`, waiting: [], at: now };
-        const shown = triage.state === 'passed' ? this.reached({ ...card, triage }) : { card: { ...card, triage }, first: false };
-        this.store.put('cards', card.id, shown.card);
+          ? { ...rest, state: 'held' as const, reason: `${late} did not answer in time, and its policy holds the card.`, waiting: [], at: now }
+          : { ...rest, state: 'passed' as const, reason: `${late} did not answer in time, so the card went through.`, waiting: [], at: now };
+        const shown = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? advice : []);
         this.emit({ type: 'change', card: card.id });
         if (shown.first) this.pushNew(shown.card);
       }

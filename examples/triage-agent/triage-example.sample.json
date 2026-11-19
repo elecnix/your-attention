@@ -1,0 +1,24 @@
+{
+  "vale": ["vale"],
+  "classifier": ["pr-context-classifier", "-m", "openai/gpt-oss-120b"],
+  "valeTimeoutMs": 30000,
+  "classifierTimeoutMs": 150000,
+  "prVerdict": {
+    "command": ["/path/to/your/pr-verdict-command"],
+    "acceptVerdicts": ["ACCEPT"],
+    "timeoutMs": 300000
+  },
+  "policy": {
+    "valeErrors": "block",
+    "valeWarnings": "advise",
+    "classifierMissingContext": "block",
+    "classifierNames": "advise",
+    "prVerdictBlockBelow": 0.5
+  },
+  "maxReturns": 3,
+  "stateFile": "~/.local/state/your-attention/triage-example.json",
+  "knownNames": {
+    "Acme API": "the company's public REST service",
+    "Bolt": "the deploy tool that puts each service in production"
+  }
+}

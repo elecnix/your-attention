@@ -136,6 +136,8 @@ export interface Triage {
   request?: string;
   /** The extensions that have not answered yet. */
   waiting?: string[];
+  /** Advice from the extensions that passed the card, which the inbox gives the agent once every extension passed it. */
+  advice?: { by: string; text: string }[];
   at: number;
 }
 
@@ -518,6 +520,8 @@ export type AgentEvent =
   /** `by` names who sent the card back: triage, or the inbox page when it could not draw the card. `extension` names
    * the triage extension, and only a card it sent back takes feedback. */
   | { type: 'returned'; id: string; card: Card; reason: string; by?: string; extension?: string }
+  /** A triage extension passed this agent's card to the person, with advice for the agent. `by` names the extension. */
+  | { type: 'advice'; id: string; card: Card; advice: string; by: string }
   /** A card the person sent to this agent, as the panel in the page sends it. */
   | { type: 'card'; id: string; card: Card; sentAt: number };
 

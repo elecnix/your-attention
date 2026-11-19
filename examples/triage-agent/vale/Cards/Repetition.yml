@@ -1,0 +1,7 @@
+# A doubled word, such as "the the", is a typo the agent can fix.
+extends: repetition
+message: "'%s' appears twice in a row."
+level: error
+alpha: true
+tokens:
+  - '[^\s]+'
