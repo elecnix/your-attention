@@ -178,7 +178,7 @@ const COLUMN = 52;
 function listLine({ syntax, summary }: UsageLine): string {
   const [first = '', ...more] = summary.split('\n');
   const indent = ' '.repeat(COLUMN + 2);
-  const head = syntax.length > COLUMN ? `  ${syntax}\n${indent}${first}` : `  ${syntax.padEnd(COLUMN - 2)}  ${first}`;
+  const head = syntax.length > COLUMN - 2 ? `  ${syntax}\n${indent}${first}` : `  ${syntax.padEnd(COLUMN - 2)}  ${first}`;
   return [head, ...more.map((m) => indent + m)].join('\n');
 }
 

@@ -68,6 +68,8 @@ describe('a usage mistake', () => {
       [['offer', 'telnet', 'host'], 'your-attention offer: '],
       [['claude-hook', 'frob'], 'your-attention claude-hook: '],
       [['stop', 'extra'], 'your-attention stop: unexpected argument extra'],
+      [['telemetry', 'off', '--days=5'], 'your-attention telemetry: --days and --invites go with report'],
+      [['telemetry', 'off', '--days', '5'], 'your-attention telemetry: --days and --invites go with report'],
     ];
     await Promise.all(cases.map(async ([args, line]) => {
       const r = await runCli(env, ...args);

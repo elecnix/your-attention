@@ -733,10 +733,11 @@ switch (command) {
     await (await import('./integrations/herdr/blocked.ts')).main();
     break;
   case 'telemetry': {
-    const { values, positionals } = parseCommand(command, { args: rest, allowPositionals: true, options: { days: { type: 'string', default: '30' }, invites: { type: 'string' } } });
+    const { values, positionals } = parseCommand(command, { args: rest, allowPositionals: true, options: { days: { type: 'string' }, invites: { type: 'string' } } });
     const [sub, extra] = positionals;
     if (extra !== undefined) usageError(command, `unexpected argument ${extra}`);
-    if (sub !== 'report' && (rest.includes('--days') || values.invites !== undefined)) usageError(command, '--days and --invites go with report');
+    if (sub !== 'report' && (values.days !== undefined || values.invites !== undefined)) usageError(command, '--days and --invites go with report');
+    const days = values.days ?? '30';
     if (sub === 'report') {
       // For the operator of the hosted service. Invite codes stay in the file: the report prints the label beside each one.
       const account = process.env['CLOUDFLARE_ACCOUNT_ID'];
@@ -751,8 +752,8 @@ switch (command) {
           if (code && !code.startsWith('#')) labels.set(await inviteId(code), label.join(' ') || `line ${i + 1}`);
         }
       }
-      const rows = summarize(await queryUsage(account, token, Number(values.days)), labels);
-      if (!rows.length) { console.log(`No usage reports in the last ${values.days} days.`); break; }
+      const rows = summarize(await queryUsage(account, token, Number(days)), labels);
+      if (!rows.length) { console.log(`No usage reports in the last ${days} days.`); break; }
       const cols = ['invite', 'inboxes', 'days', 'cards', 'answers', 'pairings', 'pages', 'peakAgents', 'peakInstances', 'peakTokens', 'flag'] as const;
       const table = [cols.map(String), ...rows.map((r) => cols.map((c) => String(r[c])))];
       const widths = cols.map((_, i) => Math.max(...table.map((row) => (row[i] ?? '').length)));

@@ -26,6 +26,18 @@ describe('the usage table', () => {
     }
   });
 
+  it('starts every summary line in the list at the same column', () => {
+    const out = helpText('/home').split('\n');
+    for (const c of COMMANDS) {
+      for (const l of c.lines) {
+        for (const part of l.summary.split('\n')) {
+          const row = out.find((o) => o.endsWith(part));
+          assert.equal(row?.length, 54 + part.length, `${l.syntax}: ${part}`);
+        }
+      }
+    }
+  });
+
   it('reads parseArgs mistakes as one short line', () => {
     const problem = (args: string[], options: ParseArgsConfig['options'] = {}) => {
       try { parseArgs({ args, options }); return undefined; } catch (e) { return parseProblem(e); }
