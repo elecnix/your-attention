@@ -30,9 +30,9 @@ const NESTED = [
   '╭──────────────────────────╮',
   '│ Pick a database          │',
   '╰──────────────────────────╯',
-  '╭──────────────────────────╮',
-  '│ Confirm the migration?   │',
-  '╰──────────────────────────╯',
+  '╭───────────────────╮',
+  '│ Confirm?          │',
+  '╰───────────────────╯',
 ].join('\n');
 
 /** The box the answered prompt left behind, with the output of the agent that resumed under it. */
@@ -107,6 +107,17 @@ describe('whether the prompt still waits on the screen', () => {
       true,
       'a corner inside the box is text, not the top of another frame',
     );
+  });
+
+  it('finds the frame when an answer wraps to a second line inside the box', () => {
+    const grown = [
+      '╭──────────────────────────╮',
+      '│ Pick a database          │',
+      '│ ❯ SQLite                 │',
+      '│   and Postgres           │',
+      '╰──────────────────────────╯',
+    ].join('\n');
+    assert.equal(promptOnScreen({ screen: SCREEN }, grown), true, 'a taller box keeps the same borders, so the Enter goes out');
   });
 
   it('closes on a rule that carries a caption between its corners', () => {

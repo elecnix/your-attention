@@ -116,25 +116,29 @@ const FOOT_RIGHT = /[\u2518\u2519\u251a\u251b\u255c\u255d\u255e\u255f\u256c\u256
 
 const TOP_CORNER = /^\s*[\u250c-\u250f\u2552-\u2554\u256d]/;
 
-/** The shape of the frame that ends a screen: every row from its top corner to the closing rule, reduced to the box
- * drawing characters it draws and nothing else. Text typed into the box leaves the shape alone, whatever it contains,
- * so an answer still finds its prompt, while a box of another height, width or set of corners has a shape of its own. Comparing every row is what keeps a nested prompt
- * from passing for the one outside it: pi folds the two spans into one, so the inner frame can replace the outer. */
-function frameShape(screen: string): string[] {
+/** The shape of the frame that ends a screen: the border rows from its top corner down, reduced to the box drawing
+ * characters at their two ends. Text typed into the box leaves the shape alone, whatever it contains and however many
+ * rows it takes, so an answer still finds its prompt, while a box of another width or set of corners has a shape of its
+ * own. Reading every border row is what keeps a nested prompt from passing for the one outside it: pi folds the two
+ * spans into one, so the inner frame can replace the outer. */
+function frameShape(screen: string): { marks: string[]; rows: number } {
   const rows = screen.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim());
   let top = -1;
   rows.forEach((l, i) => {
     if (TOP_CORNER.test(l)) top = i;
   });
-  if (top < 0) return [];
-  // A row counts by the marks at its two ends, which is where a box draws its sides. Words and symbols inside the row
-  // carry no weight, so an answer of any text, a box character included, leaves the shape where it was.
-  return rows.slice(top).map((l) => {
+  if (top < 0) return { marks: [], rows: 0 };
+  // Only the border rows count: a row that starts with a side is body, and an answer that wraps or takes a second line
+  // adds body rows without touching the borders. The words inside a border row carry no weight either, since an answer
+  // on a captioned foot would otherwise change it.
+  const marks: string[] = [];
+  for (const l of rows.slice(top)) {
     const row = l.trimEnd();
     const lead = /^[\u2500-\u257f]+/.exec(row)?.[0] ?? '';
     const trail = /[\u2500-\u257f]+$/.exec(row)?.[0] ?? '';
-    return `${lead}|${trail}`;
-  });
+    if (/[\u2500\u2501\u2550]/.test(lead)) marks.push(`${lead}|${trail}`);
+  }
+  return { marks, rows: rows.length - top };
 }
 
 /** Whether the prompt a card was posted for still waits on the screen just read. pi gives a title for every widget
@@ -149,7 +153,12 @@ export function promptOnScreen(prompt: { title?: string; screen?: string }, raw:
   if (closingRule(now) === '') return false;
   const then = frameShape(prompt.screen ?? '');
   const drawn = frameShape(now);
-  return then.length > 0 && drawn.length === then.length && then.every((row, i) => row === drawn[i]);
+  // The borders have to match row for row, and the box can only grow: an answer that wraps or takes a second line adds
+  // a row inside the box, while a box of another size shows fewer rows than the one the card recorded.
+  return then.marks.length > 0
+    && drawn.marks.length === then.marks.length
+    && then.marks.every((row, i) => row === drawn.marks[i])
+    && drawn.rows >= then.rows;
 }
 
 /** Why no key goes out, when the screen no longer shows the prompt the card was posted for. */
