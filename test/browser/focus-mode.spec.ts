@@ -274,3 +274,28 @@ test('in focus mode, an agent reply keeps the 72ch line, since its text reads as
   const ch = await chWidth(page);
   expect((await box(page, '.reply-msg p')).width).toBeLessThanOrEqual(72 * ch + 1);
 });
+
+test('in focus mode, a note and the lines of a revision\'s changes keep the 72ch line, since they are plain text', async ({ page }) => {
+  const long = (what: string) => `${what}, long enough to run past a 72ch line when the column gives it room to. `.repeat(3).trim();
+  await post('fm-changes', 'A card the agent revised', { priority: 'now', text: 'The plan uses SQLite.' });
+  await inbox.agent.patch('fm-changes', [{ old: 'SQLite', new: long('SQLite with FTS5') }]);
+  await post('fm-noted', 'A card you answered', { priority: 'soon', text: 'A card the person answers.' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'A card you answered' }).click();
+  await page.locator('.focus-card').getByPlaceholder('Anything to add?').fill(long('A comment on the answer'));
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  await page.locator('nav.queue .q', { hasText: 'A card you answered' }).click();
+  await expect(page.locator('.note.ok')).toContainText('A comment on the answer');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  const ch = await chWidth(page);
+  expect((await box(page, '.note.ok')).width).toBeLessThanOrEqual(72 * ch + 1);
+  await page.keyboard.press('ControlOrMeta+.');
+
+  await page.locator('nav.queue .q', { hasText: 'A card the agent revised' }).click();
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('details.changes summary').click();
+  await expect(page.locator('details.changes .add')).toContainText('SQLite with FTS5');
+  expect((await box(page, 'details.changes .add')).width).toBeLessThanOrEqual(72 * ch + 1);
+});
