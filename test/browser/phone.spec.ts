@@ -323,6 +323,8 @@ test.describe('the sign-in field, for a device with no address bar', () => {
     const phone = await browser.newContext();
     const p = await phone.newPage();
     await p.goto(`${inbox.server.url}/`);
+    // The field's label reads as a heading over the page's thin body text.
+    await expect(p.locator('.code-signin label')).toHaveCSS('font-weight', '600');
     await p.getByLabel('Sign-in code or link').fill(link!);
     await p.getByRole('button', { name: 'Sign in' }).click();
     await expect(p.getByRole('heading', { name: 'Sign in to your inbox' })).toBeHidden();
