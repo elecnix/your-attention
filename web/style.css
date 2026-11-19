@@ -108,12 +108,22 @@
   .focus-toggle.on { color: var(--accent); border-color: var(--accent); }
   .focus-count { position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--panel); font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; }
   /* Focus mode fills the screen with the open card. The bar, the queue, the count above the card on a phone and the notices
-     hide, and the page scrolls the card alone. The card spans the width, and its text keeps a line length that reads well,
-     at the center. The focus button stays at the card's top right, and on screen as the card scrolls, to leave. */
+     hide, and the page scrolls the card alone. The card spans the width, and its content takes a column at the center. The focus button stays at the card's top right, and on screen as the card scrolls, to leave. */
   body.focus-mode .bar, body.focus-mode .queue, body.focus-mode .resizer, body.focus-mode .to-queue, body.focus-mode .usage-notice { display: none; }
   body.focus-mode .layout { display: block; padding: 0; }
-  body.focus-mode .focus-card { min-height: 100vh; min-height: 100dvh; border: 0; border-radius: 0; padding: 20px max(16px, calc((100% - 72ch) / 2)) 48px; }
-  body.focus-mode .closed-line, body.focus-mode .dismiss-draft { max-width: 72ch; margin: 16px auto 0; }
+  body.focus-mode { --focus-column: 108ch; --focus-prose: 72ch; }
+  body.focus-mode .focus-card { min-height: 100vh; min-height: 100dvh; border: 0; border-radius: 0; padding: 20px max(16px, calc((100% - var(--focus-column)) / 2)) 48px; }
+  body.focus-mode .closed-line, body.focus-mode .dismiss-draft { max-width: var(--focus-column); margin: 16px auto 0; }
+  /* The column is half again as wide as a line of text that reads well, so tables, code and diagrams get room. Paragraphs,
+     lists and quotes keep that line length, at the column's left edge. */
+  body.focus-mode .focus-card :is(p, ul, ol, blockquote) { max-width: var(--focus-prose); }
+  /* So does the page's own plain text, which has no paragraph around it: notes, the lines of a revision's changes and of a
+     guidance proposal, a pushback's reason and comment, the summary of your answer to the card before this one, a closed
+     card's note and your unsent draft. Code and approval sentences keep the column. This is a rule of its own: inside the
+     :is() above, these classes would raise the cap above the reset below, and nested lists would stay capped. */
+  body.focus-mode .focus-card :is(.note, details.changes :is(.del, .add), .guidance-diff > div, details.pushback :is(.reason, .comment), .turn .ans),
+  body.focus-mode :is(.closed-line .o, .dismiss-draft-body) { max-width: var(--focus-prose); }
+  body.focus-mode .focus-card :is(li, td, th, label) :is(p, ul, ol, blockquote) { max-width: none; }
   @media (max-width: 900px) { body.focus-mode .meta { padding-right: 44px; } }
   body.focus-mode .meta .focus-toggle { position: fixed; top: 12px; right: 16px; z-index: 10; background: var(--panel); }
   /* A card's tags, under the meta row. The pin sits right after each label: dim until the value is pinned. */
@@ -268,6 +278,17 @@
   /* A diagram shrinks to the card's width and never grows past its own. Its labels keep mermaid's line breaks, not the text's. */
   .diagram { margin: 8px 0 12px; white-space: normal; overflow-x: auto; }
   .diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  /* A drawn diagram is a button that opens it full screen. The overlay covers the page in the page's own background, with the
+     diagram as large as the screen fits, and scrolls a diagram taller than the screen. A click anywhere closes it. */
+  .diagram-open { display: block; width: 100%; margin: 0; padding: 0; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; cursor: zoom-in; }
+  .diagram-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  html:has(dialog.diagram-zoom[open]) { overflow: hidden; }
+  dialog.diagram-zoom { position: fixed; inset: 0; width: auto; height: auto; max-width: none; max-height: none; margin: 0; padding: 16px; border: 0; box-sizing: border-box; background: var(--bg); color: var(--ink); overflow: auto; overscroll-behavior: contain; cursor: zoom-out; }
+  dialog.diagram-zoom[open] { display: flex; }
+  dialog.diagram-zoom::backdrop { background: var(--bg); }
+  .diagram-zoomed { flex: none; margin: auto; }
+  .diagram-zoomed svg { display: block; width: 100% !important; height: 100% !important; max-width: none !important; }
+  .diagram-close { position: fixed; top: 12px; right: 16px; z-index: 1; background: var(--panel); border-color: var(--line); }
   .markdown blockquote { margin: 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
   .html-card { display: block; width: 100%; height: 360px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
   details.changes { margin: 0 0 12px; font-size: calc(13px * var(--text-scale)); }

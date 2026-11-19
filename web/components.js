@@ -6,6 +6,7 @@ import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { copyText, installCopy } from './copy.js';
+import { naturalSize, zoomSize, zoomedSvg } from './zoom.js';
 import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, pushbackKey, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf } from './queue.js';
@@ -138,7 +139,66 @@ export function Diagram({ source }) {
   // Should drawing fail all the same, such as when the renderer does not load, the person reads the source.
   if (drawn.failed) return codeBlock(h, source, undefined, { className: 'diagram-source', title: `The diagram did not draw: ${drawn.failed}` });
   // mermaid's strict security level sanitizes the SVG it returns.
-  return h('figure', { className: 'diagram', role: 'img', 'aria-label': `Diagram: ${source.split('\n')[0]}`, dangerouslySetInnerHTML: { __html: drawn.svg } });
+  if (!drawn.svg) return h('figure', { className: 'diagram' });
+  return h('figure', { className: 'diagram' },
+    h(ZoomableDiagram, { svg: drawn.svg }));
+}
+
+// A drawn diagram is a button that opens it full screen. The overlay shows the same SVG on the page background, as large as
+// the screen fits. A click or a tap anywhere, Escape or the back button closes it, and the page is where the person left it.
+function ZoomableDiagram({ svg }) {
+  const [open, setOpen] = React.useState(false);
+  const button = React.useRef(null);
+  const dialog = React.useRef(null);
+  const holder = React.useRef(null);
+  const close = React.useRef(null);
+  const endRef = React.useRef(() => {});
+  const zoomed = React.useMemo(() => zoomedSvg(svg), [svg]);
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const el = dialog.current;
+    const y = window.scrollY;
+    let done = false;
+    // The back button closes the overlay, so opening it adds a step to the browser's history with the same address.
+    history.pushState({ ...(history.state || {}), diagram: true }, '', location.href);
+    el.showModal();
+    close.current?.focus({ preventScroll: true });
+    const fit = () => {
+      const natural = naturalSize(zoomed);
+      const style = getComputedStyle(el);
+      const room = { width: el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), height: el.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) };
+      const size = natural ? zoomSize(natural, room) : room;
+      holder.current.style.width = `${size.width}px`;
+      holder.current.style.height = `${size.height}px`;
+    };
+    fit();
+    const end = (fromHistory) => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('popstate', popped);
+      window.removeEventListener('resize', fit);
+      if (el.open) el.close();
+      if (!fromHistory) history.back();
+      window.scrollTo(window.scrollX, y);
+      button.current?.focus({ preventScroll: true });
+      setOpen(false);
+    };
+    const popped = () => end(true);
+    endRef.current = () => end(false);
+    window.addEventListener('popstate', popped);
+    window.addEventListener('resize', fit);
+    return () => end(false);
+  }, [open]);
+  // A click inside a card's option must not pick the option, and Escape belongs to the overlay alone, not to the page's
+  // shortcut that ends focus mode or clears the pane.
+  const shut = (e) => { e.stopPropagation(); e.preventDefault(); endRef.current(); };
+  return h(React.Fragment, null,
+    h('button', { ref: button, type: 'button', className: 'diagram-open', 'aria-label': 'Open the diagram full screen', title: 'Open the diagram full screen',
+      onClick: (e) => { e.stopPropagation(); setOpen(true); }, dangerouslySetInnerHTML: { __html: svg } }),
+    open ? h('dialog', { ref: dialog, className: 'diagram-zoom', 'aria-label': 'The diagram, full screen', onClick: shut,
+      onKeyDown: (e) => { if (e.key === 'Escape') shut(e); }, onCancel: (e) => e.preventDefault() },
+    h('button', { ref: close, type: 'button', className: 'icon-btn diagram-close', 'aria-label': 'Close the full-screen diagram', title: 'Close the full-screen diagram' }, h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, h('path', { d: 'M18 6 6 18' }), h('path', { d: 'm6 6 12 12' }))),
+    h('div', { ref: holder, className: 'diagram-zoomed', dangerouslySetInnerHTML: { __html: zoomed } })) : null);
 }
 
 // A field label reads Markdown, as card text does, so a label can link to the pull request it asks about.

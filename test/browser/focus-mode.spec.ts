@@ -30,6 +30,14 @@ const toggle = (page: Page) => page.locator('.focus-card .focus-toggle');
 const box = async (page: Page, selector: string) => (await page.locator(selector).first().boundingBox())!;
 const pageY = (page: Page) => page.evaluate(() => window.scrollY);
 const queueY = (page: Page) => page.locator('.queue').evaluate((el) => el.scrollTop);
+/** The width of 1ch in the card's text, in pixels. */
+const chWidth = (page: Page) => page.locator('.focus-card .card-text').first().evaluate((el) => {
+  const probe = el.appendChild(document.createElement('div'));
+  probe.style.width = '100ch';
+  const width = probe.getBoundingClientRect().width / 100;
+  probe.remove();
+  return width;
+});
 
 /** Only the open card shows: no bar, no queue, no border to resize it, and the card spans the viewport. */
 async function expectFullScreen(page: Page) {
@@ -67,11 +75,15 @@ test('focus mode fills the screen with the card, counts arrivals without a notif
   await page.keyboard.press('ControlOrMeta+.');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
   await expectFullScreen(page);
-  // The text keeps a reading width, centered in the card.
+  // The content sits in a column at the center, 108ch wide, and paragraphs keep a 72ch line.
   const width = page.viewportSize()!.width;
   const title = await box(page, '.focus-card .card-title');
-  expect(title.width).toBeLessThan(900);
+  const ch = await chWidth(page);
+  expect(title.width).toBeCloseTo(108 * ch, 0);
   expect(Math.abs(title.x - (width - title.x - title.width))).toBeLessThan(2);
+  const paragraph = await box(page, '.focus-card .card-text p');
+  expect(paragraph.width).toBeCloseTo(72 * ch, 0);
+  expect(paragraph.x).toBeCloseTo(title.x, 0);
   // The button sits at the card's top right, and stays on screen at the end of the card.
   const corner = await box(page, '.focus-card .focus-toggle');
   expect(width - corner.x - corner.width).toBeLessThan(24);
@@ -167,4 +179,123 @@ test('on a phone, focus mode fills the screen too, and leaving it scrolls back t
   await toggle(page).click();
   await expect(page.locator('.to-queue')).toHaveText('2 waiting · show the queue');
   await expect.poll(() => pageY(page)).toBe(600);
+});
+
+const WIDE = `A paragraph above the table, long enough to wrap: ${'the column gives tables room while prose keeps the line length that reads well, '.repeat(4)}\n\n`
+  + `| ${Array.from({ length: 8 }, (_, i) => `Column ${i + 1}`).join(' | ')} |\n|${' --- |'.repeat(8)}\n`
+  + `| ${Array.from({ length: 8 }, (_, i) => `value-${i + 1}-with-a-long-name`).join(' | ')} |`;
+
+test('the focus column is half again as wide as a paragraph, so a wide table gets the room and the text keeps its line length', async ({ page }) => {
+  await post('fm-wide', 'A card with a wide table', { text: WIDE, priority: 'now' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('A card with a wide table');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  const ch = await chWidth(page);
+  const title = await box(page, '.focus-card .card-title');
+  const table = await box(page, '.focus-card .card-text table');
+  const paragraph = await box(page, '.focus-card .card-text p');
+  expect(title.width).toBeCloseTo(108 * ch, 0);
+  expect(table.width).toBeGreaterThan(72 * ch + 10);
+  expect(table.width).toBeLessThanOrEqual(title.width + 1);
+  expect(paragraph.width).toBeCloseTo(72 * ch, 0);
+
+  // On a phone the column is the screen less its 16px gutters.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const narrow = await box(page, '.focus-card .card-title');
+  expect(narrow.x).toBeCloseTo(16, 0);
+  expect(narrow.width).toBeCloseTo(390 - 32, 0);
+  expect((await box(page, '.focus-card .card-text p')).width).toBeCloseTo(390 - 32, 0);
+});
+
+test('in focus mode, your answer to the card before this one keeps the 72ch line of the text around it', async ({ page }) => {
+  const comment = 'A long comment on the first card, which the panel of the card before this one repeats in full. '.repeat(4).trim();
+  await post('fm-before', 'The card before', { priority: 'now' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('The card before');
+  await page.locator('.focus-card').getByPlaceholder('Anything to add?').fill(comment);
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  await post('fm-after', 'The card after', { priority: 'now', follows: 'fm-before', text: 'A follow-up to your answer.' });
+  await page.locator('.q', { hasText: 'The card after' }).click();
+  await expect(page.locator('.focus-card .card-title')).toHaveText('The card after');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('.focus-card details.earlier summary').click();
+  const answer = page.locator('.focus-card details.earlier .ans');
+  await expect(answer).toContainText('A long comment on the first card');
+  const ch = await chWidth(page);
+  expect((await answer.boundingBox())!.width).toBeLessThanOrEqual(72 * ch + 1);
+});
+
+test('in focus mode, a list inside a list item takes no cap of its own, since the list around it already has one', async ({ page }) => {
+  await post('fm-nested', 'A card with a nested list', { priority: 'now', text: '- The outer item\n  - The inner item' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('A card with a nested list');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  // The cap reads as a fraction of a pixel that differs between font builds, so it compares as a number.
+  const cap = await page.locator('.focus-card .card-text > ul').evaluate((el) => parseFloat(getComputedStyle(el).maxWidth));
+  expect(cap).toBeCloseTo(72 * await chWidth(page), 0);
+  await expect(page.locator('.focus-card .card-text li ul')).toHaveCSS('max-width', 'none');
+});
+
+test('in focus mode, the closing note and the unsent draft of a closed card keep the 72ch line of the text around them', async ({ page }) => {
+  const long = (what: string) => `${what}, long enough to run past a 72ch line when the column gives it room to. `.repeat(3).trim();
+  await post('fm-draft', 'A card to dismiss with a draft', { priority: 'now', text: 'A card the person dismisses.' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('A card to dismiss with a draft');
+  await page.locator('.focus-card').getByPlaceholder('Anything to add?').fill(long('A draft the person typed'));
+  await page.locator('.focus-card .openui-buttons').getByRole('button', { name: 'Dismiss without telling the agent' }).click();
+  await page.locator('nav.queue .q.dim', { hasText: 'A card to dismiss with a draft' }).click();
+  await expect(page.locator('.dismiss-draft')).toContainText('A draft the person typed');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  const ch = await chWidth(page);
+  expect((await box(page, '.dismiss-draft-body')).width).toBeLessThanOrEqual(72 * ch + 1);
+  await page.keyboard.press('ControlOrMeta+.');
+
+  await post('fm-note', 'A card its agent closes', { priority: 'now', text: 'A card the agent closes.' });
+  await page.locator('.q', { hasText: 'A card its agent closes' }).click();
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await inbox.agent.close('fm-note', 'resolved', long('A closing note from the agent'));
+  await expect(page.locator('.closed-line .o')).toContainText('A closing note from the agent');
+  expect((await box(page, '.closed-line .o')).width).toBeLessThanOrEqual(72 * ch + 1);
+});
+
+test('in focus mode, an agent reply keeps the 72ch line, since its text reads as paragraphs', async ({ page }) => {
+  const reply = 'A reply from the agent, long enough to run past a 72ch line when the column gives it room to. '.repeat(3).trim();
+  await post('fm-reply', 'A card with a reply', { priority: 'now', text: 'A card the agent replied to.' });
+  inbox.seedReplies('fm-reply', [reply]);
+  await inbox.open(page);
+  await expect(page.locator('.reply-msg')).toContainText('A reply from the agent');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  const ch = await chWidth(page);
+  expect((await box(page, '.reply-msg p')).width).toBeLessThanOrEqual(72 * ch + 1);
+});
+
+test('in focus mode, a note and the lines of a revision\'s changes keep the 72ch line, since they are plain text', async ({ page }) => {
+  const long = (what: string) => `${what}, long enough to run past a 72ch line when the column gives it room to. `.repeat(3).trim();
+  await post('fm-changes', 'A card the agent revised', { priority: 'now', text: 'The plan uses SQLite.' });
+  await inbox.agent.patch('fm-changes', [{ old: 'SQLite', new: long('SQLite with FTS5') }]);
+  await post('fm-noted', 'A card you answered', { priority: 'soon', text: 'A card the person answers.' });
+  await inbox.open(page);
+  await page.locator('.q', { hasText: 'A card you answered' }).click();
+  await page.locator('.focus-card').getByPlaceholder('Anything to add?').fill(long('A comment on the answer'));
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  await page.locator('nav.queue .q', { hasText: 'A card you answered' }).click();
+  await expect(page.locator('.note.ok')).toContainText('A comment on the answer');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  const ch = await chWidth(page);
+  expect((await box(page, '.note.ok')).width).toBeLessThanOrEqual(72 * ch + 1);
+  await page.keyboard.press('ControlOrMeta+.');
+
+  await page.locator('nav.queue .q', { hasText: 'A card the agent revised' }).click();
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('details.changes summary').click();
+  await expect(page.locator('details.changes .add')).toContainText('SQLite with FTS5');
+  expect((await box(page, 'details.changes .add')).width).toBeLessThanOrEqual(72 * ch + 1);
 });
