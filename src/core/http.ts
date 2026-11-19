@@ -5,7 +5,7 @@ import { randomId } from './crypto.ts';
 import { fileLinkPaths, folderFilePath } from './file-links.ts';
 import { parseSessionLink } from './session-link.ts';
 import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
-import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller, type SearchFilters } from './inbox.ts';
+import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller, type PushInput, type SearchFilters } from './inbox.ts';
 import { UNLOCK_HEADER, UNLOCK_IDLE_MS, pinKeyError, validKey, type PinKey } from './pin.ts';
 import type { Source } from './telemetry.ts';
 import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
@@ -613,6 +613,22 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         return json({ ...hook, secret }, 201);
       }
       if (method === 'DELETE' && b) { inbox.deleteWebhook(b); return json({ ok: true }); }
+    }
+    // The owner's devices that get a push for each new card. The key is the inbox's own, made on the first ask.
+    if (a === 'push' && !b) {
+      owner();
+      if (method === 'GET') return json({ publicKey: await inbox.pushKey() });
+      const body = await readJson<(PushInput & { endpoint?: unknown }) | null>(req, BODY_LIMIT.open);
+      if (method === 'PUT') {
+        if (!body || typeof body !== 'object') throw new InboxError(400, 'send the browser\'s push subscription: {endpoint, keys: {p256dh, auth}, collapsed?}');
+        inbox.savePush(me, body);
+        return json({ ok: true });
+      }
+      if (method === 'DELETE') {
+        if (typeof body?.endpoint !== 'string' || !body.endpoint) throw new InboxError(400, 'send {endpoint}');
+        inbox.deletePush(body.endpoint);
+        return json({ ok: true });
+      }
     }
     if (a === 'subscriptions') {
       if (method === 'GET' && !b) return json(inbox.listSubscriptions(me));

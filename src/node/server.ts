@@ -18,6 +18,7 @@ import { WebSocketServer } from 'ws';
 import { Inbox } from '../core/inbox.ts';
 import { herdrApprovals } from '../integrations/herdr/approve.ts';
 import { focusHerdrPane, focusSessionLink } from '../integrations/herdr/focus.ts';
+import { notifies } from '../../web/queue.js';
 import { homeDir, writePrivate } from './home.ts';
 import { relayClient } from './links.ts';
 import { NOTICE, sendDue, telemetryEnv, type TelemetryEnv } from './telemetry.ts';
@@ -106,7 +107,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');
