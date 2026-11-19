@@ -134,7 +134,8 @@ function frameShape(screen: string): { marks: string[]; rows: number } {
   const marks: string[] = [];
   for (const l of rows.slice(top)) {
     const row = l.trimEnd();
-    const lead = /^[\u2500-\u257f]+/.exec(row)?.[0] ?? '';
+    // A box can sit at any indent, so its left edge is read past the spaces in front of it.
+    const lead = /^[\u2500-\u257f]+/.exec(row.trimStart())?.[0] ?? '';
     const trail = /[\u2500-\u257f]+$/.exec(row)?.[0] ?? '';
     if (/[\u2500\u2501\u2550]/.test(lead)) marks.push(`${lead}|${trail}`);
   }

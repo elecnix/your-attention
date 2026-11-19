@@ -109,6 +109,11 @@ describe('whether the prompt still waits on the screen', () => {
     );
   });
 
+  it('finds an indented frame, which a nested prompt draws inside another one', () => {
+    const indented = SCREEN.split('\n').map((l) => `    ${l}`).join('\n');
+    assert.equal(promptOnScreen({ screen: indented }, indented), true, 'a box at an indent matches its own shape');
+  });
+
   it('finds the frame when an answer wraps to a second line inside the box', () => {
     const grown = [
       '╭──────────────────────────╮',
