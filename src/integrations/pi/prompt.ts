@@ -120,7 +120,15 @@ function frameShape(screen: string): string[] {
   rows.forEach((l, i) => {
     if (TOP_CORNER.test(l)) top = i;
   });
-  return top < 0 ? [] : rows.slice(top).map((l) => l.replace(/[^\u2500-\u257f]/g, ''));
+  if (top < 0) return [];
+  // A row counts by the marks at its two ends, which is where a box draws its sides. Words and symbols inside the row
+  // carry no weight, so an answer of any text, a box character included, leaves the shape where it was.
+  return rows.slice(top).map((l) => {
+    const row = l.trimEnd();
+    const lead = /^[\u2500-\u257f]+/.exec(row)?.[0] ?? '';
+    const trail = /[\u2500-\u257f]+$/.exec(row)?.[0] ?? '';
+    return `${lead}|${trail}`;
+  });
 }
 
 /** Whether the prompt a card was posted for still waits on the screen just read. pi gives a title for every widget

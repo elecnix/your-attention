@@ -80,6 +80,11 @@ describe('whether the prompt still waits on the screen', () => {
       true,
       'an answer with punctuation still finds the prompt, so the Enter goes out',
     );
+    assert.equal(
+      promptOnScreen({ screen: SCREEN }, TYPED_SCREEN.replace('SQLite SQLite', '│ yes ─ really')),
+      true,
+      'an answer that contains a box character leaves the shape of the frame where it was',
+    );
     assert.equal(promptOnScreen({}, SCREEN), false, 'a prompt with no title and no screen to compare gets no key');
   });
 
