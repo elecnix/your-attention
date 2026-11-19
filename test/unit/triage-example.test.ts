@@ -289,8 +289,16 @@ describe('the example triage agent reads its local config', () => {
     const file = path.join(dir, 'policy.json');
     fs.writeFileSync(file, JSON.stringify({ policy: { classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 }, maxReturns: 5 }));
     const cfg = loadConfig(file);
-    assert.deepEqual(cfg.policy, { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 });
+    assert.deepEqual(cfg.policy, { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'advise', classifierNames: 'advise', prVerdictBlockBelow: 0.3 });
     assert.equal(cfg.maxReturns, 5);
+  });
+
+  it('reads policy.classifierNames, and refuses a level it does not know', () => {
+    const file = path.join(dir, 'names-policy.json');
+    fs.writeFileSync(file, JSON.stringify({ policy: { classifierNames: 'block' } }));
+    assert.equal(loadConfig(file).policy.classifierNames, 'block');
+    fs.writeFileSync(file, JSON.stringify({ policy: { classifierNames: 'warn' } }));
+    assert.throws(() => loadConfig(file), /policy\.classifierNames/);
   });
 
   it('refuses an empty config path, such as --config "$CFG" with CFG unset', () => {
@@ -354,7 +362,7 @@ describe('the example triage agent reads its local config', () => {
 
   it('ships a card prompt with a text fence that asks for the classifier\'s reply format', () => {
     const fence = /```text\n([\s\S]*?)\n```/.exec(fs.readFileSync(CARD_PROMPT, 'utf8'))?.[1] ?? '';
-    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word', 'The evidence behind the recommendation', 'in either order', 'the first two sentences', 'each question states its own change', 'only further down', 'the problem it fixes', 'Never ask for a separate goal sentence', 'Names the reader already knows', 'except the opening that step 1 checks', 'step 4 still checks that it says why', 'a name the card itself makes up', 'an acronym the card never spells out', 'Every other proper name passes']) assert.ok(fence.includes(part), part);
+    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word', 'The evidence behind the recommendation', 'in either order', 'the first two sentences', 'each question states its own change', 'only further down', 'the problem it fixes', 'Never ask for a separate goal sentence', 'Names the reader already knows', 'except the opening that step 1 checks', 'step 4 still checks that it says why', 'a name the card itself makes up', 'an acronym the card never spells out', 'Every other proper name passes', 'a software developer who knows common software, cloud, AI and developer-tool terms and products']) assert.ok(fence.includes(part), part);
     assert.ok(!fence.includes('Ask about any other internal name'), 'step 2 adds no prompt to look for names');
   });
 });
@@ -366,6 +374,34 @@ describe('the example triage agent follows the local policy', () => {
     const ruling = await checkCard(card, config({ classifier: missingContext(), policy: { ...DEFAULTS.policy, classifierMissingContext: 'advise' } }), logger().log);
     assert.equal(ruling.verdict, 'pass');
     assert.match(ruling.advice ?? '', /Card classifier, advice:[\s\S]*What is the goal\?/);
+  });
+
+  const asks = (questions: string[]): string[] => stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'Some gaps.', clarifyingQuestions: questions })).argv;
+
+  it('passes a card whose only questions come from the names step, with them as advice', async () => {
+    const ruling = await checkCard(card, config({ classifier: asks(['[2] What is the Kilo lane?', '[2]What does BYOK stand for?']) }), logger().log);
+    assert.equal(ruling.verdict, 'pass');
+    assert.match(ruling.advice ?? '', /Card classifier, advice:[\s\S]*Some gaps\.[\s\S]*\[2\] What is the Kilo lane\?[\s\S]*\[2\]What does BYOK/);
+  });
+
+  it('sends a card back for the other steps, and gives its names questions as advice', async () => {
+    const ruling = await checkCard(card, config({ classifier: asks(['[2] What is the Kilo lane?', '[6] Which option does this agent recommend?']) }), logger().log);
+    assert.equal(ruling.verdict, 'return');
+    const [blocking, advice] = (ruling.reason ?? '').split(/Card classifier, advice:/);
+    assert.match(blocking ?? '', /Some gaps\.[\s\S]*\[6\] Which option/);
+    assert.doesNotMatch(blocking ?? '', /Kilo lane/);
+    assert.match(advice ?? '', /\[2\] What is the Kilo lane\?/);
+  });
+
+  it('blocks a question without a step number, and a MISSING_CONTEXT answer without questions', async () => {
+    assert.equal((await checkCard(card, config({ classifier: asks(['What is the goal?']) }), logger().log)).verdict, 'return');
+    assert.equal((await checkCard(card, config({ classifier: asks([]) }), logger().log)).verdict, 'return');
+  });
+
+  it('sends a card back for its names questions when policy.classifierNames says block', async () => {
+    const ruling = await checkCard(card, config({ classifier: asks(['[2] What is the Kilo lane?']), policy: { ...DEFAULTS.policy, classifierNames: 'block' } }), logger().log);
+    assert.equal(ruling.verdict, 'return');
+    assert.match(ruling.reason ?? '', /Kilo lane/);
   });
 
   it('leaves out a finding the policy ignores', async () => {

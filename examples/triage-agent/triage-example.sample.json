@@ -12,6 +12,7 @@
     "valeErrors": "block",
     "valeWarnings": "advise",
     "classifierMissingContext": "block",
+    "classifierNames": "advise",
     "prVerdictBlockBelow": 0.5
   },
   "maxReturns": 3,

@@ -43,6 +43,9 @@ export interface Policy {
   valeErrors: Level;
   valeWarnings: Level;
   classifierMissingContext: Level;
+  /** What a classifier question from the names step does: the card's step 2, which asks about a term the card makes up
+   * or an acronym it never spells out. The other steps' questions follow classifierMissingContext. */
+  classifierNames: Level;
   /** A verdict the PR-verdict command does not accept blocks the card below this confidence, and is advice from it up. */
   prVerdictBlockBelow: number;
 }
@@ -65,7 +68,7 @@ export interface ExampleConfig {
 
 export const DEFAULTS: ExampleConfig = {
   vale: ['vale'], classifier: ['pr-context-classifier'], valeTimeoutMs: 30_000, classifierTimeoutMs: 150_000,
-  policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', prVerdictBlockBelow: 0.5 },
+  policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', classifierNames: 'advise', prVerdictBlockBelow: 0.5 },
   maxReturns: 3,
   stateFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'),
   knownNames: {},
@@ -103,7 +106,7 @@ export function loadConfig(file = defaultConfigPath()): ExampleConfig {
   if (raw['valeTimeoutMs'] !== undefined) cfg.valeTimeoutMs = ms('valeTimeoutMs', raw['valeTimeoutMs']);
   if (raw['classifierTimeoutMs'] !== undefined) cfg.classifierTimeoutMs = ms('classifierTimeoutMs', raw['classifierTimeoutMs']);
   const policy = (raw['policy'] ?? {}) as Record<string, unknown>;
-  for (const k of ['valeErrors', 'valeWarnings', 'classifierMissingContext'] as const) if (policy[k] !== undefined) cfg.policy[k] = level(`policy.${k}`, policy[k]);
+  for (const k of ['valeErrors', 'valeWarnings', 'classifierMissingContext', 'classifierNames'] as const) if (policy[k] !== undefined) cfg.policy[k] = level(`policy.${k}`, policy[k]);
   if (policy['prVerdictBlockBelow'] !== undefined) {
     const t = policy['prVerdictBlockBelow'];
     cfg.policy.prVerdictBlockBelow = typeof t === 'number' && t >= 0 && t <= 1 ? t : bad('policy.prVerdictBlockBelow must be a number from 0 to 1');
@@ -322,6 +325,9 @@ export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand 
   };
 }
 
+/** A classifier question from the card prompt's step 2, the names step. */
+const NAMES_STEP = /^\s*\[2\]/;
+
 interface Classification { verdict: string; rationale?: string; clarifyingQuestions?: string[] }
 
 export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport> {
@@ -336,8 +342,20 @@ export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCo
   const questions = result.clarifyingQuestions ?? [];
   const detail = { classifier: { verdict: result.verdict, rationale: result.rationale ?? '', questions } };
   if (result.verdict === 'COMPLETE') return { check: 'Card classifier', sections: [], detail };
-  const lines = [`The card lacks context the person needs: ${result.rationale ?? ''}`.trim(), ...questions.map((q) => `- ${q}`)];
-  return { check: 'Card classifier', sections: section('Card classifier', cfg.policy.classifierMissingContext, lines), detail };
+  // The card prompt numbers each question with its step. Step 2 asks about names, which the policy can make advice
+  // alone; a question without a number, or an answer without questions, follows the other steps.
+  const names = questions.filter((q) => NAMES_STEP.test(q));
+  const others = questions.filter((q) => !NAMES_STEP.test(q));
+  const why = `The card lacks context the person needs: ${result.rationale ?? ''}`.trim();
+  const list = (qs: string[]): string[] => qs.map((q) => `- ${q}`);
+  const namesOnly = names.length > 0 && others.length === 0;
+  const sections = [
+    ...section('Card classifier', cfg.policy.classifierMissingContext, namesOnly ? [] : [why, ...list(others)]),
+    ...section('Card classifier', cfg.policy.classifierNames, namesOnly ? [why, ...list(names)] : list(names)),
+  ];
+  // Two sections at one level read as one list.
+  const merged = sections.length === 2 && sections[0]!.level === sections[1]!.level ? [{ ...sections[0]!, lines: [...sections[0]!.lines, ...sections[1]!.lines] }] : sections;
+  return { check: 'Card classifier', sections: merged, detail };
 }
 
 const PR_TAG = /^([\w.-]+)\/([\w.-]+)#(\d+)$/;
