@@ -530,6 +530,22 @@ describe('the card.created hook runner', () => {
     assert.match(lines.join('\n'), /skipped a frame it could not read/);
   });
 
+  it('lets the process exit when it stops, even while a check that ignores the stop still runs', () => {
+    const script = path.join(dir, 'hook-exit.ts');
+    const hook = path.resolve(import.meta.dirname, '../../src/extensions/card-hook.ts');
+    fs.writeFileSync(script, `
+import { runCardHook } from ${JSON.stringify(hook)};
+const event = 'data: ' + JSON.stringify({ type: 'hook', version: 1, id: 'h1', hook: 'card.created', card: ${JSON.stringify(card)}, deadline: Date.now() + 60_000, person: { pages: 0, visible: false, activeAt: null } }) + '\\n\\n';
+const stop = new AbortController();
+const fetcher = (async () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(event)); } }))) as typeof fetch;
+setTimeout(() => stop.abort(), 200);
+await runCardHook({ url: 'http://inbox.test', token: 't', name: 'triage-example', fetcher, log: () => {} }, () => new Promise(() => {}), stop.signal);
+`);
+    const started = Date.now();
+    execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', script], { timeout: 20_000 });
+    assert.ok(Date.now() - started < 10_000, `the process took ${Date.now() - started} ms to exit, waiting on the card's 60 s deadline`);
+  });
+
   it('logs a verdict the inbox refuses as failed', async () => {
     const event = `data: ${JSON.stringify({ type: 'hook', version: 1, id: 'h9', hook: 'card.created', card, deadline: Date.now() + 60_000, person: { pages: 0, visible: false, activeAt: null } })}\n\n`;
     const stop = new AbortController();

@@ -67,6 +67,11 @@ export async function runCardHook(cfg: CardHookConfig, check: CardCheck, signal:
     // never settles must not keep every later card from its turn.
     const late = new AbortController();
     const timer = setTimeout(() => late.abort(), Math.max(0, ev.deadline - Date.now()));
+    // A check that ignores its abort keeps the race pending past a stop, so the stop clears the timer: it would
+    // otherwise keep the process alive until the card's deadline.
+    const onStop = (): void => clearTimeout(timer);
+    if (signal.aborted) onStop();
+    else signal.addEventListener('abort', onStop, { once: true });
     const ends = AbortSignal.any([signal, late.signal]);
     try {
       const tooLate = (): Error => new Error('it did not finish before the card\'s deadline');
@@ -82,6 +87,7 @@ export async function runCardHook(cfg: CardHookConfig, check: CardCheck, signal:
       ruling = { verdict: 'pass', reason: `${cfg.name} failed (${(e as Error).message}), so the card went through.` };
     } finally {
       clearTimeout(timer);
+      signal.removeEventListener('abort', onStop);
     }
     try {
       await call(`/v1/hooks/${ev.id}`, ruling);
