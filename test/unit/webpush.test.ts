@@ -81,7 +81,13 @@ describe('VAPID, RFC 8292', () => {
     const a = await generateVapid();
     const b = await generateVapid();
     assert.notEqual(a.publicKey, b.publicKey);
-    assert.ok(!a.publicKey.includes(String(a.privateKey.d)));
+    // The private scalar is 32 bytes, and the public point is 0x04, x and y. The scalar must be neither coordinate.
+    const point = b64urlDecode(a.publicKey);
+    const scalar = b64urlDecode(a.privateKey.d);
+    assert.equal(scalar.length, 32);
+    assert.notEqual(b64urlEncode(point.slice(1, 33)), a.privateKey.d);
+    assert.notEqual(b64urlEncode(point.slice(33)), a.privateKey.d);
+    assert.ok(!a.publicKey.includes(a.privateKey.d));
   });
 });
 
