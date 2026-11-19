@@ -83,6 +83,12 @@ describe('whether the prompt still waits on the screen', () => {
     assert.equal(promptOnScreen({}, SCREEN), false, 'a prompt with no title and no screen to compare gets no key');
   });
 
+  it('recognises a frame drawn with heavy corners, which the closing rule already accepts', () => {
+    const heavy = ['┏━━━━━━━━━━━━━━━━━━━━━━━━━┓', '┃ Pick a database          ┃', '┗━━━━━━━━━━━━━━━━━━━━━━━━━┛'].join('\n');
+    assert.equal(promptOnScreen({ screen: heavy }, heavy), true, 'a heavy frame matches its own shape');
+    assert.equal(promptOnScreen({ screen: SCREEN }, heavy), false, 'and stays apart from the light one');
+  });
+
   it('refuses a nested prompt of another height that ends on the same rule as the one outside it', () => {
     assert.equal(promptOnScreen({ screen: SCREEN }, NESTED), false, 'the inner frame is not the frame the card was posted for');
     assert.equal(promptOnScreen({ screen: NESTED }, SCREEN), false, 'and the outer frame is not the inner one either');

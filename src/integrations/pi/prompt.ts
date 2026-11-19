@@ -108,7 +108,7 @@ function closingRule(screen: string): string {
   return /[─━═]/.test(foot) && !/[A-Za-z0-9]/.test(foot) ? foot : '';
 }
 
-const TOP_CORNER = /[\u256d\u250c\u2554]/;
+const TOP_CORNER = /[\u256d\u250c\u2554\u250f\u2552\u2553]/;
 
 /** The shape of the frame that ends a screen: every row from its top corner to the closing rule, reduced to the box
  * drawing characters it draws and nothing else. Text typed into the box leaves the shape alone, whatever it contains,
