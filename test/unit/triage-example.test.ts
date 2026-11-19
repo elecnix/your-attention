@@ -642,6 +642,24 @@ describe('the example triage agent reads a damaged state file', () => {
     }
   });
 
+  it('refuses a bypass code it cannot mark used on disk, so a restart cannot make it work twice', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs a folder this user cannot write' : false }, () => {
+    const folder = path.join(dir, 'bypass-locked');
+    fs.mkdirSync(folder, { recursive: true });
+    const file = path.join(folder, 'state.json');
+    const state = new TriageState(file);
+    const { code } = state.recordReturn(state.chainOf(card), card);
+    fs.chmodSync(folder, 0o500);
+    try {
+      const use = state.useBypass(code, card.agent, 'urgent');
+      assert.equal(use.ok, false);
+      assert.match(use.ok ? '' : use.why, /could not record its use/);
+    } finally {
+      fs.chmodSync(folder, 0o700);
+    }
+    assert.equal(state.useBypass(code, card.agent, 'urgent').ok, true, 'the code works once a write does');
+    assert.equal(new TriageState(file).useBypass(code, card.agent, 'again').ok, false, 'and a restart sees it used');
+  });
+
   it('starts empty, and says so, when the file is JSON of the wrong shape, an array included', () => {
     for (const shape of [{ chains: 5 }, [], 7]) {
       const file = path.join(dir, 'state-shape.json');

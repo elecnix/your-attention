@@ -90,7 +90,8 @@ export class TriageState {
     return { returns: c.returns, code };
   }
 
-  /** Use a bypass code: it works once, and only for the agent it went to. */
+  /** Use a bypass code: it works once, and only for the agent it went to. The agent refuses a code whose use it can't
+   * write to disk, since the file would still list it unused and a restart would accept it a second time. */
   useBypass(code: string, agent: string, card: string): BypassCheck {
     const b = this.data.bypass[code];
     if (!b) return { ok: false, why: 'triage never gave it' };
@@ -98,13 +99,17 @@ export class TriageState {
     if (b.usedAt !== undefined) return { ok: false, why: 'it was used already' };
     b.usedAt = this.now();
     b.usedOn = card;
-    this.save();
+    if (!this.save()) {
+      delete b.usedAt;
+      delete b.usedOn;
+      return { ok: false, why: 'the agent could not record its use, so the code stays unused until a write works' };
+    }
     return { ok: true, issuedFor: b.card };
   }
 
-  /** Save the cards seen since the last write, so a restart keeps every chain. */
-  save(): void {
-    if (!this.file) return;
+  /** Save the cards seen since the last write, so a restart keeps every chain. Answers whether the file now has them. */
+  save(): boolean {
+    if (!this.file) return true;
     const cutoff = this.now() - KEEP;
     const drop = <T extends object>(rec: Record<string, T>, at: (v: T) => number): void => {
       for (const [k, v] of Object.entries(rec)) if (at(v) < cutoff) delete rec[k];
@@ -117,11 +122,13 @@ export class TriageState {
       fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
       fs.writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
       fs.renameSync(tmp, this.file);
+      return true;
     } catch (e) {
       // A folder it cannot write, or a full disk, must not change a verdict: the counts and codes stay in memory, and the
       // next save tries again.
       fs.rmSync(tmp, { force: true });
       this.writeError = `could not write ${this.file} (${(e as Error).message}), so the return counts and bypass codes stay in memory until a write works`;
+      return false;
     }
   }
 
