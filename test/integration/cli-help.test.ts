@@ -13,15 +13,24 @@ const env = { ...process.env, YOUR_ATTENTION_HOME: home, YOUR_ATTENTION_URL: '',
 after(() => fs.rmSync(home, { recursive: true, force: true }));
 const STACK = /^\s+at /m;
 
+/** Run fn on each item, three at a time. Each item starts a Node process, and starting all of them at once takes every
+ * core of a CI runner from the test files that run beside this one, such as the channel's startup test. */
+async function each<T>(items: T[], fn: (item: T) => Promise<void>): Promise<void> {
+  const queue = [...items];
+  await Promise.all(Array.from({ length: 3 }, async () => {
+    for (let item = queue.shift(); item !== undefined; item = queue.shift()) await fn(item);
+  }));
+}
+
 describe('help for each command', () => {
   for (const flag of ['--help', '-h']) {
     it(`prints the usage of every command for ${flag}, and exits 0`, async () => {
-      await Promise.all(COMMANDS.map(async (c) => {
+      await each(COMMANDS, async (c) => {
         const r = await runCli(env, c.name, flag);
         assert.equal(r.code, 0, `${c.name} ${flag}: ${r.stderr}`);
         for (const l of c.lines) assert.ok(r.stdout.includes(`your-attention ${l.syntax}`), `${c.name} ${flag} prints ${l.syntax}`);
         assert.match(r.stdout, /Options:/);
-      }));
+      });
     });
   }
 
@@ -47,14 +56,14 @@ describe('help for each command', () => {
 
 describe('a usage mistake', () => {
   it('names an unknown option on one line, prints the usage to stderr, and exits 2, for every command', async () => {
-    await Promise.all(COMMANDS.map(async (c) => {
+    await each(COMMANDS, async (c) => {
       const r = await runCli(env, c.name, '--frobnicate');
       assert.equal(r.code, 2, `${c.name}: ${r.stderr}`);
       assert.doesNotMatch(r.stderr, STACK, c.name);
       assert.match(r.stderr, new RegExp(`^your-attention ${c.name}: `), c.name);
       assert.ok(r.stderr.includes(`Usage: your-attention ${c.lines[0]!.syntax}`), c.name);
       assert.equal(r.stdout, '', c.name);
-    }));
+    });
   });
 
   it('says which option needs a value, and which positional is missing or wrong', async () => {
@@ -71,12 +80,12 @@ describe('a usage mistake', () => {
       [['telemetry', 'off', '--days=5'], 'your-attention telemetry: --days and --invites go with report'],
       [['telemetry', 'off', '--days', '5'], 'your-attention telemetry: --days and --invites go with report'],
     ];
-    await Promise.all(cases.map(async ([args, line]) => {
+    await each(cases, async ([args, line]) => {
       const r = await runCli(env, ...args);
       assert.equal(r.code, 2, `${args.join(' ')}: ${r.stderr}`);
       assert.ok(r.stderr.startsWith(line), `${args.join(' ')}: ${r.stderr}`);
       assert.doesNotMatch(r.stderr, STACK);
-    }));
+    });
   });
 
   it('names an unknown command, and exits 2', async () => {
