@@ -112,7 +112,11 @@ describe('principles', () => {
     assert.match(extension, /pi\.on\('ui_prompt_end'/, 'the card closes from the event that says the wait is over');
     // DP16 continues: pi catches neither promise, so each handler settles its own, with the reason on stderr.
     for (const event of ['ui_prompt_start', 'ui_prompt_end']) {
-      const handler = new RegExp(`pi\\.on\\('${event}',[^\\n]*`).exec(extension)?.[0] ?? '';
+      // The whole registration, wherever its lines end: the call may wrap and its catch may sit on any of those lines.
+      const start = extension.indexOf(`pi.on('${event}'`);
+      assert.ok(start >= 0, `the ${event} registration is read`);
+      const next = extension.indexOf("pi.on('", start + 1);
+      const handler = extension.slice(start, next < 0 ? undefined : next);
       assert.match(handler, /\.catch\(/, `the ${event} handler resolves, so a prompt card that fails leaves no rejection nobody holds`);
     }
     const prompt = fs.readFileSync(path.join(ROOT, 'src/integrations/pi/prompt.ts'), 'utf8');

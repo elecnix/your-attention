@@ -346,7 +346,8 @@ export function createPromptCards(session: () => PromptSession | undefined, herd
       if (span !== open) {
         // A span knows its id before its post returns, so the id, not the card, is what says a later span took this one.
         if (span?.id === card.id) return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
-        await to.close(card.id, 'resolved', 'Typed your answer in its session.').catch(() => {});
+        // The span may have closed its own card already, as answered in the terminal; `typed` says this path owns it.
+        if (open.closed === 'typed') await to.close(card.id, 'resolved', 'Typed your answer in its session.').catch(() => {});
         return log('typed the answer for', card.id, 'into', open.pane, 'as its span ended');
       }
       if (waits) await herdr('agent', 'send-keys', open.pane, 'enter').catch(() => {});

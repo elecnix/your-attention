@@ -238,7 +238,8 @@ describe('the close that follows the typed answer', () => {
     // extension gets to close anything.
     const typing = cards.answered(card, answer('SQLite'));
     await cards.ended();
-    await cards.started({ kind: 'select', title: 'Pick a database' });
+    // Another title, so the prompt that follows gets a card of its own and the close below names the one it belongs to.
+    await cards.started({ kind: 'select', title: 'Pick a server' });
     await typing;
     assert.deepEqual(s.closes.map((c) => [c.id, c.kind]), [[card.id, 'answered-in-terminal']], 'only the span that was answered closes');
     assert.deepEqual(s.keys, ['SQLite'], 'the prompt that follows takes no Enter');
