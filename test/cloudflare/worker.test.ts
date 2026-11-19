@@ -166,6 +166,23 @@ describe('the hosted Cloudflare build', () => {
     assert.match(res.headers.get('set-cookie') ?? '', new RegExp(`Path=${new URL(inbox).pathname}/`));
   });
 
+  it('signs a device in with a typed short code, and refuses typed codes after too many wrong ones', async () => {
+    const made = await fetch(`${inbox}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${owner}` }, body: '{}' });
+    assert.equal(made.status, 201);
+    const { short, code } = (await made.json()) as { short: string; code: string };
+    const login = (body: unknown) => fetch(`${inbox}/v1/login`, { method: 'POST', body: JSON.stringify(body) });
+    const typed = await login({ code: `${short.slice(0, 4).toLowerCase()} ${short.slice(4)}` });
+    assert.equal(typed.status, 200);
+    assert.match(typed.headers.get('set-cookie') ?? '', /HttpOnly/);
+    assert.equal((await login({ code })).status, 401, 'the link of a used short code');
+    let last: Response | undefined;
+    for (let i = 0; i < 11; i++) last = await login({ code: 'ZZZZZZZZ' });
+    assert.equal(last!.status, 429);
+    assert.ok(Number(last!.headers.get('retry-after')) > 0);
+    const link = (await (await fetch(`${inbox}/v1/sign-in-codes`, { method: 'POST', headers: { authorization: `Bearer ${owner}` }, body: '{}' })).json()) as { code: string };
+    assert.equal((await login({ code: link.code })).status, 200, 'the link still works while typed codes wait');
+  });
+
   it('carries page events to the owner page over a WebSocket', async () => {
     const page = new WebSocket(`${inbox.replace(/^http/, 'ws')}/v1/ws?page=1&viewer=test-page`, { headers: { authorization: `Bearer ${owner}` } });
     const got: string[] = [];

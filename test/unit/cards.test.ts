@@ -1,10 +1,11 @@
 // Card features from the batch of principles about the card model.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_GUIDANCE, DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PRESENCE_KEEP_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, guidanceTextOnly, publicCard, type Caller } from '../../src/core/inbox.ts';
+import { DEFAULT_GUIDANCE, DEFAULT_GUIDANCE_VERSION, Inbox, InboxError, MAX_CARD_BYTES, PRESENCE_GRACE_MS, MAX_SOURCE_BYTES, MAX_VERSIONS, MAX_WEBHOOKS, MIN_FILE_CHARGE, ORPHAN_MS, PRESENCE_KEEP_MS, PAIRING_KEEP_MS, SIGN_IN_CODE_TTL_MS, SIGN_IN_GUESS_WINDOW_MS, MAX_WRONG_SIGN_IN_CODES, guidanceTextOnly, publicCard, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
 import { guidanceDiff } from '../../web/answers.js';
+import { SHORT_CODE_ALPHABET, SHORT_CODE_LENGTH } from '../../src/core/sign-in.ts';
 import { setup } from './fixture.ts';
 
 describe('patch edits', () => {
@@ -700,6 +701,60 @@ describe('sign-in codes for a phone', () => {
     const late = inbox.createSignInCode(owner).code;
     t += SIGN_IN_CODE_TTL_MS + 1;
     await assert.rejects(inbox.redeemSignInCode(late), /expired|not valid/);
+  });
+
+  it('gives each code a short form to type, with no letter or digit that reads as another', () => {
+    const inbox = new Inbox(new MemoryStorage());
+    for (const ch of '01ILO') assert.ok(!SHORT_CODE_ALPHABET.includes(ch), ch);
+    const { code, short } = inbox.createSignInCode(owner);
+    assert.match(code, /^[0-9a-f]{32}$/);
+    assert.equal(short.length, SHORT_CODE_LENGTH);
+    for (const ch of short) assert.ok(SHORT_CODE_ALPHABET.includes(ch), ch);
+  });
+
+  it('signs a device in with the typed short code, in any case, spaced or dashed, and either form ends both', async () => {
+    let t = 1_000_000;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const first = inbox.createSignInCode(owner);
+    const typed = `${first.short.slice(0, 4).toLowerCase()} - ${first.short.slice(4)}`;
+    const { secret } = await inbox.redeemSignInCode(typed);
+    assert.equal((await inbox.authenticate(secret))?.role, 'owner');
+    await assert.rejects(inbox.redeemSignInCode(first.code), (e: unknown) => e instanceof InboxError && e.status === 401, 'the link of a used short code');
+    const second = inbox.createSignInCode(owner);
+    await inbox.redeemSignInCode(second.code);
+    await assert.rejects(inbox.redeemSignInCode(second.short), (e: unknown) => e instanceof InboxError && e.status === 401, 'the short code of a used link');
+    const late = inbox.createSignInCode(owner);
+    t += SIGN_IN_CODE_TTL_MS + 1;
+    await assert.rejects(inbox.redeemSignInCode(late.short), (e: unknown) => e instanceof InboxError && e.status === 401, 'an expired short code');
+  });
+
+  it('refuses every typed code for a while after too many wrong ones, and the link still works', async () => {
+    let t = 1_000_000;
+    const inbox = new Inbox(new MemoryStorage(), () => t);
+    const live = inbox.createSignInCode(owner);
+    const wrong = live.short.startsWith('2') ? '3'.repeat(SHORT_CODE_LENGTH) : '2'.repeat(SHORT_CODE_LENGTH);
+    for (let i = 0; i < MAX_WRONG_SIGN_IN_CODES; i++) {
+      await assert.rejects(inbox.redeemSignInCode(wrong), (e: unknown) => e instanceof InboxError && e.status === 401);
+    }
+    // The right code is refused too, or a guesser would keep going.
+    await assert.rejects(inbox.redeemSignInCode(live.short), (e: unknown) => e instanceof InboxError && e.status === 429 && /try again in/.test(e.message));
+    // Something that is not a code at all is not a guess, and the long code in a link is too long to guess.
+    await assert.rejects(inbox.redeemSignInCode('not a code'), (e: unknown) => e instanceof InboxError && e.status === 401);
+    const link = inbox.createSignInCode(owner);
+    const { secret } = await inbox.redeemSignInCode(link.code);
+    assert.equal((await inbox.authenticate(secret))?.role, 'owner');
+    t += SIGN_IN_GUESS_WINDOW_MS + 1;
+    const fresh = inbox.createSignInCode(owner);
+    assert.ok(await inbox.redeemSignInCode(fresh.short));
+  });
+
+  it('counts the wrong codes in the inbox storage, so a restart does not reset them', async () => {
+    const t = 1_000_000;
+    const storage = new MemoryStorage();
+    const before = new Inbox(storage, () => t);
+    for (let i = 0; i < MAX_WRONG_SIGN_IN_CODES; i++) await before.redeemSignInCode('2'.repeat(SHORT_CODE_LENGTH)).catch(() => {});
+    const after = new Inbox(storage, () => t);
+    await assert.rejects(after.redeemSignInCode('3'.repeat(SHORT_CODE_LENGTH)), (e: unknown) => e instanceof InboxError && e.status === 429);
   });
 
   it('gives codes to the owner only, a few at a time', () => {

@@ -140,7 +140,7 @@ function describePin(pin: { set: boolean; neverAsk: boolean; lockedUntil: number
 
 /** A one-time link that signs a browser in, so the owner token stays out of the address bar and the browser history.
  * It signs in to the inbox this machine runs, or else to the inbox this machine paired with, such as a cloud inbox. */
-async function signInLink(): Promise<string> {
+async function signInLink(): Promise<{ link: string; short?: string }> {
   const local = runningHere();
   const paired = local ? undefined : ownerPairing();
   const target = local ?? paired ?? fail('No inbox runs on this machine. Start one with `your-attention start`, or pair this machine with your inbox as owner: `your-attention pair <url> --role owner`.');
@@ -148,9 +148,10 @@ async function signInLink(): Promise<string> {
   if (!res) fail(local ? 'No inbox runs on this machine. Start one with `your-attention start`.' : `The inbox this machine paired with, ${target.url}, did not answer.`);
   // An agent token cannot sign a browser in: only the owner's can.
   if (res.status === 403 && !local) fail(notOwnerAdvice(target.url));
-  const { code, error } = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
+  const { code, short, error } = (await res.json().catch(() => ({}))) as { code?: string; short?: unknown; error?: string };
   if (!res.ok || !code) fail(`Could not make a sign-in code: ${error ?? res.status}`);
-  return `${target.url}/#signin=${encodeURIComponent(code)}`;
+  // An inbox from before short codes answers without one, so the command prints the link alone.
+  return { link: `${target.url}/#signin=${encodeURIComponent(code)}`, ...(typeof short === 'string' && short.length === 8 ? { short } : {}) };
 }
 
 /** The inbox the PIN commands change: the one this machine runs, or else the one this machine paired with as owner. */
@@ -358,7 +359,7 @@ switch (command) {
   }
   case 'login-url':
     parseCommand(command, { args: rest });
-    console.log(await signInLink());
+    console.log((await signInLink()).link);
     break;
   case 'pin': {
     const { positionals } = parseCommand(command, { args: rest, allowPositionals: true });
@@ -404,9 +405,11 @@ switch (command) {
   }
   case 'open': {
     const { values } = parseCommand(command, { args: rest, options: { link: { type: 'boolean', default: false } } });
-    const link = await signInLink();
+    const { link, short } = await signInLink();
     if (values.link) {
       console.log(`Open this link in the browser to sign in. It works once, within 5 minutes:\n${link}`);
+      // A Home Screen app has no address bar, so its sign-in page takes the same sign-in as a code.
+      if (short) console.log(`Or type this code on the sign-in page: ${short.slice(0, 4)}-${short.slice(4)}`);
       break;
     }
     const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';

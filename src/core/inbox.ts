@@ -3,6 +3,7 @@
 // before the next starts. Every change is written to storage before a method
 // returns, and memory holds only the open connections.
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
+import { readShortCode, shortCode } from './sign-in.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed, sealedFields, secretInputs, withoutSealed } from './sealed.ts';
@@ -20,11 +21,17 @@ import type {
   FeedbackFinding, FeedbackVerdict, TriageFeedback, TriagePushback,
 } from './types.ts';
 
+/** A sign-in code as the inbox keeps it in `meta`. A code made before short codes has no `short`. */
+interface SignInCode { key: string; short?: string; expiresAt: number }
+
 export class InboxError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** Seconds until a refused request may succeed, for a 429's retry-after header. */
+  readonly retryAfter: number | undefined;
+  constructor(status: number, message: string, retryAfter?: number) {
     super(message);
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -254,6 +261,15 @@ export const MAX_AGENT_CHARS = 80;
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
+/** Wrong short codes the inbox takes in a window before it refuses every short code until the window passes. With
+ * five codes alive at once, the most an owner holds, each guess hits one with odds of 5 in 31^8, about 1 in 1.7e11.
+ * Ten guesses every 15 minutes is 350,400 a year, so a guesser who never stops gets in with odds of about 2 in a
+ * million a year, even if the owner kept five codes alive all year. A person who mistypes gets ten tries. The limit
+ * counts for the whole inbox, since a guesser can change address, and the long code in a link has its own 128 bits,
+ * so the QR code and a copied link still sign a device in while typed codes wait. */
+export const MAX_WRONG_SIGN_IN_CODES = 10;
+export const SIGN_IN_GUESS_WINDOW_MS = 15 * 60 * 1000;
+const SIGN_IN_GUESSES = 'signin-guesses';
 /** The most tag keys GET /v1/guidance lists, and the most values it lists for each key, so a busy inbox stays short. */
 export const MAX_TAG_KEYS = 20;
 export const MAX_TAG_VALUES = 15;
@@ -532,7 +548,7 @@ export class Inbox {
   }
 
   /** The owner's page asks for a code that signs one more device in, such as a phone that scans it. */
-  createSignInCode(caller: Caller): { code: string; expiresAt: number } {
+  createSignInCode(caller: Caller): { code: string; short: string; expiresAt: number } {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner signs a device in');
     const now = this.now();
     const live = this.signInCodes().filter((c) => {
@@ -542,24 +558,42 @@ export class Inbox {
     });
     if (live.length >= MAX_SIGN_IN_CODES) throw new InboxError(429, 'too many sign-in codes are waiting; wait five minutes');
     const code = randomId(16);
+    // Two live codes never share a short form, so a typed code names one.
+    let short = shortCode();
+    while (live.some((c) => c.short === short)) short = shortCode();
     const expiresAt = now + SIGN_IN_CODE_TTL_MS;
-    this.store.put('meta', `signin:${code}`, { key: `signin:${code}`, expiresAt });
-    return { code, expiresAt };
+    this.store.put('meta', `signin:${code}`, { key: `signin:${code}`, short, expiresAt });
+    return { code, short, expiresAt };
   }
 
-  /** A device turns a sign-in code into its own owner token. Each code works once. */
+  /** A device turns a sign-in code into its own owner token: the long code of a link, or the short code a person
+   * typed. Each code works once, and using either form ends both. Wrong short codes count toward a limit. */
   async redeemSignInCode(code: string): Promise<{ secret: string }> {
-    const key = `signin:${String(code ?? '')}`;
-    const found = /^signin:[0-9a-f]{32}$/.test(key) ? this.store.get<{ key: string; expiresAt: number }>('meta', key) : undefined;
-    if (found) this.store.delete('meta', key);
-    if (!found || found.expiresAt <= this.now()) throw new InboxError(401, 'this sign-in code is not valid or has expired; scan a new one');
-    const { secret } = await this.createToken(`device signed in ${new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ')}`, 'owner');
+    const now = this.now();
+    const text = String(code ?? '').trim();
+    const short = /^[0-9a-f]{32}$/.test(text) ? undefined : readShortCode(text);
+    let found: SignInCode | undefined;
+    if (short !== undefined) {
+      const guesses = this.store.get<{ key: string; at: number[] }>('meta', SIGN_IN_GUESSES)?.at.filter((at) => now - at < SIGN_IN_GUESS_WINDOW_MS) ?? [];
+      if (guesses.length >= MAX_WRONG_SIGN_IN_CODES) {
+        const seconds = Math.max(1, Math.ceil((Math.min(...guesses) + SIGN_IN_GUESS_WINDOW_MS - now) / 1000));
+        const minutes = Math.ceil(seconds / 60);
+        throw new InboxError(429, `too many wrong sign-in codes: try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}, or scan the QR code or open the sign-in link, which work meanwhile`, seconds);
+      }
+      found = this.signInCodes().find((c) => c.short === short && c.expiresAt > now);
+      if (!found) this.store.put('meta', SIGN_IN_GUESSES, { key: SIGN_IN_GUESSES, at: [...guesses, now] });
+    } else if (/^[0-9a-f]{32}$/.test(text)) {
+      found = this.store.get<SignInCode>('meta', `signin:${text}`);
+    }
+    if (found) this.store.delete('meta', found.key);
+    if (!found || found.expiresAt <= now) throw new InboxError(401, 'this sign-in code is not valid or has expired; get a new one from the phone button of a signed-in page');
+    const { secret } = await this.createToken(`device signed in ${new Date(now).toISOString().slice(0, 16).replace('T', ' ')}`, 'owner');
     return { secret };
   }
 
-  private signInCodes(): { key: string; expiresAt: number }[] {
+  private signInCodes(): SignInCode[] {
     return this.store.list<{ key?: unknown; expiresAt?: unknown }>('meta')
-      .filter((m): m is { key: string; expiresAt: number } => typeof m?.key === 'string' && m.key.startsWith('signin:'));
+      .filter((m): m is SignInCode => typeof m?.key === 'string' && m.key.startsWith('signin:'));
   }
 
   /** A client asks to pair. The person sees a system card with the code. */
@@ -2700,6 +2734,8 @@ export class Inbox {
       if (typeof key === 'string' && key.startsWith('reads:') && !key.startsWith(today)) this.store.delete('meta', key);
       const expiresAt = (m as { expiresAt?: unknown })?.expiresAt;
       if (typeof key === 'string' && key.startsWith('signin:') && typeof expiresAt === 'number' && expiresAt <= now) this.store.delete('meta', key);
+      const guesses = key === SIGN_IN_GUESSES ? (m as { at?: unknown }).at : undefined;
+      if (Array.isArray(guesses) && guesses.every((at) => typeof at !== 'number' || now - at >= SIGN_IN_GUESS_WINDOW_MS)) this.store.delete('meta', SIGN_IN_GUESSES);
     }
     this.pin.sweep();
     for (const m of this.store.list<{ key: string; at: number }>('messages')) {

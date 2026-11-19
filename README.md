@@ -217,7 +217,11 @@ YOUR_ATTENTION_RELAY_KEY=... your-attention serve --relay https://relay.example
 
 ### 6. Open the inbox on your phone (optional)
 
-Select the phone button, left of the GitHub mark, and scan the QR code with the phone camera. The phone opens the inbox, signed in with its own token. The code works once, for five minutes, so keep it to yourself. The devices button, left of the phone button, lists every key to the inbox and signs one out, so a phone you lost ends without touching the others.
+Select the phone button, left of the GitHub mark, and scan the QR code with the phone camera. The phone opens the inbox, signed in with its own token. The code works once, for five minutes, so keep it to yourself.
+
+If the camera opens the wrong browser, select **Copy the sign-in link** in the dialog, send the link to the phone, and open it in the browser you want. The link is the one in the QR code, so it also works once, within five minutes. The dialog gets a new link before the old one expires, so copy it again after it changes.
+
+The dialog also shows a short code, such as `K7QM-3XTP`. Type it, or paste the sign-in link, in the **Sign-in code or link** field of the sign-in page. A Home Screen app signs in this way, since it has no address bar. The devices button, left of the phone button, lists every key to the inbox and signs one out, so a phone you lost ends without touching the others.
 
 A cloud inbox works from anywhere, and a laptop inbox from a phone on the same network. The laptop inbox listens on every network interface, IPv4 and IPv6, by default. Its QR code opens the laptop's `.local` name, such as `http://my-laptop.local:4815`, and the dialog also gives an IP address, for a phone that cannot open `.local` names.
 
@@ -235,14 +239,14 @@ A laptop inbox opened over plain http, such as `http://my-laptop.local:4815` fro
 
 **Android, or a computer:**
 
-1. Open the https inbox in Chrome, Edge, Firefox or Safari, signed in.
+1. Open the https inbox in Chrome, Edge, Firefox or Safari, signed in. An app installed from Chrome on Android shares Chrome's sign-in, so signing in Chrome signs it in. If it shows the sign-in page, type the phone dialog's short code there.
 2. Turn on **Notify me**, and allow notifications when the browser asks.
 
 **iPhone or iPad** (iOS 16.4 or newer):
 
 1. Open the https inbox in Safari.
 2. Tap Share, then **Add to Home Screen**.
-3. Open Your Attention from the new Home Screen icon, not from Safari. If it shows the sign-in steps, scan the phone QR code from a signed-in page, as in step 6.
+3. Open Your Attention from the new Home Screen icon, not from Safari. The Home Screen app keeps its own sign-in, apart from Safari's, so it shows the sign-in page even after you sign Safari in. On a signed-in page, open the phone button, then type its short code in the app's **Sign-in code or link** field, or paste its sign-in link there.
 4. Turn on **Notify me**, and tap Allow.
 
 Before step 3, the switch on an iPhone is grey and says "add this page to your Home Screen first". If you tap Don't Allow, it says "the browser blocks notifications". Change that in the phone's Settings.

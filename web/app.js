@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, AgentPin, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, AgentPin, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, agentName, buildQueue, notifies, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
@@ -411,24 +411,26 @@ export function App() {
   }, [!!focusMode]);
 
   if (auth === 'needed') {
-    const phone = h('p', null, 'On a phone: on a page that is signed in, tap the phone button at the top, then scan its QR code. The code works once, within 5 minutes.');
+    const phone = h('p', null, 'On a phone: on a page that is signed in, tap the phone button at the top, then scan its QR code, or type its code above. The code works once, within 5 minutes.');
+    // A device with no address bar, such as an iPhone Home Screen app, signs in with a typed code or a pasted link.
+    const field = h(CodeSignIn, { onSignedIn: unlocked });
     // The page cannot sign itself in. The steps depend on where the inbox runs: on a computer, or in the cloud.
     if (LAPTOP_HOST.test(location.hostname)) {
-      return h('div', { className: 'signin' }, h('h2', null, 'Sign in to your inbox'),
-        h('p', null, 'This inbox runs on a computer. To sign in this browser:'),
+      return h('div', { className: 'signin' }, h('h2', null, 'Sign in to your inbox'), field,
+        h('p', null, 'This inbox runs on a computer. To sign in this browser from that computer:'),
         h('ol', null,
           h('li', null, 'Open a terminal on the computer that runs the inbox.'),
-          h('li', null, 'Run ', h('code', null, 'your-attention open --link'), '. It prints a sign-in link that works once, within 5 minutes.'),
-          h('li', null, 'Open that link in this browser.')),
+          h('li', null, 'Run ', h('code', null, 'your-attention open --link'), '. It prints a sign-in link and a code, which work once, within 5 minutes.'),
+          h('li', null, 'Open that link in this browser, or type the code above.')),
         h('p', null, 'In your usual browser, ', h('code', null, 'your-attention open'), ' opens the page signed in, with no link to copy.'),
         phone);
     }
     // The address the person bookmarks carries no token: the page drops it from the address bar on sign-in.
-    return h('div', { className: 'signin' }, h('h2', null, 'Sign in to your inbox'),
+    return h('div', { className: 'signin' }, h('h2', null, 'Sign in to your inbox'), field,
       h('p', null, 'This inbox runs in the cloud. This address does not sign a browser in by itself. To sign in this browser:'),
       h('ol', null,
-        h('li', null, 'On a computer paired with this inbox as owner, run ', h('code', null, 'your-attention open --link'), '. It prints a sign-in link that works once, within 5 minutes.'),
-        h('li', null, 'Open that link in this browser.')),
+        h('li', null, 'On a computer paired with this inbox as owner, run ', h('code', null, 'your-attention open --link'), '. It prints a sign-in link and a code, which work once, within 5 minutes.'),
+        h('li', null, 'Open that link in this browser, or type the code above.')),
       h('p', null, 'To pair a computer as owner, run ', h('code', null, `your-attention pair ${location.origin}${location.pathname.replace(/\/$/, '')} --role owner`), ' on it, then approve its card in a browser that is signed in.'),
       phone);
   }

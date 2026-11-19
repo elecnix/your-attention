@@ -6,6 +6,7 @@ import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
 import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdown.js';
 import { copyText, installCopy } from './copy.js';
+import { groupCode, readSignIn } from './sign-in.js';
 import { naturalSize, zoomSize, zoomedSvg } from './zoom.js';
 import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, pushbackKey, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
@@ -980,11 +981,13 @@ export function UsageToggle({ telemetry: t, onChange }) {
     h('input', { type: 'checkbox', role: 'switch', checked: t.enabled && !t.blocked, disabled: !!t.blocked, onChange: (e) => onChange({ enabled: e.target.checked }) }), 'Send anonymous usage counts');
 }
 
-// The inbox address as a QR code, to open the inbox on a phone. The code in the QR signs one phone in once, within five minutes.
+// The inbox address as a QR code, to open the inbox on a phone. The code in the QR signs one phone in once, within five
+// minutes. The same link shows under the QR, with a button that copies it, for a phone whose camera opens the wrong
+// browser. A short code goes with it, to type where no link can be pasted, such as an iPhone Home Screen app.
 export function PhoneLink() {
   const [open, setOpen] = React.useState(false);
   const [qr, setQr] = React.useState(null);
-  const [copied, setCopied] = React.useState(false);
+  const [copied, setCopied] = React.useState(null);
   const ref = React.useRef(null);
   // A phone cannot reach an address that names this computer itself, so a laptop inbox gives its network addresses.
   const local = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)$/.test(location.hostname);
@@ -1010,19 +1013,29 @@ export function PhoneLink() {
       : Promise.resolve([]);
     where.then((list) => { if (live) setNetwork(list); });
     const load = import(/* @vite-ignore */ new URL('vendor/qrcode.mjs', document.baseURI).href);
-    // Ask for a fresh sign-in code, and another one shortly before it expires while the dialog stays open.
-    const refresh = () => Promise.all([load, where, api(`${BASE}v1/sign-in-codes`, {}).then((r) => (r.ok ? r.json() : null)).catch(() => null)])
-      .then(([{ default: qrcode }, list, signin]) => {
-        if (!live) return;
-        const target = (list[0] || location.origin) + location.pathname;
-        setQr({ ...draw(qrcode, signin ? `${target}#signin=${signin.code}` : target), signsIn: !!signin });
-        if (signin) renew = setTimeout(refresh, Math.max(10_000, signin.expiresAt - Date.now() - 30_000));
-      }, () => { if (live) setQr({ failed: true }); });
+    // A refused code says why, such as five codes waiting already, and the dialog shows the plain address.
+    const ask = () => api(`${BASE}v1/sign-in-codes`, {}).then((r) => (r.ok ? r.json() : bodyError(r)))
+      .catch((e) => ({ refused: (e && e.message) || 'the inbox did not answer' }));
+    // Ask for a fresh sign-in code, and another one shortly before it expires while the dialog stays open. The link
+    // under the QR and the copy button follow each new code, and a copy of the old link no longer shows as copied.
+    const refresh = () => Promise.all([where, ask()]).then(([list, answer]) => {
+      if (!live) return;
+      const signin = answer.refused ? null : answer;
+      const target = (list[0] || location.origin) + location.pathname;
+      const link = signin ? `${target}#signin=${signin.code}` : target;
+      setCopied(null);
+      setQr((q) => ({ ...(q && !q.failed ? q : {}), link, short: signin && signin.short, signsIn: !!signin, refused: answer.refused, drawn: false }));
+      load.then(({ default: qrcode }) => { if (live) setQr((q) => (q && q.link === link ? { ...q, ...draw(qrcode, link), drawn: true } : q)); },
+        () => { if (live) setQr((q) => (q && q.link === link ? { ...q, failed: true } : q)); });
+      if (signin) renew = setTimeout(refresh, Math.max(10_000, signin.expiresAt - Date.now() - 30_000));
+    });
     refresh();
     return () => { live = false; clearTimeout(renew); };
   }, [open]);
-  const close = () => { ref.current?.close(); setOpen(false); setCopied(false); setQr(null); };
-  const copy = () => navigator.clipboard?.writeText(address).then(() => setCopied(true), () => {});
+  const close = () => { ref.current?.close(); setOpen(false); setCopied(null); setQr(null); };
+  const copy = (what, text) => copyText(text).then((ok) => setCopied(ok ? what : null));
+  const link = qr ? qr.link : address;
+  const signsIn = !!(qr && qr.signsIn);
   return h(React.Fragment, null,
     h(BarIconButton, { className: 'phone', label: 'Open this inbox on your phone', onClick: () => setOpen(true) },
       h(BarIcon, null,
@@ -1031,20 +1044,51 @@ export function PhoneLink() {
     open && h(BarDialog, { dialogRef: ref, className: 'qr-dialog', titleId: 'qr-title', title: 'Open this inbox on your phone', onClose: close },
       h('p', null, 'Scan the code with the phone camera. The phone opens the inbox signed in.'),
       h('div', { className: 'qr' }, qr && qr.failed
-        ? h('p', { className: 'qr-failed' }, 'The QR code did not load. Copy the address below instead.')
-        : qr
+        ? h('p', { className: 'qr-failed' }, 'The QR code did not load. Copy the link below instead.')
+        : qr && qr.drawn
         ? h('svg', { viewBox: `-4 -4 ${qr.n + 8} ${qr.n + 8}`, role: 'img', 'aria-label': `QR code that opens ${address}`, shapeRendering: 'crispEdges' },
           h('rect', { x: -4, y: -4, width: qr.n + 8, height: qr.n + 8, fill: '#fff' }), h('path', { d: qr.d, fill: '#000' }))
         : h('span', { className: 'muted' }, 'Drawing the code…')),
-      h('p', { className: 'qr-address' }, address),
+      qr && qr.short && h('div', { className: 'signin-code-row' },
+        h('span', { className: 'muted', id: 'signin-code-label' }, 'Or type this code on the phone\'s sign-in page:'),
+        h('strong', { className: 'signin-code', 'aria-labelledby': 'signin-code-label' }, groupCode(qr.short))),
+      h('p', { className: 'qr-address', 'aria-label': signsIn ? 'The sign-in link' : 'The inbox address' }, link),
       local && network.length > 1 && h('p', { className: 'muted' }, 'Your phone must be on the same network. If its camera cannot open the name, try ', h('code', null, network[1] + location.pathname), '.'),
       local && !network.length && h('p', { className: 'note warn' }, 'This address names this computer, so a phone cannot open it. Open this page at the computer\'s network address instead, such as ', h('code', null, 'http://<name>.local:4815'), ', or use a cloud inbox.'),
-      qr && h('p', { className: 'muted' }, qr.signsIn
-        ? 'The code signs one phone in, once, within five minutes. Anyone who scans it first gets in, so keep it to yourself.'
-        : 'This address has no sign-in. On the phone, sign in with your owner link.'),
+      qr && h('p', { className: 'muted' }, signsIn
+        ? 'The link signs one device in, once, within five minutes. The QR code and the typed code are the same sign-in. While this dialog stays open, a new link and code replace them before they expire, so copy the link again after a change. Anyone who uses them first gets in, so keep them to yourself.'
+        : `This inbox gave no sign-in code (${qr.refused}), so the QR code and the copy button give the address only. On the phone, sign in with your owner link, or open this dialog again later.`),
       h('div', { className: 'qr-actions' },
-        h('button', { type: 'button', className: 'btn', onClick: copy }, copied ? 'Copied' : 'Copy the address'),
-        h('button', { type: 'button', className: 'btn primary', onClick: close, autoFocus: true }, 'Close'))));
+        signsIn && h('button', { type: 'button', className: 'btn primary', onClick: () => copy('link', link) }, copied === 'link' ? 'Copied the sign-in link' : 'Copy the sign-in link'),
+        h('button', { type: 'button', className: 'btn', onClick: () => copy('address', address) },
+          signsIn ? (copied === 'address' ? 'Copied the address' : 'Copy the address only') : (copied === 'address' ? 'Copied the address' : 'Copy the address')),
+        h('button', { type: 'button', className: 'btn', onClick: close, autoFocus: true }, 'Close'))));
+}
+
+/** The sign-in field of a signed-out page. A device with no address bar, such as an iPhone Home Screen app, signs in
+ * here with the short code of the phone dialog, or with a pasted sign-in link. */
+export function CodeSignIn({ onSignedIn }) {
+  const [text, setText] = React.useState('');
+  const [error, setError] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const submit = (e) => {
+    e.preventDefault();
+    const body = readSignIn(text);
+    if (!body) { setError('Type the code from the phone button of a signed-in page, or paste the sign-in link.'); return; }
+    setBusy(true);
+    setError(null);
+    fetch(`${BASE}v1/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: J(body) })
+      .then((r) => (r.ok ? onSignedIn() : bodyError(r)))
+      .catch((err) => setError(err.message || 'The inbox did not answer.'))
+      .finally(() => setBusy(false));
+  };
+  return h('form', { className: 'code-signin', onSubmit: submit },
+    h('label', { htmlFor: 'signin-input' }, 'Sign-in code or link'),
+    h('div', { className: 'code-signin-row' },
+      h('input', { id: 'signin-input', value: text, onChange: (e) => setText(e.target.value), autoComplete: 'one-time-code', autoCapitalize: 'characters', autoCorrect: 'off', spellCheck: false, placeholder: 'ABCD-EFGH', 'aria-describedby': 'signin-help' }),
+      h('button', { type: 'submit', className: 'btn primary', disabled: busy }, 'Sign in')),
+    h('p', { id: 'signin-help', className: 'muted' }, 'On a page that is signed in, tap the phone button at the top. Type the code it shows, or paste its sign-in link. Each code works once, within five minutes.'),
+    error && h('p', { className: 'note warn', role: 'alert' }, error));
 }
 
 /** The inbox's own words for a failed request, so a dialog says why it did not happen. */

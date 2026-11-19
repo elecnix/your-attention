@@ -25,8 +25,19 @@ describe('your-attention open --link', () => {
       assert.equal(link[1]!.startsWith(info.url), true);
       assert.match(run.stdout, /once, within 5 minutes/);
       const login = () => fetch(`${info.url}/v1/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: decodeURIComponent(link[2]!) }) });
+      // The same sign-in as a code to type, for a sign-in page with no address bar. Using the link ends it too.
+      const typed = /type this code on the sign-in page: ([2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4})$/m.exec(run.stdout);
+      assert.ok(typed, run.stdout);
       assert.equal((await login()).ok, true);
       assert.equal((await login()).ok, false);
+      const byCode = await fetch(`${info.url}/v1/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: typed[1] }) });
+      assert.equal(byCode.status, 401);
+      // A fresh code, typed as printed with its dash, signs in, so the 401 above comes from the used link.
+      const again = spawnSync(process.execPath, [...CLI, 'open', '--link'], { env, encoding: 'utf8' });
+      const fresh = /type this code on the sign-in page: (\S+)$/m.exec(again.stdout);
+      assert.ok(fresh, again.stdout);
+      const typedFresh = await fetch(`${info.url}/v1/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: fresh[1] }) });
+      assert.equal(typedFresh.status, 200);
       serve.kill();
       await until(async () => (await fetch(`${info.url}/v1/info`).then(() => false, () => true)) || undefined);
       const down = spawnSync(process.execPath, [...CLI, 'open', '--link'], { env, encoding: 'utf8' });

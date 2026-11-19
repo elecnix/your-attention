@@ -113,6 +113,7 @@ flowchart TB
   CK -- "POST /v1/sign-in-codes, phone QR" --> SC
   OJ -- "POST /v1/sign-in-codes" --> SC
   SC -- "#signin=code, then POST /v1/login" --> CK
+  SC -- "short code typed or link pasted on the sign-in page, then POST /v1/login: 10 wrong per 15 min" --> CK
   PERSON -- "invite code" --> WORKER
   WORKER -- "POST /new: #token=owner token, once, then POST /v1/login" --> CK
   CLIENT -- "POST /v1/pair: name, role" --> PC["pairing id + 6-digit code: 10 min"]
@@ -135,7 +136,7 @@ flowchart TB
 ```
 
 - The inbox stores a hash of each token, never the token. Only the machine or tab named in its box holds the secret.
-- An owner token is the only key that signs in a new browser. A browser gets one from a sign-in code, or once from `POST /new`. The page removes `#token=` and `#signin=` from the address bar, so a bookmarked address signs nobody in.
+- An owner token is the only key that signs in a new browser. A browser gets one from a sign-in code, or once from `POST /new`. A sign-in code has a long form for links and an 8-character short form to type. The inbox refuses every short code for 15 minutes after 10 wrong ones. The page removes `#token=` and `#signin=` from the address bar, so a bookmarked address signs nobody in.
 - Losing every owner credential closes the page. A cloud inbox's address does not sign a browser in, its sign-in link works once within five minutes, and an agent token cannot make a sign-in code, so recovery means a new inbox. The cards in the old one remain in a place nobody can open.
 - An agent token can't make a sign-in code, approve a pairing or read the state. On a machine paired only as an agent, the owner commands, `open`, `tui` and `pin`, say to pair as owner. That pairing goes in `owner.json` and leaves `client.json` to the agents.
 - The PIN never leaves the device that types it. The tab, the CLI and the terminal client derive a key from it with PBKDF2, using the salt from `GET /v1/pin`, and send the key. The inbox stores a SHA-256 hash of that key.
