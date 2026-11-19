@@ -12,6 +12,7 @@ import { PinLock } from './pin.ts';
 import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
+import { generateVapid, sendPush, b64urlDecode, type Vapid } from './webpush.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
@@ -124,9 +125,41 @@ export interface InboxOptions {
   usageAlwaysOn?: boolean;
   /** Types approved sentences into herdr panes. Without it, as on the hosted inbox, the inbox takes no card with approvals. */
   approvals?: ApprovalSender | undefined;
-  /** How the inbox calls answer webhooks. The default is the platform's fetch. */
+  /** How the inbox calls answer webhooks and push services. The default is the platform's fetch. */
   fetch?: typeof fetch | undefined;
+  /** Whether a new card pushes to a device that collapsed these groups. The page's own rule, `notifies` in web/queue.js,
+   * which an adapter passes in because the core imports only the core. Without it, every new card pushes to every device. */
+  pushRule?: ((state: ReturnType<Inbox['summaryState']>, card: CardSummary, collapsed: ReadonlySet<string>) => boolean) | undefined;
+  /** How long a push waits before its retry. Tests pass an instant one. */
+  pushWait?: ((ms: number) => Promise<void>) | undefined;
 }
+
+/** A device that gets a push for each new card: the browser's push subscription, and the groups its page has collapsed. */
+export interface PushDevice {
+  /** The endpoint, which names the device. */
+  id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  /** The ids of the groups the device's page collapsed, which the page sends each time they change. */
+  collapsed: string[];
+  /** The owner token that saved it. Revoking that token removes the device. */
+  token: string;
+  savedAt: number;
+}
+
+/** What the page sends to save a device: the browser's `PushSubscription` as JSON, and its collapsed groups. */
+export interface PushInput {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  collapsed?: string[];
+}
+
+const MAX_PUSH_DEVICES = 20;
+const MAX_ENDPOINT_CHARS = 2048;
+const MAX_COLLAPSED = 100;
+/** The notification shows this much of a title. A longer one ends in an ellipsis. */
+const PUSH_TITLE_CHARS = 100;
 
 export const SYSTEM_AGENT = 'system';
 /** The inbox itself, as the caller of the system cards it posts. */
@@ -361,9 +394,13 @@ export class Inbox {
   /** What each open page reports about the person, by page id. */
   private readonly viewers = new Map<string, { visible: boolean; activeAt: number | null; focus: string | null }>();
   private readonly extensions = new Map<string, { reg: ExtensionRegistration; token: string; send: (ev: HookEvent) => void }>();
-  /** Webhook deliveries still running, so tests and shutdown can wait for them. */
+  /** Webhook deliveries and pushes still running, so a platform, a test and a shutdown can wait for them. */
   readonly deliveries = new Set<Promise<unknown>>();
   private readonly fetcher: typeof fetch;
+  private readonly pushRule: InboxOptions['pushRule'];
+  private readonly pushWait: InboxOptions['pushWait'];
+  /** The VAPID key, read or made once. A promise, so two requests that ask at once make one key. */
+  private vapid: Promise<Vapid> | undefined;
   /** The usage counts the platform sends once a day, when the person left them on. */
   readonly usage: Usage;
   /** The PIN a browser tab types before it acts as the owner. */
@@ -389,6 +426,8 @@ export class Inbox {
     this.approvalSender = opts.approvals;
     // Workers refuse a fetch called as a method of another object, so the default calls it bare.
     this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
+    this.pushRule = opts.pushRule;
+    this.pushWait = opts.pushWait;
     this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
@@ -465,6 +504,7 @@ export class Inbox {
     this.store.delete('tokens', id);
     this.pin.dropUnlocks(id);
     this.removeSubscriptions((s) => s.token === id, 'The token that asked for this webhook was revoked.');
+    for (const d of this.store.list<PushDevice>('pushes')) if (d.token === id) this.store.delete('pushes', d.id);
   }
 
   /** Let an owner token act without the PIN, such as the laptop's owner-token file, which only this machine's user reads. */
@@ -684,6 +724,7 @@ export class Inbox {
       pushback: before?.pushback,
       history: history.length ? history : undefined,
       broadcast: before?.broadcast,
+      pushed: before ? hadReached(before) || undefined : undefined,
       origin: cleanOrigin(input.origin),
       from: input.from === undefined || input.from === null ? undefined : String(input.from).trim().slice(0, MAX_FROM_CHARS) || undefined,
       tags: mergedTags.tags,
@@ -704,7 +745,10 @@ export class Inbox {
     // History and pushback have caps of their own, and the replies of older cards are stored data the card cap leaves out.
     const size = new TextEncoder().encode(JSON.stringify({ ...card, history: undefined, replies: undefined, pushback: undefined })).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}. Attach large content as a file`);
-    this.store.put('cards', id, card);
+    // A card no triage hook screens reaches the person at once. An agent's ask or secret card waits for the hook.
+    const screened = (kind === 'ask' || kind === 'secret') && caller.token !== '';
+    const shown = screened ? { card, first: false } : this.reached(card);
+    this.store.put('cards', id, shown.card);
     this.store.index(id, searchText(card));
     if (card.version === 1 && caller.token !== '') {
       this.usage.record('cards');
@@ -718,9 +762,10 @@ export class Inbox {
       }
     }
     this.emit({ type: 'change', card: id });
-    // Agent cards go through the card.created hook before the person sees them.
-    if ((kind === 'ask' || kind === 'secret') && caller.token !== '') return this.requestTriage(card);
-    return card;
+    // Agent cards go through the card.created hook before the person sees them, and push once it lets them through.
+    if (screened) return this.requestTriage(card);
+    if (shown.first) this.pushNew(shown.card);
+    return shown.card;
   }
 
   /** An inbox with a limit shows at most that many cards, so its state fits the hosted inbox's CPU time. The limit counts
@@ -823,7 +868,7 @@ export class Inbox {
         if (t?.state === 'pending' && t.request && t.deadline && t.waiting?.includes(name)) {
           // A call this extension missed while it reconnected.
           send({ type: 'hook', version: HOOK_VERSION, id: t.request, hook: 'card.created', card: publicCard(card), deadline: t.deadline, person: this.person() });
-        } else if (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length)) this.requestTriage(card);
+        } else if (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length)) this.requestTriage(card, true);
       }
     }
     return () => { if (this.extensions.get(name) === entry) this.extensions.delete(name); };
@@ -842,14 +887,17 @@ export class Inbox {
     return { name, hooks: hooks as HookName[], policy, timeoutMs };
   }
 
-  private requestTriage(card: Card): Card {
+  /** `rescreen` is for a card the person already had, which a hook that connects later screens again. It is not new, so it never pushes. */
+  private requestTriage(card: Card, rescreen = false): Card {
+    if (rescreen && !card.pushed && hadReached(card)) card = { ...card, pushed: true };
     const targets = [...this.extensions.values()].filter((e) => e.reg.hooks.includes('card.created'));
     const now = this.now();
     if (!targets.length) {
       // Fail-open when triage is down: the card goes straight to the person, and a returning extension screens it.
-      const next = { ...card, triage: { state: 'skipped' as const, reason: 'No triage extension was connected.', at: now } };
-      this.store.put('cards', card.id, next);
-      return next;
+      const shown = this.reached({ ...card, triage: { state: 'skipped' as const, reason: 'No triage extension was connected.', at: now } });
+      this.store.put('cards', card.id, shown.card);
+      if (shown.first) this.pushNew(shown.card);
+      return shown.card;
     }
     const request = randomId(8);
     const deadline = now + Math.max(...targets.map((t) => t.reg.timeoutMs));
@@ -886,20 +934,23 @@ export class Inbox {
     const triage = verdict === 'hold'
       ? { ...rest, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
       : { ...rest, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, ...(waiting.length && kept.length ? { advice: kept } : {}), at: now };
-    const next = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? kept : []);
+    const shown = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? kept : []);
     this.emit({ type: 'change', card: card.id });
-    return next;
+    if (shown.first) this.pushNew(shown.card);
+    return shown.card;
   }
 
-  /** Store a card that triage just decided on, and when it passed, give its agent the advice of each extension. Advice is
-   * pushback too, so the card keeps it beside a return's entries and the agent can give feedback on it. */
-  private passWithAdvice(card: Card, advice: { by: string; text: string }[]): Card {
+  /** Store a card that triage just decided on, and when it passed, mark it as reaching the person and give its agent the
+   * advice of each extension. Advice is pushback too, so the card keeps it beside a return's entries and the agent can
+   * give feedback on it. `first` says the card reached the person for the first time, so the caller pushes it. */
+  private passWithAdvice(card: Card, advice: { by: string; text: string }[]): { card: Card; first: boolean } {
     const at = this.now();
     const pushback = advice.length ? [...(card.pushback ?? []), ...advice.map((a) => ({ kind: 'advice' as const, by: a.by, reason: a.text, version: card.version, at }))].slice(-PUSHBACK_LIMIT) : card.pushback;
-    const next = { ...card, ...(pushback ? { pushback } : {}) };
-    this.store.put('cards', card.id, next);
-    for (const a of advice) this.tellAgent(card, { type: 'advice', id: randomId(6), card: publicCard(next), advice: a.text, by: a.by });
-    return next;
+    const withAdvice = { ...card, ...(pushback ? { pushback } : {}) };
+    const shown = card.triage?.state === 'passed' ? this.reached(withAdvice) : { card: withAdvice, first: false };
+    this.store.put('cards', card.id, shown.card);
+    for (const a of advice) this.tellAgent(card, { type: 'advice', id: randomId(6), card: publicCard(shown.card), advice: a.text, by: a.by });
+    return shown;
   }
 
   /** The agent that posted a card says whether triage was right to push back on it. The feedback answers the latest
@@ -961,10 +1012,11 @@ export class Inbox {
   release(id: string): Card {
     const card = this.getCard(id);
     if (!card.triage || card.triage.state !== 'held') return card;
-    const next = { ...card, triage: { ...card.triage, state: 'passed' as const, reason: `Released by you. ${card.triage.reason ?? ''}`.trim(), at: this.now() } };
-    this.store.put('cards', id, next);
+    const shown = this.reached({ ...card, triage: { ...card.triage, state: 'passed' as const, reason: `Released by you. ${card.triage.reason ?? ''}`.trim(), at: this.now() } });
+    this.store.put('cards', id, shown.card);
     this.emit({ type: 'change', card: id });
-    return next;
+    if (shown.first) this.pushNew(shown.card);
+    return shown.card;
   }
 
   addWebhook(hook: string, url: string, secret: string): Webhook {
@@ -998,6 +1050,107 @@ export class Inbox {
   private track(p: Promise<unknown>): void {
     this.deliveries.add(p);
     void p.then(() => this.deliveries.delete(p), () => this.deliveries.delete(p));
+  }
+
+  // ---- web push ----
+
+  /** The inbox's public VAPID key, which a browser passes to `pushManager.subscribe`. The key pair is made on the first ask
+   * and kept in the inbox's storage, and the private half never leaves it. */
+  pushKey(): Promise<string> {
+    return this.vapidKeys().then((v) => v.publicKey);
+  }
+
+  private vapidKeys(): Promise<Vapid> {
+    // The read runs before the first await, so two callers share one promise and one key.
+    this.vapid ??= (async () => {
+      const kept = this.store.get<Vapid>('meta', 'vapid');
+      if (kept) return kept;
+      const made = await generateVapid();
+      // Another object over the same storage may have stored a key while this one generated. Read again, with no await before the write.
+      const raced = this.store.get<Vapid>('meta', 'vapid');
+      if (raced) return raced;
+      this.store.put('meta', 'vapid', made);
+      return made;
+    })().catch((e: unknown) => { this.vapid = undefined; throw e; });
+    return this.vapid;
+  }
+
+  /** Save a device, or change the groups it collapsed. The endpoint names the device, so a device saved again is one device. */
+  savePush(caller: Caller, input: PushInput): void {
+    const endpoint = String(input?.endpoint ?? '');
+    let url: URL | undefined;
+    try { url = new URL(endpoint); } catch { /* reported below */ }
+    if (!url || endpoint.length > MAX_ENDPOINT_CHARS) throw new InboxError(400, `endpoint must be the push service's address, at most ${MAX_ENDPOINT_CHARS} characters`);
+    if (url.protocol !== 'https:') throw new InboxError(400, 'endpoint must be an https address');
+    const p256dh = String(input.keys?.p256dh ?? '');
+    const auth = String(input.keys?.auth ?? '');
+    const bytes = (text: string): Uint8Array | undefined => {
+      // A length that base64url cannot have, such as one more than a multiple of four, makes atob throw.
+      if (!/^[\w-]+$/.test(text) || text.length % 4 === 1) return undefined;
+      try { return b64urlDecode(text); } catch { return undefined; }
+    };
+    const point = bytes(p256dh);
+    if (point?.length !== 65 || point[0] !== 4) throw new InboxError(400, 'keys.p256dh must be the browser\'s 65-byte P-256 public key, in base64url');
+    if (bytes(auth)?.length !== 16) throw new InboxError(400, 'keys.auth must be 16 bytes in base64url');
+    const collapsed = input.collapsed ?? [];
+    if (!Array.isArray(collapsed) || collapsed.length > MAX_COLLAPSED || collapsed.some((g) => typeof g !== 'string' || g.length > 300)) {
+      throw new InboxError(400, `collapsed must list at most ${MAX_COLLAPSED} group ids, as text`);
+    }
+    const id = endpoint;
+    if (!this.store.get('pushes', id) && this.pushCount() >= MAX_PUSH_DEVICES) {
+      throw new InboxError(400, `this inbox pushes to at most ${MAX_PUSH_DEVICES} devices: turn off Notify me on one you no longer use`);
+    }
+    this.store.put<PushDevice>('pushes', id, { id, endpoint, p256dh, auth, collapsed, token: caller.token, savedAt: this.now() });
+  }
+
+  deletePush(endpoint: string): void {
+    this.store.delete('pushes', endpoint);
+  }
+
+  pushCount(): number {
+    return this.store.list<PushDevice>('pushes').length;
+  }
+
+  /** The card as stored once it has reached the person, and whether this is the first time. A card pushes once, when it
+   * first reaches the person: not while a triage hook screens it, and not again when the agent revises it. The mark is
+   * written with the change that shows the card, so it costs no write of its own. */
+  private reached(card: Card): { card: Card; first: boolean } {
+    return card.pushed ? { card, first: false } : { card: { ...card, pushed: true }, first: true };
+  }
+
+  /** A card that would notify the person today also pushes to each saved device. The push runs on, tracked like a webhook,
+   * so the platform can wait for it while the post answers at once, and a failed push never touches the card. */
+  private pushNew(card: Card): void {
+    const devices = this.store.list<PushDevice>('pushes');
+    if (!devices.length) return;
+    if (card.closed || card.archivedAt) return;
+    // The state is read once, and only when a device has collapsed groups for the rule to apply.
+    let state: ReturnType<Inbox['summaryState']> | undefined;
+    const summary = (): CardSummary | undefined => {
+      state ??= this.summaryState();
+      return state.cards.find((c) => c.id === card.id);
+    };
+    const to = devices.filter((d) => {
+      if (!this.pushRule || !d.collapsed.length) return true;
+      const c = summary();
+      return !c || !state || this.pushRule(state, c, new Set(d.collapsed));
+    });
+    if (!to.length) return;
+    const title = [...card.title];
+    const text = JSON.stringify({ id: card.id, title: title.length > PUSH_TITLE_CHARS ? `${title.slice(0, PUSH_TITLE_CHARS - 1).join('')}…` : card.title });
+    this.track(this.sendPushes(to, new TextEncoder().encode(text)));
+  }
+
+  private async sendPushes(to: PushDevice[], payload: Uint8Array): Promise<void> {
+    let vapid: Vapid;
+    try { vapid = await this.vapidKeys(); } catch { return; }
+    await Promise.all(to.map(async (d) => {
+      const result = await sendPush(this.fetcher, vapid, d, payload, { ...(this.pushWait ? { wait: this.pushWait } : {}) });
+      // The push service forgot this device: the person cleared the site's data, or the browser dropped the subscription.
+      if (result.gone) {
+        try { this.store.delete('pushes', d.id); } catch { /* the inbox closed while the push ran */ }
+      }
+    }));
   }
 
   // ---- answer webhooks ----
@@ -2420,6 +2573,20 @@ export class Inbox {
     this.emit({ type: 'presence', agent, online });
   }
 
+  /** A live connection reports where its session runs now, as one does after the person renames the session. Only a
+   * connection of this token for this agent may, so one client cannot relabel another's session. The row and the pages
+   * change only when the kept fields differ, so a client that repeats itself costs a read. Answers whether it changed. */
+  reportOrigin(caller: Caller, agent: string, reported: unknown): boolean {
+    if (!this.agents.get(this.key(caller.token, agent))?.size) throw new InboxError(409, `no connection of yours for ${agent}`);
+    const origin = connectionOrigin(reported);
+    if (!origin) return false;
+    const before = this.store.get<Presence>('presence', agent);
+    if (JSON.stringify(before?.origin ?? {}) === JSON.stringify(origin)) return false;
+    this.store.put<Presence>('presence', agent, { ...before, agent, online: true, lastSeen: this.now(), origin });
+    this.emit({ type: 'presence', agent, online: true });
+    return true;
+  }
+
   /** Write a presence change over what is stored, so the fields a change does not name stay. */
   private putPresence(agent: string, change: Partial<Presence>): void {
     const before = this.store.get<Presence>('presence', agent);
@@ -2550,8 +2717,9 @@ export class Inbox {
         const triage = t.policy === 'fail-closed'
           ? { ...rest, state: 'held' as const, reason: `${late} did not answer in time, and its policy holds the card.`, waiting: [], at: now }
           : { ...rest, state: 'passed' as const, reason: `${late} did not answer in time, so the card went through.`, waiting: [], at: now };
-        this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? advice : []);
+        const shown = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? advice : []);
         this.emit({ type: 'change', card: card.id });
+        if (shown.first) this.pushNew(shown.card);
       }
       if (card.expiresAt && card.expiresAt <= now && !card.closed && !this.store.get('answers', card.id)) {
         this.closeAs(card, 'expired', 'The agent stopped waiting for an answer.');
@@ -3025,10 +3193,18 @@ function webhookHeaders(headers: unknown): Record<string, string> {
 /** A card without what only the person reads: the id of the token that posted it, and the draft they left on a card
  * they dismissed. */
 export function publicCard(card: Card): Card {
-  const { token: _token, ...rest } = card;
+  const { token: _token, pushed: _pushed, ...rest } = card;
   if (!rest.closed?.draft) return rest;
   const { kind, outcome, at } = rest.closed;
   return { ...rest, closed: { kind, outcome, at } };
+}
+
+/** Whether the person already had this card, so a revision of it never pushes. A card stored before pushes existed has no
+ * mark, and the person had it, unless triage still screens it, holds it or sent it back. */
+function hadReached(card: Card): boolean {
+  if (card.pushed) return true;
+  const t = card.triage?.state;
+  return t !== 'pending' && t !== 'held' && t !== 'returned' && card.closed?.kind !== 'returned';
 }
 
 /** The stored lines that share the most words with a text that matched nothing, so an error can name what is there. */

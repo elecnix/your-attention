@@ -73,13 +73,16 @@ export default function yourAttention(pi: PiApi): void {
   let inbox: Client | undefined;
   let agent = '';
   let origin: NewCard['origin'];
+  /** The session's name now: /name renames a session while it runs, so each use asks pi again. */
+  let sessionName: () => string | undefined = () => undefined;
+  const here = (): NewCard['origin'] => origin && { ...origin, name: sessionName() };
   let stop: AbortController | undefined;
   // Receipt id -> card id, for answers sent but not yet in the model context.
   const pending = new Map<string, string>();
   const secrets = new SecretRequests();
   // A session waiting on a prompt draws no output, so only pi's own lifecycle tells it apart from a session that
   // thinks. One card reports the span, and an answer on it is typed into this session's pane.
-  const prompts = createPromptCards(() => (inbox && origin ? { inbox, agent, origin } : undefined));
+  const prompts = createPromptCards(() => (inbox && origin ? { inbox, agent, origin: here() } : undefined));
 
   pi.on('session_start', async (_event, ctx) => {
     const config = loadConfig();
@@ -87,7 +90,8 @@ export default function yourAttention(pi: PiApi): void {
     inbox = new Client(config);
     const session = ctx.sessionManager.getSessionId();
     agent = `pi:${session}`;
-    origin = { harness: 'pi', session, name: ctx.sessionManager.getSessionName?.(), host: os.hostname(), cwd: ctx.sessionManager.getCwd(), herdrPane: process.env['HERDR_PANE_ID'] };
+    sessionName = () => ctx.sessionManager.getSessionName?.();
+    origin = { harness: 'pi', session, name: sessionName(), host: os.hostname(), cwd: ctx.sessionManager.getCwd(), herdrPane: process.env['HERDR_PANE_ID'] };
     stop?.abort();
     stop = new AbortController();
     const client = inbox;
@@ -129,7 +133,7 @@ export default function yourAttention(pi: PiApi): void {
       // Steer by default; start a new turn when the agent is idle.
       if (ctx.isIdle()) pi.sendUserMessage(text);
       else pi.sendUserMessage(text, { deliverAs: ev.answer.delivery === 'followUp' ? 'followUp' : 'steer' });
-    }, stop.signal, 'auto', { origin }).catch((e: Error) => log('stream stopped:', e.message));
+    }, stop.signal, 'auto', { origin: here }).catch((e: Error) => log('stream stopped:', e.message));
   });
 
   pi.on('session_shutdown', () => {
@@ -139,9 +143,11 @@ export default function yourAttention(pi: PiApi): void {
   });
 
   // pi draws the prompt and then waits, so the card goes up while nothing moves on the screen. A nested prompt is part
-  // of the same span, which pi reports with one start and one end.
-  pi.on('ui_prompt_start', (event) => prompts.started(event));
-  pi.on('ui_prompt_end', () => prompts.ended());
+  // of the same span, which pi reports with one start and one end. Both handlers resolve: pi catches neither promise,
+  // so a card that fails to post or to close says why on stderr rather than ending the process as an unhandled
+  // rejection nobody waits for.
+  pi.on('ui_prompt_start', (event) => prompts.started(event).catch((e: Error) => log('the prompt card was not posted:', e.message)));
+  pi.on('ui_prompt_end', () => prompts.ended().catch((e: Error) => log('the prompt card was not closed:', e.message)));
 
   // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
   // card. The count resets on any run the request did not start, and it stops at three.
@@ -203,7 +209,7 @@ export default function yourAttention(pi: PiApi): void {
       description: tool.description,
       parameters: Type.Unsafe(tool.schema),
       async execute(_id, args) {
-        return result(await runTool({ inbox: need(), secrets, agent, origin: async () => (origin && { ...origin, ...(await herdrPlace(origin.herdrPane)) }), arrival: 'as a user message' }, tool.name, args));
+        return result(await runTool({ inbox: need(), secrets, agent, origin: async () => (origin && { ...here(), ...(await herdrPlace(origin.herdrPane)) }), arrival: 'as a user message' }, tool.name, args));
       },
     });
   }

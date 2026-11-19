@@ -384,6 +384,8 @@ export interface Card {
   updatedAt: number;
   /** When the owner cleared it from the inbox. Search still finds it, and a revision brings it back. */
   archivedAt?: number;
+  /** Set when the card has pushed to the owner's devices, so a revision or a later triage step never pushes it twice. Never sent to clients. */
+  pushed?: boolean;
   closed?: Closure;
   /** Agent replies stored before linked follow-ups. Nothing writes one now, and the page shows the old ones in a fold. */
   replies: Reply[];

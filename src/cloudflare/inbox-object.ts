@@ -7,6 +7,7 @@ import { pinKeyError, type PinKey } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
 import { dataPoint } from '../core/telemetry.ts';
 import type { PresenceOrigin, Role } from '../core/types.ts';
+import { notifies } from '../../web/queue.js';
 import { DurableSqlStorage, R2Blobs } from './storage.ts';
 import type { Env } from './worker.ts';
 
@@ -106,6 +107,8 @@ export class InboxObject {
       clientChecks: true,
       // The hosted service always counts usage. A single-inbox deployment sends nothing.
       usageAlwaysOn: env.MODE === 'hosted',
+      // The page's own rule for which cards notify, so a push follows what the open page would do.
+      pushRule: (state, card, collapsed) => notifies(state, card, collapsed),
     });
     // Open requests keep the object awake and billed, so events go over hibernating WebSockets only.
     this.handle = createHandler(this.inbox, { heartbeatMs: 2000, streams: false, telemetry: { source: 'hosted', destination: 'the operator of this hosted service', blocked: () => this.usageBlocked() } });
@@ -259,7 +262,8 @@ export class InboxObject {
     }
     const res = await this.handle(req);
     await this.schedule();
-    // An answer calls its webhook at once. When the call fails, the alarm moves to its retry.
+    // An answer calls its webhook at once, and a new card pushes to the owner's devices. When a webhook call fails, the alarm moves to its retry.
+    // A push runs in the background, so a slow push service never delays the card.
     const calls = [...this.inbox.deliveries];
     if (calls.length) this.ctx.waitUntil?.(Promise.allSettled(calls).then(() => this.schedule()));
     return res;
@@ -282,6 +286,12 @@ export class InboxObject {
     if (!before && agent?.caller) {
       const a = ws.deserializeAttachment() as SocketAttachment;
       ws.serializeAttachment({ ...a, token: agent.caller.token, role: agent.caller.role } satisfies SocketAttachment);
+    }
+    // A session renamed since it connected reports its new origin, and the object rebuilds the connection with it after
+    // a wake, so the presence row keeps the new name instead of the one in the socket's address.
+    if (agent && agent.origin !== undefined && text.includes('"origin"')) {
+      const a = ws.deserializeAttachment() as SocketAttachment;
+      if (JSON.stringify(a.origin) !== JSON.stringify(agent.origin)) ws.serializeAttachment({ ...a, origin: agent.origin as PresenceOrigin } satisfies SocketAttachment);
     }
     await this.schedule();
   }

@@ -48,3 +48,5 @@ export interface Queue {
 }
 export function buildQueue(state: InboxState, groupBy: string, pins?: Pin[], collapsed?: ReadonlySet<string>): Queue;
 export function after(order: Card[], id: string | null): string | null;
+/** Whether a card that just arrived raises a notification: not when its group is collapsed, unless it is at the highest level. */
+export function notifies(state: InboxState, card: Card, collapsed?: ReadonlySet<string>, groupBy?: string, pins?: Pin[]): boolean;

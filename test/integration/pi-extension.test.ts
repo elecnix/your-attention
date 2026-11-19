@@ -31,7 +31,9 @@ const handlers = new Map<string, Handler>();
 const tools = new Map<string, { execute: (...a: unknown[]) => Promise<{ content: { text: string }[] }> }>();
 const sent: { text: string; options?: { deliverAs?: string } }[] = [];
 let idle = true;
-const ctx = { isIdle: () => idle, sessionManager: { getSessionId: () => 'pi-session-1', getCwd: () => '/repo', getSessionName: () => 'card inbox' } };
+/** The name pi reports for the session, which /name changes while the session runs. */
+let piName = 'card inbox';
+const ctx = { isIdle: () => idle, sessionManager: { getSessionId: () => 'pi-session-1', getCwd: () => '/repo', getSessionName: () => piName } };
 const pi = {
   on: (name: string, fn: Handler) => { handlers.set(name, fn); },
   registerTool: (t: { name: string; execute: (...a: unknown[]) => Promise<{ content: { text: string }[] }> }) => { tools.set(t.name, t); },
@@ -55,6 +57,19 @@ describe('the pi extension', () => {
     assert.equal(row.origin?.['session'], 'pi-session-1');
     assert.equal(row.origin?.['name'], 'card inbox', 'the name the session reports');
     assert.equal(row.origin?.['host'], os.hostname());
+  });
+
+  it('names a card with the name the session has now, after a rename', async () => {
+    piName = 'release prep';
+    try {
+      await tools.get('card_post')!.execute('call-r', { id: 'pi-renamed', title: 'Tag the release?' }, undefined, undefined, ctx);
+      const card = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'pi-renamed');
+      assert.equal(card?.origin?.name, 'release prep');
+    } finally {
+      piName = 'card inbox';
+      // An open card would keep the turn-end request below from asking for one.
+      await tools.get('card_close')!.execute('call-rc', { card_id: 'pi-renamed', kind: 'retracted', outcome: 'Asked only to test the name.' }, undefined, undefined, ctx);
+    }
   });
 
   it('starts a new turn with the answer when pi is idle, and marks it read from the context', async () => {

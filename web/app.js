@@ -4,14 +4,25 @@ import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
 import { Approvals, AgentPin, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
-import { after, agentName, buildQueue, SECTION_ID } from './queue.js';
+import { after, agentName, buildQueue, notifies, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
+import { arrivals, notifiable, readFocusMode, releaseNotice } from './focus.js';
 
 const { React, createRoot } = window.__OpenUI;
 
 export function App() {
   const [state, setState] = React.useState(null);
+  // Focus mode, `{card, ids, pageY, queueY}`: the card the person reads, the cards listed when focus began, and where the page
+  // and the queue were scrolled. Each tab keeps its own, under its viewer id, so a reload keeps it and another tab does not share it.
+  const [focusMode, setFocusMode] = React.useState(() => readFocusMode(store.get(FOCUS_KEY)));
+  const focusModeRef = React.useRef(focusMode);
+  focusModeRef.current = focusMode;
+  // Where to scroll once the page draws the layout that focus mode enters or leaves.
+  const scrollAfterFocusRef = React.useRef(null);
+  // Leaving focus mode is defined with each render, because it reads the state and the queue settings.
+  const leaveFocusRef = React.useRef(() => {});
+  const toggleFocusRef = React.useRef(() => {});
   // The approvals the person turned on, by card version: a revision may change the sentences, so it starts with all off.
   // They live in the device store, so an idle reload of the page for new code keeps them, as it keeps a comment draft.
   const [approvalPicks, setApprovalPicks] = React.useState(() => { try { return JSON.parse(store.get('approvalPicks') || '{}'); } catch { return {}; } });
@@ -26,6 +37,9 @@ export function App() {
   const linkedRef = React.useRef(null);
   linkedRef.current ??= linkLookup((ids) => fetch(`${BASE}v1/cards?ids=${ids.map(encodeURIComponent).join(',')}`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`the inbox answered ${r.status}`)))).then((r) => r.cards), () => setLoaded((n) => n + 1));
   const linked = linkedRef.current;
+  // The card the state leaves out that the person opened from a link, and the card they read before it.
+  const outsideRef = React.useRef(null);
+  const previousRef = React.useRef(null);
   const [auth, setAuth] = React.useState('checking');
   // The search field filters the queue in the browser, so it never asks the inbox for anything. Command+K (Control+K off a Mac) focuses it.
   const [query, setQuery] = React.useState('');
@@ -107,11 +121,10 @@ export function App() {
       if (added.length) {
         setFresh((f) => ({ ...f, ...Object.fromEntries(added.map((c) => [c.id, true])) }));
         // A card that arrives in a collapsed group raises no notification, unless it is at the highest level:
-        // muting a group must never hide an urgent card.
-        const q = buildQueue(s, groupBy, pins, collapsedGroups);
-        const top = (s.levels || [])[0];
-        added.forEach((c) => {
-          if (q.hidden.has(c.id) && (!top || q.levelOf(c) !== top.id)) return;
+        // muting a group must never hide an urgent card. The inbox applies the same rule to each push.
+        // Focus mode raises none: when it ends, one notification names every card that arrived meanwhile.
+        if (!focusModeRef.current) added.forEach((c) => {
+          if (!notifies(s, c, collapsedGroups, groupBy, pins)) return;
           notify(c.kind === 'blocked' ? 'An agent is blocked' : 'An agent asked you something', c.title);
         });
       }
@@ -120,7 +133,8 @@ export function App() {
       }
     }
     knownRef.current = ids;
-    details.keep(ids);
+    // A cleared card opened from a link keeps its copy, though the state leaves it out, from its fetch on.
+    details.keep(outsideRef.current ? new Set([...ids, outsideRef.current]) : ids);
     setState(s);
   }); }, [state, closing, groupBy, pins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
@@ -196,6 +210,17 @@ export function App() {
     return () => document.removeEventListener('keydown', key, true);
   }, []);
 
+  // Command+period on a Mac, Control+period elsewhere, turns focus mode on or off, from anywhere on the page.
+  React.useEffect(() => {
+    const key = (e) => {
+      if (e.key !== '.' || (IS_MAC ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.isComposing) return;
+      e.preventDefault();
+      toggleFocusRef.current();
+    };
+    document.addEventListener('keydown', key, true);
+    return () => document.removeEventListener('keydown', key, true);
+  }, []);
+
   // Command+K on a Mac, Control+K elsewhere, focuses the search field from anywhere on the page, a field of the card included.
   // The other modifier is left alone: Control+K on a Mac deletes to the end of the line in a text field.
   React.useEffect(() => {
@@ -218,6 +243,8 @@ export function App() {
     const busy = () => { last = Date.now(); };
     const editing = () => !!(document.activeElement && document.activeElement.closest('input, textarea, select, [contenteditable]'));
     const check = () => {
+      // New page code waits until focus ends, since a reload would lose where the page and the queue were scrolled.
+      if (focusModeRef.current) return;
       if (document.visibilityState === 'hidden' || (Date.now() - last >= IDLE_RELOAD_MS && !editing())) reloadPage();
     };
     const events = ['keydown', 'pointerdown', 'input', 'focusin', 'focusout'];
@@ -237,6 +264,8 @@ export function App() {
     // Escape in a field belongs to the field, so a half-typed answer stays on screen.
     const escape = (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented || (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]'))) return;
+      // In focus mode, Escape ends focus and leaves the card on screen. A second Escape clears the pane.
+      if (focusModeRef.current) { leaveFocusRef.current(); return; }
       // The sign-in token or code stays in the address until the sign-in request has used it.
       const token = /(?:token|signin)=[^&]*/.exec(location.hash);
       if (!(history.state && history.state.cleared)) history.pushState({ cleared: true }, '', location.pathname + (token ? `#${token[0]}` : ''));
@@ -367,6 +396,20 @@ export function App() {
     if (y != null) { store.del('scroll:y'); requestAnimationFrame(() => window.scrollTo(0, y)); }
   }, [!!state]);
 
+  // Focus mode hides everything but the card, through a class on the body. Entering it keeps the part of the card the
+  // person read at the top of the screen, and leaving it scrolls the page and the queue back to where they were.
+  React.useLayoutEffect(() => {
+    document.body.classList.toggle('focus-mode', !!focusMode);
+    const to = scrollAfterFocusRef.current;
+    scrollAfterFocusRef.current = null;
+    if (!to) return;
+    const card = document.querySelector('.focus-card');
+    if (to.cardShare !== undefined) { if (card) window.scrollTo(0, card.getBoundingClientRect().top + window.scrollY + to.cardShare * card.offsetHeight); return; }
+    const queue = document.querySelector('.queue');
+    if (queue) queue.scrollTop = to.queueY;
+    window.scrollTo(0, to.pageY);
+  }, [!!focusMode]);
+
   if (auth === 'needed') {
     const phone = h('p', null, 'On a phone: on a page that is signed in, tap the phone button at the top, then scan its QR code. The code works once, within 5 minutes.');
     // The page cannot sign itself in. The steps depend on where the inbox runs: on a computer, or in the cloud.
@@ -413,7 +456,17 @@ export function App() {
   // The groups the person collapsed decide this, so the whole inbox's hidden set applies, never the search's.
   const firstInSight = (cards) => cards.find((c) => !all.hidden.has(c.id));
   const lastVisit = firstInSight(pending.filter((c) => c.id === lastVisitRef.current));
-  const shown = cleared ? null : byId[focus] || pinned || lastVisit || firstInSight(pending) || null;
+  // A card the state leaves out, such as a cleared one, opens from a link to it, and the page fetches it on its own. Until
+  // the fetch ends the pane waits for it, and a card the inbox does not have leaves the card read before on screen.
+  const outside = !cleared && focus && !byId[focus] ? focus : null;
+  outsideRef.current = outside;
+  if (outside) details.want([{ id: outside, rev: (details.get({ id: outside }) || {}).rev ?? 0 }]);
+  const outsideDetail = outside ? details.get({ id: outside }) : undefined;
+  const away = outsideDetail && outsideDetail.card ? { ...outsideDetail.card, rev: outsideDetail.rev ?? 0 } : null;
+  const fetchingOutside = outside && !details.tried(outside);
+  // A card the inbox does not have leaves the card the person read before on screen, or the pane says so.
+  const notFound = outside && !fetchingOutside && !away ? outside : null;
+  const shown = cleared ? null : byId[focus] || away || (fetchingOutside ? null : notFound ? byId[previousRef.current] || null : pinned || lastVisit || firstInSight(pending) || null);
   // The card after this one loads ahead, and so does the card it follows, which the fold below it shows.
   details.want([shown, shown && byId[after(order, shown.id)], shown && shown.follows && byId[shown.follows]]);
   const detail = details.get(shown);
@@ -429,9 +482,40 @@ export function App() {
   }
   if (current && cardInAddress() !== current.id && !/(?:token|signin)=/.test(location.hash)) history.replaceState({ card: current.id }, '', cardAddress(current.id));
 
+  // Focus mode. Turning it on keeps this card on screen, alone. Turning it off gives the page back as the person left it,
+  // with one notification for the cards that arrived meanwhile.
+  const arrived = focusMode ? arrivals(focusMode.ids, state, focusMode.card) : [];
+  const enterFocus = () => {
+    if (!current) return;
+    const queue = document.querySelector('.queue');
+    const mode = { card: current.id, ids: state.cards.map((c) => c.id), pageY: window.scrollY, queueY: queue ? queue.scrollTop : 0 };
+    const card = document.querySelector('.focus-card');
+    if (card) { const r = card.getBoundingClientRect(); scrollAfterFocusRef.current = { cardShare: Math.max(0, -r.top) / (r.height || 1) }; }
+    store.set(FOCUS_KEY, mode);
+    setFocus(current.id);
+    setFocusMode(mode);
+  };
+  const leaveFocus = () => {
+    const mode = focusModeRef.current;
+    if (!mode) return;
+    const notice = releaseNotice(notifiable(state, arrived, groupBy, pins, collapsedGroups));
+    if (notice) notify(notice.title, notice.body);
+    focusModeRef.current = null;
+    scrollAfterFocusRef.current = { pageY: mode.pageY, queueY: mode.queueY };
+    store.del(FOCUS_KEY);
+    setFocusMode(null);
+  };
+  leaveFocusRef.current = leaveFocus;
+  toggleFocusRef.current = () => (focusModeRef.current ? leaveFocus() : enterFocus());
+  // Focus belongs to one card: moving on from it, by an answer, Skip, a link to another card or the back button, ends focus.
+  if (focusMode && !fetchingOutside && (!current || current.id !== focusMode.card)) setTimeout(leaveFocus, 0);
+
   // Each card you open is a step in the browser's history, so back and forward move between them.
   const go = (id) => {
+    // Focus ends as the next card opens, in the same draw, so a phone still scrolls to that card.
+    if (focusModeRef.current && id !== focusModeRef.current.card) leaveFocus();
     if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id));
+    if (current && current.id !== id) previousRef.current = current.id;
     setCleared(false);
     setFocus(id);
     // On a phone the card sits above the queue, so the page scrolls up to the card that opened.
@@ -545,7 +629,11 @@ export function App() {
     h(PinControls, { pin, onEdit: () => setPinForm('change'), onLock: () => lockTab().then(() => setAuth('locked')) }));
 
   let main;
-  if (!current) {
+  if (!current && fetchingOutside) {
+    main = h('div', { className: 'focus-card done', 'aria-busy': 'true' }, 'Loading the card…');
+  } else if (!current && notFound) {
+    main = h('div', { className: 'focus-card done' }, `This inbox has no card ${notFound}. The inbox deletes a cleared card 30 days after you clear it.`);
+  } else if (!current) {
     // Every waiting card can sit out of sight in a collapsed group, so the pane says that instead of reporting an empty inbox.
     const allHidden = pending.length > 0 && pending.every((c) => all.hidden.has(c.id));
     main = h('div', { className: 'focus-card done' },
@@ -556,7 +644,8 @@ export function App() {
     main = h('div', { className: 'focus-card done', 'aria-busy': 'true' }, `Loading ${current.title}…`);
   } else {
     const a = detail.answer;
-    const s = st(current);
+    // A card the state leaves out has its state in its own copy.
+    const s = st(current) || detail.state;
     const pres = presenceOf(current, state);
     const prevDetail = current.follows ? details.get(byId[current.follows]) : undefined;
     const prev = prevDetail && prevDetail.card;
@@ -578,13 +667,17 @@ export function App() {
         h('span', { className: `prio ${levelOf(current)}`, title: (levels.find((l) => l.id === levelOf(current)) || {}).definition }, label(levelOf(current))),
         current.status && h('span', { className: 'status' }, current.status),
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
-        pres && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
-        h(CardAge, { card: current })),
+        pres && !current.archivedAt && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
+        h(CardAge, { card: current }),
+        h(FocusToggle, { on: !!focusMode, arrived: arrived.length, onToggle: () => toggleFocusRef.current() })),
       h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin, agent: current.agent, name: agentName(current.agent, state.cards, state.presence), agentPinned: isAgentPinned(current.agent) }),
       current.triage && current.triage.state === 'passed' && /did not answer|failed/.test(current.triage.reason || '') && h('div', { className: 'note' }, `Triage did not check this card: ${current.triage.reason}`),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,
         current.triage.state === 'held' && h('button', { className: 'btn', style: { marginLeft: 8 }, onClick: () => api(`${BASE}v1/cards/${current.id}/release`, {}) }, 'Release')),
+      // A cleared card opens only from a link to it. It shows what it asked, under the line that says how it ended, and
+      // takes no answer, since the outbox would never show one.
+      current.archivedAt && h('div', { className: 'note' }, `Cleared on ${new Date(current.archivedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}. It takes no answer.`),
       current.from && h('div', { className: 'from' }, `From ${current.from}`),
       (o.harness || o.host || o.herdrWorkspace || o.herdrTab) && h('div', { className: 'origin' },
         h('span', null, [o.name, o.harness, o.host, o.cwd].filter(Boolean).join(' · ')),
@@ -605,7 +698,8 @@ export function App() {
       h(Changes, { card: current }),
       h(TriagePushback, { card: current }),
       current.approvals && current.approvals.length > 0 && h(Approvals, { card: current, answer: a, picks: picksOf(current), onToggle: (i, on) => toggleApproval(current, i, on) }),
-      current.broadcast && !current.closed
+      current.archivedAt ? null
+        : current.broadcast && !current.closed
         ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip, onDismiss: (comment) => dismiss(current, {}, comment) })
         : current.html !== undefined
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); }, onDismiss: (values, comment) => dismiss(current, values, comment) })
@@ -624,8 +718,9 @@ export function App() {
           h('div', { className: 'ans' }, prevDetail.answer ? describe(prev, prevDetail.answer) : 'You did not answer it.'))));
     // A diagram or a body the page cannot draw goes back to the card's agent.
     main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
-      // The summary has the closure as soon as the state does, before the whole card arrives again.
-      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id] }, card)
+      // The summary has the closure as soon as the state does, before the whole card arrives again. In focus mode the card
+      // stays open under its closed line, since the person is reading it.
+      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id], open: !!current.archivedAt || !!focusMode }, card)
       : card);
   }
 
@@ -647,7 +742,7 @@ export function App() {
           if (back && back.isConnected && back !== document.body) back.focus(); else e.currentTarget.blur();
         },
       }),
-      h(NotifyToggle),
+      h(NotifyToggle, { collapsed: collapsedGroups }),
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable')),
       h(DevicesLink),
       h(PhoneLink),
@@ -672,6 +767,7 @@ export function App() {
 }
 
 const IDLE_RELOAD_MS = 3000;
+const FOCUS_KEY = `focusMode:${VIEWER}`;
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 // An inbox at a loopback, private network or .local address runs on a computer, where `your-attention open` signs in.
 const LAPTOP_HOST = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|\[f[cd][0-9a-f:]*\]|\[fe80:[0-9a-f:]*\]|[\w-]+\.local)$/i;
@@ -693,6 +789,17 @@ function storedTagPins() {
 function storedCollapsedGroups() {
   const groups = store.get('collapsedGroups');
   return new Set(Array.isArray(groups) ? groups.filter((x) => typeof x === 'string' && x) : []);
+}
+
+// The button at the top right of the open card that turns focus mode on and off. While focus is on, it is the one control
+// on screen besides the card, and a count on it says how many cards arrived meanwhile.
+const FOCUS_SHORTCUT = IS_MAC ? '⌘.' : 'Ctrl+.';
+function FocusToggle({ on, arrived, onToggle }) {
+  const waiting = arrived ? `, ${arrived} new card${arrived === 1 ? '' : 's'} waiting` : '';
+  const tip = on ? `Leave focus mode${waiting} (${FOCUS_SHORTCUT} or Escape)` : `Focus on this card: fill the screen with it, and hold notifications until you leave (${FOCUS_SHORTCUT})`;
+  return h('button', { type: 'button', className: `icon-btn focus-toggle${on ? ' on' : ''}`, title: tip, 'aria-label': on ? `Leave focus mode${waiting}` : 'Focus on this card', 'aria-pressed': on, 'aria-keyshortcuts': IS_MAC ? 'Meta+.' : 'Control+.', onClick: onToggle },
+    h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.focus.map((d) => h('path', { key: d, d }))),
+    on && arrived > 0 && h('span', { className: 'focus-count', 'aria-hidden': 'true' }, arrived > 99 ? '99+' : String(arrived)));
 }
 
 // A broom beside the Sent header, so clearing the cards you dealt with needs no scroll to the bottom of the list.

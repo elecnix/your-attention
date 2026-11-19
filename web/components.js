@@ -1,5 +1,6 @@
 // The parts of the page, each one renderable alone, as the stories do.
-import { BASE, CLOSED_LABEL, ICONS, Icon, J, api, h, notifyOn, store, time } from './env.js';
+import { BASE, CLOSED_LABEL, ICONS, Icon, J, PUSH_KEY, api, h, store, time } from './env.js';
+import { disablePush, enablePush, isIos, pushSupport } from './push.js';
 import { cardAge } from './age.js';
 import { extendLibrary } from './library-spec.js';
 import { bodyFaults, fallbackSources } from './body-faults.js';
@@ -246,13 +247,15 @@ function CardBody({ draftKey, response, broken, onAction }) {
 }
 
 // A card the agent closed while you looked at it, or one you dismissed: it collapses to its outcome, and opens again on
-// demand. A dismissal also shows the draft the person had on screen, which no agent reads.
-export function ClosedCard({ closed, card, children, onNext, animate }) {
+// demand. A dismissal also shows the draft the person had on screen, which no agent reads. `open` keeps it open, for a card
+// the person opened from a link to read it.
+export function ClosedCard({ closed, card, children, onNext, animate, open = false }) {
   const ref = React.useRef(null);
   const [collapsed, setCollapsed] = React.useState(false);
   const [height, setHeight] = React.useState(null);
   React.useLayoutEffect(() => {
     setHeight(ref.current.scrollHeight);
+    if (open) return undefined;
     if (!animate) { setCollapsed(true); return undefined; }
     const t = setTimeout(() => setCollapsed(true), 900);
     return () => clearTimeout(t);
@@ -442,7 +445,8 @@ export function FileChip({ card, path }) {
 // A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
 // With a card id in `files`, a file: link is a chip that opens the file in a new tab, which the laptop inbox serves for that card only.
 // Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
-// A link to a card the state leaves out shows what `lookup(id)` finds: a cleared card's title, or the id as plain text.
+// A link to a card the state leaves out shows what `lookup(id)` finds: a cleared card's title, which opens that card, or
+// the id as plain text.
 // Each link to a card that ended carries a marker with how it ended, answered or taken back, from `outcomeOf(id)` for a
 // card on show and from the lookup for one the state leaves out. Its hover names the outcome and when.
 const OUTCOME_ICON = { answered: 'link-answered', 'taken-back': 'link-taken-back', dismissed: 'dismissed', expired: 'link-expired', returned: 'link-taken-back' };
@@ -459,7 +463,7 @@ export function LinkedText({ text, byId, open, diagrams = true, files, lookup = 
     const other = lookup(id);
     if (!other) return h('span', { key, className: 'unknown-link', title: other === null ? 'The inbox does not store this card' : '' }, id);
     const o = linkOutcome(other.outcome);
-    return h('span', { key, className: 'cleared-link', title: leftOutHover(other, o) }, other.title, outcomeMarker(o));
+    return h('a', { key, className: 'cleared-link', title: leftOutHover(other, o), onClick: () => open(id) }, other.title, outcomeMarker(o));
   };
   const cardLink = (id, key) => {
     const target = byId[id];
@@ -791,18 +795,83 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
       error && h('div', { className: 'note warn' }, error)));
 }
 
-export function NotifyToggle() {
-  const [on, setOn] = React.useState(notifyOn());
-  if (!('Notification' in window)) return null;
+// What each reason for a greyed-out switch means, in words for someone new to this.
+const NOTIFY_HELP = {
+  'needs an https address': 'Notifications on a phone or in a closed browser need a secure address that starts with https. Use the hosted inbox, or serve this inbox through an https relay.',
+  'add this page to your Home Screen first': 'An iPhone sends notifications only to a page on its Home Screen. In Safari tap Share, then Add to Home Screen, open Your Attention from there, and turn this on.',
+  'the browser blocks notifications': 'This browser blocks notifications for this page. Allow them in the browser\'s site settings, then reload.',
+  'this browser cannot show notifications': 'This browser has no notifications that a page can use.',
+};
+
+// The Notify me switch. With a secure page and a browser that has push, the inbox sends each new card to this device even when
+// the page is closed. Where push is impossible the switch stays, greyed out, with the reason beside it.
+export function NotifyToggle({ collapsed = new Set() } = {}) {
+  const [on, setOn] = React.useState(store.get('notify:on') === true);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const hasNotification = 'Notification' in window;
+  const support = pushSupport({
+    secure: window.isSecureContext === true,
+    ios: isIos(navigator.userAgent, navigator.maxTouchPoints),
+    standalone: (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true,
+    hasPush: 'serviceWorker' in navigator && 'PushManager' in window,
+    hasNotification,
+    permission: hasNotification ? Notification.permission : 'default',
+  });
+  const push = support.ok && support.mode === 'push';
+  const active = on && support.ok;
+  // A switch that is already on stays usable where push is now impossible, so the person can turn the old notifications off.
+  const locked = !support.ok && !on;
+  const groups = [...collapsed].sort().join('\n');
+  // A page that opens with the switch on makes sure the inbox still has this device, and tells it which groups this device
+  // collapsed, so a card in a muted group raises no push. A device the inbox dropped, such as after its token was revoked, is saved again.
+  React.useEffect(() => {
+    // Only a device that already turned push on: a page from before push keeps its old notifications until the person flips the switch.
+    if (!active || !push || store.get(PUSH_KEY) !== true) return;
+    let stale = false;
+    enablePush({ base: BASE, collapsed, api }).then(() => {
+      // The person may have switched it off while this ran. The device the call just saved must then go again.
+      if (store.get('notify:on') !== true) return disablePush({ base: BASE, api });
+      store.set(PUSH_KEY, true);
+      if (!stale) setError('');
+    }, (e) => { if (!stale) setError(e.message); });
+    return () => { stale = true; };
+  }, [active, push, groups]);
   async function toggle() {
-    if (on) { store.set('notify:on', false); return setOn(false); }
-    const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
-    store.set('notify:on', perm === 'granted');
-    setOn(perm === 'granted');
+    setError('');
+    if (on) {
+      store.set('notify:on', false);
+      store.set(PUSH_KEY, false);
+      setOn(false);
+      // Whatever the page can do now, a device it saved earlier must go: disablePush finds the browser's subscription itself.
+      // The switch waits meanwhile, so turning it on again cannot start before this finishes.
+      setBusy(true);
+      try { await disablePush({ base: BASE, api }); } catch { /* the inbox or the browser did not answer */ } finally { setBusy(false); }
+      return;
+    }
+    setBusy(true);
+    try {
+      if (push) {
+        await enablePush({ base: BASE, collapsed, api });
+        store.set(PUSH_KEY, true);
+      } else {
+        const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+        if (perm !== 'granted') throw new Error('the browser blocks notifications');
+      }
+      store.set('notify:on', true);
+      setOn(true);
+    } catch (e) {
+      setError(e && e.message ? e.message : 'Notifications did not turn on.');
+    } finally {
+      setBusy(false);
+    }
   }
-  const blocked = Notification.permission === 'denied';
-  return h('label', { className: 'notify', title: blocked ? 'The browser blocks notifications for this page' : 'Show a browser notification for new cards' },
-    h('input', { type: 'checkbox', role: 'switch', checked: on, disabled: blocked, onChange: toggle }), 'Notify me');
+  const why = support.ok ? error : support.reason;
+  const tip = support.ok ? (push ? 'Get a notification for each new card, even when this page is closed' : 'Show a browser notification for new cards while this page is open') : NOTIFY_HELP[support.reason] || support.reason;
+  return h('label', { className: `notify${locked ? ' off' : ''}`, title: tip },
+    h('input', { type: 'checkbox', role: 'switch', checked: on, disabled: locked || busy, onChange: toggle, 'aria-describedby': why ? 'notify-why' : undefined }),
+    'Notify me',
+    why && h('span', { id: 'notify-why', className: 'notify-why' }, why));
 }
 
 // The usage counts of this inbox: GET /v1/telemetry, and PUT to change them. Null where the inbox sends none.

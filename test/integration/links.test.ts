@@ -146,6 +146,20 @@ describe('a relay', () => {
     await roundTrip(new Client({ url: `${relay.url}/i/${id}`, token: h.agentToken }), 'via-relay', 'sse', 'relay-sse');
     const page = await fetch(`${relay.url}/i/${id}/`);
     assert.match(await page.text(), /<title>Your Attention<\/title>/);
+    // The page's worker, manifest and icons come through the relay's path too, so the worker's scope is /i/<id>/.
+    const worker = await fetch(`${relay.url}/i/${id}/sw.js`);
+    assert.equal(worker.status, 200);
+    assert.match(worker.headers.get('content-type') ?? '', /javascript/);
+    assert.match(await worker.text(), /showNotification/);
+    const manifest = await fetch(`${relay.url}/i/${id}/manifest.webmanifest`);
+    assert.match(manifest.headers.get('content-type') ?? '', /manifest\+json/);
+    const { start_url, scope, icons } = (await manifest.json()) as { start_url: string; scope: string; icons: { src: string }[] };
+    assert.deepEqual([start_url, scope], ['./', './'], 'relative, so the installed page opens the inbox at its own path');
+    for (const icon of icons) assert.equal((await fetch(`${relay.url}/i/${id}/${icon.src}`)).headers.get('content-type'), 'image/png');
+    // The subscription routes reach the inbox through the relay, and need the owner's token like every other.
+    assert.equal((await fetch(`${relay.url}/i/${id}/v1/push`)).status, 401);
+    const key = (await (await fetch(`${relay.url}/i/${id}/v1/push`, { headers: { authorization: `Bearer ${h.server.ownerToken}` } })).json()) as { publicKey: string };
+    assert.match(key.publicKey, /^[\w-]{87}$/);
     const wrongKey = relayClient({ relay: relay.url, key: 'wrong', inboxId: 'other-inbox', local: h.server.url, log: () => {} });
     await new Promise((r) => setTimeout(r, 300));
     assert.equal((await fetch(`${relay.url}/i/other-inbox/v1/info`)).status, 404, 'a wrong key registers nothing');
