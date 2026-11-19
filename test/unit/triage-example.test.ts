@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, it } from 'node:test';
 import { BYPASS_TAG, CARD_PROMPT, CARD_QUESTION, cardProse, cardText, checkCard, DEFAULTS, loadConfig, runCommand, type ExampleConfig, type RunCommand } from '../../examples/triage-agent/checks.ts';
 import { TriageState } from '../../examples/triage-agent/state.ts';
@@ -532,7 +533,8 @@ describe('the card.created hook runner', () => {
 
   it('lets the process exit when it stops, even while a check that ignores the stop still runs', () => {
     const script = path.join(dir, 'hook-exit.ts');
-    const hook = path.resolve(import.meta.dirname, '../../src/extensions/card-hook.ts');
+    // A file URL, since an ESM import of a Windows drive path fails.
+    const hook = pathToFileURL(path.resolve(import.meta.dirname, '../../src/extensions/card-hook.ts')).href;
     fs.writeFileSync(script, `
 import { runCardHook } from ${JSON.stringify(hook)};
 const event = 'data: ' + JSON.stringify({ type: 'hook', version: 1, id: 'h1', hook: 'card.created', card: ${JSON.stringify(card)}, deadline: Date.now() + 60_000, person: { pages: 0, visible: false, activeAt: null } }) + '\\n\\n';
