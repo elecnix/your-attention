@@ -1,0 +1,18 @@
+# The person reads the card, and "you" is the person. The agent writes about
+# itself in the third person, so the person always knows who acts.
+extends: existence
+message: "Write about this agent in the third person, not '%s'."
+level: error
+ignorecase: false
+tokens:
+  - I
+  - I'm
+  - I've
+  - I'll
+  - I'd
+  - '[Ww]e'
+  - "[Ww]e're"
+  - "[Ww]e've"
+  - "[Ww]e'll"
+  - '[Oo]ur'
+  - '[Mm]y'

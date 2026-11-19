@@ -16,6 +16,7 @@ export function formValues(formState: unknown): { values: Record<string, unknown
 /** An answer as a person reads it. */
 export function describe(card: Card, answer: Answer | undefined): string;
 /** Every revision, newest first: for each one, the lines it removed and added in each field. */
+export function pushbackKey(p: { version: number; at: number; kind: string; by: string }): string;
 export function changeSteps(card: Card): { version: number; fields: { label: string; removed: string[]; added: string[] }[] }[];
 /** The name a pick and the page's lookups use for an option: its id, or its label when it has none. */
 /** The card id of a link to this inbox's own card address, such as http://host:4815/#card=<id>, else undefined. */

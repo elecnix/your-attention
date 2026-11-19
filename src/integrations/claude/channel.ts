@@ -12,7 +12,7 @@ import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { Client, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
@@ -248,6 +248,10 @@ void inbox.stream(agent, async (ev) => {
   }
   if (ev.type === 'returned') {
     await notify(describeReturned(ev), { card_id: ev.card.id });
+    return;
+  }
+  if (ev.type === 'advice') {
+    await notify(describeAdvice(ev), { card_id: ev.card.id });
     return;
   }
   if (ev.type === 'card') {

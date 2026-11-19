@@ -77,6 +77,22 @@ export function ownerPairing(home = homeDir()): (ClientConfig & { source: string
   return undefined;
 }
 
+/** The inbox this machine runs, with its owner token, or undefined when it runs none. */
+export function runningHere(home = homeDir()): { url: string; token: string } | undefined {
+  try {
+    const { url } = JSON.parse(fs.readFileSync(path.join(home, 'server.json'), 'utf8')) as { url?: unknown };
+    const token = fs.readFileSync(path.join(home, 'owner-token'), 'utf8').trim();
+    return typeof url === 'string' && url && token ? { url, token } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The inbox to act on as the person: the one this machine runs, or else the one it paired with as owner. */
+export function ownerConfig(home = homeDir()): ClientConfig | undefined {
+  return runningHere(home) ?? ownerPairing(home);
+}
+
 /** What to do on a machine whose only pairing with `url` is an agent's. */
 export function notOwnerAdvice(url: string): string {
   return `This machine is paired with ${url} as an agent, so it can't act as you. Pair it as owner with \`your-attention pair ${url} --role owner\`, which keeps the agent pairing. Or open the inbox on your phone from the phone button of a page that is signed in.`;
@@ -523,6 +539,13 @@ export function describeReturned(ev: Extract<AgentEvent, { type: 'returned' }>):
   const notice = `${ev.by ?? 'Triage'} sent back card ${ev.card.id} ("${ev.card.title}"): ${ev.reason} Revise it with card_patch or post a better card.`;
   // Only a triage extension's return takes feedback, so only its notice asks for it.
   return ev.extension ? `${notice} If this pushback was wrong, or right only in part, say so with card_triage_feedback, so the person can tune the gate.` : notice;
+}
+
+/** What an integration tells the agent about advice that triage gave on a card it let through to the person. */
+export function describeAdvice(ev: Extract<AgentEvent, { type: 'advice' }>): string {
+  // Advice comes only from a triage extension's pass, and the inbox records it as a pushback entry, so every advice
+  // notice can take feedback. A return can come from the inbox page as well, which is why describeReturned checks.
+  return `${ev.by ?? 'Triage'} let card ${ev.card.id} ("${ev.card.title}") through to the person, with advice for this card and the next ones: ${ev.advice} The card is with the person now, so revise it with card_patch only if the advice changes what the person needs to decide. If this advice was wrong, or right only in part, say so with card_triage_feedback, so the person can tune the gate.`;
 }
 
 /** What an integration tells the agent about a card the person sent it from the inbox page. It asks for no answer:

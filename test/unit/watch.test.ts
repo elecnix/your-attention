@@ -62,6 +62,14 @@ describe('the watcher output', () => {
     assert.equal(returned.type === 'returned' ? returned.reason : undefined, 'no recommendation');
   });
 
+  it('keeps an advice event with --type advice, and leaves its card out with --no-card', () => {
+    const advice: AgentEvent = { type: 'advice', id: 'receipt-4', card, advice: 'Say which branch.', by: 'triage' };
+    assert.equal(keepEvent(advice, { types: ['advice'] }), true);
+    assert.equal(keepEvent(advice, { types: ['answer', 'returned'] }), false);
+    const line = watchLine(advice, { noCard: true }, 1700);
+    assert.deepEqual(line, { type: 'advice', id: 'receipt-4', advice: 'Say which branch.', by: 'triage', receivedAt: 1700 });
+  });
+
   it('carries a guidance event whole, since it has no card to cut', () => {
     const guidance = { type: 'guidance', id: 'receipt-3', guidance: { text: 'Offer three options.', version: 2, at: 5 } } as AgentEvent;
     assert.deepEqual(watchLine(guidance, { noCard: true, fields: ['id'] }, 1700), { ...guidance, receivedAt: 1700 });

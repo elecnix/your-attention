@@ -389,6 +389,12 @@ function diff(before, after) {
 }
 
 /** Every revision, newest first: for each one, the lines it removed and added in each field. */
+/** The key of one triage pushback row. Two extensions can pass one card with advice in the same write, so their entries
+ * share the version and the time, and only the extension and the kind tell them apart. */
+export function pushbackKey(p) {
+  return `${p.version}:${p.at}:${p.kind}:${p.by}`;
+}
+
 export function changeSteps(card) {
   const versions = [...(card.history || []), card];
   const steps = [];

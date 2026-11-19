@@ -6,16 +6,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import type { HookEvent } from '../core/hooks.ts';
 import type { Card, PersonPresence } from '../core/types.ts';
 import { homeDir, writePrivate } from '../node/home.ts';
+import { limiter, runCardHook, type Ruling } from './card-hook.ts';
 
-export interface Ruling {
-  verdict: 'pass' | 'return';
-  reason: string;
-}
+export { limiter, type Ruling };
 
-export type Judge = (prompt: string) => Promise<string>;
+/** `signal` aborts when the card's deadline passes or triage stops, and the judge then ends its call. */
+export type Judge = (prompt: string, signal?: AbortSignal) => Promise<string>;
 
 export interface TriageConfig {
   url: string;
@@ -23,37 +21,23 @@ export interface TriageConfig {
   judge: Judge;
   name?: string;
   timeoutMs?: number;
-  /** Judge calls at once. A burst of cards waits its turn instead of hitting the judge's rate limit. */
+  /** Cards checked at once. A burst of cards waits its turn instead of hitting the judge's rate limit. */
   concurrency?: number;
   log?: (...a: unknown[]) => void;
 }
 
-/** Run at most `limit` tasks at once, in arrival order. */
-export function limiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
-  let active = 0;
-  const queue: (() => void)[] = [];
-  return async (task) => {
-    if (active >= limit) await new Promise<void>((r) => queue.push(r));
-    active++;
-    try {
-      return await task();
-    } finally {
-      active--;
-      queue.shift()?.();
-    }
-  };
-}
-
-/** Call the judge, and retry with backoff when it is busy, until `deadline`. */
-export async function judgeWithRetry(judge: Judge, prompt: string, deadline: number, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<string> {
+/** Call the judge, and retry with backoff when it is busy, until `deadline` or until `signal` aborts. */
+export async function judgeWithRetry(judge: Judge, prompt: string, deadline: number, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), signal?: AbortSignal): Promise<string> {
   let wait = 1000;
   for (;;) {
     try {
-      return await judge(prompt);
+      return await judge(prompt, signal);
     } catch (e) {
       const busy = /\b(429|50[23])\b/.test((e as Error).message);
       if (!busy || Date.now() + wait > deadline - 1000) throw e;
       await sleep(wait);
+      // A card whose deadline passed while the judge was busy needs no more calls.
+      if (signal?.aborted) throw new Error('triage stopped judging the card: it was aborted');
       wait = Math.min(wait * 2, 15_000);
     }
   }
@@ -109,10 +93,16 @@ export function parseRuling(text: string): Ruling {
 
 /** A judge that runs a harness in print mode, such as "claude -p" or "pi -p", with the prompt on stdin. */
 export function commandJudge(command: string, timeoutMs = 120_000): Judge {
-  return (prompt) => new Promise((resolve, reject) => {
-    const child = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  return (prompt, signal) => new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error(`${command} stopped before it started: the card's check was aborted`)); return; }
+    // The command runs in a shell, and a pipeline or a chain runs as that shell's children, so it gets a process group
+    // of its own and every process in it ends together.
+    const child = spawn(command, { shell: true, stdio: ['pipe', 'pipe', 'ignore'], detached: process.platform !== 'win32' });
     let out = '';
-    const timer = setTimeout(() => { child.kill(); reject(new Error(`${command} took longer than ${timeoutMs} ms`)); }, timeoutMs);
+    const timer = setTimeout(() => { killTree(child); reject(new Error(`${command} took longer than ${timeoutMs} ms`)); }, timeoutMs);
+    const stop = (): void => { clearTimeout(timer); killTree(child); reject(new Error(`${command} stopped: the card's check was aborted`)); };
+    signal?.addEventListener('abort', stop, { once: true });
+    child.on('close', () => signal?.removeEventListener('abort', stop));
     child.stdout.on('data', (d) => { out += String(d); });
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve(out) : reject(new Error(`${command} exited with ${code}`)); });
@@ -122,15 +112,29 @@ export function commandJudge(command: string, timeoutMs = 120_000): Judge {
   });
 }
 
+/** End a judge command with everything it started: its process group on POSIX, then SIGKILL after 2 s, and its tree on
+ * Windows. */
+function killTree(child: ReturnType<typeof spawn>): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }).on('error', () => child.kill());
+    return;
+  }
+  const signal = (s: NodeJS.Signals): void => { try { process.kill(-pid, s); } catch { /* the group has already ended */ } };
+  signal('SIGTERM');
+  setTimeout(() => signal('SIGKILL'), 2000).unref();
+}
+
 /** A judge on an OpenAI-compatible chat endpoint: OpenRouter, Ollama Cloud, or a local model. */
 export function chatJudge(opts: { baseUrl: string; apiKey: string; model: string; fetcher?: typeof fetch }): Judge {
   const fetcher = opts.fetcher ?? fetch;
-  return async (prompt) => {
+  return async (prompt, signal) => {
     const res = await fetcher(`${opts.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${opts.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({ model: opts.model, messages: [{ role: 'user', content: prompt }], temperature: 0 }),
-      signal: AbortSignal.timeout(120_000),
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(120_000), signal]) : AbortSignal.timeout(120_000),
     });
     if (!res.ok) throw new Error(`judge answered ${res.status}`);
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
@@ -178,56 +182,13 @@ export function defaultJudge(model = 'openrouter/auto'): Judge {
 
 /** Run triage until `signal` aborts. Reconnects after a drop, and the inbox resends calls it missed. */
 export async function runTriage(cfg: TriageConfig, signal: AbortSignal): Promise<void> {
-  const log = cfg.log ?? ((...a: unknown[]) => console.error(new Date().toISOString(), '[triage]', ...a));
-  const base = cfg.url.replace(/\/$/, '');
-  const auth = { authorization: `Bearer ${cfg.token}`, 'content-type': 'application/json' };
-  const run = limiter(cfg.concurrency ?? 3);
-  const call = async <T>(route: string, body?: unknown): Promise<T> => {
-    const res = await fetch(`${base}${route}`, { method: body === undefined ? 'GET' : 'POST', headers: auth, body: body === undefined ? undefined : JSON.stringify(body) });
-    return (await res.json()) as T;
-  };
-  const decide = async (ev: Extract<HookEvent, { hook: 'card.created' }>): Promise<void> => {
-    let ruling: Ruling;
-    try {
-      const guidance = (await call<{ text: string }>('/v1/guidance')).text;
-      const words = ev.card.title.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).join(' ');
-      // A bare word search, so an inbox from before the paged reply and one after both answer the array.
-      const hits = words ? await call<{ card: Card; answer?: { comment: string; values: Record<string, unknown> } }[]>(`/v1/search?q=${encodeURIComponent(words)}`) : [];
-      const earlier = hits.filter((h) => h.card.id !== ev.card.id && h.answer).slice(0, 3)
-        .map((h) => ({ title: h.card.title, answer: [JSON.stringify(h.answer?.values), h.answer?.comment].filter(Boolean).join(' ') }));
-      ruling = parseRuling(await run(() => judgeWithRetry(cfg.judge, triagePrompt(ev.card, guidance, earlier, ev.person), ev.deadline)));
-    } catch (e) {
-      ruling = { verdict: 'pass', reason: `Triage failed (${(e as Error).message}), so the card went through.` };
-    }
-    await call(`/v1/hooks/${ev.id}`, ruling).catch((e: Error) => log('verdict failed:', e.message));
-    log(ruling.verdict, ev.card.id, ruling.reason);
-  };
-  const q = new URLSearchParams({ name: cfg.name ?? 'triage', hooks: 'card.created', policy: 'fail-open', timeoutMs: String(cfg.timeoutMs ?? 120_000) });
-  while (!signal.aborted) {
-    try {
-      const res = await fetch(`${base}/v1/extensions/stream?${q}`, { headers: auth, signal });
-      if (!res.ok || !res.body) throw new Error(`stream: ${res.status} ${await res.text()}`);
-      log('connected to', base);
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let end: number;
-        while ((end = buf.indexOf('\n\n')) >= 0) {
-          const data = buf.slice(0, end).split('\n').find((l) => l.startsWith('data: '));
-          buf = buf.slice(end + 2);
-          if (!data) continue;
-          const ev = JSON.parse(data.slice(6)) as HookEvent | { type: 'beat' };
-          if (ev.type === 'hook' && ev.hook === 'card.created') void decide(ev);
-        }
-      }
-    } catch (e) {
-      if (signal.aborted) return;
-      log('stream failed:', (e as Error).message);
-    }
-    await new Promise((r) => setTimeout(r, 1000));
-  }
+  await runCardHook({ url: cfg.url, token: cfg.token, name: cfg.name ?? 'triage', timeoutMs: cfg.timeoutMs, concurrency: cfg.concurrency, log: cfg.log }, async (ev, call, signal) => {
+    const guidance = (await call<{ text: string }>('/v1/guidance')).text;
+    const words = ev.card.title.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).join(' ');
+    // A bare word search, so an inbox from before the paged reply and one after both answer the array.
+    const hits = words ? await call<{ card: Card; answer?: { comment: string; values: Record<string, unknown> } }[]>(`/v1/search?q=${encodeURIComponent(words)}`) : [];
+    const earlier = hits.filter((h) => h.card.id !== ev.card.id && h.answer).slice(0, 3)
+      .map((h) => ({ title: h.card.title, answer: [JSON.stringify(h.answer?.values), h.answer?.comment].filter(Boolean).join(' ') }));
+    return parseRuling(await judgeWithRetry(cfg.judge, triagePrompt(ev.card, guidance, earlier, ev.person), ev.deadline, undefined, signal));
+  }, signal);
 }

@@ -1,0 +1,12 @@
+# A warning only: the agent may be unsure, but it should say what it knows.
+extends: existence
+message: "Say what this agent knows, or what it would check, instead of '%s'."
+level: warning
+ignorecase: true
+tokens:
+  - maybe
+  - perhaps
+  - probably
+  - I think
+  - sort of
+  - kind of

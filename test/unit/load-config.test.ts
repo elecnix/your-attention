@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { Client, loadConfig } from '../../src/client.ts';
+import { Client, loadConfig, ownerConfig } from '../../src/client.ts';
 
 let home = '';
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-config-')); });
@@ -73,5 +73,14 @@ describe('a pairing file that carries more than an address', () => {
       assert.doesNotThrow(() => new Client(config), 'a client built from it');
     }
     assert.deepEqual(withUrls(['http://b', 42, '']), { url: 'http://a', token: 't', urls: ['http://b'] }, 'the strings it can use');
+  });
+});
+
+describe('the owner config of the inbox this machine runs', () => {
+  it('falls back to the owner pairing when server.json has no usable address', () => {
+    fs.writeFileSync(path.join(home, 'server.json'), JSON.stringify({ url: 42 }));
+    fs.writeFileSync(path.join(home, 'owner-token'), 'local-owner');
+    fs.writeFileSync(path.join(home, 'owner.json'), JSON.stringify({ url: 'https://inbox.example/', token: 'paired-owner' }));
+    assert.equal(ownerConfig(home)?.url, 'https://inbox.example');
   });
 });

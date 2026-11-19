@@ -2,7 +2,7 @@
 // filter and the owner's export (SPEC.md, "Feedback on triage pushback").
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { describeReturned } from '../../src/client.ts';
+import { describeAdvice, describeReturned } from '../../src/client.ts';
 import type { HookEvent } from '../../src/core/hooks.ts';
 import { Inbox, type Caller } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
@@ -26,10 +26,10 @@ async function setup() {
   inbox.connect({ token: http.agentA.split('.')[0]!, role: 'agent' }, 's1', (e) => events.push(e));
   const post = (body: Record<string, unknown>, token = http.agentA): Promise<Card> => http.post(token, body);
   /** The extension's verdict on the newest call for this card. */
-  const verdict = (id: string, v: 'pass' | 'hold' | 'return', reason: string) => {
+  const verdict = (id: string, v: 'pass' | 'hold' | 'return', reason: string, advice?: string) => {
     const call = calls.filter((c) => c.card.id === id).at(-1);
     assert.ok(call, `no hook call for ${id}`);
-    return inbox.hookVerdict(ext, call.id, v, reason);
+    return inbox.hookVerdict(ext, call.id, v, reason, advice);
   };
   const feedback = (id: string, body: unknown, token = http.agentA) => http.call('POST', `/v1/cards/${id}/triage-feedback`, { token, body });
   return { ...http, inbox, ext, events, post, verdict, feedback, tick: (ms: number) => { now += ms; } };
@@ -58,6 +58,39 @@ describe('the pushback a card keeps', () => {
     assert.equal(res.status, 200);
     assert.equal(inbox.getCard('c1').closed?.kind, 'returned');
     assert.equal(inbox.getCard('c1').pushback, undefined);
+  });
+});
+
+describe('advice on a passed card', () => {
+  it('adds an advice entry to the pushback, and a pass without advice adds none', async () => {
+    const { inbox, post, verdict } = await setup();
+    await post({ id: 'c1', title: 'Ship it?' });
+    await post({ id: 'c2', title: 'Ship the other one?' });
+    verdict('c1', 'pass', 'Passed with advice.', 'Say what the export does today.');
+    verdict('c2', 'pass', 'Fine.');
+    assert.equal(inbox.getCard('c1').triage?.state, 'passed');
+    assert.deepEqual(inbox.getCard('c1').pushback, [{ kind: 'advice', by: 'triage', reason: 'Say what the export does today.', version: 1, at: 1_000 }]);
+    assert.equal(inbox.getCard('c2').pushback, undefined);
+  });
+
+  it('takes feedback on the advice, the same way as on a return', async () => {
+    const { inbox, post, verdict, feedback } = await setup();
+    await post({ id: 'c1', title: 'Ship it?' });
+    verdict('c1', 'pass', '', 'Say what the export does today.');
+    const res = await feedback('c1', { verdict: 'disagree', comment: 'The text says it.' });
+    assert.equal(res.status, 200);
+    assert.equal(inbox.getCard('c1').pushback?.[0]?.feedback?.verdict, 'disagree');
+  });
+
+  it('ends its notice with one sentence that points to card_triage_feedback', async () => {
+    const { events, post, verdict } = await setup();
+    await post({ id: 'c1', title: 'Ship it?' });
+    verdict('c1', 'pass', '', 'Say what the export does today.');
+    const ev = events.find((e): e is Extract<AgentEvent, { type: 'advice' }> => e.type === 'advice');
+    assert.ok(ev);
+    const text = describeAdvice(ev);
+    assert.match(text, /card_triage_feedback/);
+    assert.equal(text.split('decide.')[1]!.trim().split('. ').length, 1, 'one sentence follows the old notice');
   });
 });
 
