@@ -3,7 +3,6 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseArgs } from 'node:util';
 import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerConfig, ownerPairing, runningHere } from './client.ts';
 import { parseTagsFlag } from './integrations/tags.ts';
 import type { Option, Priority, PublicSubscription } from './core/types.ts';
@@ -11,55 +10,13 @@ import { homeDir, readHome, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
 import { keepEvent, unackedNotice, watchLine } from './watch.ts';
+import { commandHelp, commandUsage, helpText, parseCommand, usageError } from './cli-usage.ts';
 
-const HELP = `your-attention: one inbox for the questions your coding agents ask you.
+/** The list `your-attention help` prints, from the same table as each command's --help. */
+const HELP = helpText(homeDir());
 
-  serve [--port 4815] [--host ::] [--no-mdns]        run the inbox
-  start [options for serve]                           run the inbox in the background
-  stop                                                stop the inbox, or its service when one is installed
-  status                                              show the inbox, its files, and this machine's pairings
-  open [--link]                                       open the inbox page signed in, or print a one-time sign-in link
-  tui [--mono] [--ascii]                              answer cards full screen in this terminal, with the keyboard and mouse
-  clear                                               clear the cards you answered or that closed; search still finds them
-  reset --yes                                         remove every card, answer and file; tokens and templates stay
-  login-url                                           print a sign-in link that works once, like open --link
-  pin status|set|reset|clear                          read, set, reset or remove the PIN that each browser tab types
-  install [--from-source PATH]                        print the exact commands that connect this machine's harnesses, and ask nothing
-  install --help <harness>                            the full recipe for one harness, even when it is not installed
-  discover [--seconds 3]                              list inboxes on the LAN
-  pair <url> [--name NAME] [--role agent|owner]       pair this machine with an inbox
-  post --agent ID --title TEXT [--text TEXT] [--option LABEL]... [--priority now|soon|later] [--wait]
-                                                      post a card, and with --wait print the answer
-  ack <card> [<card>...]                              mark answers read, when a script took them out of band
-  watch [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...] [--ack]
-                                                      print each answer for that agent as a line of JSON; --ack marks each
-                                                      read, and without it the card waits in the outbox as unread
-  watch --role owner [--agent ID] [--no-card] [--select FIELD,...] [--type TYPE,...]
-                                                      print each change to every card, or to that agent's, as the owner
-  subscribe --agent ID (--webhook URL | --webhook-file FILE) [--header 'NAME: VALUE']... [--header-file FILE|-]
-                                                      send each answer to that agent's cards to an https webhook, once you approve it
-  unsubscribe --agent ID                              stop sending that agent's answers to its webhook
-  pi [--tags repo=acme/api,topic=billing] -- [pi args]  run pi, and give every card it posts default tags
-                                                      (YOUR_ATTENTION_TAGS, read by the pi extension at session start)
-  claude-channel                                      the MCP channel server for Claude Code
-  claude-hook ask-pre|ask-post|ask-cancel|turn-end    the Claude Code hooks: AskUserQuestion, and the Stop request for a card
-  herdr-blocked                                       post a card for each herdr agent that is blocked
-  opencode-plugin [--write]                           print or write the OpenCode plugin file that loads the card tools
-  triage [--judge-cmd "claude -p" | --judge-url URL --judge-model M --judge-key-env VAR]
-                                                      check each card before you see it (OpenRouter by default)
-  triage login                                        sign in to OpenRouter for the default judge
-  triage feedback [--verdict any|agree|disagree|partly]
-                                                      as the owner: one line of JSON per card triage pushed back on, with
-                                                      the reason, the agent's feedback and how the card ended
-  service serve|triage [--write]                      print or write a launchd or systemd unit
-  bridge [--upstream URL] [--port 4815] [--mdns]      offer a remote inbox on this machine
-  offer ssh <host> [--remote-port 4815]               offer this inbox on another machine over SSH
-  relay [--port 4900] [--key-env VAR]                 run a relay that inboxes dial out to
-  serve --relay URL [--relay-key-env VAR]             also offer this inbox through a relay
-  telemetry status|on|off|show|reset-id               read or change the anonymous usage counts, off unless you turn them on
-  telemetry report [--days 30] [--invites FILE]       for the operator: usage per invite, from Analytics Engine
-
-Files live in ${homeDir()} (set YOUR_ATTENTION_HOME to move them).`;
+/** The options of serve, which start checks before it hands them to serve in the background. */
+const SERVE_OPTIONS = { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '::' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } as const;
 
 const [command, ...rest] = process.argv.slice(2);
 
@@ -212,7 +169,7 @@ function localServer(): { url: string; owner: string } {
 
 switch (command) {
   case 'serve': {
-    const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4815' }, host: { type: 'string', default: '::' }, 'no-mdns': { type: 'boolean', default: false }, relay: { type: 'string' }, 'relay-key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
+    const { values } = parseCommand(command, { args: rest, options: SERVE_OPTIONS });
     const relayKey = values.relay ? process.env[String(values['relay-key-env'])] ?? fail(`--relay needs the relay key in $${values['relay-key-env']}`) : '';
     const stop = async (): Promise<void> => { await server.close(); process.exit(0); };
     const { serve } = await import('./node/server.ts');
@@ -230,6 +187,7 @@ switch (command) {
   }
   case 'start': {
     // `serve` in the background, with the same options. The shell gets its prompt back once the inbox answers.
+    parseCommand(command, { args: rest, options: SERVE_OPTIONS });
     const home = homeDir();
     const already = await runningUrl();
     if (already) { console.log(`The inbox already runs on ${already}.`); break; }
@@ -264,6 +222,7 @@ switch (command) {
     process.exit(0);
   }
   case 'stop': {
+    parseCommand(command, { args: rest });
     // A service restarts the inbox when it exits, so stop the service itself when there is one.
     if (process.platform === 'darwin' || process.platform === 'linux') {
       const { serviceFile } = await import('./node/service.ts');
@@ -293,6 +252,7 @@ switch (command) {
     break;
   }
   case 'status': {
+    parseCommand(command, { args: rest });
     const home = homeDir();
     const serverFile = path.join(home, 'server.json');
     const here = readServerInfo();
@@ -397,10 +357,14 @@ switch (command) {
     break;
   }
   case 'login-url':
+    parseCommand(command, { args: rest });
     console.log(await signInLink());
     break;
   case 'pin': {
-    const [sub = 'status'] = rest;
+    const { positionals } = parseCommand(command, { args: rest, allowPositionals: true });
+    const [sub = 'status', extra] = positionals;
+    if (!['status', 'set', 'reset', 'clear'].includes(sub)) usageError(command, `unknown subcommand ${sub}`);
+    if (extra !== undefined) usageError(command, `unexpected argument ${extra}`);
     const { url, token } = pinTarget();
     const api = httpPinApi(url, token);
     const s = await api.status().catch((e: Error) => fail(`Could not read the PIN of the inbox on ${url}: ${e.message}`));
@@ -418,8 +382,6 @@ switch (command) {
       } else if (sub === 'clear') {
         await api.clear();
         console.log('The PIN is gone. The inbox page opens without one.');
-      } else {
-        fail('Usage: your-attention pin status|set|reset|clear');
       }
     } catch (e) {
       fail(`The inbox refused: ${(e as Error).message}`);
@@ -430,6 +392,7 @@ switch (command) {
   }
   case 'clear':
   case 'reset': {
+    parseCommand(command, { args: rest, options: command === 'reset' ? { yes: { type: 'boolean' } } : {} });
     if (command === 'reset' && !rest.includes('--yes')) fail('reset removes every card, answer and file, and cannot be undone. Run `your-attention reset --yes` to confirm, or `your-attention clear` to clear only the cards you dealt with.');
     const { url, owner } = localServer();
     const res = await fetch(`${url}/v1/${command === 'clear' ? 'archive' : 'reset'}`, { method: 'POST', headers: { authorization: `Bearer ${owner}`, 'content-type': 'application/json' }, body: JSON.stringify(command === 'reset' ? { confirm: 'reset' } : {}) }).catch(() => undefined);
@@ -440,7 +403,7 @@ switch (command) {
     break;
   }
   case 'open': {
-    const { values } = parseArgs({ args: rest, options: { link: { type: 'boolean', default: false } } });
+    const { values } = parseCommand(command, { args: rest, options: { link: { type: 'boolean', default: false } } });
     const link = await signInLink();
     if (values.link) {
       console.log(`Open this link in the browser to sign in. It works once, within 5 minutes:\n${link}`);
@@ -451,29 +414,15 @@ switch (command) {
     break;
   }
   case 'tui': {
-    const { values } = parseArgs({ args: rest, options: { mono: { type: 'boolean', default: false }, ascii: { type: 'boolean', default: false } } });
+    const { values } = parseCommand(command, { args: rest, options: { mono: { type: 'boolean', default: false }, ascii: { type: 'boolean', default: false } } });
     if ((!process.stdin.isTTY || !process.stdout.isTTY) && !process.env['YOUR_ATTENTION_TUI_SIZE']) fail('your-attention tui needs a terminal for its input and its output.');
     const { runTui } = await import('./tui/app.ts');
     process.exit(await runTui({ env: process.env, io: { input: process.stdin, output: process.stdout }, mono: values.mono, ascii: values.ascii }));
   }
   case 'install': {
     // An agent reads this, so nothing here prompts: every line it needs to run comes out as one command.
-    // `--help` takes a harness name. On its own it means "show me the report", and parseArgs would read the next
-    // flag as that missing value, so a `--help` followed by nothing or by another flag is answered before parsing.
-    const helpAt = rest.indexOf('--help');
-    const next = helpAt < 0 ? undefined : rest[helpAt + 1];
-    const bareHelp = helpAt >= 0 && (next === undefined || next.startsWith('-'));
-    let values: { help?: string; 'from-source'?: string };
-    try {
-      ({ values } = parseArgs({
-        args: bareHelp ? rest.filter((a) => a !== '--help') : rest,
-        options: { help: { type: 'string' }, 'from-source': { type: 'string' } },
-        allowPositionals: true,
-      }));
-    } catch (e) {
-      // An option without its value is a usage mistake, and a reader of this command is an agent: one clear line.
-      fail(`install: ${(e as Error).message}. Usage: your-attention install [--from-source PATH], or install --help <harness>.`);
-    }
+    // `--help` takes a harness name. Alone, or before another flag, it asks for this command's help.
+    const { values } = parseCommand(command, { args: rest, options: { help: { type: 'string' }, 'from-source': { type: 'string' } } });
     const { HARNESSES, detect, installHelp, installReport, which } = await import('./node/install.ts');
     const pathEnv = process.env['PATH'];
     const facts = {
@@ -492,7 +441,7 @@ switch (command) {
     break;
   }
   case 'discover': {
-    const { values } = parseArgs({ args: rest, options: { seconds: { type: 'string', default: '3' } } });
+    const { values } = parseCommand(command, { args: rest, options: { seconds: { type: 'string', default: '3' } } });
     const { discover } = await import('./adapters/mdns.ts');
     const found = await discover(Number(values.seconds) * 1000);
     if (!found.length) console.log('No inbox found on this network.');
@@ -500,8 +449,8 @@ switch (command) {
     break;
   }
   case 'pair': {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { name: { type: 'string', default: `${os.userInfo().username}@${os.hostname()}` }, role: { type: 'string', default: 'agent' } } });
-    const url = (positionals[0] ?? fail('Usage: your-attention pair <url>')).replace(/\/$/, '');
+    const { values, positionals } = parseCommand(command, { args: rest, allowPositionals: true, options: { name: { type: 'string', default: `${os.userInfo().username}@${os.hostname()}` }, role: { type: 'string', default: 'agent' } } });
+    const url = (positionals[0] ?? usageError(command, 'needs the address of the inbox')).replace(/\/$/, '');
     const res = await fetch(`${url}/v1/pair`, { method: 'POST', body: JSON.stringify({ name: values.name, role: values.role }) });
     const req = (await res.json()) as { id?: string; code?: string; error?: string };
     if (!res.ok || !req.id) fail(`Pairing refused: ${req.error ?? res.status}`);
@@ -522,8 +471,8 @@ switch (command) {
     break;
   }
   case 'post': {
-    const { values } = parseArgs({ args: rest, options: { agent: { type: 'string' }, title: { type: 'string' }, text: { type: 'string' }, option: { type: 'string', multiple: true }, priority: { type: 'string', default: 'soon' }, wait: { type: 'boolean', default: false } } });
-    if (!values.agent || !values.title) fail('Usage: your-attention post --agent ID --title TEXT');
+    const { values } = parseCommand(command, { args: rest, options: { agent: { type: 'string' }, title: { type: 'string' }, text: { type: 'string' }, option: { type: 'string', multiple: true }, priority: { type: 'string', default: 'soon' }, wait: { type: 'boolean', default: false } } });
+    if (!values.agent || !values.title) usageError(command, 'needs --agent and --title');
     const c = client();
     const options: Option[] | undefined = values.option?.map((label, i) => ({ id: `o${i + 1}`, label }));
     const card = await c.post({ agent: values.agent, title: values.title, text: values.text, options, priority: values.priority as Priority, origin: { harness: 'cli', host: os.hostname(), cwd: process.cwd() } });
@@ -542,8 +491,8 @@ switch (command) {
     // A script that takes an answer out of band, as one reading `watch` does, marks it read with this. Without the ack
     // the card waits in the page's outbox, and the person cannot tell what the agent consumed. It takes every id it is
     // given, because the watcher's own advice names them all on one line.
-    const ids = rest.filter((a) => !a.startsWith('-'));
-    if (!ids.length) fail('Usage: your-attention ack <card> [<card>...]');
+    const { positionals: ids } = parseCommand(command, { args: rest, allowPositionals: true });
+    if (!ids.length) usageError(command, 'needs the id of a card');
     const c = client();
     for (const id of ids) {
       const answer = await c.ack(id).catch((e: Error) => fail(`The inbox refused ${id}: ${e.message}`));
@@ -553,7 +502,7 @@ switch (command) {
     break;
   }
   case 'watch': {
-    const { values } = parseArgs({ args: rest, options: {
+    const { values } = parseCommand(command, { args: rest, options: {
       role: { type: 'string', default: 'agent' },
       agent: { type: 'string' },
       type: { type: 'string' },
@@ -561,7 +510,7 @@ switch (command) {
       select: { type: 'string' },
       ack: { type: 'boolean', default: false },
     } });
-    if (values.role !== 'agent' && values.role !== 'owner') fail(`--role is agent or owner, not ${values.role}.`);
+    if (values.role !== 'agent' && values.role !== 'owner') usageError(command, `--role is agent or owner, not ${values.role}`);
     const owner = values.role === 'owner';
     if (values['no-card'] && values.select !== undefined) fail('Choose --no-card or --select, not both: one leaves the card out, and the other picks the fields to keep.');
     const fields = values.select?.split(',').map((f) => f.trim()).filter(Boolean);
@@ -635,9 +584,9 @@ switch (command) {
     break;
   }
   case 'subscribe': {
-    const { values } = parseArgs({ args: rest, options: { agent: { type: 'string' }, webhook: { type: 'string' }, 'webhook-file': { type: 'string' }, header: { type: 'string', multiple: true }, 'header-file': { type: 'string' } } });
-    const usage = "Usage: your-attention subscribe --agent ID (--webhook URL | --webhook-file FILE) [--header 'NAME: VALUE']... [--header-file FILE|-]";
-    if (!values.agent || (values.webhook === undefined) === (values['webhook-file'] === undefined)) fail(usage);
+    const { values } = parseCommand(command, { args: rest, options: { agent: { type: 'string' }, webhook: { type: 'string' }, 'webhook-file': { type: 'string' }, header: { type: 'string', multiple: true }, 'header-file': { type: 'string' } } });
+    if (!values.agent) usageError(command, 'needs --agent');
+    if ((values.webhook === undefined) === (values['webhook-file'] === undefined)) usageError(command, 'needs one of --webhook and --webhook-file');
     // A secret goes in a file or on stdin: an argument shows in `ps` to every user of this machine, and in the shell history.
     const readText = (file: string, what: string): string => {
       try { return file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8'); } catch (e) { return fail(`Could not read the ${what} in ${file === '-' ? 'stdin' : file}: ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}.`); }
@@ -659,17 +608,17 @@ switch (command) {
     break;
   }
   case 'unsubscribe': {
-    const { values } = parseArgs({ args: rest, options: { agent: { type: 'string' } } });
-    if (!values.agent) fail('Usage: your-attention unsubscribe --agent ID');
+    const { values } = parseCommand(command, { args: rest, options: { agent: { type: 'string' } } });
+    if (!values.agent) usageError(command, 'needs --agent');
     const { removed } = await client().unsubscribe(values.agent).catch((e: Error) => fail(`The inbox refused: ${e.message}`));
     console.log(removed ? `Stopped sending the answers for ${values.agent} to its webhook.` : `${values.agent} had no webhook for this token.`);
     break;
   }
   case 'triage': {
     if (rest[0] === 'feedback') {
-      const { values } = parseArgs({ args: rest.slice(1), options: { verdict: { type: 'string' } } });
+      const { values } = parseCommand(command, { args: rest.slice(1), options: { verdict: { type: 'string' } } });
       const verdict = values.verdict;
-      if (verdict !== undefined && !['any', 'agree', 'disagree', 'partly'].includes(verdict)) fail('Usage: your-attention triage feedback [--verdict any|agree|disagree|partly]');
+      if (verdict !== undefined && !['any', 'agree', 'disagree', 'partly'].includes(verdict)) usageError(command, `--verdict is any, agree, disagree or partly, not ${verdict}`);
       const target = runningHere() ?? ownerPairing() ?? fail('This machine runs no inbox and is not paired with one as owner. Pair it as owner with `your-attention pair <url> --role owner`, or start an inbox with `your-attention start`.');
       const records = await new Client(target).triageFeedbackRecords(verdict as 'any' | undefined).catch((e: Error) => {
         // An agent pairing reaches the route, and the inbox answers that only the owner exports.
@@ -680,12 +629,13 @@ switch (command) {
     }
     const triage = await import('./extensions/triage.ts');
     if (rest[0] === 'login') {
+      parseCommand(command, { args: rest.slice(1) });
       const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
       await triage.openRouterLogin((u) => { console.log(`Opening ${u}`); execFile(opener, [u]); });
       console.log(`Signed in. The key is in ${triage.OPENROUTER_KEY_FILE()}.`);
       break;
     }
-    const { values } = parseArgs({ args: rest, options: { 'judge-cmd': { type: 'string' }, 'judge-url': { type: 'string' }, 'judge-model': { type: 'string' }, 'judge-key-env': { type: 'string' }, name: { type: 'string', default: 'triage' } } });
+    const { values } = parseCommand(command, { args: rest, options: { 'judge-cmd': { type: 'string' }, 'judge-url': { type: 'string' }, 'judge-model': { type: 'string' }, 'judge-key-env': { type: 'string' }, name: { type: 'string', default: 'triage' } } });
     const { loadExtensionConfig } = await import('./client.ts');
     const config = loadExtensionConfig() ?? fail('No inbox found: start one, or set YOUR_ATTENTION_URL and YOUR_ATTENTION_TOKEN to an extension token.');
     const judge = values['judge-cmd'] ? triage.commandJudge(values['judge-cmd'])
@@ -699,10 +649,12 @@ switch (command) {
   }
   case 'service': {
     // The options after the name go to the service as they were typed, without --write.
+    // Strict parsing would refuse those options, so this one only answers --help.
+    parseCommand(command, { args: rest, strict: false, allowPositionals: true });
     const [name, ...given] = rest;
     const write = given.includes('--write');
     const args = given.filter((a) => a !== '--write');
-    if (name !== 'serve' && name !== 'triage') fail('Usage: your-attention service serve|triage [--write] [options for the command]');
+    if (name !== 'serve' && name !== 'triage') usageError(command, name === undefined ? 'needs serve or triage' : `the unit runs serve or triage, not ${name}`);
     const { serviceFile } = await import('./node/service.ts');
     const unit = serviceFile(name, [name, ...args]);
     if (!write) { console.log(`# ${unit.path}\n${unit.content}\n# then: ${unit.start}`); break; }
@@ -712,21 +664,23 @@ switch (command) {
     break;
   }
   case 'bridge': {
-    const { values } = parseArgs({ args: rest, options: { upstream: { type: 'string' }, port: { type: 'string', default: '4815' }, host: { type: 'string', default: '127.0.0.1' }, mdns: { type: 'boolean', default: false } } });
+    const { values } = parseCommand(command, { args: rest, options: { upstream: { type: 'string' }, port: { type: 'string', default: '4815' }, host: { type: 'string', default: '127.0.0.1' }, mdns: { type: 'boolean', default: false } } });
     const upstream = values.upstream ?? loadConfig()?.url ?? ownerPairing()?.url ?? fail('Give the inbox with --upstream <url>, or pair this machine first.');
     const b = await (await import('./node/links.ts')).bridge({ upstream, port: Number(values.port), host: values.host, mdns: values.mdns });
     console.error(`[bridge] ${b.url} leads to ${upstream}`);
     break;
   }
   case 'offer': {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { 'remote-port': { type: 'string', default: '4815' } } });
-    if (positionals[0] !== 'ssh' || !positionals[1]) fail('Usage: your-attention offer ssh <host> [--remote-port 4815]');
+    const { values, positionals } = parseCommand(command, { args: rest, allowPositionals: true, options: { 'remote-port': { type: 'string', default: '4815' } } });
+    if (positionals[0] !== 'ssh') usageError(command, positionals[0] === undefined ? 'needs ssh <host>' : `offers over ssh, not ${positionals[0]}`);
+    if (!positionals[1]) usageError(command, 'needs the host to offer the inbox on');
+    if (positionals[2] !== undefined) usageError(command, `unexpected argument ${positionals[2]}`);
     const { url } = localServer();
     (await import('./node/links.ts')).offerOverSsh({ host: positionals[1], localPort: Number(new URL(url).port), remotePort: Number(values['remote-port']) });
     break;
   }
   case 'relay': {
-    const { values } = parseArgs({ args: rest, options: { port: { type: 'string', default: '4900' }, host: { type: 'string', default: '0.0.0.0' }, 'key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
+    const { values } = parseCommand(command, { args: rest, options: { port: { type: 'string', default: '4900' }, host: { type: 'string', default: '0.0.0.0' }, 'key-env': { type: 'string', default: 'YOUR_ATTENTION_RELAY_KEY' } } });
     const key = process.env[String(values['key-env'])] ?? fail(`The relay needs its key in $${values['key-env']}.`);
     const r = await (await import('./node/links.ts')).relayServer({ port: Number(values.port), host: values.host, key });
     console.error(`[relay] listening on ${r.url}; inboxes are at /i/<inbox id>/`);
@@ -737,7 +691,7 @@ switch (command) {
     const sep = rest.indexOf('--');
     const own = sep === -1 ? rest : rest.slice(0, sep);
     const piArgs = sep === -1 ? [] : rest.slice(sep + 1);
-    const { values } = parseArgs({ args: own, options: { tags: { type: 'string' } } });
+    const { values } = parseCommand(command, { args: own, options: { tags: { type: 'string' } } });
     const env: NodeJS.ProcessEnv = { ...process.env };
     if (values.tags !== undefined) {
       parseTagsFlag(values.tags);
@@ -754,14 +708,18 @@ switch (command) {
     process.exit(child.status ?? 1);
   }
   case 'claude-channel':
+    parseCommand(command, { args: rest });
     await import('./integrations/claude/channel.ts');
     break;
-  case 'claude-hook':
+  case 'claude-hook': {
+    const { positionals } = parseCommand(command, { args: rest, allowPositionals: true });
+    if (!['ask-pre', 'ask-post', 'ask-cancel', 'turn-end'].includes(positionals[0] ?? '')) usageError(command, positionals[0] === undefined ? 'needs the hook to run' : `unknown hook ${positionals[0]}`);
     if (rest[0] === 'turn-end') await (await import('./integrations/claude/turn-end-hook.ts')).main();
     else await (await import('./integrations/claude/ask-hook.ts')).main(rest[0] ?? '');
     break;
+  }
   case 'opencode-plugin': {
-    const { values } = parseArgs({ args: rest, options: { write: { type: 'boolean', default: false } } });
+    const { values } = parseCommand(command, { args: rest, options: { write: { type: 'boolean', default: false } } });
     const { pluginFile, pluginSource } = await import('./integrations/opencode/install.ts');
     const file = pluginFile();
     if (!values.write) { console.log(`# ${file}\n${pluginSource()}`); break; }
@@ -771,13 +729,16 @@ switch (command) {
     break;
   }
   case 'herdr-blocked':
+    parseCommand(command, { args: rest });
     await (await import('./integrations/herdr/blocked.ts')).main();
     break;
   case 'telemetry': {
-    const [sub, ...args] = rest;
+    const { values, positionals } = parseCommand(command, { args: rest, allowPositionals: true, options: { days: { type: 'string', default: '30' }, invites: { type: 'string' } } });
+    const [sub, extra] = positionals;
+    if (extra !== undefined) usageError(command, `unexpected argument ${extra}`);
+    if (sub !== 'report' && (rest.includes('--days') || values.invites !== undefined)) usageError(command, '--days and --invites go with report');
     if (sub === 'report') {
       // For the operator of the hosted service. Invite codes stay in the file: the report prints the label beside each one.
-      const { values } = parseArgs({ args, options: { days: { type: 'string', default: '30' }, invites: { type: 'string' } } });
       const account = process.env['CLOUDFLARE_ACCOUNT_ID'];
       const token = process.env['CLOUDFLARE_API_TOKEN'];
       if (!account || !token) fail('Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN, a token with Account Analytics Read.');
@@ -811,9 +772,19 @@ switch (command) {
     }
     if (sub === 'show') { console.log(JSON.stringify((await telemetry()).next, null, 2)); break; }
     if (sub === 'reset-id') { console.log(`New install id: ${(await telemetry({ resetId: true })).installId}`); break; }
-    fail('Usage: your-attention telemetry status|on|off|show|reset-id, or telemetry report for the operator.');
+    usageError(command, `unknown subcommand ${sub}`);
   }
-  default:
-    console.log(HELP);
-    if (command && command !== 'help' && command !== '--help') process.exit(1);
+  default: {
+    if (command === undefined || command === '--help' || command === '-h') { console.log(HELP); break; }
+    if (command === 'help') {
+      const [name, extra] = rest;
+      if (name === undefined) { console.log(HELP); break; }
+      const c = commandUsage(name) ?? usageError(command, `unknown command ${name}`);
+      if (extra !== undefined) usageError(command, `unexpected argument ${extra}`);
+      console.log(commandHelp(c));
+      break;
+    }
+    process.stderr.write(`your-attention: unknown command ${command}\n${HELP}\n`);
+    process.exit(2);
+  }
 }
