@@ -353,7 +353,7 @@ describe('the example triage agent reads its local config', () => {
 
   it('ships a card prompt with a text fence that asks for the classifier\'s reply format', () => {
     const fence = /```text\n([\s\S]*?)\n```/.exec(fs.readFileSync(CARD_PROMPT, 'utf8'))?.[1] ?? '';
-    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word', 'The evidence behind the recommendation', 'in either order', 'the first two sentences', 'each question states its own change', 'only further down', 'the problem it fixes', 'Never ask for a separate goal sentence', 'Names the reader already knows', 'except the opening that step 1 checks', 'step 4 still checks that it says why']) assert.ok(fence.includes(part), part);
+    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word', 'The evidence behind the recommendation', 'in either order', 'the first two sentences', 'each question states its own change', 'only further down', 'the problem it fixes', 'Never ask for a separate goal sentence', 'Names the reader already knows', 'except the opening that step 1 checks', 'step 4 still checks that it says why', 'a name the card itself makes up', 'an acronym the card never spells out', 'Every other proper name passes']) assert.ok(fence.includes(part), part);
     assert.ok(!fence.includes('Ask about any other internal name'), 'step 2 adds no prompt to look for names');
   });
 });
