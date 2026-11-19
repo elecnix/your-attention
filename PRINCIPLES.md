@@ -34,7 +34,7 @@ Cards stay short-lived, and the links let you trace a decision without a chat th
 
 ### DP5: A new card never replaces the one you are reading
 
-The card you have open remains on screen until you move on from it, by answering, skipping, picking another card, or closing the page. A new card joins the queue in its priority slot, above your card if it ranks higher, with a mark that it is new. In focus mode, which you turn on for one card, the queue waits instead: new cards join it when you leave focus.
+The card you have open remains on screen until you move on from it, by answering, skipping, picking another card, or closing the page. A new card joins the queue in its priority slot, above your card if it ranks higher, with a mark that it is new. In focus mode, which you turn on for one card, that card fills the screen and the queue hides until you leave focus.
 
 A card that changes under you loses your place and your train of thought.
 
