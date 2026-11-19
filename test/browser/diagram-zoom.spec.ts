@@ -31,13 +31,15 @@ async function zoomIn(page: Page) {
   const view = page.viewportSize()!;
   const box = (await overlay(page).boundingBox())!;
   expect(box).toEqual({ x: 0, y: 0, width: view.width, height: view.height });
-  // A wide flowchart meets the sides of the screen, less the gutters, and keeps its shape.
+  // A small flowchart grows until it meets an edge of the screen, less the gutters: it fits both ways, touches one edge,
+  // and keeps its aspect ratio.
   const svg = (await overlay(page).locator('.diagram-zoomed > svg').boundingBox())!;
   const card = (await opener(page).locator('svg').boundingBox())!;
   expect(svg.width).toBeGreaterThan(card.width * 1.2);
-  expect(svg.width).toBeLessThanOrEqual(view.width - 32 + 1);
-  expect(Math.max(view.width - 32 - svg.width, view.height - 32 - svg.height)).toBeGreaterThanOrEqual(-1);
-  expect(Math.min(view.width - 32 - svg.width, view.height - 32 - svg.height)).toBeLessThan(2);
+  const gaps = { width: view.width - 32 - svg.width, height: view.height - 32 - svg.height };
+  expect(gaps.width).toBeGreaterThanOrEqual(-1);
+  expect(gaps.height).toBeGreaterThanOrEqual(-1);
+  expect(Math.min(gaps.width, gaps.height)).toBeLessThan(2);
   expect(svg.width / svg.height).toBeCloseTo(card.width / card.height, 1);
   await expect(overlay(page).locator('.diagram-zoomed > svg')).toContainText('Check');
   // Focus moves into the overlay, on its close button.
