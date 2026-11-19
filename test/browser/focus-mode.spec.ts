@@ -226,3 +226,13 @@ test('in focus mode, your answer to the card before this one keeps the 72ch line
   const ch = await chWidth(page);
   expect((await answer.boundingBox())!.width).toBeLessThanOrEqual(72 * ch + 1);
 });
+
+test('in focus mode, a list inside a list item takes no cap of its own, since the list around it already has one', async ({ page }) => {
+  await post('fm-nested', 'A card with a nested list', { priority: 'now', text: '- The outer item\n  - The inner item' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('A card with a nested list');
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.focus-card .card-text > ul')).toHaveCSS('max-width', `${72 * await chWidth(page)}px`);
+  await expect(page.locator('.focus-card .card-text li ul')).toHaveCSS('max-width', 'none');
+});
