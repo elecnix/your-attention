@@ -824,7 +824,8 @@ export function NotifyToggle({ collapsed = new Set() } = {}) {
   // A page that opens with the switch on makes sure the inbox still has this device, and tells it which groups this device
   // collapsed, so a card in a muted group raises no push. A device the inbox dropped, such as after its token was revoked, is saved again.
   React.useEffect(() => {
-    if (!active || !push) return;
+    // Only a device that already turned push on: a page from before push keeps its old notifications until the person flips the switch.
+    if (!active || !push || store.get('notify:push') !== true) return;
     let stale = false;
     enablePush({ base: BASE, collapsed, api }).then(() => store.set('notify:push', true), (e) => { if (!stale) setError(e.message); });
     return () => { stale = true; };
