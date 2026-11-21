@@ -391,6 +391,13 @@ export interface Card {
   replies: Reply[];
 }
 
+/** The close a late answer came after. */
+export interface LateAnswer {
+  kind: CloseKind;
+  outcome: string;
+  at: number;
+}
+
 export interface Answer {
   card: string;
   /** The card version the person answered. */
@@ -404,6 +411,10 @@ export interface Answer {
   approvalResults?: ApprovalResult[];
   /** The card's widget responses, filled from this answer. */
   responses?: string[];
+  /** Set when the person sent this answer after the agent closed the card: the close it answers, as the agent made it. A
+   * late answer reaches the agent as any answer does, but the card keeps its close, and it fills no widget response
+   * and types no approval, since both were meant for a live answer. */
+  late?: LateAnswer;
   delivery: Delivery;
   savedAt: number;
   deliveredAt: number | null;

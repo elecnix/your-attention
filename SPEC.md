@@ -203,6 +203,16 @@ When the person dismisses a card, the inbox records what they had on screen: the
 
 The inbox saves a revision on a dismissed card, and the card stays in **Sent**. The person may still answer the card, and that answer goes to the agent as any answer to a closed card does.
 
+## Late answers
+
+An answer the person sends after the agent closed the card is a late answer. The inbox stores it as the card's answer, with `late: {kind, outcome, at}` copied from the card's `closed`, and delivers it on the agent's stream or the long poll, and to the answer webhook, as it delivers any answer. An agent that is offline gets it when it connects, as it gets any undelivered answer. The card keeps its `closed` as the agent made it. Its state then reads `answered`, `delivered` and `read` from the answer, so the page's outbox shows the receipt. A close by `dismiss` is the person's own close, which the agent never heard of, so an answer after a dismissal has no `late`. A system card applies its answer itself and has no late answer either.
+
+The inbox keeps the late answer in the answer record, not in a record of its own, because delivery, the read receipt, **Force-send**, the webhook and `previous` all read that one record. A second record would need each of those twice, on the laptop build and on the hosted one.
+
+A late answer fills no widget response, and the inbox types no approval for it. Both were written for a live answer, such as "merge it now", and the agent's close took that request back. The inbox drops `approval_<i>` values from a late answer, and `POST /v1/cards/<id>/answer` doesn't send an approval for one. The first line that `describeAnswer` writes for the agent says the answer is late and quotes the close's outcome. It asks the agent to act on the answer, or to post a card that follows this one. Each approval line reads "not sent, because the card was closed when the person answered".
+
+The page keeps what the person types on a card in this device's store: the form as `draft:<id>:<version>`, and an HTML card's comment as `draft:<id>:comment`. When the agent closes a card that has such a draft, the closed card shows the draft under its closed line, with **Send to the agent anyway** and **Discard**. The draft stays across a reload until the person picks one of them. **Send to the agent anyway** sends it as a late answer and keeps the card on screen, which then says the answer went after the agent took the card back. **Discard** deletes the drafts of that card from the device and empties its form. **Show card** opens the whole card under the closed line, and the box around it follows the card's height, so a card that grew while it was collapsed shows its **Send answer** row. A dismissed card shows the draft that the inbox recorded instead, as [Dismissing a card](#dismissing-a-card) describes.
+
 ## A card the person sends to an agent
 
 The page shows a panel of every agent known to the inbox, with one search field that picks the agent and one message field for the card. The row of actions at the foot of the panel puts **Send** first, as the default of the dialog, with **Close** after it and quieter. `POST /v1/send {agent, text}` takes that message, for the owner only, and answers 201 with `{id, agent, card, sentAt, deliveredAt?}`. The first line of the message becomes `title`, at most 300 characters, and the lines under it become `text`, so a one-line message reads once. Its `kind` is `ask`. The queue doesn't show it, since it waits for an agent rather than for the person.
@@ -540,7 +550,7 @@ A hosted inbox writes its own reports to the `TELEMETRY` binding at its next req
 | `held` | A fail-closed hook timed out, or an extension stopped the card. The card shows which extension and why. |
 | `orphaned` | The card is open, and its agent has been offline for more than an hour. Another session can claim it. |
 
-An answer saved after a close moves the card out of `closed` and goes to the agent. A close with `ifUnanswered: true` fails with 409 when the person already answered. A guidance card reads `closed` as soon as the inbox applies the answer, and its answer still goes to the agent in `broadcast.from`, so the receipt on the card shows when that agent received and read it.
+An answer saved after a close moves the card out of `closed` and goes to the agent, marked late as [Late answers](#late-answers) describes. The card keeps its `closed`. A close with `ifUnanswered: true` fails with 409 when the person already answered. A guidance card reads `closed` as soon as the inbox applies the answer, and its answer still goes to the agent in `broadcast.from`, so the receipt on the card shows when that agent received and read it.
 
 ## Blocked agents in herdr
 

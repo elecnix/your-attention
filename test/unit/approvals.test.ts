@@ -6,7 +6,7 @@ import { Inbox, type ApprovalSender } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { Answer } from '../../src/core/types.ts';
 import { boxState, herdrApprovals } from '../../src/integrations/herdr/approve.ts';
-import { agent, owner } from './fixture.ts';
+import { agent, owner, postAs } from './fixture.ts';
 
 /** A sender that records each send, or fails with `fail` when it is set. */
 function stub(fail?: string): ApprovalSender & { sent: [string, string][] } {
@@ -140,7 +140,7 @@ describe('the send rule', () => {
     const handle = createHandler(inbox);
     const ownerToken = (await inbox.createToken('page', 'owner')).secret;
     const agentToken = (await inbox.createToken('agents', 'agent')).secret;
-    const call = (path: string, token: string, body: unknown) => handle(new Request(`http://inbox.test${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) }));
+    const call = (path: string, token: string, body: unknown) => postAs(handle, path, token, body);
     assert.equal((await call('/v1/cards', agentToken, { id: 'h1', agent: 's1', title: 'Push?', approvals: [approval] })).status, 201);
     assert.equal((await call('/v1/cards/h1/answer', agentToken, { values: { approval_0: true } })).status, 403);
     assert.deepEqual(s.sent, []);

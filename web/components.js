@@ -298,7 +298,7 @@ function CardBody({ draftKey, response, broken, onAction }) {
   // A button sends only its own form's state. A card can hold several forms, so the answer takes all of them.
   const stateRef = React.useRef(initialState);
   const handlers = React.useMemo(() => ({
-    onStateUpdate: (s) => { stateRef.current = s; store.set(draftKey, s); },
+    onStateUpdate: (s) => { stateRef.current = s; store.set(draftKey, s); draftsChanged(); },
     onAction: (ev) => actionRef.current({ ...ev, formState: stateRef.current || ev.formState }),
   }), [draftKey]);
   // One Renderer in one place draws both, so a swap keeps what the person typed, as a revision does.
@@ -308,18 +308,26 @@ function CardBody({ draftKey, response, broken, onAction }) {
 }
 
 // A card the agent closed while you looked at it, or one you dismissed: it collapses to its outcome, and opens again on
-// demand. A dismissal also shows the draft the person had on screen, which no agent reads. `open` keeps it open, for a card
-// the person opened from a link to read it.
-export function ClosedCard({ closed, card, children, onNext, animate, open = false }) {
+// demand. A dismissal also shows the draft the person had on screen, which no agent reads. A card its agent took back
+// shows the answer the person had typed and not sent, with a button that sends it anyway and one that discards it.
+// `open` keeps it open, for a card the person opened from a link to read it.
+export function ClosedCard({ closed, card, children, onNext, animate, open = false, onSendLate, onDiscardLate }) {
   const ref = React.useRef(null);
   const [collapsed, setCollapsed] = React.useState(false);
   const [height, setHeight] = React.useState(null);
+  // The box follows the body's height, which grows after the first draw: a revision, a form that draws late, a narrower
+  // window. A height measured once would clip the bottom of the card, the Send answer row first.
   React.useLayoutEffect(() => {
-    setHeight(ref.current.scrollHeight);
-    if (open) return undefined;
-    if (!animate) { setCollapsed(true); return undefined; }
-    const t = setTimeout(() => setCollapsed(true), 900);
-    return () => clearTimeout(t);
+    const el = ref.current;
+    setHeight(el.offsetHeight);
+    const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => setHeight(el.offsetHeight)) : null;
+    if (watch) watch.observe(el);
+    let t;
+    if (!open) {
+      if (!animate) setCollapsed(true);
+      else t = setTimeout(() => setCollapsed(true), 900);
+    }
+    return () => { clearTimeout(t); if (watch) watch.disconnect(); };
   }, []);
   const draft = closed.draft;
   const draftText = draft && card ? describe(card, { values: draft.values, comment: draft.comment }) : '';
@@ -329,10 +337,71 @@ export function ClosedCard({ closed, card, children, onNext, animate, open = fal
       h('span', { className: 'o' }, closed.outcome),
       h('button', { className: 'btn', onClick: () => setCollapsed((c) => !c) }, collapsed ? 'Show card' : 'Hide card'),
       h('button', { className: 'btn', onClick: onNext }, 'Next card')),
-    draft && h('div', { className: 'dismiss-draft' },
+    draft && closed.kind === 'dismissed' && h('div', { className: 'dismiss-draft' },
       h('div', { className: 'dismiss-draft-head' }, `Your unsent draft, at ${time(draft.at)}`),
       h('div', { className: 'dismiss-draft-body' }, draftText && draftText !== 'Empty answer' ? draftText : 'Nothing typed yet.')),
-    h('div', { ref, className: 'collapse', style: { maxHeight: collapsed ? 0 : (height || 4000), opacity: collapsed ? 0 : 1 } }, children));
+    closed.kind !== 'dismissed' && card && onSendLate && h(LateDraft, { card, kind: closed.kind, onSend: onSendLate, onDiscard: onDiscardLate }),
+    h('div', { className: 'collapse', style: { maxHeight: collapsed ? 0 : (height ?? 4000), opacity: collapsed ? 0 : 1 } },
+      h('div', { ref, className: 'collapse-body' }, children)));
+}
+
+// The drafts this device keeps for each card: the form at each version, as `draft:<id>:<version>`, and an HTML card's
+// comment, as `draft:<id>:comment`. A view of a draft redraws when the person types or a draft goes.
+const draftWatchers = new Set();
+const draftsChanged = () => { for (const f of draftWatchers) f(); };
+function useDrafts() {
+  const [, redraw] = React.useState(0);
+  React.useEffect(() => { const f = () => redraw((n) => n + 1); draftWatchers.add(f); return () => { draftWatchers.delete(f); }; }, []);
+}
+const draftKeys = (id) => {
+  try { return Object.keys(localStorage).filter((k) => k.startsWith(`draft:${id}:`)); } catch { return []; }
+};
+
+/** What the person typed on a card and has not sent: the values and the comment, read from the newest form draft this
+ * device keeps for the card, and the HTML card's comment draft when the form has none. */
+export function unsentDraft(card) {
+  const versions = draftKeys(card.id).map((k) => Number(k.slice(`draft:${card.id}:`.length))).filter((v) => Number.isInteger(v) && v <= card.version);
+  const form = versions.length ? store.get(`draft:${card.id}:${Math.max(...versions)}`) : null;
+  const { values, comment } = form ? formValues(form) : { values: {}, comment: '' };
+  const answer = { values: answerValues(card, values), comment: comment || String(store.get(`draft:${card.id}:comment`) || '').trim() };
+  const text = describe(card, answer);
+  return text && text !== 'Empty answer' ? { ...answer, text } : null;
+}
+
+/** Forget every draft this device keeps for a card, once it is sent or discarded. */
+export function forgetDrafts(id) {
+  for (const k of draftKeys(id)) store.del(k);
+  draftsChanged();
+}
+
+const LATE_HEAD = {
+  expired: 'This card expired before you sent it.',
+  returned: 'Triage sent this card back before you sent it.',
+};
+
+/** The answer the person typed on a card its agent took back. Nothing typed goes silently: it stays here until the person
+ * sends it to the agent anyway, as a late answer, or discards it. */
+function LateDraft({ card, kind, onSend, onDiscard }) {
+  useDrafts();
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const draft = unsentDraft(card);
+  if (!draft) return null;
+  const send = async () => {
+    setBusy(true);
+    setError(null);
+    const why = await onSend(draft).catch((e) => String(e.message || e));
+    setBusy(false);
+    if (why) setError(why);
+  };
+  return h('div', { className: 'dismiss-draft late-draft' },
+    h('div', { className: 'dismiss-draft-head' }, 'Your unsent answer'),
+    h('div', { className: 'late-draft-why' }, `${LATE_HEAD[kind] || 'The agent took this card back before you sent it.'} You can still send it: the agent gets it marked as a late answer, with its own outcome quoted.`),
+    h('div', { className: 'dismiss-draft-body' }, draft.text),
+    error && h('div', { className: 'note warn', role: 'alert' }, `Not sent: ${error}`),
+    h('div', { className: 'late-draft-actions' },
+      h('button', { className: 'btn primary', disabled: busy, onClick: send }, busy ? 'Sending…' : 'Send to the agent anyway'),
+      h('button', { className: 'btn', disabled: busy, onClick: onDiscard }, 'Discard')));
 }
 
 // The icon button that dismisses the card on screen, for the rows the page draws itself: an HTML card's footer and a
@@ -703,7 +772,7 @@ export function HtmlCard({ card, allowed, onAnswer, onSkip, onDismiss }) {
     frame.postMessage({ yourAttention: 'collect', id }, '*');
   });
   const footer = h('div', { className: 'html-answer' },
-    h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
+    h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); draftsChanged(); } })),
     h('div', { className: 'html-answer-actions' },
       h('button', { type: 'button', className: 'btn primary', onClick: async () => { onAnswer(await collect(), comment.trim()); store.del(draftKey); } }, 'Send answer'),
       h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now'),
