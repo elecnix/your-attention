@@ -18,7 +18,7 @@ import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
-  FeedbackFinding, FeedbackVerdict, TriageFeedback, TriagePushback,
+  FeedbackFinding, FeedbackVerdict, LateAnswer, TriageFeedback, TriagePushback,
 } from './types.ts';
 
 /** A sign-in code as the inbox keeps it in `meta`. A code made before short codes has no `short`. */
@@ -2117,12 +2117,19 @@ export class Inbox {
       throw e;
     }
     const before = this.store.get<Answer>('answers', id);
+    // An answer after the agent closed the card is late. A dismissal is the person's own close, which the agent never
+    // heard of, so an answer after one is not. A system card applies its answer itself, so it has no late answer.
+    const late: LateAnswer | undefined = card.kind !== 'system' && card.closed && card.closed.kind !== 'dismissed'
+      ? { kind: card.closed.kind, outcome: card.closed.outcome, at: card.closed.at } : undefined;
+    // Approvals on a closed card are never sent, so a late answer does not keep any as approved.
+    if (late) for (const k of Object.keys(values)) if (/^approval_\d+$/.test(k)) delete values[k];
     const answer: Answer = {
       card: id,
       version: Number(input.version ?? card.version),
       values,
       comment: String(input.comment ?? '').trim(),
       ...(images.length ? { images } : {}),
+      ...(late ? { late } : {}),
       delivery,
       savedAt: this.now(),
       deliveredAt: null,
@@ -2130,10 +2137,11 @@ export class Inbox {
       forcedAt: null,
       previous: before ? [...before.previous, { ...before, previous: undefined } as Omit<Answer, 'previous'>] : [],
     };
-    const responses = (card.responses ?? []).map((r) => respond(r.template, values, r.values)).filter(Boolean);
+    // A widget response tells the agent what to do with a live answer, such as merge now, so a late answer fills none.
+    const responses = late ? [] : (card.responses ?? []).map((r) => respond(r.template, values, r.values)).filter(Boolean);
     if (responses.length) answer.responses = responses;
     // An approval sent for this version of the card stays sent, so a second answer never types it again.
-    const kept = before && before.version === answer.version ? (before.approvalResults ?? []).map((r) => (r && !('error' in r) ? r : null)) : [];
+    const kept = !late && before && before.version === answer.version ? (before.approvalResults ?? []).map((r) => (r && !('error' in r) ? r : null)) : [];
     if (kept.some(Boolean)) answer.approvalResults = kept;
     for (const p of answer.previous) delete (p as Partial<Answer>).previous;
     this.store.put('answers', id, answer);
@@ -2160,7 +2168,8 @@ export class Inbox {
     const answer = this.store.get<Answer>('answers', id);
     const sender = this.approvalSender;
     const card = this.store.get<Card>('cards', id);
-    if (!sender || caller.role !== 'owner' || !answer || !card?.approvals?.length) return answer;
+    // A late answer types nothing: the agent closed the card, so the sentence it asked to type is no longer its request.
+    if (!sender || caller.role !== 'owner' || !answer || answer.late || !card?.approvals?.length) return answer;
     const approvals = card.approvals;
     const results: ApprovalResult[] = approvals.map((_, i) => answer.approvalResults?.[i] ?? null);
     const claimed: number[] = [];

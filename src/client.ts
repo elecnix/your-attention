@@ -555,13 +555,28 @@ export function describeSentCard(ev: Extract<AgentEvent, { type: 'card' }>): str
   return `The person sent this session a card, ${ev.card.id}: "${ev.card.title}"${text} Reply with a card of your own if there is something to say, and carry on with what you were doing.`;
 }
 
+/** How each close kind reads in a late answer's first line, said to the agent that closed the card. */
+const LATE_CLOSE: Record<CloseKind, string> = {
+  retracted: 'retracted it',
+  'self-answered': 'answered it yourself',
+  'answered-in-terminal': 'had it answered in the terminal',
+  resolved: 'marked it no longer needed',
+  expired: 'let it expire',
+  returned: 'had it sent back by triage',
+  dismissed: 'saw it dismissed',
+};
+
 export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]): string {
   const lines: string[] = [];
+  // A late answer says so first, with the agent's own close quoted, so the agent weighs it against what it did since.
+  const late = answer.late;
+  if (late) lines.push(`Late answer: you had already closed this card when the person sent this. You ${LATE_CLOSE[late.kind] ?? 'closed it'}, with the outcome "${late.outcome}". Act on it if it still matters, or post a new card that follows this one.`, '');
   if (card.questions?.length) lines.push(...questionLines(card, answer.values));
   card.approvals?.forEach((a, i) => {
     const r = answer.approvalResults?.[i];
     // Only a recorded send reads as sent: an answer with no result entry says nothing about the pane.
-    const done = !answer.values[`approval_${i}`] ? 'not approved'
+    const done = late ? 'not sent, because the card was closed when the person answered'
+      : !answer.values[`approval_${i}`] ? 'not approved'
       : r && 'sentAt' in r ? 'approved, and the inbox typed it into the pane as the person\'s message'
       : r && 'error' in r ? `approved, but not sent: ${r.error}`
       : 'approved, but the inbox recorded no send';

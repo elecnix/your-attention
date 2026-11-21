@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, AgentPin, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
+import { Approvals, AgentPin, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetDrafts, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions } from './components.js';
 import { after, agentName, buildQueue, notifies, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
@@ -25,6 +25,8 @@ export function App() {
   const toggleFocusRef = React.useRef(() => {});
   // The approvals the person turned on, by card version: a revision may change the sentences, so it starts with all off.
   // They live in the device store, so an idle reload of the page for new code keeps them, as it keeps a comment draft.
+  // How many times the person discarded the draft of a closed card, by card, so its form draws empty again.
+  const [discarded, setDiscarded] = React.useState({});
   const [approvalPicks, setApprovalPicks] = React.useState(() => { try { return JSON.parse(store.get('approvalPicks') || '{}'); } catch { return {}; } });
   // GET /v1/state sends card summaries. The whole card on screen, and the one after it, come from GET /v1/cards/<id>.
   const [, setLoaded] = React.useState(0);
@@ -573,7 +575,8 @@ export function App() {
     let sealed;
     // A secret that cannot be sealed stops the answer, and its field says why: the person typed it to send it.
     try { sealed = await sealSecrets(c.id, secretFieldsOf(c)); } catch { return; }
-    const values = { ...answerValues(c, picked), ...sealed, ...approvalValues(c, picksOf(c)) };
+    // Approvals on a closed card are never sent, so an answer to one carries none.
+    const values = { ...answerValues(c, picked), ...sealed, ...(c.closed ? {} : approvalValues(c, picksOf(c))) };
     const images = pastedImages.payload(c.id);
     await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
     clearPasted(c.id);
@@ -581,6 +584,27 @@ export function App() {
     store.del(`draft:${c.id}:${c.version}`);
     answered(c.id);
   }
+
+  // Send the draft of a card its agent took back, as a late answer. The page stays on the card, which then shows the
+  // answer and says it went after the card closed. It answers why it failed, or nothing once it is sent.
+  const sendLate = async (c, draft) => {
+    let sealed;
+    try { sealed = await sealSecrets(c.id, secretFieldsOf(c)); } catch (e) { return String(e.message || e); }
+    const images = pastedImages.payload(c.id);
+    const res = await api(`${BASE}v1/cards/${c.id}/answer`, { values: { ...draft.values, ...sealed }, comment: draft.comment, version: c.version, ...(images.length ? { images } : {}) });
+    if (!res.ok) return (await res.json().catch(() => ({}))).error || `the inbox answered ${res.status}`;
+    clearPasted(c.id);
+    forgetSecrets(c.id);
+    forgetDrafts(c.id);
+    return null;
+  };
+  // Discard the draft of a card its agent took back. The form under the closed line starts empty again.
+  const discardLate = (c) => {
+    clearPasted(c.id);
+    forgetSecrets(c.id);
+    forgetDrafts(c.id);
+    setDiscarded((d) => ({ ...d, [c.id]: (d[c.id] || 0) + 1 }));
+  };
 
   // A text with each match of the search drawn as a <mark>.
   const marked = (text) => (terms.length ? highlightParts(text, terms).map((p, i) => (p.hit ? h('mark', { key: i }, p.text) : p.text)) : text);
@@ -702,6 +726,7 @@ export function App() {
       after && h('div', { className: 'chain' }, 'Followed by ', h('a', { onClick: () => open(after.id) }, after.title)),
       // Replies agents sent before linked follow-ups stay on the card. No new reply can appear: a follow-up is a card that follows this one.
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { ...links, text: r.text, diagrams: false }))),
+      a && a.late && h('div', { className: 'note late' }, `You sent this answer after the agent took the card back (${CLOSED_LABEL[a.late.kind] || 'Closed'}: ${a.late.outcome}). It went to the agent marked as a late answer, with that outcome quoted.`),
       a && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
       a && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
       h('h2', { className: 'card-title' }, current.title),
@@ -712,13 +737,14 @@ export function App() {
       current.attachments && h(Attachments, { files: current.attachments }),
       h(Changes, { card: current }),
       h(TriagePushback, { card: current }),
-      current.approvals && current.approvals.length > 0 && h(Approvals, { card: current, answer: a, picks: picksOf(current), onToggle: (i, on) => toggleApproval(current, i, on) }),
+      // Approvals on a closed card are never sent, so a card closed before a live answer offers none.
+      current.approvals && current.approvals.length > 0 && !(current.closed && (!a || a.late)) && h(Approvals, { card: current, answer: a, picks: picksOf(current), onToggle: (i, on) => toggleApproval(current, i, on) }),
       current.archivedAt ? null
         : current.broadcast && !current.closed
         ? h(BroadcastForm, { key: current.id, card: current, cards: state.cards, presence: state.presence, guidance: state.guidance, onDone: skip, onSkip: skip, onDismiss: (comment) => dismiss(current, {}, comment) })
         : current.html !== undefined
         ? h(HtmlCard, { key: current.id, card: current, onSkip: skip, allowed: !!(state.settings && state.settings.allowHtml), onAnswer: (values, comment) => { const images = pastedImages.payload(current.id); return api(`${BASE}v1/cards/${current.id}/answer`, { values: { ...values, ...approvalValues(current, picksOf(current)) }, comment, version: current.version, ...(images.length ? { images } : {}) }).then(() => { clearPasted(current.id); skip(); }); }, onDismiss: (values, comment) => dismiss(current, values, comment) })
-        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
+        : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}:${discarded[current.id] || 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
         h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),
@@ -735,7 +761,8 @@ export function App() {
     main = h(DrawFaults.Provider, { value: drawFaultsOf(current) }, s === 'closed'
       // The summary has the closure as soon as the state does, before the whole card arrives again. In focus mode the card
       // stays open under its closed line, since the person is reading it.
-      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id], open: !!current.archivedAt || !!focusMode }, card)
+      ? h(ClosedCard, { key: `closed:${current.id}`, closed: current.closed || shown.closed, card: current, onNext: skip, animate: !!closing[current.id], open: !!current.archivedAt || !!focusMode,
+        ...(current.archivedAt || current.broadcast ? {} : { onSendLate: (draft) => sendLate(current, draft), onDiscardLate: () => discardLate(current) }) }, card)
       : card);
   }
 
