@@ -20,14 +20,6 @@ export const VALE_INI = path.join(import.meta.dirname, 'vale', '.vale.ini');
 export const CARD_PROMPT = path.join(import.meta.dirname, 'card-prompt.md');
 export const CARD_QUESTION = 'Can the person make the decision this card asks for from the card alone, without opening the agent\'s session, its code or its diff?';
 
-/** The reader question with the names the person knows. They go in the question, which the operator writes, and never
- * in the card's text, so a card cannot add names of its own. */
-export function classifierQuestion(cfg: ExampleConfig): string {
-  const names = Object.entries(cfg.knownNames ?? {});
-  if (!names.length) return CARD_QUESTION;
-  return `${CARD_QUESTION}\n\nNames the reader already knows, from the operator and not from the card:\n${names.map(([n, d]) => `- ${n}: ${d}`).join('\n')}`;
-}
-
 export interface PrVerdictConfig {
   /** The command and its first arguments. The check appends the pull request's URL and --json. */
   command: string[];
@@ -43,9 +35,6 @@ export interface Policy {
   valeErrors: Level;
   valeWarnings: Level;
   classifierMissingContext: Level;
-  /** What a classifier question from the names step does: the card's step 2, which asks about a term the card makes up
-   * or an acronym it never spells out. The other steps' questions follow classifierMissingContext. */
-  classifierNames: Level;
   /** A verdict the PR-verdict command does not accept blocks the card below this confidence, and is advice from it up. */
   prVerdictBlockBelow: number;
 }
@@ -62,16 +51,13 @@ export interface ExampleConfig {
   maxReturns: number;
   /** Where the agent keeps the return counts and the bypass codes. */
   stateFile: string;
-  /** Names the person knows, each with a one-line definition. The classifier asks about no name on this list. */
-  knownNames: Record<string, string>;
 }
 
 export const DEFAULTS: ExampleConfig = {
   vale: ['vale'], classifier: ['pr-context-classifier'], valeTimeoutMs: 30_000, classifierTimeoutMs: 150_000,
-  policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', classifierNames: 'advise', prVerdictBlockBelow: 0.5 },
+  policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', prVerdictBlockBelow: 0.5 },
   maxReturns: 3,
   stateFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'),
-  knownNames: {},
 };
 /** The tag an agent sets, to the code a return notice gave it, to let one urgent card skip triage. */
 export const BYPASS_TAG = 'triage-bypass';
@@ -81,8 +67,9 @@ export function defaultConfigPath(): string {
   return process.env['YOUR_ATTENTION_TRIAGE_EXAMPLE_CONFIG'] ?? path.join(os.homedir(), '.config', 'your-attention', 'triage-example.json');
 }
 
-/** The local config, over the defaults. A missing file gives the defaults, which have no PR-verdict command. */
-export function loadConfig(file = defaultConfigPath()): ExampleConfig {
+/** The local config, over the defaults. A missing file gives the defaults, which have no PR-verdict command. A field
+ * that an earlier version read and this one doesn't, such as knownNames, gets one line in `log`, and the config loads. */
+export function loadConfig(file = defaultConfigPath(), log: (line: string) => void = (line) => console.error(line)): ExampleConfig {
   // An empty path, such as --config "$CFG" with CFG unset, would otherwise run the default policy without a word.
   if (!file) throw new Error('--config needs a file path, and it was empty');
   if (!fs.existsSync(file)) return { ...DEFAULTS, policy: { ...DEFAULTS.policy } };
@@ -106,7 +93,7 @@ export function loadConfig(file = defaultConfigPath()): ExampleConfig {
   if (raw['valeTimeoutMs'] !== undefined) cfg.valeTimeoutMs = ms('valeTimeoutMs', raw['valeTimeoutMs']);
   if (raw['classifierTimeoutMs'] !== undefined) cfg.classifierTimeoutMs = ms('classifierTimeoutMs', raw['classifierTimeoutMs']);
   const policy = (raw['policy'] ?? {}) as Record<string, unknown>;
-  for (const k of ['valeErrors', 'valeWarnings', 'classifierMissingContext', 'classifierNames'] as const) if (policy[k] !== undefined) cfg.policy[k] = level(`policy.${k}`, policy[k]);
+  for (const k of ['valeErrors', 'valeWarnings', 'classifierMissingContext'] as const) if (policy[k] !== undefined) cfg.policy[k] = level(`policy.${k}`, policy[k]);
   if (policy['prVerdictBlockBelow'] !== undefined) {
     const t = policy['prVerdictBlockBelow'];
     cfg.policy.prVerdictBlockBelow = typeof t === 'number' && t >= 0 && t <= 1 ? t : bad('policy.prVerdictBlockBelow must be a number from 0 to 1');
@@ -119,19 +106,10 @@ export function loadConfig(file = defaultConfigPath()): ExampleConfig {
     const f = typeof raw['stateFile'] === 'string' ? raw['stateFile'] : bad('stateFile must be a path');
     cfg.stateFile = f.startsWith('~/') ? path.join(os.homedir(), f.slice(2)) : f;
   }
-  if (raw['knownNames'] !== undefined) {
-    const names = raw['knownNames'];
-    if (typeof names !== 'object' || names === null || Array.isArray(names)) return bad('knownNames must map each name to a short definition, such as {"Acme API": "the company\'s public REST service"}');
-    cfg.knownNames = {};
-    for (const [name, def] of Object.entries(names)) {
-      const key = name.trim();
-      if (!key) return bad('knownNames has an empty name');
-      // A definition is one short line, so the list stays small enough to send with every card.
-      const text = typeof def === 'string' && def.trim() ? def.trim() : bad(`knownNames.${key} must be a definition, a line of text`);
-      if (text.length > 120 || text.includes('\n')) return bad(`knownNames.${key} must be at most 120 characters on one line`);
-      cfg.knownNames[key] = text;
-    }
-  }
+  // The card prompt had a step that asked the card to explain names, with these two fields. The step is gone, and a
+  // config written for it still loads.
+  const retired = [raw['knownNames'] !== undefined && 'knownNames', policy['classifierNames'] !== undefined && 'policy.classifierNames'].filter((f) => f !== false);
+  if (retired.length) log(`${file}: ${retired.join(' and ')} ${retired.length > 1 ? 'are' : 'is'} no longer used, so the agent ignores ${retired.length > 1 ? 'them' : 'it'}`);
   const pr = raw['prVerdict'] as Record<string, unknown> | undefined;
   if (pr !== undefined && pr !== null) {
     cfg.prVerdict = {
@@ -325,13 +303,10 @@ export async function valeCheck(card: Card, cfg: ExampleConfig, run: RunCommand 
   };
 }
 
-/** A classifier question from the card prompt's step 2, the names step. */
-const NAMES_STEP = /^\s*\[2\]/;
-
 interface Classification { verdict: string; rationale?: string; clarifyingQuestions?: string[] }
 
 export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport> {
-  const result = await ask('classifier', [...cfg.classifier, '-p', CARD_PROMPT, '-q', classifierQuestion(cfg), '-'], cardText(card), cfg.classifierTimeoutMs, [0], (out) => {
+  const result = await ask('classifier', [...cfg.classifier, '-p', CARD_PROMPT, '-q', CARD_QUESTION, '-'], cardText(card), cfg.classifierTimeoutMs, [0], (out) => {
     const c = JSON.parse(out) as Classification;
     if (c.verdict !== 'COMPLETE' && c.verdict !== 'MISSING_CONTEXT') return undefined;
     if (c.rationale !== undefined && typeof c.rationale !== 'string') return undefined;
@@ -342,20 +317,8 @@ export async function classifierCheck(card: Card, cfg: ExampleConfig, run: RunCo
   const questions = result.clarifyingQuestions ?? [];
   const detail = { classifier: { verdict: result.verdict, rationale: result.rationale ?? '', questions } };
   if (result.verdict === 'COMPLETE') return { check: 'Card classifier', sections: [], detail };
-  // The card prompt numbers each question with its step. Step 2 asks about names, which the policy can make advice
-  // alone; a question without a number, or an answer without questions, follows the other steps.
-  const names = questions.filter((q) => NAMES_STEP.test(q));
-  const others = questions.filter((q) => !NAMES_STEP.test(q));
   const why = `The card lacks context the person needs: ${result.rationale ?? ''}`.trim();
-  const list = (qs: string[]): string[] => qs.map((q) => `- ${q}`);
-  const namesOnly = names.length > 0 && others.length === 0;
-  const sections = [
-    ...section('Card classifier', cfg.policy.classifierMissingContext, namesOnly ? [] : [why, ...list(others)]),
-    ...section('Card classifier', cfg.policy.classifierNames, namesOnly ? [why, ...list(names)] : list(names)),
-  ];
-  // Two sections at one level read as one list.
-  const merged = sections.length === 2 && sections[0]!.level === sections[1]!.level ? [{ ...sections[0]!, lines: [...sections[0]!.lines, ...sections[1]!.lines] }] : sections;
-  return { check: 'Card classifier', sections: merged, detail };
+  return { check: 'Card classifier', sections: section('Card classifier', cfg.policy.classifierMissingContext, [why, ...questions.map((q) => `- ${q}`)]), detail };
 }
 
 const PR_TAG = /^([\w.-]+)\/([\w.-]+)#(\d+)$/;

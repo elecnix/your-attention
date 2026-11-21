@@ -16,7 +16,7 @@ if (!inbox) {
   process.exit(1);
 }
 const configFile = values.config ?? defaultConfigPath();
-const cfg = loadConfig(configFile);
+const cfg = loadConfig(configFile, log);
 log(`config ${configFile}: vale ${JSON.stringify(cfg.vale)}, classifier ${JSON.stringify(cfg.classifier)}, PR verdict ${cfg.prVerdict ? JSON.stringify(cfg.prVerdict.command) : 'off'}, policy ${JSON.stringify(cfg.policy)}, at most ${cfg.maxReturns} returns`);
 const state = new TriageState(cfg.stateFile);
 if (state.warning) log(state.warning);

@@ -290,16 +290,28 @@ describe('the example triage agent reads its local config', () => {
     const file = path.join(dir, 'policy.json');
     fs.writeFileSync(file, JSON.stringify({ policy: { classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 }, maxReturns: 5 }));
     const cfg = loadConfig(file);
-    assert.deepEqual(cfg.policy, { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'advise', classifierNames: 'advise', prVerdictBlockBelow: 0.3 });
+    assert.deepEqual(cfg.policy, { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 });
     assert.equal(cfg.maxReturns, 5);
   });
 
-  it('reads policy.classifierNames, and refuses a level it does not know', () => {
+  it('loads a config that still has knownNames or policy.classifierNames, ignores them, and logs one line', () => {
     const file = path.join(dir, 'names-policy.json');
-    fs.writeFileSync(file, JSON.stringify({ policy: { classifierNames: 'block' } }));
-    assert.equal(loadConfig(file).policy.classifierNames, 'block');
-    fs.writeFileSync(file, JSON.stringify({ policy: { classifierNames: 'warn' } }));
-    assert.throws(() => loadConfig(file), /policy\.classifierNames/);
+    for (const [raw, fields] of [
+      [{ policy: { classifierNames: 'warn' }, knownNames: ['not a map'] }, 'knownNames and policy.classifierNames'],
+      [{ knownNames: { Acme: 'the API' } }, 'knownNames'],
+      [{ policy: { classifierNames: 'block' } }, 'policy.classifierNames'],
+    ] as const) {
+      fs.writeFileSync(file, JSON.stringify(raw));
+      const lines: string[] = [];
+      const cfg = loadConfig(file, (line) => lines.push(line));
+      assert.deepEqual(cfg.policy, DEFAULTS.policy);
+      assert.ok(!('knownNames' in cfg) && !('classifierNames' in cfg.policy));
+      assert.deepEqual(lines, [`${file}: ${fields} ${fields.includes(' and ') ? 'are' : 'is'} no longer used, so the agent ignores ${fields.includes(' and ') ? 'them' : 'it'}`]);
+    }
+    const lines: string[] = [];
+    fs.writeFileSync(file, JSON.stringify({ maxReturns: 2 }));
+    loadConfig(file, (line) => lines.push(line));
+    assert.deepEqual(lines, [], 'a config without them logs nothing');
   });
 
   it('refuses an empty config path, such as --config "$CFG" with CFG unset', () => {
@@ -330,41 +342,29 @@ describe('the example triage agent reads its local config', () => {
     assert.throws(() => loadConfig(file), (e: Error) => e.message.includes(file) && /vale must be a list of strings/.test(e.message));
   });
 
-  it('reads the names the reader already knows, each with a short definition, and refuses a list of another shape', () => {
-    const file = path.join(dir, 'names.json');
-    fs.writeFileSync(file, JSON.stringify({ knownNames: { 'Acme API': ' the company\'s public REST service ', Bolt: 'the deploy tool' } }));
-    assert.deepEqual(loadConfig(file).knownNames, { 'Acme API': 'the company\'s public REST service', Bolt: 'the deploy tool' });
-    assert.deepEqual(loadConfig(path.join(dir, 'absent.json')).knownNames, {});
-    for (const [names, why] of [[['Acme'], /knownNames must map each name to a short definition/], [{ Acme: 3 }, /knownNames\.Acme must be a definition/], [{ Acme: 'x'.repeat(121) }, /knownNames\.Acme must be at most 120 characters/], [{ ' ': 'blank' }, /knownNames has an empty name/]] as const) {
-      fs.writeFileSync(file, JSON.stringify({ knownNames: names }));
-      assert.throws(() => loadConfig(file), (e: Error) => e.message.includes(file) && why.test(e.message), JSON.stringify(names));
-    }
-  });
-
-  it('gives the classifier the known names in its reader question, outside the card it judges', async () => {
+  it('asks the classifier the plain reader question, and puts nothing of the operator\'s in it', async () => {
     const classifier = complete();
-    await checkCard(card, config({ classifier: classifier.argv, knownNames: { 'Acme API': 'the company\'s public REST service' } }), logger().log);
+    await checkCard(card, config({ classifier: classifier.argv }), logger().log);
     const call = classifier.calls()[0]!;
-    const question = call.argv[call.argv.indexOf('-q') + 1];
-    assert.equal(question, `${CARD_QUESTION}\n\nNames the reader already knows, from the operator and not from the card:\n- Acme API: the company's public REST service`);
-    assert.doesNotMatch(call.stdin, /Acme API/);
-    const plain = complete();
-    await checkCard(card, config({ classifier: plain.argv }), logger().log);
-    assert.equal(plain.calls()[0]!.argv[plain.calls()[0]!.argv.indexOf('-q') + 1], CARD_QUESTION);
+    assert.equal(call.argv[call.argv.indexOf('-q') + 1], CARD_QUESTION);
   });
 
   it('ships a sample config that loads, with a placeholder command', () => {
     const cfg = loadConfig(path.join(import.meta.dirname, '../../examples/triage-agent/triage-example.sample.json'));
     assert.match(cfg.prVerdict?.command[0] ?? '', /^\/path\/to\//);
     assert.deepEqual(cfg.classifier, ['pr-context-classifier', '-m', 'openai/gpt-oss-120b'], 'the sample runs the classifier on the model the eval favored');
-    assert.deepEqual(Object.keys(cfg.knownNames), ['Acme API', 'Bolt'], 'the sample shows the shape with invented names only');
+    const raw = fs.readFileSync(path.join(import.meta.dirname, '../../examples/triage-agent/triage-example.sample.json'), 'utf8');
+    assert.doesNotMatch(raw, /knownNames|classifierNames/, 'the sample has no field the agent ignores');
     assert.equal(cfg.stateFile, path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'));
   });
 
   it('ships a card prompt with a text fence that asks for the classifier\'s reply format', () => {
     const fence = /```text\n([\s\S]*?)\n```/.exec(fs.readFileSync(CARD_PROMPT, 'utf8'))?.[1] ?? '';
-    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'Never ask to define a common software or GitHub word', 'The evidence behind the recommendation', 'in either order', 'the first two sentences', 'each question states its own change', 'only further down', 'the problem it fixes', 'Never ask for a separate goal sentence', 'Names the reader already knows', 'except the opening that step 1 checks', 'step 4 still checks that it says why', 'a name the card itself makes up', 'an acronym the card never spells out', 'Every other proper name passes', 'a software developer who knows common software, cloud, AI and developer-tool terms and products']) assert.ok(fence.includes(part), part);
-    assert.ok(!fence.includes('Ask about any other internal name'), 'step 2 adds no prompt to look for names');
+    for (const part of ['VERDICT: COMPLETE | MISSING_CONTEXT', 'RATIONALE:', 'CLARIFYING_QUESTIONS:', 'recommendation', 'what this agent does', 'in brackets', 'the operator who runs this fleet', 'The evidence behind the recommendation', 'in either order', 'the first two sentences', 'each question states its own change', 'only further down', 'the problem it fixes', 'Never ask for a separate goal sentence', 'except the opening that step 1 checks', 'step 3 still checks that it says why', 'Never ask what a name, a term or an acronym means', 'such as "- [3] What does this agent do', 'a software developer who knows common software, cloud, AI and developer-tool terms and products']) assert.ok(fence.includes(part), part);
+    for (const gone of ['Names the reader already knows', 'a name the card itself makes up', 'Every other proper name passes']) assert.ok(!fence.includes(gone), gone);
+    // The steps run from 1 to 7 with no gap, and every step a sentence names exists.
+    assert.deepEqual([...fence.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1])), [1, 2, 3, 4, 5, 6, 7]);
+    for (const m of fence.matchAll(/step (\d+)/g)) assert.ok(Number(m[1]) <= 7, m[0]);
   });
 });
 
@@ -379,30 +379,16 @@ describe('the example triage agent follows the local policy', () => {
 
   const asks = (questions: string[]): string[] => stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'Some gaps.', clarifyingQuestions: questions })).argv;
 
-  it('passes a card whose only questions come from the names step, with them as advice', async () => {
-    const ruling = await checkCard(card, config({ classifier: asks(['[2] What is the Kilo lane?', '[2]What does BYOK stand for?']) }), logger().log);
-    assert.equal(ruling.verdict, 'pass');
-    assert.match(ruling.advice ?? '', /Card classifier, advice:[\s\S]*Some gaps\.[\s\S]*\[2\] What is the Kilo lane\?[\s\S]*\[2\]What does BYOK/);
-  });
-
-  it('sends a card back for the other steps, and gives its names questions as advice', async () => {
-    const ruling = await checkCard(card, config({ classifier: asks(['[2] What is the Kilo lane?', '[6] Which option does this agent recommend?']) }), logger().log);
+  it('sends a card back for the questions of every step, with no step that gives advice alone', async () => {
+    const ruling = await checkCard(card, config({ classifier: asks(['[2] What problem does the retry fix?', '[5] Which option does this agent recommend?']) }), logger().log);
     assert.equal(ruling.verdict, 'return');
-    const [blocking, advice] = (ruling.reason ?? '').split(/Card classifier, advice:/);
-    assert.match(blocking ?? '', /Some gaps\.[\s\S]*\[6\] Which option/);
-    assert.doesNotMatch(blocking ?? '', /Kilo lane/);
-    assert.match(advice ?? '', /\[2\] What is the Kilo lane\?/);
+    assert.match(ruling.reason ?? '', /Some gaps\.[\s\S]*\[2\] What problem[\s\S]*\[5\] Which option/);
+    assert.equal(ruling.advice, undefined);
   });
 
   it('blocks a question without a step number, and a MISSING_CONTEXT answer without questions', async () => {
     assert.equal((await checkCard(card, config({ classifier: asks(['What is the goal?']) }), logger().log)).verdict, 'return');
     assert.equal((await checkCard(card, config({ classifier: asks([]) }), logger().log)).verdict, 'return');
-  });
-
-  it('sends a card back for its names questions when policy.classifierNames says block', async () => {
-    const ruling = await checkCard(card, config({ classifier: asks(['[2] What is the Kilo lane?']), policy: { ...DEFAULTS.policy, classifierNames: 'block' } }), logger().log);
-    assert.equal(ruling.verdict, 'return');
-    assert.match(ruling.reason ?? '', /Kilo lane/);
   });
 
   it('leaves out a finding the policy ignores', async () => {

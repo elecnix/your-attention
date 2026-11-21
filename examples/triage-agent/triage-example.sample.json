@@ -12,13 +12,8 @@
     "valeErrors": "block",
     "valeWarnings": "advise",
     "classifierMissingContext": "block",
-    "classifierNames": "advise",
     "prVerdictBlockBelow": 0.5
   },
   "maxReturns": 3,
-  "stateFile": "~/.local/state/your-attention/triage-example.json",
-  "knownNames": {
-    "Acme API": "the company's public REST service",
-    "Bolt": "the deploy tool that puts each service in production"
-  }
+  "stateFile": "~/.local/state/your-attention/triage-example.json"
 }
