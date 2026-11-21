@@ -8,7 +8,7 @@ import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
 import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller, type PushInput, type SearchFilters } from './inbox.ts';
 import { UNLOCK_HEADER, UNLOCK_IDLE_MS, pinKeyError, validKey, type PinKey } from './pin.ts';
 import type { Source } from './telemetry.ts';
-import type { AgentEvent, Card, CloseKind, Delivery, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
+import type { AgentEvent, Card, CloseKind, Delivery, GuidanceEdit, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
 import { PROTOCOL_VERSION } from './types.ts';
 
 export const COOKIE = 'ya_token';
@@ -533,8 +533,14 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       // The text is the guidance alone: the catalog and the tag values come in fields of their own, built on this read.
       if (method === 'GET') return json(inbox.cardGuidance());
       if (method === 'POST') {
-        const g = await readJson<{ text?: string; message?: string; agent?: string }>(req);
-        return json(publicCard(inbox.proposeGuidance(String(g.text ?? ''), String(g.message ?? ''), g.agent ? { caller: me, agent: String(g.agent) } : undefined)), 201);
+        // Edits are the usual proposal. A whole text goes under replace_all_with, and `text` is its older name.
+        const g = (await readJson<{ edits?: unknown; replace_all_with?: string; text?: string; message?: string; agent?: string; origin?: unknown }>(req)) ?? {};
+        const whole = g.replace_all_with ?? g.text;
+        if (g.edits !== undefined && whole !== undefined) throw new InboxError(400, 'a proposal takes edits or replace_all_with, not both');
+        if (g.edits !== undefined && !Array.isArray(g.edits)) throw new InboxError(400, 'edits must be a list of {old, new}');
+        const proposal = g.edits !== undefined ? (g.edits as GuidanceEdit[]) : String(whole ?? '');
+        const by = g.agent ? { caller: me, agent: String(g.agent), origin: g.origin } : undefined;
+        return json(publicCard(inbox.proposeGuidance(proposal, String(g.message ?? ''), by)), 201);
       }
     }
     if (a === 'telemetry' && !b && (method === 'GET' || method === 'PUT')) {
@@ -562,7 +568,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET') return json(inbox.requireCardView(url.searchParams.get('agent') ?? ''));
       if (method === 'POST') {
         // A request body may be `null`, and reading it as an object would crash rather than refuse it.
-        const input = (await readJson<{ scope?: string; on?: unknown; reminders?: unknown; agent?: string }>(req)) ?? {};
+        const input = (await readJson<{ scope?: string; on?: unknown; reminders?: unknown; agent?: string; origin?: unknown }>(req)) ?? {};
         const who = String(input.agent ?? '').trim();
         // A rule says whether someone is asked for a card, so the request says it plainly rather than in a lookalike.
         if (typeof input.on !== 'boolean') throw new InboxError(400, 'on must be true or false');
@@ -578,7 +584,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(inbox.setRequireCardForAgent(who, on));
         }
         if (input.scope === 'all') {
-          const card = inbox.proposeRequireCard({ on, ...(reminders === undefined ? {} : { reminders }), ...(who ? { by: { caller: me, agent: who } } : {}) });
+          const card = inbox.proposeRequireCard({ on, ...(reminders === undefined ? {} : { reminders }), ...(who ? { by: { caller: me, agent: who, origin: input.origin } } : {}) });
           return json(publicCard(card), 201);
         }
         throw new InboxError(400, 'scope must be self or all');

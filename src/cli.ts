@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerConfig, ownerPairing, runningHere } from './client.ts';
+import { herdrPlace } from './integrations/herdr/place.ts';
 import { parseTagsFlag } from './integrations/tags.ts';
 import type { Option, Priority, PublicSubscription } from './core/types.ts';
 import { homeDir, readHome, writePrivate } from './node/home.ts';
@@ -604,7 +605,10 @@ switch (command) {
       if (at < 0 || !h.slice(0, at).trim()) fail(`Header ${i + 1} has no name: each --header, and each line of --header-file, takes 'NAME: VALUE', such as 'Authorization: Bearer <token>'.`);
       headers[h.slice(0, at).trim()] = h.slice(at + 1).trim();
     }
-    const r = await client().subscribe(values.agent, { url: webhook, headers }).catch((e: Error) => fail(`The inbox refused the webhook: ${e.message}`));
+    // The card names the shell that asked, as an agent's own card names its session, and opens its herdr pane.
+    const pane = process.env['HERDR_PANE_ID'];
+    const origin = { harness: 'cli', host: os.hostname(), cwd: process.cwd(), ...(pane ? { herdrPane: pane, ...(await herdrPlace(pane)) } : {}) };
+    const r = await client().subscribe(values.agent, { url: webhook, headers }, origin).catch((e: Error) => fail(`The inbox refused the webhook: ${e.message}`));
     console.error(`Asked the inbox to send the answers for ${values.agent} to ${new URL(r.subscription.url).host}. Nothing goes out until you approve the card "${r.card.title}" in the inbox.`);
     console.error('Each call carries x-your-attention-signature, an HMAC-SHA256 of the body keyed with the secret below. The inbox shows it only this once.');
     console.log(JSON.stringify({ id: r.subscription.id, status: r.subscription.status, card: r.card.id, secret: r.secret }));

@@ -709,7 +709,8 @@ export function App() {
         pres && !current.archivedAt && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
         h(CardAge, { card: current }),
         h(FocusToggle, { on: !!focusMode, arrived: arrived.length, onToggle: () => toggleFocusRef.current() })),
-      h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin, agent: current.agent, name: agentName(current.agent, state.cards, state.presence), agentPinned: isAgentPinned(current.agent) }),
+      // A system card an agent asked for names that agent, as the agent's own card does, and the person still answers it.
+      h(CardTags, { tags: current.tags, isPinned, onToggle: togglePin, agent: current.proposedBy || current.agent, name: agentName(current.proposedBy || current.agent, state.cards, state.presence), agentPinned: isAgentPinned(current.proposedBy || current.agent) }),
       current.triage && current.triage.state === 'passed' && /did not answer|failed/.test(current.triage.reason || '') && h('div', { className: 'note' }, `Triage did not check this card: ${current.triage.reason}`),
       current.triage && ['held', 'returned'].includes(current.triage.state) && h('div', { className: 'note warn' },
         `${current.triage.by || 'An extension'} ${current.triage.state === 'held' ? 'held this card' : 'sent this card back'}: ${current.triage.reason || 'no reason given'}`,

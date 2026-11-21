@@ -92,7 +92,7 @@ describe('card tools', () => {
   it('reports an argument the tool does not take', async () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     const ctx = { inbox: {} as never, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' };
-    await assert.rejects(runTool(ctx, 'card_guidance', { text: 'x' }), /card_guidance does not take text\. It takes propose/);
+    await assert.rejects(runTool(ctx, 'card_guidance', { text: 'x' }), /card_guidance does not take text\. It takes edits, replace_all_with, propose, message/);
   });
 
   it('reads an HTML file the agent attaches as text/html', async () => {

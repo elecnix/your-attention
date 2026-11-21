@@ -128,9 +128,22 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return `Saved widget ${w.name} version ${w.versions.length}. Place it in a card body or a template with a line: part = widget ${w.name} {"name": "value"}.`;
     }
     case 'card_guidance': {
-      if (args['propose']) {
-        const card = await inbox.proposeGuidance(String(args['propose']), { message: String(args['message'] ?? ''), ...(agent ? { agent } : {}) });
-        return `Proposed the guidance on card ${card.id}. It changes only if the person approves it. The answer and the person's comment arrive ${ctx.arrival}.`;
+      // `propose` is the older name of replace_all_with, kept for one release so running sessions don't break.
+      const whole = args['replace_all_with'] ?? args['propose'];
+      if (args['edits'] !== undefined || whole !== undefined) {
+        if (args['edits'] !== undefined && whole !== undefined) throw new Error('propose either edits or replace_all_with, not both');
+        const opts = { message: String(args['message'] ?? ''), ...(agent ? { agent } : {}), origin: await origin() };
+        const after = `It changes only if the person approves it. The answer and the person's comment arrive ${ctx.arrival}.`;
+        if (args['edits'] !== undefined) {
+          if (!Array.isArray(args['edits'])) throw new Error('edits must be a list of {old, new}');
+          const edits = args['edits'] as { old: string; new: string }[];
+          const card = await inbox.proposeGuidance(edits, opts);
+          const n = edits.length;
+          return `Proposed ${n} edit${n === 1 ? '' : 's'} to guidance version ${card.broadcast?.base?.version ?? '?'} on card ${card.id}. ${after} The edits apply to the guidance as it is at the approval.`;
+        }
+        const card = await inbox.proposeGuidance(String(whole), opts);
+        const deprecated = args['replace_all_with'] === undefined ? ' propose is deprecated: use edits, or replace_all_with for a whole new text.' : '';
+        return `Proposed a whole new guidance text on card ${card.id}. It replaces every rule. ${after}${deprecated}`;
       }
       const g = await inbox.guidance();
       // The tags other cards set go last, one line per key, so the agent reuses a value instead of inventing one.
@@ -236,7 +249,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       if (scope === 'all') {
         // A count arrives as a number or not at all, since null and true would reach the inbox as 0 and 1.
         if (args['reminders'] !== undefined && typeof args['reminders'] !== 'number') throw new Error('reminders must be a whole number');
-        const card = await inbox.proposeRequireCard({ on, ...(args['reminders'] === undefined ? {} : { reminders: args['reminders'] }), agent });
+        const card = await inbox.proposeRequireCard({ on, ...(args['reminders'] === undefined ? {} : { reminders: args['reminders'] }), agent, origin: await origin() });
         return `Proposed the rule for every agent on card ${card.id}. It changes only if the person approves it, and the answer arrives ${ctx.arrival}.`;
       }
       throw new Error('scope must be self, for this session, or all, for every agent');

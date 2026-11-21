@@ -12,12 +12,13 @@ const idPart = (s) => String(s).replace(/[%:]/g, (c) => `%${c.charCodeAt(0).toSt
 const groupId = (kind, ...parts) => [kind, ...parts.map(idPart)].join(': ');
 
 // An agent's name for people: the name its connection reports, else the session name its newest card carries, else its
-// id. A session that has posted no card still has a name, because presence keeps the one its connection sent.
+// id. A session that has posted no card still has a name, because presence keeps the one its connection sent. A system
+// card an agent asked for carries that agent's session, so it names the agent in `proposedBy`, never the system.
 export function agentName(id, cards, presence = {}) {
   const reported = presence[id] && presence[id].origin && presence[id].origin.name;
   if (reported) return reported;
   let best = null;
-  for (const c of cards) if (c.agent === id && c.origin && c.origin.name && (!best || c.createdAt > best.createdAt)) best = c;
+  for (const c of cards) if ((c.proposedBy || c.agent) === id && c.origin && c.origin.name && (!best || c.createdAt > best.createdAt)) best = c;
   return best ? best.origin.name : id;
 }
 

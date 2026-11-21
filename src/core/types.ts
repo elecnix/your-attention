@@ -37,6 +37,28 @@ export interface AskQuestion {
   multiSelect?: boolean;
 }
 
+/** One edit of a guidance proposal: `old` occurs exactly once in the guidance, and `new` takes its place. */
+export interface GuidanceEdit {
+  old: string;
+  new: string;
+}
+
+/** On a system card that proposes new guidance. A proposal holds either `edits`, the default, or `text`, a whole new
+ * text that replaces every rule. `from` is the agent that proposed it, which receives the answer. `base` is the
+ * guidance it starts from. For a proposal of edits, each read fills `text` from the edits and the guidance as stored
+ * at that moment, sets `base` to that guidance, so the diff is against the current rules, and sets `stale` when an
+ * edit no longer applies. `agents` is on cards stored before the page listed the online agents from live presence,
+ * and nothing reads it. */
+export interface Broadcast {
+  text?: string;
+  edits?: GuidanceEdit[];
+  stale?: string;
+  message?: string;
+  agents?: string[];
+  from?: string;
+  base?: { version: number; text: string };
+}
+
 export interface Origin {
   harness?: string;
   session?: string;
@@ -359,14 +381,16 @@ export interface Card {
   /** Each triage pushback on this card, oldest first, with the agent's feedback on it. */
   pushback?: TriagePushback[];
   history?: CardVersion[];
-  /** On a system card that proposes new guidance: the text, the agent that proposed it, which receives the answer, and
-   * the guidance the proposal starts from, so the card can say when it changed since. `agents` is on cards stored
-   * before the page listed the online agents from live presence, and nothing reads it. */
-  broadcast?: { text: string; message?: string; agents?: string[]; from?: string; base?: { version: number; text: string } };
+  /** On a system card that proposes new guidance: the edits or the whole text, as `Broadcast` describes. */
+  broadcast?: Broadcast;
   /** A rule proposed for every agent at once, which changes only when the person approves the card. */
   requireCard?: { mode: 'all' | 'off'; reminders: number; from?: string };
   /** On a system card that asks to send an agent's answers to a webhook: the id of that subscription. */
   subscription?: string;
+  /** On a system card an agent's request made, such as a guidance proposal or a webhook request: that agent. Its
+   * `origin` is where the agent ran when it asked, so the card shows the session that asked, while the owner answers
+   * it as a system card. */
+  proposedBy?: string;
   origin?: Origin;
   /** The name the agent gives itself, such as "the release agent". The page shows it as written. */
   from?: string;

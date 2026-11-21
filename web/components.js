@@ -867,8 +867,10 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
   const [whole, setWhole] = React.useState(false);
   const [error, setError] = React.useState(null);
   const current = guidance || b.base || { text: '', version: 0 };
-  const changed = !!(b.base && guidance && b.base.version !== guidance.version);
-  const rows = guidanceDiff(current.text, b.text, changed ? b.base.text : undefined);
+  // A proposal of edits arrives with its text derived from the guidance stored now, so only a whole new text can miss
+  // what was added since it was proposed.
+  const changed = !b.edits && !!(b.base && guidance && b.base.version !== guidance.version);
+  const rows = guidanceDiff(current.text, b.text ?? current.text, changed ? b.base.text : undefined);
   const same = rows.filter((r) => r.kind === 'same').length;
   const matches = same === rows.length;
   // A failed answer keeps the comment and says why, so the person can send it again.
@@ -901,6 +903,9 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
   return h('div', { className: 'broadcast' },
     h('div', { className: 'field' }, `${b.from ? `${agentName(b.from, cards, presence)} proposes` : 'Proposed'} changes to card guidance version ${current.version}`),
     b.message && h('p', { className: 'broadcast-message' }, b.message),
+    b.stale && h('div', { className: 'note warn' }, `This proposal no longer applies, because the guidance changed after the agent proposed it: ${b.stale}. Approving changes nothing, and the agent hears why.`),
+    b.edits && !b.stale && h('div', { className: 'note' }, `The agent proposes ${b.edits.length === 1 ? 'one edit' : `${b.edits.length} edits`}. Approving applies ${b.edits.length === 1 ? 'it' : 'them'} to the guidance as it is then, so the rest of the text stays as it is.`),
+    !b.edits && h('div', { className: 'note' }, 'The agent proposes a whole new text: approving replaces every rule with it.'),
     changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
     h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
     same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
