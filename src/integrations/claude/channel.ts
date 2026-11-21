@@ -265,6 +265,8 @@ void asks.sync();
 void inbox.stream(agent, async (ev) => {
   // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
   if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
+  // A new rule may move the next ask, or turn the asks on or off.
+  if (ev.type === 'settings') return void asks.sync();
   if (ev.type === 'guidance') {
     await notify(`The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`, { guidance: String(ev.guidance.version) });
     return;

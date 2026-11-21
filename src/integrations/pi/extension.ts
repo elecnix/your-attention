@@ -103,6 +103,8 @@ export default function yourAttention(pi: PiApi): void {
       }
     }
     void client.stream(agent, async (ev) => {
+      // A new rule may move the next ask, or turn the asks on or off.
+      if (ev.type === 'settings') return void asks.sync();
       if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice') {
         const note = ev.type === 'guidance'
           ? `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`
