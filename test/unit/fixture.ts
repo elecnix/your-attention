@@ -51,3 +51,7 @@ export async function httpInbox(inbox: Inbox = new Inbox(new MemoryStorage(), ()
     (await (await call('POST', '/v1/cards', { token, body: { agent: 's1', ...body } })).json()) as Card;
   return { inbox, handle, call, post, owner, agentA, agentB, ext };
 }
+
+/** A POST to an inbox's HTTP handler with a bearer token, as a client sends one. */
+export const postAs = (handle: (req: Request) => Promise<Response>, path: string, token: string, body: unknown): Promise<Response> =>
+  handle(new Request(`http://inbox.test${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) }));

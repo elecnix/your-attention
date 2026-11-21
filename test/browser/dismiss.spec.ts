@@ -1,16 +1,12 @@
 // Issue 38: dismiss a card without telling its agent. A card stored with replies keeps them in a fold.
 import { expect, test } from '@playwright/test';
-import type { Card, Answer } from '../../src/core/types.ts';
 import { startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
 test.beforeAll(async () => { inbox = await startInbox(); });
 test.afterAll(async () => { await inbox.close(); });
 
-const cardDetail = async (id: string): Promise<{ card: Card; answer?: Answer }> => {
-  const res = await fetch(`${inbox.server.url}/v1/cards/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${inbox.server.ownerToken}` } });
-  return (await res.json()) as { card: Card; answer?: Answer };
-};
+const cardDetail = (id: string) => inbox.detail(id);
 
 test('a comment and a pick are recorded, then Dismiss moves the card to Sent and tells the agent nothing', async ({ page }) => {
   const heard = inbox.listen('s-dismiss');

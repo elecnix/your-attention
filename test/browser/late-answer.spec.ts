@@ -1,17 +1,13 @@
 // A card its agent takes back while the person types: the closed card keeps what the person typed, with a button that
 // sends it to the agent anyway, as a late answer, and one that discards it. Re-expanding the card shows all of it.
 import { expect, test, type Page } from '@playwright/test';
-import type { Answer, Card } from '../../src/core/types.ts';
 import { startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
 test.beforeEach(async () => { inbox = await startInbox(); });
 test.afterEach(async () => { await inbox.close(); });
 
-const cardDetail = async (id: string): Promise<{ card: Card; answer?: Answer }> => {
-  const res = await fetch(`${inbox.server.url}/v1/cards/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${inbox.server.ownerToken}` } });
-  return (await res.json()) as { card: Card; answer?: Answer };
-};
+const cardDetail = (id: string) => inbox.detail(id);
 const post = (id: string, agent: string, extra: Record<string, unknown> = {}) =>
   inbox.agent.post({ id, agent, title: 'Which size?', text: 'Pick the size that fits.', priority: 'now', options: [{ id: 'o1', label: 'Small' }, { id: 'o2', label: 'Large' }], ...extra });
 const draft = (page: Page) => page.locator('.late-draft');

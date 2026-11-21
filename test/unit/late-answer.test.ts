@@ -8,7 +8,7 @@ import { createHandler } from '../../src/core/http.ts';
 import { Inbox, cardState, type ApprovalSender } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent } from '../../src/core/types.ts';
-import { agent, owner } from './fixture.ts';
+import { agent, owner, postAs } from './fixture.ts';
 
 function stub(): ApprovalSender & { sent: [string, string][] } {
   const sent: [string, string][] = [];
@@ -117,7 +117,7 @@ describe('a late answer', () => {
     const agentToken = (await inbox.createToken('a', 'agent')).secret;
     const ownerToken = (await inbox.createToken('o', 'owner')).secret;
     const handle = createHandler(inbox);
-    const call = (path: string, token: string, body: unknown) => handle(new Request(`http://inbox.test${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) }));
+    const call = (path: string, token: string, body: unknown) => postAs(handle, path, token, body);
     assert.equal((await call('/v1/cards', agentToken, { id: 'h1', agent: 's1', title: 'Push?', approvals: [{ pane: 'w6P:p2', text: 'Yes.' }] })).status, 201);
     assert.equal((await call('/v1/cards/h1/close', agentToken, { kind: 'retracted', outcome: 'Not needed.' })).status, 200);
     const res = await call('/v1/cards/h1/answer', ownerToken, { values: { approval_0: true }, comment: 'Sending anyway.' });

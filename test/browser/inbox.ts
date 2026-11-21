@@ -6,7 +6,7 @@ import { expect, type Page } from '@playwright/test';
 import { Client } from '../../src/client.ts';
 import type { ApprovalSender } from '../../src/core/inbox.ts';
 import type { Storage } from '../../src/core/storage.ts';
-import type { AgentEvent, Card, Origin } from '../../src/core/types.ts';
+import type { AgentEvent, Answer, Card, Origin } from '../../src/core/types.ts';
 import { serve, type RunningServer } from '../../src/node/server.ts';
 
 /** Open the dialog that the button of that name in the bar opens, and return it once its content shows. */
@@ -25,6 +25,8 @@ export interface TestInbox {
   open(page: Page): Promise<void>;
   /** The whole cards and answers, as the inbox stores them. The page reads summaries from GET /v1/state, and each card it opens. */
   state(): Promise<{ cards: Card[]; states: Record<string, string>; answers: Record<string, { values: Record<string, unknown>; comment: string }> }>;
+  /** One card and its answer, as the owner's `GET /v1/cards/<id>` returns them, draft included. */
+  detail(id: string): Promise<{ card: Card; answer?: Answer }>;
   /** Store replies on a card, as an inbox wrote them before linked follow-ups. Nothing posts a reply now. Call it before the page opens. */
   seedReplies(id: string, texts: string[]): void;
   /** Receive answers for one agent, into a list the test reads. `origin` is what the connection reports about its
@@ -53,6 +55,10 @@ export async function startInbox(opts: { usage?: boolean; pinPrompt?: boolean; a
     },
     async state() {
       return server.inbox.state() as unknown as Awaited<ReturnType<TestInbox['state']>>;
+    },
+    async detail(id) {
+      const res = await fetch(`${server.url}/v1/cards/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${server.ownerToken}` } });
+      return (await res.json()) as { card: Card; answer?: Answer };
     },
     seedReplies(id, texts) {
       const store = (server.inbox as unknown as { store: Storage }).store;
