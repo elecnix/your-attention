@@ -6,7 +6,7 @@ import { createHandler } from '../../src/core/http.ts';
 import { Inbox, type Caller } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, Card } from '../../src/core/types.ts';
-import { envRequireCard, resolveRequireCard, ruleFromView } from '../../src/integrations/require-card.ts';
+import { envRequireCard, holdsCard, resolveRequireCard, ruleFromView } from '../../src/integrations/require-card.ts';
 
 const DEFAULT = [2, 5, 10];
 
@@ -253,6 +253,15 @@ describe('the schedule of asks', () => {
     store.put('cards', card.id, { ...store.get<Card>('cards', card.id)!, requireCard: { mode: 'all', reminders: 1 } });
     await inbox.answer(card.id, { values: { choice: 'approve' } });
     assert.deepEqual(inbox.requireCard().delays, [2]);
+  });
+
+  it('counts a card that triage holds as the session\'s card, so the asks do not make it post twice', () => {
+    const mine = (state: string) => [{ card: { agent: 's1' }, state }];
+    assert.equal(holdsCard(mine('open'), 's1'), true);
+    assert.equal(holdsCard(mine('in-triage'), 's1'), true);
+    assert.equal(holdsCard(mine('held'), 's1'), true);
+    assert.equal(holdsCard(mine('answered'), 's1'), false, 'an answered card waits on the agent, not the person');
+    assert.equal(holdsCard(mine('open'), 's2'), false, 'another session\'s card does not count');
   });
 
   it('reads the schedule from an inbox that sends only a count', () => {

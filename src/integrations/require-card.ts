@@ -11,6 +11,15 @@ export interface CardRule {
   delays: number[];
 }
 
+/** The states in which a session's card stands for the card the rule asks for: open, or posted and held by triage.
+ * A card a triage hook holds is still the session's question, and asking again would post it twice. */
+export const CARD_HELD_STATES: readonly string[] = ['open', 'in-triage', 'held'];
+
+/** Whether one of these cards is the session's card that the rule asks for. */
+export function holdsCard(results: readonly { card: { agent?: string }; state: string }[], agent: string): boolean {
+  return results.some((c) => c.card.agent === agent && CARD_HELD_STATES.includes(c.state));
+}
+
 /** What both harnesses say when they ask, so they ask in one voice. */
 export const NO_CARD = '[your-attention] This session has no open card. Post one with card_post that says what you are working on and what you need from the person.';
 

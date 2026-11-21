@@ -18,7 +18,7 @@ import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { SessionName } from './session-name.ts';
 import { CardAsks } from '../card-asks.ts';
-import { envRequireCard, minuteMs, NO_CARD, ruleFromView } from '../require-card.ts';
+import { envRequireCard, holdsCard, minuteMs, NO_CARD, ruleFromView } from '../require-card.ts';
 import { fileStore, stretchFile } from './card-stretch.ts';
 import { devChannelEnabled, parentArgs } from './channel-flag.ts';
 import { boxState, runHerdr } from '../herdr/approve.ts';
@@ -240,7 +240,7 @@ const asks = new CardAsks({
   store: fileStore(session),
   // A value in the environment decides for the whole session, so the inbox's rule is not read at all.
   rule: async () => envRequireCard(process.env) ?? ruleFromView(await inbox.requireCard(agent)),
-  hasOpenCard: async () => (await inbox.list()).results.some((c) => c.card.agent === agent && c.state === 'open'),
+  hasOpenCard: async () => holdsCard((await inbox.list()).results, agent),
   ask: () => notify(NO_CARD, { request: 'card' }),
   minuteMs: MINUTE_MS,
   log,
@@ -259,14 +259,14 @@ offset = transcriptSize();
 setInterval(scanTranscript, Math.min(500, Math.max(50, Math.floor(RETRY_MS / 4))));
 log('connected to', inbox.url, 'as', agent, channelOff ? '(channel off: the session started without the development-channels flag)' : '');
 // The hooks change the file from their own processes: a stat of it notices, at a fraction of a minute of the schedule.
-fs.watchFile(stretchFile(session), { interval: Math.min(1000, Math.max(20, Math.floor(MINUTE_MS / 10))), persistent: false }, () => void asks.sync());
-void asks.sync();
+fs.watchFile(stretchFile(session), { interval: Math.min(1000, Math.max(20, Math.floor(MINUTE_MS / 10))), persistent: false }, () => asks.resync());
+asks.resync();
 
 void inbox.stream(agent, async (ev) => {
   // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
   if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
   // A new rule may move the next ask, or turn the asks on or off.
-  if (ev.type === 'settings') return void asks.sync();
+  if (ev.type === 'settings') return asks.resync();
   if (ev.type === 'guidance') {
     await notify(`The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`, { guidance: String(ev.guidance.version) });
     return;

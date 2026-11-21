@@ -144,19 +144,23 @@ describe('the asks for a card', () => {
       await turnEnd();
       await sleep(MINUTE * 5);
       assert.equal(asks().length, 3, 'three asks, then nothing until the session does something');
-      // Activity at 3 minutes of a new stretch cancels its 5 and 10 minute asks and starts a fresh one.
+      // Activity at 3.5 minutes of a new stretch cancels its 5 and 10 minute asks and starts a fresh one, whose first ask
+      // at 5.5 minutes comes after the cancelled 5 minute ask would have.
       await turnStart();
       await turnEnd();
       await until(() => asks().length === 4 || undefined);
       await turnStart();
       await turnEnd();
-      await sleep(MINUTE);
+      const stretchStart = Date.now() - MINUTE * 2;
+      await sleep(MINUTE * 1.5);
       await turnStart();
       const restart = Date.now();
       await turnEnd();
       await until(() => asks().length === 5 || undefined);
       const fresh = (Date.now() - restart) / MINUTE;
       assert.ok(fresh >= 2 && fresh < 4, `the new stretch asks 2 minutes after its own start, not ${fresh}`);
+      const old = (Date.now() - stretchStart) / MINUTE;
+      assert.ok(old >= 5.5, `the old stretch's 5 minute ask was cancelled, but an ask came at ${old}`);
       // A card of its own is what the asks are for: once one is open, the stretch ends without an ask.
       await turnStart();
       await tools.get('card_post')!.execute('call-4', { id: 'pi-4', title: 'Still working?' }, undefined, undefined, ctx);

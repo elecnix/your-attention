@@ -74,7 +74,7 @@ export class CardAsks {
   /** The session's turn ended: it is inactive from now, unless the turn was the one an ask started. */
   ended(): void {
     this.o.store.save(afterTurn(this.o.store.load(), Date.now()));
-    void this.sync();
+    this.resync();
   }
 
   /** A turn started or a tool ran. Activity, unless the session runs the turn an ask started. */
@@ -104,9 +104,17 @@ export class CardAsks {
     const next = rule.delays[stretch.asks];
     if (next === undefined) return;
     const wait = Math.max(0, stretch.since + next * this.minuteMs - Date.now());
-    const timer = setTimeout(() => void this.fire(gen), wait);
+    const timer = setTimeout(() => {
+      // A store that fails to write, such as a full disk, must not end the process as an unhandled rejection.
+      this.fire(gen).catch((e: Error) => this.o.log?.('the ask for a card failed:', e.message));
+    }, wait);
     (timer as { unref?: () => void }).unref?.();
     this.timer = timer;
+  }
+
+  /** sync, for a caller that does not wait: a failure is logged rather than left unhandled. */
+  resync(): void {
+    this.sync().catch((e: Error) => this.o.log?.('could not time the asks for a card:', e.message));
   }
 
   private cancel(): number {
@@ -132,7 +140,7 @@ export class CardAsks {
     if (!rule?.on || gen !== this.gen) return;
     // A process that was away asks once for every delay it missed, rather than once per delay.
     const due = rule.delays.filter((d) => d * this.minuteMs <= Date.now() - stretch.since).length;
-    if (due <= stretch.asks) return void this.sync();
+    if (due <= stretch.asks) return this.resync();
     let open: boolean;
     try {
       open = await this.o.hasOpenCard();
@@ -141,7 +149,7 @@ export class CardAsks {
       return;
     }
     // A hook may have written the store while the inbox answered: that change wins.
-    if (gen !== this.gen || !same(this.o.store.load(), stretch)) return void this.sync();
+    if (gen !== this.gen || !same(this.o.store.load(), stretch)) return this.resync();
     // A card of its own is what the asks are for, so it ends the stretch.
     if (open) return void this.o.store.save(undefined);
     this.o.store.save({ since: stretch.since, asks: due, ours: true });
@@ -152,7 +160,7 @@ export class CardAsks {
       // An ask that never left starts no turn, so the stretch goes on to its next delay.
       if (same(this.o.store.load(), { since: stretch.since, asks: due, ours: true })) {
         this.o.store.save({ since: stretch.since, asks: due });
-        void this.sync();
+        this.resync();
       }
     }
   }

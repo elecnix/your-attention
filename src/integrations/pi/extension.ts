@@ -12,7 +12,7 @@ import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { parseTagsFlag } from '../tags.ts';
 import { CardAsks, memoryStore } from '../card-asks.ts';
-import { type CardRule, envRequireCard, minuteMs, NO_CARD, ruleFromView } from '../require-card.ts';
+import { type CardRule, envRequireCard, holdsCard, minuteMs, NO_CARD, ruleFromView } from '../require-card.ts';
 import { cardTools } from '../tools.ts';
 
 // stdout belongs to pi, so a stream that stops for good says why on stderr instead of vanishing.
@@ -104,7 +104,7 @@ export default function yourAttention(pi: PiApi): void {
     }
     void client.stream(agent, async (ev) => {
       // A new rule may move the next ask, or turn the asks on or off.
-      if (ev.type === 'settings') return void asks.sync();
+      if (ev.type === 'settings') return asks.resync();
       if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice') {
         const note = ev.type === 'guidance'
           ? `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`
@@ -153,7 +153,7 @@ export default function yourAttention(pi: PiApi): void {
   const asks = new CardAsks({
     store: memoryStore(),
     rule: async () => (inbox ? requireCardRule(inbox, agent) : { on: false, delays: [] }),
-    hasOpenCard: async () => Boolean(inbox && (await inbox.list()).results.some((c) => c.card.agent === agent && c.state === 'open')),
+    hasOpenCard: async () => Boolean(inbox && holdsCard((await inbox.list()).results, agent)),
     // The ask starts a run of its own, which agent_start below tells apart from activity.
     ask: () => pi.sendUserMessage(NO_CARD),
     minuteMs: minuteMs(process.env),

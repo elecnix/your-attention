@@ -107,6 +107,8 @@ describe('the channel asks an inactive session for a card', () => {
     await until(() => asks.length === 1 || undefined, 5000);
     const minute = (asks[0]! - since) / MINUTE;
     assert.ok(minute >= 5 && minute < Math.max(5, ready) + 2, `the restarted channel asks at 5 minutes, or once it is up at ${ready}, not ${minute}`);
-    assert.deepEqual(read(), { since, asks: 2, ours: true });
+    // One ask covers every delay that passed: the 5 minute one, and the 10 minute one too on a slow start.
+    const passed = [2, 5, 10].filter((d) => d <= minute).length;
+    assert.deepEqual(read(), { since, asks: passed, ours: true });
   });
 });
