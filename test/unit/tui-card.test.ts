@@ -274,7 +274,7 @@ describe('a guidance card', () => {
     const edits = [{ old: 'Give two options.', new: 'Give three options.' }];
     const { text } = draw(card({ ...proposal, broadcast: { edits, text: 'Old.\nGive three options.', base: { version: 0, text: 'Old.\nGive two options.' }, from: 's1' } }));
     const shown = text();
-    assert.match(shown, /Reading these edits against guidance version 1\./);
+    assert.match(shown, /the guidance changed to version 1\s+since\s+this\s+copy/);
     assert.doesNotMatch(shown, /− /);
   });
 

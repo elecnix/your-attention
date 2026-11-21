@@ -911,7 +911,7 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
     b.edits && !b.stale && h('div', { className: 'note' }, `The agent proposes ${b.edits.length === 1 ? 'one edit' : `${b.edits.length} edits`}. Approving applies ${b.edits.length === 1 ? 'it' : 'them'} to the guidance as it is then, so the rest of the text stays as it is.`),
     !b.edits && h('div', { className: 'note' }, 'The agent proposes a whole new text: approving replaces every rule with it.'),
     changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
-    behind && !b.stale && h('div', { className: 'note' }, `Reading these edits against guidance version ${guidance.version}.`),
+    behind && !b.stale && h('div', { className: 'note warn' }, `The guidance changed to version ${guidance.version} since this copy of the card. The diff shows again once the card is read against it, and Approve and send waits until then.`),
     !noDiff && h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
     !noDiff && same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
     h('fieldset', { className: 'agents' },
@@ -928,7 +928,8 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
     h('div', { className: 'html-answer' },
       h('label', null, 'Comment', h('textarea', { rows: 3, value: comment, placeholder: b.from ? 'Anything to tell the agent that proposed it?' : 'Anything to add?', onChange: (e) => { setComment(e.target.value); store.set(draftKey, e.target.value); } })),
       h('div', { className: 'html-answer-actions' },
-        h('button', { type: 'button', className: 'btn primary', onClick: () => send('approve') }, 'Approve and send'),
+        // Approving waits until the diff of these edits shows, so the person never approves a change they did not see.
+        h('button', { type: 'button', className: 'btn primary', disabled: behind && !b.stale, title: behind && !b.stale ? 'Wait for the diff against the current guidance' : undefined, onClick: () => send('approve') }, 'Approve and send'),
         h('button', { type: 'button', className: 'btn', onClick: () => send('reject') }, 'Reject'),
         h('button', { type: 'button', className: 'btn', onClick: onSkip }, 'Skip for now'),
         onDismiss && h(DismissButton, { onClick: () => onDismiss(comment.trim()) })),

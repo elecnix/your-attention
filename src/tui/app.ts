@@ -141,6 +141,13 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     }
     let body: { values: Record<string, unknown>; comment: string; version?: number };
     if (c.broadcast && !c.closed) {
+      // An edit proposal read against an older guidance than the state's shows no diff yet, so approving waits for it.
+      const b = c.broadcast;
+      if (msg === 'approve' && b.edits && !b.stale && b.base && m.state?.guidance && b.base.version !== m.state.guidance.version) {
+        view.notice = { text: 'Approve and send waits until the diff against the current guidance shows.', style: 'warn' };
+        schedule();
+        return;
+      }
       const picked = (view.store.get('broadcast', 'agents') ?? {}) as Record<string, boolean>;
       const comment = String(view.store.get('broadcast', 'comment') ?? '').trim();
       body = { values: { choice: msg === 'approve' ? 'approve' : 'reject', agents: (m.state ? onlineAgents(m.state) : []).filter((a) => picked[a] ?? true) }, comment };

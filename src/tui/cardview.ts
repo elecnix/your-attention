@@ -421,7 +421,7 @@ export class CardView {
     // An edit proposal derived from an older version than the state holds is fetched again at once, and a stale one
     // changes nothing, so neither draws a diff, as on the page.
     const behind = !!(b.edits && b.base && s.guidance && b.base.version !== s.guidance.version);
-    if (behind && !b.stale) doc.para([{ text: `Reading these edits against guidance version ${s.guidance!.version}.`, style: st.dim }]);
+    if (behind && !b.stale) doc.para([{ text: `Warning: the guidance changed to version ${s.guidance!.version} since this copy of the card. The diff shows again once the card is read against it, and Approve and send waits until then.`, style: st.warn }]);
     if (b.stale || behind) return;
     const whole = same > 0 && toggle('meta:guidance-full', `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`);
     if (same === rows.length && !whole) { doc.para([{ text: 'The proposal matches the current guidance.', style: st.dim }]); return; }
