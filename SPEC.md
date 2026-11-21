@@ -479,7 +479,7 @@ The card stays a system card, `agent: system`, that the owner answers, and it re
 
 ## Settings
 
-`GET /v1/settings` returns `{allowHtml, groupBy, pins, requireCard}`. Only the owner changes `allowHtml`, `groupBy` and `pins`, with `PUT /v1/settings`, which takes any of those fields and leaves the others as they are. A change to `pins` may send the whole list, or one pin in `pinAdd` or `pinRemove`, so two devices that pin at the same moment both keep their value. A `requireCard` written there is the one way to name a list of agents, with `mode: agents` and the agents in `agents`. Under `mode: all` no session changes the rule for itself, and `scope: self` with `on: false` answers 400, because a rule that names every agent belongs to the person. `scope: self` refuses `reminders` too, because the count applies to every agent.
+`GET /v1/settings` returns `{allowHtml, groupBy, pins, requireCard}`. Only the owner changes `allowHtml`, `groupBy` and `pins`, with `PUT /v1/settings`, which takes any of those fields and leaves the others as they are. A change to `pins` may send the whole list, or one pin in `pinAdd` or `pinRemove`, so two devices that pin at the same moment both keep their value. A `requireCard` written there is the one way to name a list of agents, with `mode: agents` and the agents in `agents`. Under `mode: all` no session changes the rule for itself, and `scope: self` with `on: false` answers 400, because a rule that names every agent belongs to the person. `scope: self` refuses `delays` and `reminders` too, because the schedule applies to every agent.
 
 - `allowHtml` lets a card carry its own HTML and scripts, in a sandboxed frame.
 - `groupBy` is the queue's grouping: `none`, `priority`, `agent`, or `tag:<key>` for any tag key a card has. It starts unset, and the queue groups by nothing.
@@ -487,11 +487,44 @@ The card stays a system card, `agent: system`, that the owner answers, and it re
 
 The inbox answers 400 for a value it cannot use, such as a `groupBy` of `week`, or for a pin that is neither a tag key with its value nor an agent id.
 
-`requireCard` is the rule that a session must hold an open card, as `{mode, agents?, reminders}`. `mode` is `off`, `all` or `agents`: `all` applies the rule to every agent, `agents` applies it to the agents in `agents`, and `off` applies it to none. `reminders` is how many times one stretch without a card is asked about, from 0 to 10; it starts at 3, and 0 never asks. The inbox answers 400 for a mode it does not know, for a count outside that range, and for `agents` with no agent named.
+`requireCard` is the rule that a session must hold an open card, as `{mode, agents?, delays, reminders}`. `mode` is `off`, `all` or `agents`: `all` applies the rule to every agent, `agents` applies it to the agents in `agents`, and `off` applies it to none. `delays` is the schedule: the minutes of inactivity at which a session with no open card is asked for one. It starts as `[2, 5, 10]`, holds at most 10 whole minutes from 1 to 1440, each later than the one before, and an empty list never asks. The inbox answers 400 for a mode it does not know, for a schedule outside those bounds, and for `agents` with no agent named.
 
-`GET /v1/settings/require-card?agent=<id>` returns `{on, reminders, rule}`, the rule beside the answer for one session, so a harness reads one value rather than resolving the rule itself. `POST /v1/settings/require-card {scope, on, reminders?, agent}` changes it. `scope: self` turns it on or off for that one agent at once, and the inbox takes the change without a card, because how a session conducts itself is its own. The agent id a stream reports is the one the client declares, as it is for presence and for a card's `agent`, so a self change needs an open stream reporting that id and nothing more: the rule decides whether a session is asked for a card, and that is all it touches: it never reads a card, and access stays with the token. `scope: all` posts a system card that proposes the rule for every agent, and nothing changes until the owner approves that card; an answer to it from any other client gets 403, because a rule over every agent is not one agent's decision to make. Approving stores the rule and sends a `settings` event carrying `{requireCard}` to every connected agent stream, which is what spares a running session a restart; rejecting leaves the rule as it was. An answer that arrives after the card closed leaves the rule as it was.
+`reminders` is the count the rule took before the schedule, and the inbox reads it for one release. A request that sends `reminders` and no `delays` gets the first n default delays, so 1 is `[2]`, 3 or more is `[2, 5, 10]`, and 0 never asks. A request that sends both takes `delays`, so a client that writes back the rule it read keeps its schedule. A rule stored as a count reads the same way, and so does a proposal card stored before the schedule. Every read of the rule carries `reminders` as the length of `delays`, so a harness from before the schedule still reads a count. The count goes away in the release after this one.
 
-`YOUR_ATTENTION_REQUIRE_CARD` in a session's environment decides instead for as long as the session runs, and it is a decision made when the process starts rather than an exemption the inbox grants, so it stays outside the rule and does not alter it: `1` asks that session for a card and any other value holds it back, and the inbox's rule, its count included, is not read at all. A session started without the value takes the inbox's rule again, so the override lasts as long as the process that carries it, and no startup file can put it there for the sessions a launcher starts. A background agent is started without it. The terminal client reads the same two settings from `GET /v1/state`. It saves its **Group by** choice with `PUT /v1/settings`, and pressing `p` pins or unpins the open card's value of the queue's grouping: the tag value under a tag grouping, and the agent that posted the card under an agent grouping.
+`GET /v1/settings/require-card?agent=<id>` returns `{on, delays, reminders, rule}`, the rule beside the answer for one session, so a harness reads one value rather than resolving the rule itself. `POST /v1/settings/require-card {scope, on, delays?, agent}` changes it, and takes `reminders` in place of `delays` for one release. `scope: self` turns it on or off for that one agent at once, and the inbox takes the change without a card, because how a session conducts itself is its own. The agent id a stream reports is the one the client declares, as it is for presence and for a card's `agent`, so a self change needs an open stream reporting that id and nothing more: the rule decides whether a session is asked for a card, and that is all it touches: it never reads a card, and access stays with the token. `scope: all` posts a system card that proposes the rule for every agent, and nothing changes until the owner approves that card; an answer to it from any other client gets 403, because a rule over every agent is not one agent's decision to make. Approving stores the rule and sends a `settings` event carrying `{requireCard}` to every connected agent stream, which is what spares a running session a restart; rejecting leaves the rule as it was. An answer that arrives after the card closed leaves the rule as it was.
+
+`YOUR_ATTENTION_REQUIRE_CARD` in a session's environment decides instead for as long as the session runs, and it is a decision made when the process starts rather than an exemption the inbox grants, so it stays outside the rule and does not alter it: `1` asks that session for a card and any other value holds it back, and the inbox's rule, its schedule included, is not read at all. `1` asks on the default schedule, at 2, 5 and 10 minutes. A session started without the value takes the inbox's rule again, so the override lasts as long as the process that carries it, and no startup file can put it there for the sessions a launcher starts. A background agent is started without it. The terminal client reads the same two settings from `GET /v1/state`. It saves its **Group by** choice with `PUT /v1/settings`, and pressing `p` pins or unpins the open card's value of the queue's grouping: the tag value under a tag grouping, and the agent that posted the card under an agent grouping.
+
+### When a session is asked for a card
+
+A session is asked for a card only after it goes inactive with no open card. Inactive means its turn ended and nothing happened since: no message from the person, no answer, no card the person sent, no tool call and no new turn. The asks land at each minute of `delays`, counted from the moment the session went inactive, so the default schedule asks at 2, 5 and 10 minutes, not at 2, 7 and 17. After the last one, nothing more is asked until activity starts a new stretch. Any activity, or a card of its own that is open when an ask comes due, cancels the asks still to come. The session's next turn end starts a fresh stretch.
+
+An ask starts a turn of the session's own, which is not activity. A tool call in that turn, or its end, keeps the stretch and its start, so the next ask still lands at its minute. A card the session posts in that turn ends the stretch, and so does a message from the person.
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  state "Working" as W
+  state "Inactive, no ask yet" as I0
+  state "Asked once" as I1
+  state "Asked twice" as I2
+  state "Asked three times" as I3
+  W --> I0: "turn ends"
+  I0 --> I1: "2 minutes after the turn ended"
+  I1 --> I2: "5 minutes after the turn ended"
+  I2 --> I3: "10 minutes after the turn ended"
+  I0 --> W: "person, answer, tool call or card"
+  I1 --> W: "person, answer, tool call or card"
+  I2 --> W: "person, answer, tool call or card"
+  I3 --> W: "person, answer, tool call or card"
+```
+
+The long-lived process beside the session asks, on a timer, so no ask holds a turn open:
+
+- **Claude Code.** The Stop hook writes `<session>.card-ask` in the `claude` folder of the home directory, as `{since, asks, ours?}`, and exits 0 at once: it never blocks the stop. `since` is when the turn ended, `asks` counts the delays already asked for, and `ours` marks the turn an ask started, whose end keeps `since` and `asks`. The prompt hook and the session-end hook delete the file. The channel watches the file, reads the rule from the inbox when an ask comes due, checks for an open card of the session's, and pushes the request as a channel event, which wakes the session. The channel ends the stretch for each event it pushes and for each card tool the session calls outside the turn an ask started, and for `card_post` in any turn. The stretch lives in that file rather than in the channel, because the hooks write it from their own processes, and so a channel that restarts finds a stretch under way and keeps its minutes. A channel that missed several delays while it was down asks once for all of them.
+- **pi.** The extension starts the stretch when a run settles with pi idle, and sends the request as a user message. A run that starts for any reason but an ask ends the stretch. The extension lives as long as the session, so the stretch lives in its memory.
+
+`YOUR_ATTENTION_CARD_ASK_MINUTE_MS` sets how long a minute of the schedule lasts, which the tests shorten. It defaults to 60000.
 
 A page that finds **Group by** or the pins in this browser's local storage and none in the inbox copies them into the inbox once, then reads the inbox. A value the inbox already has is never overwritten, and each device copies once.
 
@@ -608,7 +641,7 @@ The event above is trimmed to the fields an agent reads. The `id` is a receipt: 
 The inbox also sends a `settings` event to every open agent stream when the require-a-card rule changes, whoever changed it, which is what spares a running session a restart:
 
 ```json
-{ "type": "settings", "id": "8a1c40e2f9b3", "requireCard": { "mode": "all", "reminders": 3 } }
+{ "type": "settings", "id": "8a1c40e2f9b3", "requireCard": { "mode": "all", "delays": [2, 5, 10], "reminders": 3 } }
 ```
 
 The event carries the whole rule rather than the field that moved, so a session that missed an earlier one still reads the rule in force.

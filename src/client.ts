@@ -248,15 +248,15 @@ export class Client {
     return this.call('POST', '/v1/guidance', { ...(typeof proposal === 'string' ? { replace_all_with: proposal, text: proposal } : { edits: proposal }), ...opts });
   }
   /** The require-a-card rule resolved for one session, and the rule itself. */
-  requireCard(agent: string): Promise<{ on: boolean; reminders: number; rule: { mode: string; agents?: string[]; reminders: number } }> {
+  requireCard(agent: string): Promise<{ on: boolean; delays?: number[]; reminders: number; rule: { mode: string; agents?: string[]; delays?: number[]; reminders: number } }> {
     return this.call('GET', `/v1/settings/require-card?agent=${encodeURIComponent(agent)}`);
   }
   /** Turn the rule on or off for this session alone. Its own conduct, so no card asks the person. */
-  setRequireCardForSelf(agent: string, on: boolean): Promise<{ mode: string; agents?: string[]; reminders: number }> {
+  setRequireCardForSelf(agent: string, on: boolean): Promise<{ mode: string; agents?: string[]; delays?: number[]; reminders: number }> {
     return this.call('POST', '/v1/settings/require-card', { scope: 'self', on, agent });
   }
   /** Propose the rule for every agent, as a card the person approves or rejects. */
-  proposeRequireCard(input: { on: boolean; reminders?: number; agent: string; origin?: Origin }): Promise<Card> {
+  proposeRequireCard(input: { on: boolean; delays?: number[]; reminders?: number; agent: string; origin?: Origin }): Promise<Card> {
     return this.call('POST', '/v1/settings/require-card', { scope: 'all', ...input });
   }
   /** Tell the inbox whether triage was right to push back on this client's card. */

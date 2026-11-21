@@ -9,6 +9,9 @@ import { seal } from '../../web/sealed.js';
 import { start, until, type Harness } from './harness.ts';
 
 let h: Harness;
+// A minute of the ask schedule lasts 100 ms here, so the asks land at 200, 500 and 1000 ms.
+const MINUTE = 100;
+process.env['YOUR_ATTENTION_CARD_ASK_MINUTE_MS'] = String(MINUTE);
 // A card's origin takes the herdr pane from the environment of the process that posts it. These tests run the extension
 // in this process, so the pane of the terminal that runs the tests would reach the inbox, and herdr with it.
 const savedPane = process.env['HERDR_PANE_ID'];
@@ -107,42 +110,62 @@ describe('the pi extension', () => {
   });
 });
 
-describe('the turn-end request', () => {
-  it('asks a session with no open card for one at turn end, three times at most', async () => {
+describe('the asks for a card', () => {
+  it('asks an inactive session with no open card at 2, 5 and 10 minutes, and starts over on activity', async () => {
     idle = true;
-    const count = () => sent.filter((m) => m.text.includes('no open card')).length;
+    const asks = () => sent.filter((m) => m.text.includes('no open card'));
     const turnEnd = () => handlers.get('agent_settled')?.({}, ctx);
     const turnStart = () => handlers.get('agent_start')?.({}, ctx);
-    // Without the opt-in the hook does nothing.
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // Without the opt-in nothing is asked.
     await turnEnd();
-    assert.equal(count(), 0);
+    await sleep(MINUTE * 12);
+    assert.equal(asks().length, 0);
     process.env['YOUR_ATTENTION_REQUIRE_CARD'] = '1';
-    // No open card: it asks, and the request starts a turn of its own.
-    await turnEnd();
-    assert.equal(count(), 1);
-    assert.equal(sent[sent.length - 1]!.options, undefined);
-    // The run that request started is ours: it does not reset the count, and its settle asks again.
-    await turnStart();
-    await turnEnd();
-    assert.equal(count(), 2);
-    await turnStart();
-    await turnEnd();
-    assert.equal(count(), 3);
-    // Three asks is the cap: a session that cannot post a card is left alone.
-    await turnStart();
-    await turnEnd();
-    await turnEnd();
-    assert.equal(count(), 3);
-    // A run the request did not start resets the count, so the person waking the session up gets it asked again.
-    await turnStart();
-    await turnEnd();
-    assert.equal(count(), 4);
-    // A card of its own is what the request asks for: the settle sees it, asks nothing, and resets the count.
-    await tools.get('card_post')!.execute('call-4', { id: 'pi-4', title: 'Still working?' }, undefined, undefined, ctx);
-    await turnStart();
-    await turnEnd();
-    assert.equal(count(), 4);
-    await h.owner('POST', '/v1/cards/pi-4/answer', { comment: 'ok' });
-    delete process.env['YOUR_ATTENTION_REQUIRE_CARD'];
+    try {
+      // The person types, and the run settles: the stretch starts here.
+      await turnStart();
+      const since = Date.now();
+      await turnEnd();
+      await sleep(MINUTE * 1.5);
+      assert.equal(asks().length, 0, 'nothing before two minutes');
+      await until(() => asks().length === 1 || undefined);
+      assert.equal(asks()[0]!.options, undefined, 'the ask starts a run of its own');
+      // The run the ask started is the session's own: it keeps the stretch, so the next ask lands at 5 minutes.
+      await turnStart();
+      await turnEnd();
+      await until(() => asks().length === 2 || undefined);
+      const second = (Date.now() - since) / MINUTE;
+      assert.ok(second >= 5 && second < 7, `the second ask at 5 minutes, not ${second}`);
+      await turnStart();
+      await turnEnd();
+      await until(() => asks().length === 3 || undefined);
+      await turnStart();
+      await turnEnd();
+      await sleep(MINUTE * 5);
+      assert.equal(asks().length, 3, 'three asks, then nothing until the session does something');
+      // Activity at 3 minutes of a new stretch cancels its 5 and 10 minute asks and starts a fresh one.
+      await turnStart();
+      await turnEnd();
+      await until(() => asks().length === 4 || undefined);
+      await turnStart();
+      await turnEnd();
+      await sleep(MINUTE);
+      await turnStart();
+      const restart = Date.now();
+      await turnEnd();
+      await until(() => asks().length === 5 || undefined);
+      const fresh = (Date.now() - restart) / MINUTE;
+      assert.ok(fresh >= 2 && fresh < 4, `the new stretch asks 2 minutes after its own start, not ${fresh}`);
+      // A card of its own is what the asks are for: once one is open, the stretch ends without an ask.
+      await turnStart();
+      await tools.get('card_post')!.execute('call-4', { id: 'pi-4', title: 'Still working?' }, undefined, undefined, ctx);
+      await turnEnd();
+      await sleep(MINUTE * 12);
+      assert.equal(asks().length, 5);
+      await h.owner('POST', '/v1/cards/pi-4/answer', { comment: 'ok' });
+    } finally {
+      delete process.env['YOUR_ATTENTION_REQUIRE_CARD'];
+    }
   });
 });

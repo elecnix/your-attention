@@ -17,7 +17,9 @@ import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { SessionName } from './session-name.ts';
-import { resetAsks } from './turn-end-hook.ts';
+import { CardAsks } from '../card-asks.ts';
+import { envRequireCard, minuteMs, NO_CARD, ruleFromView } from '../require-card.ts';
+import { fileStore, stretchFile } from './card-stretch.ts';
 import { devChannelEnabled, parentArgs } from './channel-flag.ts';
 import { boxState, runHerdr } from '../herdr/approve.ts';
 import { herdrPlace } from '../herdr/place.ts';
@@ -82,6 +84,9 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   clientReady();
+  // A tool call means the session is at work. In the turn an ask started it is not activity, unless it posts a card.
+  if (req.params.name === 'card_post') asks.activity();
+  else asks.began();
   const args = (req.params.arguments ?? {}) as Record<string, unknown>;
   const text = (t: unknown) => ({ content: [{ type: 'text' as const, text: typeof t === 'string' ? t : JSON.stringify(t, null, 2) }] });
   try {
@@ -228,8 +233,21 @@ async function clearNotSeen(card: string): Promise<void> {
   } catch { /* the card is gone, or a revision owns its status now */ }
 }
 
+// The asks for a card. The Stop hook writes the stretch when a turn ends, and this process times the asks from it, so a
+// channel that restarts finds a stretch already under way in the file and asks at the same minutes.
+const MINUTE_MS = minuteMs(process.env);
+const asks = new CardAsks({
+  store: fileStore(session),
+  // A value in the environment decides for the whole session, so the inbox's rule is not read at all.
+  rule: async () => envRequireCard(process.env) ?? ruleFromView(await inbox.requireCard(agent)),
+  hasOpenCard: async () => (await inbox.list()).results.some((c) => c.card.agent === agent && c.state === 'open'),
+  ask: () => notify(NO_CARD, { request: 'card' }),
+  minuteMs: MINUTE_MS,
+  log,
+});
+
 const stop = new AbortController();
-const quit = (): void => { stop.abort(); process.exit(0); };
+const quit = (): void => { stop.abort(); asks.stop(); process.exit(0); };
 // Exit with the session: a leftover server would show the agent as listening.
 process.stdin.on('end', quit);
 process.stdin.on('close', quit);
@@ -240,8 +258,13 @@ transcript = findTranscript();
 offset = transcriptSize();
 setInterval(scanTranscript, Math.min(500, Math.max(50, Math.floor(RETRY_MS / 4))));
 log('connected to', inbox.url, 'as', agent, channelOff ? '(channel off: the session started without the development-channels flag)' : '');
+// The hooks change the file from their own processes: a stat of it notices, at a fraction of a minute of the schedule.
+fs.watchFile(stretchFile(session), { interval: Math.min(1000, Math.max(20, Math.floor(MINUTE_MS / 10))), persistent: false }, () => void asks.sync());
+void asks.sync();
 
 void inbox.stream(agent, async (ev) => {
+  // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
+  if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
   if (ev.type === 'guidance') {
     await notify(`The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`, { guidance: String(ev.guidance.version) });
     return;
@@ -255,16 +278,11 @@ void inbox.stream(agent, async (ev) => {
     return;
   }
   if (ev.type === 'card') {
-    // A card the person sent starts a turn of its own, as an answer does, and it asks the model for a reply card,
-    // so the next stop may ask for a card again.
-    resetAsks(session);
     await notify(describeSentCard(ev), { card_id: ev.card.id });
     return;
   }
   if (ev.type !== 'answer') return;
   const { card, answer } = ev;
-  // An answer arriving starts a turn of its own, so the next stop may ask for a card again.
-  resetAsks(session);
   const dismissed = card.dialog ? await closeOwnDialog(card.origin?.herdrPane) : false;
   const receipt = ev.id;
   const head = card.dialog

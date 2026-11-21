@@ -61,17 +61,17 @@ describe('the Claude Code channel', () => {
     await until(async () => (await state()).states['cc-1'] === 'read' || undefined);
   });
 
-  it('resets the asks budget when the person sends the session a card, since that turn may post one back', async () => {
-    // The Stop hook keeps its count of asks in a file, and a session that spent all three is asked for no more.
-    const asks = path.join(h.home, 'claude', `${SESSION}.card-asks`);
+  it('ends the stretch of inactivity when the person sends the session a card, since that turn may post one back', async () => {
+    // The Stop hook keeps the stretch in a file, and the channel times its asks for a card from it.
+    const asks = path.join(h.home, 'claude', `${SESSION}.card-ask`);
     fs.mkdirSync(path.dirname(asks), { recursive: true });
-    fs.writeFileSync(asks, '3');
+    fs.writeFileSync(asks, JSON.stringify({ since: Date.now(), asks: 3 }));
     const res = await h.owner('POST', '/v1/send', { agent: `claude:${SESSION}`, text: 'Post the deploy card before you carry on.' });
     assert.equal(res.status, 201);
     const note = await until(() => notes.find((n) => n.content.includes('sent this session a card')));
     // The note asks for a reply card, which is the card the reset budget lets this session post.
     assert.match(note.content, /Post the deploy card before you carry on\./);
-    assert.equal(fs.existsSync(asks), false, 'a sent card starts a turn, as an answer does, so the count starts over');
+    assert.equal(fs.existsSync(asks), false, 'a sent card starts a turn, as an answer does, so the stretch ends');
   });
 
   it('closes its own card', async () => {
