@@ -262,6 +262,22 @@ describe('a guidance card', () => {
     assert.match(text(), /The proposal matches the current guidance\./);
   });
 
+  it('draws no diff for a stale edit proposal, so it never also says the proposal matches', () => {
+    const edits = [{ old: 'Give four options.', new: 'Give five options.' }];
+    const { text } = draw(card({ ...proposal, broadcast: { edits, text: current, base: { version: 1, text: current }, stale: 'edit 1: the old text occurs 0 times in guidance version 1, and it must occur once', from: 's1' } }));
+    const shown = text();
+    assert.match(shown, /this proposal no longer applies/);
+    assert.doesNotMatch(shown, /matches the current guidance/);
+  });
+
+  it('draws no diff for an edit proposal derived from an older version than the state holds', () => {
+    const edits = [{ old: 'Give two options.', new: 'Give three options.' }];
+    const { text } = draw(card({ ...proposal, broadcast: { edits, text: 'Old.\nGive three options.', base: { version: 0, text: 'Old.\nGive two options.' }, from: 's1' } }));
+    const shown = text();
+    assert.match(shown, /Reading these edits against guidance version 1\./);
+    assert.doesNotMatch(shown, /− /);
+  });
+
   it('lists only the agents online now, all ticked, with the count and the line about offline agents', () => {
     const presence: InboxState['presence'] = Object.fromEntries([
       ...Array.from({ length: 25 }, (_, i) => [`gone-${i}`, { agent: `gone-${i}`, online: false, lastSeen: 0 }]),

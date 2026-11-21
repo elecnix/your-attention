@@ -242,9 +242,10 @@ export class Client {
   /** The card guidance: the editable text, the catalog of widgets an agent can place, and the tags in use. */
   guidance(): Promise<CardGuidance> { return this.call('GET', '/v1/guidance'); }
   /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. A list of edits
-   * changes the passages it names; a string replaces every rule. `origin` is where the agent runs, which the card shows. */
+   * changes the passages it names; a string replaces every rule, sent under both names so an inbox from before
+   * replace_all_with still reads it. `origin` is where the agent runs, which the card shows. */
   proposeGuidance(proposal: string | GuidanceEdit[], opts: { message: string; agent?: string; origin?: Origin }): Promise<Card> {
-    return this.call('POST', '/v1/guidance', { ...(typeof proposal === 'string' ? { replace_all_with: proposal } : { edits: proposal }), ...opts });
+    return this.call('POST', '/v1/guidance', { ...(typeof proposal === 'string' ? { replace_all_with: proposal, text: proposal } : { edits: proposal }), ...opts });
   }
   /** The require-a-card rule resolved for one session, and the rule itself. */
   requireCard(agent: string): Promise<{ on: boolean; reminders: number; rule: { mode: string; agents?: string[]; reminders: number } }> {

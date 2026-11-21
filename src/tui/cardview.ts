@@ -418,6 +418,11 @@ export class CardView {
     else if (b.edits) doc.para([{ text: `The agent proposes ${b.edits.length === 1 ? 'one edit' : `${b.edits.length} edits`}. Approving applies ${b.edits.length === 1 ? 'it' : 'them'} to the guidance as it is then, so the rest of the text stays as it is.`, style: st.dim }]);
     else doc.para([{ text: 'The agent proposes a whole new text: approving replaces every rule with it.', style: st.dim }]);
     if (changed) doc.para([{ text: `Warning: the guidance changed after the agent proposed this text. The proposal starts from version ${b.base!.version}, and the guidance is now version ${s.guidance!.version}. Approving removes the lines marked as added after the proposal.`, style: st.warn }]);
+    // An edit proposal derived from an older version than the state holds is fetched again at once, and a stale one
+    // changes nothing, so neither draws a diff, as on the page.
+    const behind = !!(b.edits && b.base && s.guidance && b.base.version !== s.guidance.version);
+    if (behind && !b.stale) doc.para([{ text: `Reading these edits against guidance version ${s.guidance!.version}.`, style: st.dim }]);
+    if (b.stale || behind) return;
     const whole = same > 0 && toggle('meta:guidance-full', `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`);
     if (same === rows.length && !whole) { doc.para([{ text: 'The proposal matches the current guidance.', style: st.dim }]); return; }
     for (let k = 0; k < rows.length; k++) {

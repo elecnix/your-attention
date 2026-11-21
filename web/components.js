@@ -873,6 +873,10 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
   const rows = guidanceDiff(current.text, b.text ?? current.text, changed ? b.base.text : undefined);
   const same = rows.filter((r) => r.kind === 'same').length;
   const matches = same === rows.length;
+  // A copy of an edit proposal derived from an older version than the state holds is fetched again at once, and its
+  // diff would show lines that approving keeps. A stale proposal changes nothing. Neither one draws a diff.
+  const behind = !!(b.edits && b.base && guidance && b.base.version !== guidance.version);
+  const noDiff = !!b.stale || behind;
   // A failed answer keeps the comment and says why, so the person can send it again.
   async function send(choice) {
     setError(null);
@@ -907,8 +911,9 @@ export function BroadcastForm({ card, cards = [], presence = {}, guidance, onDon
     b.edits && !b.stale && h('div', { className: 'note' }, `The agent proposes ${b.edits.length === 1 ? 'one edit' : `${b.edits.length} edits`}. Approving applies ${b.edits.length === 1 ? 'it' : 'them'} to the guidance as it is then, so the rest of the text stays as it is.`),
     !b.edits && h('div', { className: 'note' }, 'The agent proposes a whole new text: approving replaces every rule with it.'),
     changed && h('div', { className: 'note warn' }, `The guidance changed after the agent proposed this text: the proposal starts from version ${b.base.version}, and the guidance is now version ${guidance.version}. Approving replaces version ${guidance.version}, so it removes the lines marked as added after the proposal.`),
-    h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
-    same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
+    behind && !b.stale && h('div', { className: 'note' }, `Reading these edits against guidance version ${guidance.version}.`),
+    !noDiff && h('div', { className: 'guidance-diff' }, matches && !whole ? h('div', { className: 'same-run' }, 'The proposal matches the current guidance.') : lines),
+    !noDiff && same > 0 && h('button', { type: 'button', className: 'link', onClick: () => setWhole((w) => !w) }, whole ? 'Hide the unchanged lines' : `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`),
     h('fieldset', { className: 'agents' },
       h('legend', null, `Send to ${online.length} online agent${online.length === 1 ? '' : 's'}`),
       online.length > 1 && h('label', { className: 'all' },
