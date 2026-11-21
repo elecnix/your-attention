@@ -2,6 +2,7 @@
 // this one object. Storage calls are synchronous, so each change completes
 // before the next starts. Every change is written to storage before a method
 // returns, and memory holds only the open connections.
+import { DEFAULT_CARD_DELAYS, delaysFromReminders, delaysProblem, describeDelays, MAX_REMINDERS } from './require-card.ts';
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { readShortCode, shortCode } from './sign-in.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
@@ -17,7 +18,7 @@ import { generateVapid, sendPush, b64urlDecode, type Vapid } from './webpush.ts'
 import { MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardInput, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
   FeedbackFinding, FeedbackVerdict, LateAnswer, TriageFeedback, TriagePushback,
 } from './types.ts';
 
@@ -230,8 +231,6 @@ export const UNREAD_ID_LIMIT = 20;
 export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
 // An answer takes any file: the person attaches what they were asked about. The page shows an image as a thumbnail
 // and everything else as a named chip, and a served file that a browser cannot render comes back as a download.
-const REMINDERS_DEFAULT = 3;
-const REMINDERS_MAX = 10;
 /** Each stored file counts as at least this many bytes toward the upload limit, so tiny files cannot make unlimited blob writes. */
 export const MIN_FILE_CHARGE = 64 * 1024;
 /** The largest card, as stored, without its files. */
@@ -1642,17 +1641,19 @@ export class Inbox {
     return this.store.get<Settings>('meta', 'settings') ?? { allowHtml: false };
   }
 
-  /** The require-a-card rule as the inbox holds it, defaulted rather than absent. */
+  /** The require-a-card rule as the inbox holds it, defaulted rather than absent. A rule stored before the schedule
+   * keeps its count, which reads as the first delays of the default. */
   requireCard(): RequireCardSettings {
-    const s = this.settings().requireCard;
-    return { mode: s?.mode ?? 'off', reminders: Number.isFinite(s?.reminders) ? Number(s?.reminders) : REMINDERS_DEFAULT, ...(s?.agents?.length ? { agents: [...s.agents] } : {}) };
+    const s = this.settings().requireCard as Partial<RequireCardSettings> | undefined;
+    const delays = Array.isArray(s?.delays) ? [...s.delays] : Number.isFinite(s?.reminders) ? delaysFromReminders(Number(s?.reminders)) : [...DEFAULT_CARD_DELAYS];
+    return { mode: s?.mode ?? 'off', delays, reminders: delays.length, ...(s?.agents?.length ? { agents: [...s.agents] } : {}) };
   }
 
-  /** Whether this session is asked for a card, and how many times: the rule, resolved for one agent id. */
-  requireCardFor(agent: string): { on: boolean; reminders: number } {
+  /** Whether this session is asked for a card, and when: the rule, resolved for one agent id. */
+  requireCardFor(agent: string): { on: boolean; delays: number[]; reminders: number } {
     const rule = this.requireCard();
     const on = rule.mode === 'all' || (rule.mode === 'agents' && (rule.agents ?? []).includes(agent));
-    return { on, reminders: rule.reminders };
+    return { on, delays: rule.delays, reminders: rule.reminders };
   }
 
   /** Whether this caller reported this agent id on an open stream, the only identity the inbox can check for a session. */
@@ -1674,11 +1675,11 @@ export class Inbox {
     if (enabled) have.add(id); else have.delete(id);
     const agents = [...have];
     const mode: RequireCardSettings['mode'] = agents.length ? 'agents' : 'off';
-    return this.putRequireCard({ mode, reminders: rule.reminders, ...(agents.length ? { agents } : {}) });
+    return this.putRequireCard({ mode, delays: rule.delays, ...(agents.length ? { agents } : {}) });
   }
 
   /** Change the rule, then tell every connected agent, which is what spares them a restart. */
-  private putRequireCard(next: RequireCardSettings): RequireCardSettings {
+  private putRequireCard(next: RequireCardInput): RequireCardSettings {
     const clean = this.checkRequireCard(next);
     this.store.put('meta', 'settings', { ...this.settings(), requireCard: clean });
     this.emit({ type: 'change', card: '' });
@@ -1686,23 +1687,37 @@ export class Inbox {
     return clean;
   }
 
-  private checkRequireCard(input: RequireCardSettings): RequireCardSettings {
+  /**
+   * The schedule a request asks for: `delays` when it names them, else the older `reminders` count, else `fallback`.
+   * A request that sends both, such as a client writing back the rule it read, takes `delays`.
+   */
+  private checkDelays(input: { delays?: unknown; reminders?: unknown }, fallback: readonly number[]): number[] {
+    if (input.delays !== undefined) {
+      const problem = delaysProblem(input.delays);
+      if (problem) throw new InboxError(400, `requireCard.${problem}`);
+      return [...(input.delays as number[])];
+    }
+    if (input.reminders === undefined) return [...fallback];
+    // A count is a number or nothing: a string, a boolean or null would read as 0 or 1 and slip past the range check.
+    if (typeof input.reminders !== 'number') throw new InboxError(400, 'requireCard.reminders must be a whole number');
+    if (!Number.isInteger(input.reminders) || input.reminders < 0 || input.reminders > MAX_REMINDERS) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${MAX_REMINDERS}`);
+    return delaysFromReminders(input.reminders);
+  }
+
+  private checkRequireCard(input: RequireCardInput): RequireCardSettings {
     const mode = input?.mode;
     if (mode !== 'off' && mode !== 'all' && mode !== 'agents') throw new InboxError(400, 'requireCard.mode must be off, all or agents');
-    // A count is a number or nothing: a string, a boolean or null would read as 0 or 1 and slip past the range check.
-    if (input?.reminders !== undefined && typeof input.reminders !== 'number') throw new InboxError(400, 'requireCard.reminders must be a whole number');
-    const reminders = Number(input?.reminders ?? REMINDERS_DEFAULT);
-    if (!Number.isInteger(reminders) || reminders < 0 || reminders > REMINDERS_MAX) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${REMINDERS_MAX}`);
+    const delays = this.checkDelays(input, DEFAULT_CARD_DELAYS);
     // A list is what the field takes, so a string or an object is refused rather than mapped over.
     if (input.agents !== undefined && !Array.isArray(input.agents)) throw new InboxError(400, 'requireCard.agents must be a list of agent ids');
     const agents = mode === 'agents' ? [...new Set(((input.agents as string[] | undefined) ?? []).map((a: string) => String(a).trim()).filter(Boolean))] : [];
     if (agents.some((a) => a.length > MAX_AGENT_CHARS)) throw new InboxError(400, `requireCard.agents takes agent ids of at most ${MAX_AGENT_CHARS} characters`);
     if (mode === 'agents' && !agents.length) throw new InboxError(400, 'requireCard.mode agents needs at least one agent; use off instead');
-    return { mode, reminders, ...(agents.length ? { agents } : {}) };
+    return { mode, delays, reminders: delays.length, ...(agents.length ? { agents } : {}) };
   }
 
   /** What one session should do: the rule resolved for it, beside the rule itself, for whoever wants to see it. */
-  requireCardView(agent: string): { on: boolean; reminders: number; rule: RequireCardSettings } {
+  requireCardView(agent: string): { on: boolean; delays: number[]; reminders: number; rule: RequireCardSettings } {
     return { ...this.requireCardFor(agent), rule: this.requireCard() };
   }
 
@@ -1710,21 +1725,20 @@ export class Inbox {
    * Propose the rule for every agent at once. Holding every session of the inbox to a card is the inbox's own conduct,
    * so it takes the person's approval: an agent that could turn it on for the others would police its neighbours.
    */
-  proposeRequireCard(input: { on: boolean; reminders?: number; by?: { caller: Caller; agent: string; origin?: unknown } }): Card {
+  proposeRequireCard(input: { on: boolean; delays?: unknown; reminders?: unknown; by?: { caller: Caller; agent: string; origin?: unknown } }): Card {
     const from = input.by ? String(input.by.agent ?? '').trim() : '';
     if (from.length > MAX_AGENT_CHARS) throw new InboxError(400, `agent must be at most ${MAX_AGENT_CHARS} characters`);
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
-    const rule = this.requireCard();
-    const reminders = input.reminders === undefined ? rule.reminders : Number(input.reminders);
-    if (!Number.isInteger(reminders) || reminders < 0 || reminders > REMINDERS_MAX) throw new InboxError(400, `requireCard.reminders must be a whole number from 0 to ${REMINDERS_MAX}`);
+    const delays = this.checkDelays(input, this.requireCard().delays);
     const mode: 'all' | 'off' = input.on ? 'all' : 'off';
-    const times = `${reminders} time${reminders === 1 ? '' : 's'}`;
     const what = mode === 'all'
-      ? `Every agent in this inbox would have to hold an open card, asked up to ${times} in a stretch without one.`
+      ? delays.length
+        ? `Every agent in this inbox would have to hold an open card. An agent with none is asked ${describeDelays(delays)}, counted from when it went inactive.`
+        : 'Every agent in this inbox would be under the rule, and its schedule asks no agent at all.'
       : 'No agent in this inbox would be asked for a card.';
     const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes to change the card rule for every agent. ${what} It changes only if you approve it.`;
     // The text and the proposal are measured whole before anything is stored, the way a guidance proposal is.
-    const proposal = { mode, reminders, ...(from ? { from } : {}) };
+    const proposal = { mode, delays, reminders: delays.length, ...(from ? { from } : {}) };
     const size = new TextEncoder().encode(JSON.stringify({ text: cardText, requireCard: proposal })).length + 2048;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card would be ${size} bytes, over the limit of ${MAX_CARD_BYTES}`);
     const id = `require-card-${randomId(4)}`;
@@ -1749,15 +1763,17 @@ export class Inbox {
       return;
     }
     if ([answer.values['choice']].flat()[0] === 'approve') {
-      const next = this.putRequireCard({ mode: card.requireCard.mode, reminders: card.requireCard.reminders });
+      // A proposal made before the schedule carries only its count.
+      const proposed = card.requireCard.delays ?? delaysFromReminders(card.requireCard.reminders);
+      const next = this.putRequireCard({ mode: card.requireCard.mode, delays: proposed });
       this.closeAs(card, 'resolved', next.mode === 'all'
-        ? `Approved: every agent is asked for a card, up to ${next.reminders} time${next.reminders === 1 ? '' : 's'} in a stretch without one.`
+        ? `Approved: every agent with no open card is asked for one ${describeDelays(next.delays)}.`
         : 'Approved: no agent is asked for a card.');
     } else this.closeAs(card, 'resolved', 'Rejected: the card rule did not change.');
     if (card.requireCard.from) this.flush(card.requireCard.from);
   }
 
-  setSettings(input: Partial<Settings> & PinChange): Settings {
+  setSettings(input: Partial<Omit<Settings, 'requireCard'>> & { requireCard?: RequireCardInput } & PinChange): Settings {
     const next: Settings = { ...this.settings(), ...(typeof input.allowHtml === 'boolean' ? { allowHtml: input.allowHtml } : {}) };
     // The rule goes through the same validation the tool uses, so a settings PUT and an agent's proposal agree.
     if (input.requireCard !== undefined) next.requireCard = this.checkRequireCard(input.requireCard);

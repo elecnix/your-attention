@@ -139,13 +139,14 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'settings',
-    description: 'Read or change the settings of this inbox that decide how this session works. Today there is one: whether a session must hold an open card, and how many times a stretch without one is asked about. Call it with no arguments to read the rule as it applies to this session. `scope: self` changes it for this session alone, at once, because it is your own conduct. `scope: all` proposes it for every agent, which posts a card the person approves or rejects: nothing changes until they answer.',
+    description: 'Read or change the settings of this inbox that decide how this session works. Today there is one: whether a session must hold an open card. A session that goes inactive with none open is asked for one at the minutes in `delays`, counted from when its turn ended: by default at 2, 5 and 10 minutes, and no more until it does something. Call it with no arguments to read the rule as it applies to this session. `scope: self` changes it for this session alone, at once, because it is your own conduct. `scope: all` proposes it for every agent, which posts a card the person approves or rejects: nothing changes until they answer.',
     schema: {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['self', 'all'], description: 'Who the change applies to: this session alone, or every agent in the inbox. Leave it out to read the rule.' },
         on: { type: 'boolean', description: 'true to ask for a card, false to stop asking. Required with a scope.' },
-        reminders: { type: 'number', description: 'How many times one stretch without a card is asked about, 0 to 10. Read with no arguments, or proposed with scope all.' },
+        delays: { type: 'array', items: { type: 'number' }, description: 'The minutes of inactivity at which a session with no open card is asked for one, counted from when its turn ended: up to 10 whole minutes from 1 to 1440, each later than the one before. An empty list never asks. Proposed with scope all.' },
+        reminders: { type: 'number', description: 'Deprecated: use delays. A count n proposes the first n of the default delays 2, 5 and 10.' },
       },
     },
   },

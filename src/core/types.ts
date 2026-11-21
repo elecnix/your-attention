@@ -282,8 +282,20 @@ export interface RequireCardSettings {
   mode: 'off' | 'all' | 'agents';
   /** The agents the rule holds, when mode is agents. */
   agents?: string[];
-  /** How many times one stretch without a card is asked about. 0 means never. */
+  /** The minutes of inactivity at which a session with no open card is asked for one, counted from when it went
+   * inactive, ascending. Empty means never. */
+  delays: number[];
+  /** How many asks the schedule has, the length of `delays`. Clients from before the schedule read it; it goes after
+   * one release. */
   reminders: number;
+}
+
+/** A rule as a request writes it: the schedule as `delays`, or for one release as the older `reminders` count. */
+export interface RequireCardInput {
+  mode: RequireCardSettings['mode'];
+  agents?: unknown;
+  delays?: unknown;
+  reminders?: unknown;
 }
 
 /** One pin at the top of the queue: a tag key with its value, or one agent's id. A tag pin keeps the [key, value] pair
@@ -384,7 +396,7 @@ export interface Card {
   /** On a system card that proposes new guidance: the edits or the whole text, as `Broadcast` describes. */
   broadcast?: Broadcast;
   /** A rule proposed for every agent at once, which changes only when the person approves the card. */
-  requireCard?: { mode: 'all' | 'off'; reminders: number; from?: string };
+  requireCard?: { mode: 'all' | 'off'; delays?: number[]; reminders: number; from?: string };
   /** On a system card that asks to send an agent's answers to a webhook: the id of that subscription. */
   subscription?: string;
   /** On a system card an agent's request made, such as a guidance proposal or a webhook request: that agent. Its

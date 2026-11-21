@@ -568,23 +568,21 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET') return json(inbox.requireCardView(url.searchParams.get('agent') ?? ''));
       if (method === 'POST') {
         // A request body may be `null`, and reading it as an object would crash rather than refuse it.
-        const input = (await readJson<{ scope?: string; on?: unknown; reminders?: unknown; agent?: string; origin?: unknown }>(req)) ?? {};
+        const input = (await readJson<{ scope?: string; on?: unknown; delays?: unknown; reminders?: unknown; agent?: string; origin?: unknown }>(req)) ?? {};
         const who = String(input.agent ?? '').trim();
         // A rule says whether someone is asked for a card, so the request says it plainly rather than in a lookalike.
         if (typeof input.on !== 'boolean') throw new InboxError(400, 'on must be true or false');
         const on = input.on;
-        // A count is a number or it is nothing: `null`, `""` and `true` would arrive as 0 or 1 through Number().
-        if (input.reminders !== undefined && typeof input.reminders !== 'number') throw new InboxError(400, 'reminders must be a whole number');
-        const reminders = input.reminders;
         if (input.scope === 'self') {
-          // The count applies to every agent, so a self change that carried one would be dropped rather than applied.
-          if (input.reminders !== undefined) throw new InboxError(400, 'reminders applies to every agent: change it with scope all');
+          // The schedule applies to every agent, so a self change that carried one would be dropped rather than applied.
+          if (input.delays !== undefined || input.reminders !== undefined) throw new InboxError(400, 'the schedule applies to every agent: change delays with scope all');
           // A session changes its own conduct. The agent id on an open stream is the only identity the inbox can check.
           if (!inbox.connectedAs(me, who)) throw new InboxError(403, 'only a session connected as that agent changes its own rule');
           return json(inbox.setRequireCardForAgent(who, on));
         }
         if (input.scope === 'all') {
-          const card = inbox.proposeRequireCard({ on, ...(reminders === undefined ? {} : { reminders }), ...(who ? { by: { caller: me, agent: who, origin: input.origin } } : {}) });
+          // `delays` is the schedule; `reminders` is the older count, read for one release. The inbox checks both.
+          const card = inbox.proposeRequireCard({ on, delays: input.delays, reminders: input.reminders, ...(who ? { by: { caller: me, agent: who, origin: input.origin } } : {}) });
           return json(publicCard(card), 201);
         }
         throw new InboxError(400, 'scope must be self or all');

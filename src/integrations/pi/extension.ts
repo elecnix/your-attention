@@ -11,16 +11,12 @@ import { createPromptCards, type PromptEvent } from './prompt.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
 import { parseTagsFlag } from '../tags.ts';
-import { type CardRule, ENV_REMINDERS, envRequireCard } from '../require-card.ts';
+import { CardAsks, memoryStore } from '../card-asks.ts';
+import { type CardRule, envRequireCard, holdsCard, minuteMs, NO_CARD, ruleFromView } from '../require-card.ts';
 import { cardTools } from '../tools.ts';
 
 // stdout belongs to pi, so a stream that stops for good says why on stderr instead of vanishing.
 const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
-
-/** What a session is asked when a run settles with no open card, once the inbox asks it for one. */
-const NO_CARD = '[your-attention] This session has no open card. Post one with card_post that says what you are working on and what you need from the person.';
-/** The reminders a session gets when the environment decides the rule, since the inbox's count does not apply to it. */
-const CARD_REQUESTS = ENV_REMINDERS;
 
 /**
  * The rule this session obeys. A value in YOUR_ATTENTION_REQUIRE_CARD decides for the whole session and never reads the
@@ -32,11 +28,10 @@ async function requireCardRule(inbox: Client, agent: string): Promise<CardRule> 
   const forced = envRequireCard(process.env);
   if (forced) return forced;
   try {
-    const view = await inbox.requireCard(agent);
-    return { on: view.on, reminders: view.reminders };
+    return ruleFromView(await inbox.requireCard(agent));
   } catch (e) {
     log('could not read the card rule:', (e as Error).message);
-    return { on: false, reminders: 0 };
+    return { on: false, delays: [] };
   }
 }
 
@@ -108,6 +103,8 @@ export default function yourAttention(pi: PiApi): void {
       }
     }
     void client.stream(agent, async (ev) => {
+      // A new rule may move the next ask, or turn the asks on or off.
+      if (ev.type === 'settings') return asks.resync();
       if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice') {
         const note = ev.type === 'guidance'
           ? `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`
@@ -137,6 +134,7 @@ export default function yourAttention(pi: PiApi): void {
   });
 
   pi.on('session_shutdown', () => {
+    asks.stop();
     void prompts.shutdown();
     stop?.abort();
     stop = undefined;
@@ -149,42 +147,23 @@ export default function yourAttention(pi: PiApi): void {
   pi.on('ui_prompt_start', (event) => prompts.started(event).catch((e: Error) => log('the prompt card was not posted:', e.message)));
   pi.on('ui_prompt_end', () => prompts.ended().catch((e: Error) => log('the prompt card was not closed:', e.message)));
 
-  // The person can hold every agent they want to hear from to one rule: when a run settles, the session needs an open
-  // card. The count resets on any run the request did not start, and it stops at three.
-  let asked = 0;
-  // The run our own request started. A run that begins for any other reason, such as the person typing, an answer
-  // arriving, or a card the person sent, resets the count; the run we asked for must not, or the cap below would
-  // never bite.
-  let ourRun = false;
-  pi.on('agent_start', () => {
-    if (ourRun) {
-      ourRun = false;
-      return;
-    }
-    asked = 0;
+  // The person can hold every agent they want to hear from to one rule: a session that goes inactive with no open card
+  // is asked for one at the minutes the rule names, counted from when its run settled. The extension lives as long as
+  // the session, so the stretch lives in memory.
+  const asks = new CardAsks({
+    store: memoryStore(),
+    rule: async () => (inbox ? requireCardRule(inbox, agent) : { on: false, delays: [] }),
+    hasOpenCard: async () => Boolean(inbox && holdsCard((await inbox.list()).results, agent)),
+    // The ask starts a run of its own, which agent_start below tells apart from activity.
+    ask: () => pi.sendUserMessage(NO_CARD),
+    minuteMs: minuteMs(process.env),
+    log,
   });
-  pi.on('agent_settled', async (_event, ctx) => {
+  // A run that starts for any reason but an ask is activity: the person typing, an answer, a card the person sent.
+  pi.on('agent_start', () => asks.began());
+  pi.on('agent_settled', (_event, ctx) => {
     if (!inbox || !ctx.isIdle()) return;
-    // The rule comes from the inbox, so turning it on costs no restart.
-    const rule = await requireCardRule(inbox, agent);
-    if (!rule.on) return;
-    let open = false;
-    try {
-      open = (await inbox.list()).results.some((c) => c.card.agent === agent && c.state === 'open');
-    } catch (e) {
-      log('could not read the session cards:', (e as Error).message);
-      return;
-    }
-    // A card of its own is what the request asks for, so that resets the count along with any run it did not start.
-    if (open) {
-      asked = 0;
-      return;
-    }
-    // The reminders the person set are the cap, and 0 means never: a session that cannot post a card is left alone.
-    if (asked >= rule.reminders) return;
-    asked++;
-    ourRun = true;
-    pi.sendUserMessage(NO_CARD);
+    asks.ended();
   });
 
   pi.on('context', (event) => {

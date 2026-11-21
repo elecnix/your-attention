@@ -5,7 +5,8 @@ import { describeAnswer, type Client } from '../client.ts';
 import { typeFromName, type SearchFilters } from '../core/inbox.ts';
 import type { Approval, AskQuestion, CloseKind, FeedbackFinding, FeedbackVerdict, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
-import { envRequireCard } from './require-card.ts';
+import { envRequireCard, ruleFromView } from './require-card.ts';
+import { describeDelays } from '../core/require-card.ts';
 import { cardTools, removedTools } from './tools.ts';
 
 export interface ToolContext {
@@ -222,34 +223,44 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const ruleSays = (rule: { mode: string; agents?: string[] }) => rule.mode === 'all'
         ? 'every agent in this inbox'
         : rule.mode === 'agents' ? `the agents it names: ${(rule.agents ?? []).join(', ')}` : 'no agent in this inbox';
-      const says = (on: boolean, reminders: number) => on
-        ? `This session must hold an open card, asked up to ${reminders} time${reminders === 1 ? '' : 's'} in a stretch without one.`
+      const says = (on: boolean, delays: number[]) => on
+        ? delays.length
+          ? `This session must hold an open card. With none open, it is asked for one ${describeDelays(delays)}, counted from when its turn ended.`
+          : 'This session is under the rule, and its schedule asks for no card.'
         : 'This session is not asked for a card.';
       if (scope === undefined) {
         // A change without a scope would be read as a request to read the rule, so the call says what it wants.
-        if (args['on'] !== undefined || args['reminders'] !== undefined) throw new Error('say scope: self for this session, or all for every agent');
+        if (args['on'] !== undefined || args['delays'] !== undefined || args['reminders'] !== undefined) throw new Error('say scope: self for this session, or all for every agent');
         const view = await inbox.requireCard(agent);
         // A session started with the environment value obeys that value, so the inbox's answer would mislead it.
         const forced = envRequireCard(process.env);
         if (forced) {
-          return `${says(forced.on, forced.reminders)} YOUR_ATTENTION_REQUIRE_CARD decides for this session until it restarts, so the inbox's rule does not apply to it. That rule asks ${ruleSays(view.rule)}.`;
+          return `${says(forced.on, forced.delays)} YOUR_ATTENTION_REQUIRE_CARD decides for this session until it restarts, so the inbox's rule does not apply to it. That rule asks ${ruleSays(view.rule)}.`;
         }
-        return `${says(view.on, view.reminders)} The rule asks ${ruleSays(view.rule)}.`;
+        return `${says(view.on, ruleFromView(view).delays)} The rule asks ${ruleSays(view.rule)}.`;
       }
       if (typeof args['on'] !== 'boolean') throw new Error('say on: true to ask this session for a card, false to stop asking');
       const on = args['on'];
       if (scope === 'self') {
         // A session the environment decides for cannot change what governs it, and saying otherwise would mislead.
         if (envRequireCard(process.env)) throw new Error('YOUR_ATTENTION_REQUIRE_CARD decides for this session until it restarts, so a self change would have no effect: use scope all to change the rule for every agent');
-        // The count belongs to the whole inbox, so a self change that named one would be dropped rather than applied.
-        if (args['reminders'] !== undefined) throw new Error('the reminder count applies to every agent, so change it with scope all');
+        // The schedule belongs to the whole inbox, so a self change that named one would be dropped rather than applied.
+        if (args['delays'] !== undefined || args['reminders'] !== undefined) throw new Error('the schedule applies to every agent, so change delays with scope all');
         const next = await inbox.setRequireCardForSelf(agent, on);
-        return `${says(on, next.reminders)} This took effect at once, for this session only: no card asked the person, because it is your own conduct.`;
+        return `${says(on, ruleFromView({ on, ...next }).delays)} This took effect at once, for this session only: no card asked the person, because it is your own conduct.`;
       }
       if (scope === 'all') {
-        // A count arrives as a number or not at all, since null and true would reach the inbox as 0 and 1.
+        // A schedule is a list of minutes and a count is a number; the inbox checks the values. null and true would
+        // otherwise reach the inbox as 0 and 1.
+        if (args['delays'] !== undefined && !Array.isArray(args['delays'])) throw new Error('delays must be a list of minutes, such as [2, 5, 10]');
         if (args['reminders'] !== undefined && typeof args['reminders'] !== 'number') throw new Error('reminders must be a whole number');
-        const card = await inbox.proposeRequireCard({ on, ...(args['reminders'] === undefined ? {} : { reminders: args['reminders'] }), agent, origin: await origin() });
+        const card = await inbox.proposeRequireCard({
+          on,
+          ...(args['delays'] === undefined ? {} : { delays: args['delays'] as number[] }),
+          ...(args['reminders'] === undefined ? {} : { reminders: args['reminders'] }),
+          agent,
+          origin: await origin(),
+        });
         return `Proposed the rule for every agent on card ${card.id}. It changes only if the person approves it, and the answer arrives ${ctx.arrival}.`;
       }
       throw new Error('scope must be self, for this session, or all, for every agent');

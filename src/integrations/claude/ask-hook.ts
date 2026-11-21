@@ -14,11 +14,12 @@ import { randomId } from '../../core/crypto.ts';
 import type { AskQuestion, CloseKind } from '../../core/types.ts';
 import { homeDir } from '../../node/home.ts';
 import { claudeSessionName } from './session-name.ts';
-import { resetAsks } from './turn-end-hook.ts';
+import { endStretch } from './card-stretch.ts';
 import { herdrPlace } from '../herdr/place.ts';
 
 interface HookInput {
   session_id?: string;
+  hook_event_name?: string;
   prompt?: string;
   tool_name?: string;
   tool_input?: { questions?: AskQuestion[] };
@@ -47,8 +48,11 @@ export async function main(mode: string): Promise<void> {
   // UserPromptSubmit and SessionEnd carry no tool name, and run ask-cancel for whatever is still pending.
   if (!sid || !config || (input.tool_name ?? (mode === 'ask-cancel' ? 'AskUserQuestion' : '')) !== 'AskUserQuestion') return;
   const inbox = new Client(config);
-  // A prompt the person typed starts a turn, which is what the card requests count between: the next stop asks again.
-  if (mode === 'ask-cancel' && input.prompt !== undefined) resetAsks(sid);
+  // A prompt the person typed is activity, so it ends the stretch of inactivity and cancels the asks for a card. A
+  // session that ends leaves no stretch behind, or a resumed session would be asked at once for a stretch long over.
+  if (mode === 'ask-cancel' && (input.prompt !== undefined || input.hook_event_name === 'SessionEnd')) {
+    try { endStretch(sid); } catch { /* a hook must never stop the session */ }
+  }
   const pendingFile = path.join(homeDir(), 'claude', `${sid}.pending`);
   // The inbox refuses each close when the person already answered on the card.
   const closePending = async (kind: CloseKind, outcome: string): Promise<void> => {
