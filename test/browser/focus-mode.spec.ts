@@ -39,6 +39,14 @@ const chWidth = (page: Page) => page.locator('.focus-card .card-text').first().e
   return width;
 });
 
+/** Open the card with this title from the queue, and turn focus mode on with the shortcut. */
+async function focusOn(page: Page, title: string) {
+  await page.locator('.q', { hasText: title }).click();
+  await expect(page.locator('.focus-card .card-title')).toHaveText(title);
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+}
+
 /** Only the open card shows: no bar, no queue, no border to resize it, and the card spans the viewport. */
 async function expectFullScreen(page: Page) {
   await expect(page.locator('.bar')).toBeHidden();
@@ -175,9 +183,7 @@ test('Skip for now in focus keeps focus mode on and opens the next card, scrolle
   await post('fm-skip-1', 'The first card to skip', { priority: 'now', text: dense });
   await post('fm-skip-2', 'The second card', { priority: 'soon' });
   await inbox.open(page);
-  await page.locator('.q', { hasText: 'The first card to skip' }).click();
-  await page.keyboard.press('ControlOrMeta+.');
-  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await focusOn(page, 'The first card to skip');
   await page.locator('.focus-card button', { hasText: 'Skip for now' }).click();
   await expect(page.locator('.focus-card .card-title')).toHaveText('The second card');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
@@ -193,9 +199,7 @@ test('Dismiss in focus keeps focus mode on and opens the next card', async ({ pa
   await post('fm-dismiss-1', 'A card to dismiss in focus', { priority: 'now' });
   await post('fm-dismiss-2', 'The card after the dismissed one', { priority: 'soon' });
   await inbox.open(page);
-  await page.locator('.q', { hasText: 'A card to dismiss in focus' }).click();
-  await page.keyboard.press('ControlOrMeta+.');
-  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await focusOn(page, 'A card to dismiss in focus');
   await page.locator('.focus-card .openui-buttons').getByRole('button', { name: 'Dismiss without telling the agent' }).click();
   await expect(page.locator('.focus-card .card-title')).toHaveText('The card after the dismissed one');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
@@ -206,8 +210,7 @@ test('a link to another card, and the back button, keep focus mode on', async ({
   await post('fm-target', 'The card the link opens', { priority: 'soon' });
   await post('fm-linking', 'A card that links to another', { priority: 'now', text: 'See [[fm-target]].' });
   await inbox.open(page);
-  await page.locator('.q', { hasText: 'A card that links to another' }).click();
-  await page.keyboard.press('ControlOrMeta+.');
+  await focusOn(page, 'A card that links to another');
   await page.locator('.focus-card .card-text a', { hasText: 'The card the link opens' }).click();
   await expect(page.locator('.focus-card .card-title')).toHaveText('The card the link opens');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
