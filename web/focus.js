@@ -1,11 +1,12 @@
-// Focus mode: the open card fills the screen while the person reads it. The page counts the cards that arrive meanwhile
-// and raises one notification for them when focus ends. The page uses this file, and the unit tests read it without a browser.
+// Focus mode: the open card fills the screen while the person reads it, and the next card does too once the person moves
+// on. The page counts the cards that arrive meanwhile and raises one notification for them when focus ends. The page uses
+// this file, and the unit tests read it without a browser.
 import { notifies } from './queue.js';
 
 const WAITING = ['open', 'orphaned', 'held'];
 
 /** The cards that arrived while focus was on and now wait for the person, in the order the inbox lists them. `ids` are the
- * cards the inbox listed when focus began. */
+ * cards the inbox listed when focus began and every card the person opened since, and `cardId` is the card on screen. */
 export function arrivals(ids, live, cardId) {
   const known = new Set(ids);
   return live.cards.filter((c) => c.id !== cardId && !known.has(c.id) && WAITING.includes(live.states[c.id]));
@@ -25,12 +26,15 @@ export function releaseNotice(cards) {
   };
 }
 
-/** Focus mode as this tab stored it: the card, the cards listed when focus began, and where the page and the queue were
- * scrolled, so leaving focus puts both back. Anything else reads as off, and a bad scroll position as the top. */
+/** Focus mode as this tab stored it: the cards the person has seen, which are the cards listed when focus began and each
+ * card opened since, and where the page and the queue were scrolled, so leaving focus puts both back. An older page stored
+ * the one card focus began on as `card`, which reads as a card seen. Anything else reads as off, and a bad scroll
+ * position as the top. */
 export function readFocusMode(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const { card, ids } = value;
-  if (typeof card !== 'string' || !card || !Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) return null;
+  if (card !== undefined && (typeof card !== 'string' || !card)) return null;
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string')) return null;
   const at = (y) => (typeof y === 'number' && Number.isFinite(y) && y > 0 ? y : 0);
-  return { card, ids, pageY: at(value.pageY), queueY: at(value.queueY) };
+  return { ids: card && !ids.includes(card) ? [...ids, card] : ids, pageY: at(value.pageY), queueY: at(value.queueY) };
 }

@@ -1,4 +1,4 @@
-// Focus mode fills the screen with one card, counts the cards that arrive meanwhile, and raises one notification when it ends.
+// Focus mode fills the screen with the open card, from card to card, counts the cards that arrive meanwhile, and raises one notification when it ends.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { summarize } from '../../src/core/summary.ts';
@@ -19,7 +19,7 @@ function state(cards: Card[], states: Record<string, CardState> = {}): InboxStat
 }
 
 describe('focus mode counts the cards that arrive', () => {
-  it('counts the waiting cards the inbox did not list when focus began, and leaves out the open card and the closed ones', () => {
+  it('counts the waiting cards the person has not seen since focus began, and leaves out the open card and the closed ones', () => {
     const live = state([card('a'), card('b'), card('c'), card('n'), card('m'), card('x'), card('h')], { x: 'closed', m: 'in-triage', h: 'held' });
     assert.deepEqual(arrivals(['a', 'b', 'c'], live, 'a').map((c) => c.id), ['n', 'h']);
     assert.deepEqual(arrivals(['a', 'b', 'c'], state([card('a'), card('b')]), 'a'), []);
@@ -47,16 +47,21 @@ describe('focus mode raises one notification when it ends', () => {
 });
 
 describe('focus mode as a tab stores it', () => {
-  it('reads the card, the cards listed when focus began, and where the page and the queue were scrolled', () => {
-    assert.deepEqual(readFocusMode({ card: 'a', ids: ['a', 'b'], pageY: 120, queueY: 40 }), { card: 'a', ids: ['a', 'b'], pageY: 120, queueY: 40 });
+  it('reads the cards the person has seen, and where the page and the queue were scrolled', () => {
+    assert.deepEqual(readFocusMode({ ids: ['a', 'b'], pageY: 120, queueY: 40 }), { ids: ['a', 'b'], pageY: 120, queueY: 40 });
+  });
+
+  it('reads the card an older page stored as one the person has seen, since focus mode no longer belongs to one card', () => {
+    assert.deepEqual(readFocusMode({ card: 'z', ids: ['a', 'b'], pageY: 120, queueY: 40 }), { ids: ['a', 'b', 'z'], pageY: 120, queueY: 40 });
+    assert.deepEqual(readFocusMode({ card: 'a', ids: ['a', 'b'] }), { ids: ['a', 'b'], pageY: 0, queueY: 0 });
   });
 
   it('reads a missing or bad scroll position as the top', () => {
-    assert.deepEqual(readFocusMode({ card: 'a', ids: ['a'] }), { card: 'a', ids: ['a'], pageY: 0, queueY: 0 });
-    assert.deepEqual(readFocusMode({ card: 'a', ids: ['a'], pageY: -3, queueY: 'x' }), { card: 'a', ids: ['a'], pageY: 0, queueY: 0 });
+    assert.deepEqual(readFocusMode({ ids: ['a'] }), { ids: ['a'], pageY: 0, queueY: 0 });
+    assert.deepEqual(readFocusMode({ ids: ['a'], pageY: -3, queueY: 'x' }), { ids: ['a'], pageY: 0, queueY: 0 });
   });
 
   it('reads anything else as off', () => {
-    for (const bad of [null, 'a', { card: '' }, { card: 'a' }, { card: 'a', ids: [1] }, []]) assert.equal(readFocusMode(bad), null);
+    for (const bad of [null, 'a', { card: '' }, { card: 'a' }, { ids: [1] }, { card: 1, ids: [] }, []]) assert.equal(readFocusMode(bad), null);
   });
 });

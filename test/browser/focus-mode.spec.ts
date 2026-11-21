@@ -1,5 +1,5 @@
-// Focus mode: the open card fills the screen, with nothing else drawn but the button that leaves it, and the page
-// comes back as the person left it.
+// Focus mode: the open card fills the screen, with nothing else drawn but the button that leaves it, from one card to the
+// next until the person leaves it, and the page comes back as the person left it.
 import { expect, test, type Page } from '@playwright/test';
 import { startInbox, type TestInbox } from './inbox.ts';
 
@@ -38,6 +38,21 @@ const chWidth = (page: Page) => page.locator('.focus-card .card-text').first().e
   probe.remove();
   return width;
 });
+
+/** Open the card with this title from the queue, and turn focus mode on with the shortcut. */
+async function focusOn(page: Page, title: string) {
+  await page.locator('.q', { hasText: title }).click();
+  await expect(page.locator('.focus-card .card-title')).toHaveText(title);
+  await page.keyboard.press('ControlOrMeta+.');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+}
+
+/** The card with this title fills the screen, with focus mode still on. */
+async function expectFocusedOn(page: Page, title: string) {
+  await expect(page.locator('.focus-card .card-title')).toHaveText(title);
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await expectFullScreen(page);
+}
 
 /** Only the open card shows: no bar, no queue, no border to resize it, and the card spans the viewport. */
 async function expectFullScreen(page: Page) {
@@ -148,17 +163,82 @@ test('focus mode lasts through a reload, in this tab only, and Escape ends it wi
   await expect(page.locator('.queue .q', { hasText: 'A card that arrives after the reload' })).toBeVisible();
 });
 
-test('answering the card in focus ends focus mode and opens the next card of the queue as it is now', async ({ page }) => {
+test('answering in focus keeps focus mode on and opens the next card of the queue as it is now, full screen', async ({ page }) => {
+  const notes = await readNotifications(page);
   await post('fm-answer', 'A card to answer in focus', { priority: 'now' });
   await inbox.open(page);
   await page.locator('.q', { hasText: 'A card to answer in focus' }).click();
-  await page.getByRole('button', { name: 'Focus on this card' }).click();
+  await page.getByRole('button', { name: 'Turn on focus mode' }).click();
   await post('fm-next', 'The next card, posted during focus', { priority: 'now' });
-  await expect(page.locator('.focus-card .focus-count')).toHaveText('1');
+  await post('fm-later', 'A card that waits behind it', { priority: 'soon' });
+  await expect(page.locator('.focus-card .focus-count')).toHaveText('2');
   await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
-  await expect(page.locator('.focus-card .card-title')).toHaveText('The next card, posted during focus');
-  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+  await expectFocusedOn(page, 'The next card, posted during focus');
+  // The card on screen is no longer news, so the count and the notification at the end name only the other one.
+  await expect(page.locator('.focus-card .focus-count')).toHaveText('1');
+  await expect(toggle(page)).toHaveAccessibleName('Leave focus mode, 1 new card waiting');
+  expect(await notes()).toEqual([]);
+  await toggle(page).click();
   await expect(page.locator('.queue')).toBeVisible();
+  await expect(page.locator('.focus-card .card-title')).toHaveText('The next card, posted during focus');
+  expect(await notes()).toEqual([{ title: 'A card arrived while you focused', body: 'A card that waits behind it' }]);
+});
+
+test('Skip for now in focus keeps focus mode on and opens the next card, scrolled to its top', async ({ page }) => {
+  await post('fm-skip-1', 'The first card to skip', { priority: 'now', text: dense });
+  await post('fm-skip-2', 'The second card', { priority: 'soon' });
+  await inbox.open(page);
+  await focusOn(page, 'The first card to skip');
+  await page.locator('.focus-card button', { hasText: 'Skip for now' }).click();
+  await expectFocusedOn(page, 'The second card');
+  await expect.poll(() => pageY(page)).toBe(0);
+  // Skip wraps around the queue, as it does outside focus mode.
+  await page.locator('.focus-card button', { hasText: 'Skip for now' }).click();
+  await expect(page.locator('.focus-card .card-title')).toHaveText('The first card to skip');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('Dismiss in focus keeps focus mode on and opens the next card', async ({ page }) => {
+  await post('fm-dismiss-1', 'A card to dismiss in focus', { priority: 'now' });
+  await post('fm-dismiss-2', 'The card after the dismissed one', { priority: 'soon' });
+  await inbox.open(page);
+  await focusOn(page, 'A card to dismiss in focus');
+  await page.locator('.focus-card .openui-buttons').getByRole('button', { name: 'Dismiss without telling the agent' }).click();
+  await expectFocusedOn(page, 'The card after the dismissed one');
+});
+
+test('a link to another card, and the back button, keep focus mode on', async ({ page }) => {
+  await post('fm-target', 'The card the link opens', { priority: 'soon' });
+  await post('fm-linking', 'A card that links to another', { priority: 'now', text: 'See [[fm-target]].' });
+  await inbox.open(page);
+  await focusOn(page, 'A card that links to another');
+  await page.locator('.focus-card .card-text a', { hasText: 'The card the link opens' }).click();
+  await expectFocusedOn(page, 'The card the link opens');
+  await page.goBack();
+  await expectFocusedOn(page, 'A card that links to another');
+});
+
+test('when no card is left, focus mode shows that nothing needs you, full screen, and the next card that arrives opens there', async ({ page }) => {
+  const notes = await readNotifications(page);
+  await post('fm-last', 'The last card', { priority: 'now' });
+  await inbox.open(page);
+  await expect(page.locator('.focus-card .card-title')).toHaveText('The last card');
+  await page.keyboard.press('ControlOrMeta+.');
+  await page.locator('.focus-card button', { hasText: 'Send answer' }).click();
+  await expect(page.locator('.focus-card.done')).toContainText('Nothing needs you');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle(page)).toBeInViewport();
+  await expectFullScreen(page);
+
+  await post('fm-arrives', 'A card that arrives on the empty screen', { priority: 'soon' });
+  await expect(page.locator('.focus-card .card-title')).toHaveText('A card that arrives on the empty screen');
+  await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.focus-card .focus-count')).toHaveCount(0);
+  await expectFullScreen(page);
+  await toggle(page).click();
+  await expect(page.locator('.queue')).toBeVisible();
+  // The person saw the card that arrived, so leaving raises no notification for it.
+  expect(await notes()).toEqual([]);
 });
 
 test('on a phone, focus mode fills the screen too, and leaving it scrolls back to where the person was', async ({ page }) => {

@@ -13,7 +13,7 @@ const { React, createRoot } = window.__OpenUI;
 
 export function App() {
   const [state, setState] = React.useState(null);
-  // Focus mode, `{card, ids, pageY, queueY}`: the card the person reads, the cards listed when focus began, and where the page
+  // Focus mode, `{ids, pageY, queueY}`: the cards the person has seen since focus began, and where the page
   // and the queue were scrolled. Each tab keeps its own, under its viewer id, so a reload keeps it and another tab does not share it.
   const [focusMode, setFocusMode] = React.useState(() => readFocusMode(store.get(FOCUS_KEY)));
   const focusModeRef = React.useRef(focusMode);
@@ -484,13 +484,22 @@ export function App() {
   }
   if (current && cardInAddress() !== current.id && !/(?:token|signin)=/.test(location.hash)) history.replaceState({ card: current.id }, '', cardAddress(current.id));
 
-  // Focus mode. Turning it on keeps this card on screen, alone. Turning it off gives the page back as the person left it,
-  // with one notification for the cards that arrived meanwhile.
-  const arrived = focusMode ? arrivals(focusMode.ids, state, focusMode.card) : [];
+  // Focus mode. Turning it on keeps this card on screen, alone, and each card the person moves on to fills the screen the
+  // same way. Turning it off gives the page back as the person left it, with one notification for the cards that arrived
+  // meanwhile and that the person has not opened.
+  // A card the person opens in focus mode is seen: it leaves the count and the notification at the end, which only name
+  // the cards the person has not read yet. React allows this update during the draw, and draws again before it paints.
+  if (focusMode && current && !focusMode.ids.includes(current.id)) {
+    const mode = { ...focusMode, ids: [...focusMode.ids, current.id] };
+    store.set(FOCUS_KEY, mode);
+    focusModeRef.current = mode;
+    setFocusMode(mode);
+  }
+  const arrived = focusMode ? arrivals(focusMode.ids, state, current && current.id) : [];
   const enterFocus = () => {
     if (!current) return;
     const queue = document.querySelector('.queue');
-    const mode = { card: current.id, ids: state.cards.map((c) => c.id), pageY: window.scrollY, queueY: queue ? queue.scrollTop : 0 };
+    const mode = { ids: state.cards.map((c) => c.id), pageY: window.scrollY, queueY: queue ? queue.scrollTop : 0 };
     const card = document.querySelector('.focus-card');
     if (card) { const r = card.getBoundingClientRect(); scrollAfterFocusRef.current = { cardShare: Math.max(0, -r.top) / (r.height || 1) }; }
     store.set(FOCUS_KEY, mode);
@@ -509,19 +518,18 @@ export function App() {
   };
   leaveFocusRef.current = leaveFocus;
   toggleFocusRef.current = () => (focusModeRef.current ? leaveFocus() : enterFocus());
-  // Focus belongs to one card: moving on from it, by an answer, Skip, a link to another card or the back button, ends focus.
-  if (focusMode && !fetchingOutside && (!current || current.id !== focusMode.card)) setTimeout(leaveFocus, 0);
+  // Focus belongs to the page, not to one card: an answer, Skip, a dismissal, a link to another card and the back button
+  // move to that card and keep focus on. Only the focus button, its shortcut and Escape end it.
 
   // Each card you open is a step in the browser's history, so back and forward move between them.
   const go = (id) => {
-    // Focus ends as the next card opens, in the same draw, so a phone still scrolls to that card.
-    if (focusModeRef.current && id !== focusModeRef.current.card) leaveFocus();
     if (id && id !== (current && current.id)) history.pushState({ card: id }, '', cardAddress(id));
     if (current && current.id !== id) previousRef.current = current.id;
     setCleared(false);
     setFocus(id);
-    // On a phone the card sits above the queue, so the page scrolls up to the card that opened.
-    if (id && window.matchMedia('(max-width: 760px)').matches) scrollToRef.current = id;
+    // On a phone the card sits above the queue, so the page scrolls up to the card that opened. In focus mode the page
+    // scrolls the card, so the next one opens at its top.
+    if (id && (focusModeRef.current || window.matchMedia('(max-width: 760px)').matches)) scrollToRef.current = id;
   };
   // The card after this one, in the order the queue shows, wrapping around at the end.
   const next = (id) => after(order, id);
@@ -533,7 +541,10 @@ export function App() {
     setTimeout(() => {
       if (focusRef.current !== id) return;
       pinnedRef.current = null;
-      if (then && then !== id) go(then); else setFocus(null);
+      if (then && then !== id) return go(then);
+      setFocus(null);
+      // In focus mode the pane says nothing needs you, from the top of the screen.
+      if (focusModeRef.current) window.scrollTo(0, 0);
     }, 700);
   };
   const open = (id) => { go(id); setFresh((f) => ({ ...f, [id]: false })); };
@@ -638,7 +649,9 @@ export function App() {
   } else if (!current) {
     // Every waiting card can sit out of sight in a collapsed group, so the pane says that instead of reporting an empty inbox.
     const allHidden = pending.length > 0 && pending.every((c) => all.hidden.has(c.id));
+    // In focus mode the pane fills the screen with the button that leaves focus, and the next card that arrives opens here.
     main = h('div', { className: 'focus-card done' },
+      focusMode && h('div', { className: 'meta' }, h(FocusToggle, { on: true, arrived: arrived.length, onToggle: () => toggleFocusRef.current() })),
       cleared && pending.length ? 'No card selected. Pick a card from the list.'
         : allHidden ? 'Every waiting card is in a collapsed group. Open the group in the list to see its cards.'
           : 'Nothing needs you. New cards appear here on their own.');
@@ -794,12 +807,12 @@ function storedCollapsedGroups() {
 }
 
 // The button at the top right of the open card that turns focus mode on and off. While focus is on, it is the one control
-// on screen besides the card, and a count on it says how many cards arrived meanwhile.
+// on screen besides the card, and a count on it says how many cards arrived meanwhile that the person has not opened.
 const FOCUS_SHORTCUT = IS_MAC ? '⌘.' : 'Ctrl+.';
 function FocusToggle({ on, arrived, onToggle }) {
   const waiting = arrived ? `, ${arrived} new card${arrived === 1 ? '' : 's'} waiting` : '';
-  const tip = on ? `Leave focus mode${waiting} (${FOCUS_SHORTCUT} or Escape)` : `Focus on this card: fill the screen with it, and hold notifications until you leave (${FOCUS_SHORTCUT})`;
-  return h('button', { type: 'button', className: `icon-btn focus-toggle${on ? ' on' : ''}`, title: tip, 'aria-label': on ? `Leave focus mode${waiting}` : 'Focus on this card', 'aria-pressed': on, 'aria-keyshortcuts': IS_MAC ? 'Meta+.' : 'Control+.', onClick: onToggle },
+  const tip = on ? `Leave focus mode${waiting} (${FOCUS_SHORTCUT} or Escape)` : `Turn on focus mode: fill the screen with this card, then with each card you move on to, and hold notifications until you leave (${FOCUS_SHORTCUT})`;
+  return h('button', { type: 'button', className: `icon-btn focus-toggle${on ? ' on' : ''}`, title: tip, 'aria-label': on ? `Leave focus mode${waiting}` : 'Turn on focus mode', 'aria-pressed': on, 'aria-keyshortcuts': IS_MAC ? 'Meta+.' : 'Control+.', onClick: onToggle },
     h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS.focus.map((d) => h('path', { key: d, d }))),
     on && arrived > 0 && h('span', { className: 'focus-count', 'aria-hidden': 'true' }, arrived > 99 ? '99+' : String(arrived)));
 }
