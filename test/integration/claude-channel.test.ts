@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { DEFAULT_GUIDANCE_VERSION } from '../../src/core/inbox.ts';
+import { DEFAULT_GUIDANCE, DEFAULT_GUIDANCE_VERSION } from '../../src/core/inbox.ts';
 import type { Card } from '../../src/core/types.ts';
 import { seal } from '../../web/sealed.js';
 import { ROOT, start, until, type Harness } from './harness.ts';
@@ -168,7 +168,8 @@ describe('the batch of card model tools', () => {
   });
 
   it('tells the session about guidance the person approved', async () => {
-    const proposed = await mcp.callTool({ name: 'card_guidance', arguments: { propose: 'Attach a screenshot to every UI card.', message: 'Adds the screenshot rule.' } });
+    const first = DEFAULT_GUIDANCE.split('\n')[0]!;
+    const proposed = await mcp.callTool({ name: 'card_guidance', arguments: { edits: [{ old: first, new: `${first}\nAttach a screenshot to every UI card.` }], message: 'Adds the screenshot rule.' } });
     const id = /card (\S+)\./.exec(JSON.stringify(proposed.content))?.[1];
     await h.owner('POST', `/v1/cards/${id}/answer`, { values: { choice: 'approve' } });
     const note = await until(() => notes.find((n) => n.content.includes('Attach a screenshot')));

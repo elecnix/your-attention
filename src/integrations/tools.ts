@@ -151,8 +151,20 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_guidance',
-    description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose new guidance. A proposal goes to the person, who approves it and picks the agents that receive it, or rejects it. Their answer and comment come back to you, so you can revise the text and propose again.',
-    schema: { type: 'object', properties: { propose: { type: 'string', description: 'The new guidance text. Leave it out to read the current guidance.' }, message: { type: 'string', description: 'Required with propose: one or two sentences for the person who approves it, saying what this changes and why. A proposal without a message is refused.' } } },
+    description: 'Read the shared guidance for writing cards and the catalog of widgets, each with when to use it, or propose a change to the guidance. Call it with no arguments to read. Propose with edits, the way card_patch edits a card: each old text must occur exactly once in the current guidance, and only those passages change. A proposal goes to the person, who approves it and picks the agents that receive it, or rejects it. The edits apply to the guidance as it is at the approval, so another approved proposal does not undo yours; if your old text is gone by then, nothing changes and you hear why. Their answer and comment come back to you, so you can revise and propose again.',
+    schema: {
+      type: 'object',
+      properties: {
+        edits: {
+          type: 'array',
+          description: 'The usual way to propose: exact replacements in the current guidance text. Each old must occur exactly once. To add a rule, replace a nearby line with that line plus the new one. An empty new deletes the passage.',
+          items: { type: 'object', properties: { old: { type: 'string' }, new: { type: 'string' } }, required: ['old', 'new'] },
+        },
+        replace_all_with: { type: 'string', description: 'A whole new guidance text that replaces every rule, including the ones you did not mean to change. Use it only to rewrite the guidance from scratch; use edits for anything else.' },
+        propose: { type: 'string', description: 'Deprecated: the old name of replace_all_with, kept for one release. It replaces every rule with this text. Use edits instead.' },
+        message: { type: 'string', description: 'Required with a proposal: one or two sentences for the person who approves it, saying what this changes and why. A proposal without a message is refused.' },
+      },
+    },
   },
   {
     name: 'card_close',

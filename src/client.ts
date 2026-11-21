@@ -7,7 +7,7 @@ import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError, type SearchFilters, type SearchPage, type TriageFeedbackRecord } from './core/inbox.ts';
 import { isSealed } from './core/sealed.ts';
-import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, NewCard, Origin, PublicSubscription, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, Origin, PublicSubscription, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 
@@ -241,8 +241,12 @@ export class Client {
   saveWidget(name: string, source: string, feedback?: string, extra: { when?: string; response?: string } = {}): Promise<Template> { return this.call('POST', '/v1/widgets', { name, source, feedback, ...extra }); }
   /** The card guidance: the editable text, the catalog of widgets an agent can place, and the tags in use. */
   guidance(): Promise<CardGuidance> { return this.call('GET', '/v1/guidance'); }
-  /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. */
-  proposeGuidance(text: string, opts: { message: string; agent?: string }): Promise<Card> { return this.call('POST', '/v1/guidance', { text, ...opts }); }
+  /** Propose new guidance as `agent`, which receives the person's answer and comment on the card. A list of edits
+   * changes the passages it names; a string replaces every rule, sent under both names so an inbox from before
+   * replace_all_with still reads it. `origin` is where the agent runs, which the card shows. */
+  proposeGuidance(proposal: string | GuidanceEdit[], opts: { message: string; agent?: string; origin?: Origin }): Promise<Card> {
+    return this.call('POST', '/v1/guidance', { ...(typeof proposal === 'string' ? { replace_all_with: proposal, text: proposal } : { edits: proposal }), ...opts });
+  }
   /** The require-a-card rule resolved for one session, and the rule itself. */
   requireCard(agent: string): Promise<{ on: boolean; reminders: number; rule: { mode: string; agents?: string[]; reminders: number } }> {
     return this.call('GET', `/v1/settings/require-card?agent=${encodeURIComponent(agent)}`);
@@ -252,7 +256,7 @@ export class Client {
     return this.call('POST', '/v1/settings/require-card', { scope: 'self', on, agent });
   }
   /** Propose the rule for every agent, as a card the person approves or rejects. */
-  proposeRequireCard(input: { on: boolean; reminders?: number; agent: string }): Promise<Card> {
+  proposeRequireCard(input: { on: boolean; reminders?: number; agent: string; origin?: Origin }): Promise<Card> {
     return this.call('POST', '/v1/settings/require-card', { scope: 'all', ...input });
   }
   /** Tell the inbox whether triage was right to push back on this client's card. */
@@ -282,8 +286,8 @@ export class Client {
   }
   /** Ask the inbox to send the answers to this agent's cards to a webhook. The owner approves it on a system card, and the
    * secret that signs each call comes back here once. */
-  subscribe(agent: string, webhook: { url: string; headers?: Record<string, string> }): Promise<{ subscription: PublicSubscription; card: Card; secret: string }> {
-    return this.call('POST', '/v1/cards', { agent, kind: 'system', title: `Send the answers for ${agent} to a webhook`, system: { type: 'subscribe', webhook, events: ['answer'] } });
+  subscribe(agent: string, webhook: { url: string; headers?: Record<string, string> }, origin?: Origin): Promise<{ subscription: PublicSubscription; card: Card; secret: string }> {
+    return this.call('POST', '/v1/cards', { agent, kind: 'system', title: `Send the answers for ${agent} to a webhook`, ...(origin ? { origin } : {}), system: { type: 'subscribe', webhook, events: ['answer'] } });
   }
   unsubscribe(agent: string): Promise<{ removed: number }> {
     return this.call('POST', '/v1/cards', { agent, kind: 'system', title: `Stop sending the answers for ${agent} to a webhook`, system: { type: 'unsubscribe' } });

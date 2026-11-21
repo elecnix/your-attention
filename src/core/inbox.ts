@@ -16,7 +16,7 @@ import { Usage } from './telemetry.ts';
 import { generateVapid, sendPush, b64urlDecode, type Vapid } from './webpush.ts';
 import { MAX_TAGS } from './types.ts';
 import type {
-  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, NewCard, Origin, PageEvent, Pairing, Presence,
+  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
   FeedbackFinding, FeedbackVerdict, LateAnswer, TriageFeedback, TriagePushback,
 } from './types.ts';
@@ -1241,7 +1241,7 @@ export class Inbox {
         { id: 'deny', label: 'Deny', description: 'Nothing goes out. To stop a webhook you approved, change your answer to this.' },
       ],
     });
-    const card = { ...this.getCard(cardId), subscription: id };
+    const card = { ...this.getCard(cardId), ...this.requester(agent, input.origin), subscription: id };
     this.store.put('cards', cardId, card);
     return { subscription: this.publicSubscription(sub), card: publicCard(card), secret: sub.secret };
   }
@@ -1710,7 +1710,7 @@ export class Inbox {
    * Propose the rule for every agent at once. Holding every session of the inbox to a card is the inbox's own conduct,
    * so it takes the person's approval: an agent that could turn it on for the others would police its neighbours.
    */
-  proposeRequireCard(input: { on: boolean; reminders?: number; by?: { caller: Caller; agent: string } }): Card {
+  proposeRequireCard(input: { on: boolean; reminders?: number; by?: { caller: Caller; agent: string; origin?: unknown } }): Card {
     const from = input.by ? String(input.by.agent ?? '').trim() : '';
     if (from.length > MAX_AGENT_CHARS) throw new InboxError(400, `agent must be at most ${MAX_AGENT_CHARS} characters`);
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
@@ -1734,7 +1734,7 @@ export class Inbox {
       text: cardText,
       options: [{ id: 'approve', label: mode === 'all' ? 'Approve: hold every agent' : 'Approve: stop asking' }, { id: 'reject', label: 'Reject' }],
     });
-    const card: Card = { ...this.getCard(id), ...(from && input.by?.caller.token ? { token: input.by.caller.token } : {}), requireCard: proposal };
+    const card: Card = { ...this.getCard(id), ...(from && input.by?.caller.token ? { token: input.by.caller.token } : {}), ...this.requester(from, input.by?.origin), requireCard: proposal };
     this.store.put('cards', id, card);
     this.emit({ type: 'change', card: id });
     return card;
@@ -1943,12 +1943,19 @@ export class Inbox {
   }
 
   /** An agent proposes new card guidance. The person approves it, and picks who receives it, on a system card. With `by`,
-   * the answer and its comment go to the agent that proposed the text, which may acknowledge it or retract the card. */
-  proposeGuidance(text: string, message: string, by?: { caller: Caller; agent: string }): Card {
+   * the answer and its comment go to the agent that proposed the text, which may acknowledge it or retract the card.
+   * A list of edits is the usual proposal: each `old` occurs exactly once in the guidance, and the card keeps the edits,
+   * so it applies them to the guidance as it is at the approval. A string replaces every rule with that text. */
+  proposeGuidance(proposal: string | GuidanceEdit[], message: string, by?: { caller: Caller; agent: string; origin?: unknown }): Card {
+    const base = this.guidance();
+    // Anything but a string is a list of edits, so one edit sent as an object is refused rather than read as a whole text.
+    const edits = typeof proposal === 'string' ? undefined : checkGuidanceEdits(proposal);
     // The catalog and the tag lines reach agents beside the guidance text, so a proposal that carries them keeps the
     // words the agent wrote and loses those lines: an agent that pastes a whole card_guidance answer still proposes.
-    const clean = guidanceTextOnly(String(text ?? ''), this.widgetCatalog());
-    if (!clean) throw new InboxError(400, 'a proposal needs the guidance text itself: the widget catalog and the tag lines are added beside it, so a text with only those is empty');
+    const clean = edits ? undefined : guidanceTextOnly(String(proposal ?? ''), this.widgetCatalog());
+    if (clean === '') throw new InboxError(400, 'a proposal needs the guidance text itself: the widget catalog and the tag lines are added beside it, so a text with only those is empty');
+    // Edits are checked against the guidance now, so an agent hears at once which passage it got wrong.
+    if (edits && !guidanceTextOnly(editGuidance(base, edits), this.widgetCatalog())) throw new InboxError(400, 'those edits leave the guidance empty: to replace every rule, propose replace_all_with');
     // The person reads the message to decide, so a proposal without one is refused rather than shown unexplained.
     const why = String(message ?? '').trim();
     if (!why) throw new InboxError(400, 'a guidance proposal needs a message: say what changed and why, for the person who approves it');
@@ -1956,12 +1963,15 @@ export class Inbox {
     const from = by ? String(by.agent ?? '').trim() : '';
     if (from.length > MAX_AGENT_CHARS) throw new InboxError(400, `agent must be at most ${MAX_AGENT_CHARS} characters`);
     if (from === SYSTEM_AGENT) throw new InboxError(403, 'the system agent is reserved');
-    const base = this.guidance();
     const id = `guidance-${randomId(4)}`;
-    const cardText = `${from ? `The agent ${from}` : 'An agent'} proposes this guidance for writing cards. It goes out only if you approve it.\n\n${clean}`;
+    const who = from ? `The agent ${from}` : 'An agent';
+    // The card's text is what a search and a notification read. The page and the terminal client draw the diff instead.
+    const cardText = edits
+      ? `${who} proposes ${edits.length} edit${edits.length === 1 ? '' : 's'} to the guidance for writing cards. They go out only if you approve them.\n\n${edits.map((e, i) => `Edit ${i + 1} replaces:\n\n${quote(e.old)}\n\nwith:\n\n${quote(e.new)}`).join('\n\n')}`
+      : `${who} proposes this guidance for writing cards. It replaces every rule, and goes out only if you approve it.\n\n${clean}`;
     // The card keeps no list of agents: the page lists the online ones from live presence when it draws the card, and
     // an offline agent reads the new version when it reconnects or calls card_guidance.
-    const broadcast = { text: clean, message: why, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
+    const broadcast: Broadcast = { ...(edits ? { edits } : { text: clean }), message: why, ...(from ? { from } : {}), base: { version: base.version, text: base.text } };
     // The stored card has the proposal in its text and in broadcast, and the guidance it starts from, so it is measured
     // whole before anything is stored. The margin covers the card's other fields, which stay under a kilobyte.
     const size = new TextEncoder().encode(JSON.stringify({ text: cardText, broadcast })).length + 2048;
@@ -1975,11 +1985,47 @@ export class Inbox {
     const card: Card = {
       ...this.getCard(id),
       ...(from && by?.caller.token ? { token: by.caller.token } : {}),
+      ...this.requester(from, by?.origin),
       broadcast,
     };
     this.store.put('cards', id, card);
     this.emit({ type: 'change', card: id });
     return card;
+  }
+
+  /** The agent that asked for a system card, and where it ran: the origin its request carried, else the one its
+   * connection reported. The card shows that session the way an agent's own card does. */
+  private requester(agent: string, origin: unknown): Pick<Card, 'proposedBy' | 'origin'> {
+    if (!agent) return {};
+    const where = cleanOrigin(origin) ?? this.store.get<Presence>('presence', agent)?.origin;
+    return { proposedBy: agent, ...(where ? { origin: { ...where } } : {}) };
+  }
+
+  /** Each open proposal of edits now reads against a new guidance, so its summary gets a new rev and the page fetches
+   * the card again rather than drawing the text it derived from the older version. */
+  private reshowEditProposals(): void {
+    for (const s of this.store.list<CardSummary>('summaries')) {
+      if (s.kind !== 'system' || s.closed || !s.id.startsWith('guidance-')) continue;
+      const card = this.store.get<Card>('cards', s.id);
+      if (!card?.broadcast?.edits) continue;
+      this.store.put('cards', card.id, card);
+      this.emit({ type: 'change', card: card.id });
+    }
+  }
+
+  /** A guidance card as a reader sees it. A proposal of edits gets the text those edits make of the guidance stored now,
+   * and that guidance as its base, so two proposals from one version each show their own change; an edit whose passage
+   * is gone shows no change and says why in `stale`. */
+  private shownBroadcast<C extends Card>(card: C): C {
+    const b = card.broadcast;
+    if (!b?.edits) return card;
+    const now = this.guidance();
+    const base = { version: now.version, text: now.text };
+    try {
+      return { ...card, broadcast: { ...b, text: editGuidance(now, b.edits), base } };
+    } catch (e) {
+      return { ...card, broadcast: { ...b, text: now.text, base, stale: e instanceof Error ? e.message : String(e) } };
+    }
   }
 
   /** Apply or drop the proposed guidance, close the card, and send the answer to the agent that proposed the text. */
@@ -1993,13 +2039,22 @@ export class Inbox {
     if ([answer.values['choice']].flat()[0] !== 'approve') return 'Rejected: the guidance did not change.';
     // The ticked agents, or every connected one when the answer names none. Only connected agents get the event.
     const picked = Array.isArray(answer.values['agents']) ? new Set((answer.values['agents'] as unknown[]).map(String)) : undefined;
+    // Edits apply to the guidance as it is now, in this same step, so an approval never overwrites a rule that another
+    // approval added since the proposal. An edit whose passage is gone applies nothing, and the agent hears which one.
+    let edited: string;
+    try {
+      edited = broadcast.edits ? editGuidance(this.guidance(), broadcast.edits) : String(broadcast.text ?? '');
+    } catch (e) {
+      return `Not applied: ${e instanceof Error ? e.message : String(e)}. The guidance changed after the proposal, so it did not change now: read it and propose again.`;
+    }
     // The card may hold a text an older inbox stored, so the catalog is dropped once more before it becomes the guidance.
-    const text = guidanceTextOnly(broadcast.text, this.widgetCatalog());
+    const text = guidanceTextOnly(edited, this.widgetCatalog());
     // A card kept before this change may hold nothing but the catalog or the tag lines, and storing that would leave
     // every agent reading a blank guidance. The approval changes nothing instead, and the card says so.
     if (!text) return 'Rejected: that text was only the widget catalog or the tag lines, so the guidance did not change.';
     const guidance: Guidance = { text, version: this.guidance().version + 1, at: this.now() };
     this.store.put('meta', 'guidance', guidance);
+    this.reshowEditProposals();
     let sent = 0;
     for (const [k, subs] of this.agents) {
       const agent = k.slice(k.indexOf('\n') + 1);
@@ -2909,7 +2964,7 @@ export class Inbox {
     // A body stored before the inbox checked bodies may not draw whole, so the client gets what it can draw.
     const fallback = card.body !== undefined ? this.fallbackBody?.(card.body) : undefined;
     const summary = this.store.get<CardSummary>('summaries', id);
-    const shown = owner && card.closed ? { ...publicCard(card), closed: card.closed } : publicCard(card);
+    const shown = this.shownBroadcast(owner && card.closed ? { ...publicCard(card), closed: card.closed } : publicCard(card));
     return {
       card: fallback ? { ...shown, bodyFallback: fallback } : shown,
       ...(answer ? { answer } : {}),
@@ -2935,7 +2990,7 @@ export class Inbox {
     cards: Card[]; answers: Record<string, Answer>; presence: Record<string, Presence>; states: Record<string, CardState>;
     priorities: Record<string, string>; levels: PriorityLevel[]; settings: Settings; guidance: Guidance;
   } {
-    const cards = this.store.list<Card>('cards').filter((c) => !c.archivedAt).map(publicCard).sort((a, b) => a.createdAt - b.createdAt)
+    const cards = this.store.list<Card>('cards').filter((c) => !c.archivedAt).map((c) => this.shownBroadcast(publicCard(c))).sort((a, b) => a.createdAt - b.createdAt)
       // A body stored before the inbox checked bodies may not draw whole, so the page gets what it can draw.
       .map((c) => { const f = c.body !== undefined ? this.fallbackBody?.(c.body) : undefined; return f ? { ...c, bodyFallback: f } : c; });
     const shown = new Set(cards.map((c) => c.id));
@@ -3129,6 +3184,40 @@ export function guidanceTextOnly(text: string, catalog?: string): string {
     kept.push(line);
   }
   return kept.join('\n').trim();
+}
+
+/** The edits of a guidance proposal, checked for shape: a list of {old, new}, each old a passage to find. */
+function checkGuidanceEdits(edits: unknown): GuidanceEdit[] {
+  if (!Array.isArray(edits) || !edits.length) throw new InboxError(400, 'edits must be a list of {old, new}');
+  return edits.map((e, i) => {
+    const old = typeof e?.old === 'string' ? e.old : '';
+    if (!old) throw new InboxError(400, `edit ${i + 1}: old must be the passage of the guidance to replace`);
+    if (typeof e?.new !== 'string') throw new InboxError(400, `edit ${i + 1}: new must be a string, empty to delete the passage`);
+    // An edit that changes nothing is a mistake rather than a proposal, as it is for card_patch.
+    if (e.new === old) throw new InboxError(400, `edit ${i + 1}: new is identical to old, so it changes nothing`);
+    return { old, new: e.new };
+  });
+}
+
+/** The guidance with each edit applied in turn, the way card_patch edits a card: each old text must occur exactly once
+ * in the text so far, or the whole proposal fails with the number of the edit that missed. */
+export function editGuidance(guidance: Pick<Guidance, 'text' | 'version'>, edits: GuidanceEdit[]): string {
+  let text = guidance.text;
+  for (const [i, e] of edits.entries()) {
+    const count = text.split(e.old).length - 1;
+    if (count !== 1) {
+      const near = count === 0 ? nearestLines(text, e.old) : [];
+      const hint = near.length ? `; the closest lines are ${near.map((l) => JSON.stringify(l)).join(', ')}` : '';
+      throw new InboxError(409, `edit ${i + 1}: the old text occurs ${count} times in guidance version ${guidance.version}, and it must occur once${hint}`);
+    }
+    text = text.replace(e.old, () => e.new);
+  }
+  return text;
+}
+
+/** A passage as a Markdown quote, so the card's text shows each edit apart from the words around it. */
+function quote(text: string): string {
+  return text ? text.split('\n').map((l) => `> ${l}`).join('\n') : '_(nothing)_';
 }
 
 const ORIGIN_FIELDS = ['harness', 'session', 'name', 'host', 'cwd', 'herdrPane', 'herdrWorkspace', 'herdrTab'] as const;

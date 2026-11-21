@@ -225,3 +225,37 @@ test("a row falls back to the newest card's name, and then to the agent id", asy
   await expect(agents.locator('.agent', { hasText: 'claude:bare' })).toHaveCount(1);
   await expect(agents.locator('.agent a.session-link')).toHaveCount(0);
 });
+
+test('a guidance card names the agent that proposed it and its session, and opens that session in herdr', async ({ page }) => {
+  // The person read "Agent: system" on a proposal, with nothing to say which session sent it.
+  const origin = { harness: 'claude-code', session: 'fix', name: 'Fix the guidance', host: 'laptop', cwd: '/src/app', herdrPane: 'w4:p1', herdrWorkspace: 'app', herdrTab: 'fixes' };
+  const first = (await inbox.agent.guidance()).text.split('\n')[0]!;
+  await inbox.agent.proposeGuidance([{ old: first, new: `${first}\nAttach a screenshot to every UI card.` }], { message: 'Adds the screenshot rule.', agent: 's-guide', origin });
+  await inbox.open(page);
+  await expect(page.locator('.card-title')).toHaveText('Send new card guidance to agents?');
+  await expect(page.locator('.tag.agent')).toHaveText('Agent: Fix the guidance');
+  const where = page.locator('.focus-card .origin');
+  await expect(where).toContainText('Fix the guidance · claude-code · laptop · /src/app');
+  await expect(where).toContainText('herdr: workspace app › tab fixes');
+  await where.getByRole('button', { name: 'Open session' }).click();
+  await expect.poll(focused).toEqual(['agent focus w4:p1']);
+  // The edit shows as one added line, with the rest of the guidance unchanged.
+  const diff = page.locator('.guidance-diff');
+  await expect(diff.locator('.del')).toHaveCount(0);
+  await expect(diff.locator('.add')).toHaveText(['+ Attach a screenshot to every UI card.']);
+  await expect(page.locator('.broadcast .note').first()).toContainText('The agent proposes one edit.');
+});
+
+test('an edit whose passage another approval removed says so, and approving it changes nothing', async ({ page }) => {
+  const first = (await inbox.agent.guidance()).text.split('\n')[0]!;
+  const a = await inbox.agent.proposeGuidance([{ old: first, new: 'Lead with the goal.' }], { message: 'Shorter.', agent: 's-a' });
+  const b = await inbox.agent.proposeGuidance([{ old: first, new: 'Lead with the question.' }], { message: 'Clearer.', agent: 's-b' });
+  await inbox.server.inbox.answer(a.id, { values: { choice: 'approve' } });
+  const version = (await inbox.agent.guidance()).version;
+  await inbox.open(page);
+  await expect(page.locator('.card-title')).toHaveText('Send new card guidance to agents?');
+  await expect(page.locator('.broadcast .note.warn')).toContainText('This proposal no longer applies');
+  await page.getByRole('button', { name: 'Approve and send' }).click();
+  await expect.poll(async () => (await inbox.state()).cards.find((c) => c.id === b.id)?.closed?.outcome).toMatch(/^Not applied: edit 1/);
+  expect((await inbox.agent.guidance()).version).toBe(version);
+});

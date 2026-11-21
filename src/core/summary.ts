@@ -47,6 +47,8 @@ export interface CardSummary {
   /** The session name, for the agent's name in the list, its harness, which priority rules read, and the working
    * directory it reported, which the panel that sends an agent a card shows. */
   origin?: { name?: string; harness?: string; cwd?: string };
+  /** On a system card an agent's request made: that agent, whose session the origin names. */
+  proposedBy?: string;
   from?: string;
   follows?: string;
   followedBy?: string;
@@ -83,7 +85,7 @@ export function summarize(card: Card, answer: Answer | undefined): CardSummary {
     : undefined;
   return {
     id: card.id, agent: card.agent, kind: card.kind, title: card.title, priority: card.priority, status: card.status, rating: card.rating, tags, origin,
-    from: card.from, follows: card.follows, followedBy: card.followedBy, deliver: card.deliver, version: card.version,
+    proposedBy: card.proposedBy, from: card.from, follows: card.follows, followedBy: card.followedBy, deliver: card.deliver, version: card.version,
     createdAt: card.createdAt, updatedAt: card.updatedAt, expiresAt: card.expiresAt,
     // The whole outcome comes with the card. Triage or the page can write a long one. A dismissal's draft stays in the card:
     // only the owner reads it, and a summary is a small row.

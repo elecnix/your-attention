@@ -407,13 +407,22 @@ export class CardView {
     const { s: st } = this.host.theme;
     const b = this.card.broadcast!;
     const current = s.guidance ?? b.base ?? { text: '', version: 0 };
-    const changed = !!(b.base && s.guidance && b.base.version !== s.guidance.version);
-    const rows = guidanceDiff(current.text, b.text, changed ? b.base!.text : undefined);
+    // A proposal of edits arrives with its text derived from the guidance stored now, as on the page.
+    const changed = !b.edits && !!(b.base && s.guidance && b.base.version !== s.guidance.version);
+    const rows = guidanceDiff(current.text, b.text ?? current.text, changed ? b.base!.text : undefined);
     const same = rows.filter((r) => r.kind === 'same').length;
     doc.gap();
     doc.para([{ text: `${b.from ? `${sanitize(agentName(b.from, s.cards, s.presence))} proposes` : 'Proposed'} changes to card guidance version ${current.version}`, style: st.dim }]);
     if (b.message) { doc.gap(); doc.para([{ text: sanitize(b.message) }]); }
+    if (b.stale) doc.para([{ text: `Warning: this proposal no longer applies, because the guidance changed after the agent proposed it: ${sanitize(b.stale)}. Approving changes nothing, and the agent hears why.`, style: st.warn }]);
+    else if (b.edits) doc.para([{ text: `The agent proposes ${b.edits.length === 1 ? 'one edit' : `${b.edits.length} edits`}. Approving applies ${b.edits.length === 1 ? 'it' : 'them'} to the guidance as it is then, so the rest of the text stays as it is.`, style: st.dim }]);
+    else doc.para([{ text: 'The agent proposes a whole new text: approving replaces every rule with it.', style: st.dim }]);
     if (changed) doc.para([{ text: `Warning: the guidance changed after the agent proposed this text. The proposal starts from version ${b.base!.version}, and the guidance is now version ${s.guidance!.version}. Approving removes the lines marked as added after the proposal.`, style: st.warn }]);
+    // An edit proposal derived from an older version than the state holds is fetched again at once, and a stale one
+    // changes nothing, so neither draws a diff, as on the page.
+    const behind = !!(b.edits && b.base && s.guidance && b.base.version !== s.guidance.version);
+    if (behind && !b.stale) doc.para([{ text: `Warning: the guidance changed to version ${s.guidance!.version} since this copy of the card. The diff shows again once the card is read against it, and Approve and send waits until then.`, style: st.warn }]);
+    if (b.stale || behind) return;
     const whole = same > 0 && toggle('meta:guidance-full', `Show the full text (${same} unchanged line${same === 1 ? '' : 's'})`);
     if (same === rows.length && !whole) { doc.para([{ text: 'The proposal matches the current guidance.', style: st.dim }]); return; }
     for (let k = 0; k < rows.length; k++) {
