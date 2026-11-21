@@ -101,9 +101,12 @@ describe('the channel asks an inactive session for a card', () => {
     // The 2 minute ask went out before the restart.
     write({ since, asks: 1 });
     mcp = await channel();
+    // A process can take longer to start than the schedule's shortened minutes: then the ask is overdue, and it goes out
+    // as soon as the channel is up rather than waiting for the 10 minute mark.
+    const ready = (Date.now() - since) / MINUTE;
     await until(() => asks.length === 1 || undefined, 5000);
     const minute = (asks[0]! - since) / MINUTE;
-    assert.ok(minute >= 5 && minute < 7, `the restarted channel asks at 5 minutes, not ${minute}`);
+    assert.ok(minute >= 5 && minute < Math.max(5, ready) + 2, `the restarted channel asks at 5 minutes, or once it is up at ${ready}, not ${minute}`);
     assert.deepEqual(read(), { since, asks: 2, ours: true });
   });
 });
