@@ -81,6 +81,8 @@ describe('guidance proposals as edits', () => {
     (inbox as unknown as { store: MemoryStorage }).store.put('meta', 'guidance', { text: `${BASE}\nGive two options.`, version: 8, at: 0 });
     assert.throws(() => inbox.proposeGuidance([{ old: 'Give two options.', new: 'Give three.' }], 'Why.', by), refused(409, /^edit 1: the old text occurs 2 times/));
     assert.throws(() => inbox.proposeGuidance([], 'Why.', by), refused(400, /edits/));
+    // One edit sent as an object, not a list, must never become a whole text that replaces every rule.
+    assert.throws(() => inbox.proposeGuidance({ old: 'Lead with the goal.', new: 'x' } as never, 'Why.', by), refused(400, /edits must be a list/));
     assert.throws(() => inbox.proposeGuidance([{ old: '', new: 'x' }], 'Why.', by), refused(400, /edit 1: old/));
     assert.throws(() => inbox.proposeGuidance([{ old: 'Lead with the goal.', new: 'Lead with the goal.' }], 'Why.', by), refused(400, /edit 1: new is identical/));
     assert.throws(() => inbox.proposeGuidance([{ old: `${BASE}\nGive two options.`, new: '' }], 'Why.', by), refused(400, /empty/), 'edits that delete every rule are refused');

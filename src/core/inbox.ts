@@ -1948,7 +1948,8 @@ export class Inbox {
    * so it applies them to the guidance as it is at the approval. A string replaces every rule with that text. */
   proposeGuidance(proposal: string | GuidanceEdit[], message: string, by?: { caller: Caller; agent: string; origin?: unknown }): Card {
     const base = this.guidance();
-    const edits = Array.isArray(proposal) ? checkGuidanceEdits(proposal) : undefined;
+    // Anything but a string is a list of edits, so one edit sent as an object is refused rather than read as a whole text.
+    const edits = typeof proposal === 'string' ? undefined : checkGuidanceEdits(proposal);
     // The catalog and the tag lines reach agents beside the guidance text, so a proposal that carries them keeps the
     // words the agent wrote and loses those lines: an agent that pastes a whole card_guidance answer still proposes.
     const clean = edits ? undefined : guidanceTextOnly(String(proposal ?? ''), this.widgetCatalog());
