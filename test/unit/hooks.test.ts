@@ -28,6 +28,30 @@ describe('the card.created hook', () => {
     assert.equal(inbox.state().states['c1'], 'in-triage');
   });
 
+  it('reopens a card triage returned when the person asks, and drops the return it added', () => {
+    const { inbox, agent, ext, calls } = setup();
+    const owner: Caller = { token: 'to', role: 'owner' };
+    inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'] }, (e) => calls.push(e as CardCall));
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'return', 'Say what you recommend.');
+    assert.equal(inbox.getCard('c1').closed?.kind, 'returned');
+    const back = inbox.reopen(owner, 'c1');
+    assert.equal(back.closed, undefined);
+    assert.equal(back.triage, undefined);
+    assert.equal(back.pushback, undefined);
+    assert.equal(inbox.state().states['c1'], 'open');
+  });
+
+  it('reopens only a card that triage returned, and only for the owner', () => {
+    const { inbox, agent } = setup();
+    const owner: Caller = { token: 'to', role: 'owner' };
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
+    assert.throws(() => inbox.reopen(owner, 'c1'), /only a card that triage returned/);
+    inbox.close(agent, 'c1', 'retracted', 'Not needed.');
+    assert.throws(() => inbox.reopen(owner, 'c1'), /only a card that triage returned/);
+    assert.throws(() => inbox.reopen(agent, 'c1'), /only the owner reopens a card/);
+  });
+
   it('passes, holds, or returns a card', () => {
     const { inbox, agent, ext, calls } = setup();
     const back: AgentEvent[] = [];
