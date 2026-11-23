@@ -1,7 +1,7 @@
 // The loop every card.created extension runs: dial in on the extension stream, give each new card to a check, and
 // send its verdict back. Triage uses it, and so does the example in examples/triage-agent. A check that throws passes
 // the card, because a broken check must never keep a card from the person.
-import type { HookEvent } from '../core/hooks.ts';
+import type { HookEvent, ScreenMode } from '../core/hooks.ts';
 
 export interface Ruling {
   verdict: 'pass' | 'return';
@@ -28,6 +28,8 @@ export interface CardHookConfig {
   timeoutMs?: number;
   /** Checks at once. A burst of cards waits its turn instead of hitting a model's rate limit. */
   concurrency?: number;
+  /** Which cards this connection screens: `open` also takes the open cards that have no verdict yet. Defaults to `new`. */
+  screen?: ScreenMode;
   log?: (...a: unknown[]) => void;
   fetcher?: typeof fetch;
 }
@@ -98,7 +100,7 @@ export async function runCardHook(cfg: CardHookConfig, check: CardCheck, signal:
       log('verdict failed:', ev.card.id, (e as Error).message);
     }
   };
-  const q = new URLSearchParams({ name: cfg.name, hooks: 'card.created', policy: 'fail-open', timeoutMs: String(cfg.timeoutMs ?? 120_000) });
+  const q = new URLSearchParams({ name: cfg.name, hooks: 'card.created', policy: 'fail-open', timeoutMs: String(cfg.timeoutMs ?? 120_000), screen: cfg.screen ?? 'new' });
   while (!signal.aborted) {
     try {
       const res = await fetcher(`${base}/v1/extensions/stream?${q}`, { headers: auth, signal });

@@ -388,6 +388,15 @@ function keptTagFrom(from: Record<string, string> | undefined, tags: Record<stri
   return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
+/** When a card.created extension last went away, so a reconnecting one screens only the cards that arrived since. */
+const extensionAwayKey = (name: string): string => `extension-away:${name}`;
+
+/** Whether a card arrived or moved while the extension was away. A revision keeps the card's creation time and bumps
+ * its version, so the update time is what says it changed. Both times count the stamp itself: a card posted in the same
+ * millisecond the extension left is one it never saw, and a strict comparison would leave it unchecked for good. */
+const movedWhileAway = (card: Card, away: number | undefined): boolean =>
+  away !== undefined && (card.createdAt >= away || (card.version > 1 && card.updatedAt >= away));
+
 export class Inbox {
   private readonly store: Storage;
   private readonly blobs: BlobStore;
@@ -893,18 +902,25 @@ export class Inbox {
     const entry = { reg: this.checkExtension(caller, reg), token: caller.token, send };
     const name = entry.reg.name;
     this.extensions.set(name, entry);
-    // Screen the cards that came in while no extension was there.
+    // Screen the cards that came in while no extension was there, and nothing older. A first connection
+    // screens nothing: those cards are ones the person already had, and a return would close a card they
+    // never answered.
     if (entry.reg.hooks.includes('card.created')) {
+      const away = this.store.get<{ at?: number }>('meta', extensionAwayKey(name))?.at;
       for (const card of this.store.list<Card>('cards')) {
         if ((card.kind !== 'ask' && card.kind !== 'secret') || card.closed || this.store.get('answers', card.id)) continue;
         const t = card.triage;
         if (t?.state === 'pending' && t.request && t.deadline && t.waiting?.includes(name)) {
           // A call this extension missed while it reconnected.
           send({ type: 'hook', version: HOOK_VERSION, id: t.request, hook: 'card.created', card: publicCard(card), deadline: t.deadline, person: this.person() });
-        } else if (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length)) this.requestTriage(card, true);
+        } else if ((entry.reg.screen === 'open' || movedWhileAway(card, away)) && (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length))) this.requestTriage(card, true);
       }
     }
-    return () => { if (this.extensions.get(name) === entry) this.extensions.delete(name); };
+    return () => {
+      if (this.extensions.get(name) !== entry) return;
+      this.extensions.delete(name);
+      this.store.put('meta', extensionAwayKey(name), { key: extensionAwayKey(name), at: this.now() });
+    };
   }
 
   /** Check and complete an extension registration without connecting it. */
@@ -915,12 +931,14 @@ export class Inbox {
     const hooks = (reg.hooks ?? []).map(String);
     if (!hooks.length || !hooks.every(isHook)) throw new InboxError(400, `hooks must name some of ${Object.keys(HOOKS).join(', ')}`);
     const policy = reg.policy === 'fail-closed' ? 'fail-closed' : 'fail-open';
+    const screen = reg.screen === undefined ? 'new' : reg.screen;
+    if (screen !== 'new' && screen !== 'open') throw new InboxError(400, 'screen must be new or open');
     const asked = Number(reg.timeoutMs);
     const timeoutMs = Math.min(Math.max(Number.isFinite(asked) && asked > 0 ? asked : HOOKS['card.created'].defaultTimeoutMs, 1000), 600_000);
-    return { name, hooks: hooks as HookName[], policy, timeoutMs };
+    return { name, hooks: hooks as HookName[], policy, timeoutMs, screen };
   }
 
-  /** `rescreen` is for a card the person already had, which a hook that connects later screens again. It is not new, so it never pushes. */
+  /** `rescreen` is for a card that arrived while no extension was there, which a hook that connects later screens again. It is not new, so it never pushes. */
   private requestTriage(card: Card, rescreen = false): Card {
     if (rescreen && !card.pushed && hadReached(card)) card = { ...card, pushed: true };
     const targets = [...this.extensions.values()].filter((e) => e.reg.hooks.includes('card.created'));

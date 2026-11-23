@@ -25,11 +25,16 @@ export type HookEvent =
   | { type: 'hook'; version: number; id: string; hook: 'answer.saved'; card: Card; answer: Answer }
   | { type: 'hook'; version: number; id: string; hook: 'person.changed'; person: PersonPresence };
 
+/** Which cards a connection screens beyond the new ones: `new` leaves the open cards alone, and `open` screens them
+ * too. A first connection with `new` screens nothing, so the cards the person already had stay as they are. */
+export type ScreenMode = 'new' | 'open';
+
 export interface ExtensionRegistration {
   name: string;
   hooks: HookName[];
   timeoutMs: number;
   policy: FailurePolicy;
+  screen: ScreenMode;
 }
 
 export function isHook(name: string): name is HookName {

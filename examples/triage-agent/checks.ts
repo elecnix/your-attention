@@ -12,6 +12,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { ScreenMode } from '../../src/core/hooks.ts';
 import type { Card } from '../../src/core/types.ts';
 import type { Ruling } from '../../src/extensions/card-hook.ts';
 import { logRuling, type LoggedCheck, type RulingLine } from './log.ts';
@@ -52,6 +53,9 @@ export interface ExampleConfig {
   maxReturns: number;
   /** Where the agent keeps the return counts and the bypass codes. */
   stateFile: string;
+  /** Which cards a connection screens: `new` checks the cards that arrive while it is connected, and `open` also
+   * takes the open cards that have no triage verdict yet, once, when it connects. */
+  screen: ScreenMode;
   /** Where the agent appends one JSON line per ruling, for the operator to look back at. */
   logFile: string;
 }
@@ -61,6 +65,7 @@ export const DEFAULTS: ExampleConfig = {
   policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', prVerdictBlockBelow: 0.5 },
   maxReturns: 3,
   stateFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'),
+  screen: 'new',
   logFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage.jsonl'),
 };
 /** The tag an agent sets, to the code a return notice gave it, to let one urgent card skip triage. */
@@ -105,6 +110,10 @@ export function loadConfig(file = defaultConfigPath(), log: (line: string) => vo
   if (raw['maxReturns'] !== undefined) {
     const m = raw['maxReturns'];
     cfg.maxReturns = Number.isInteger(m) && (m as number) >= 0 ? m as number : bad('maxReturns must be a whole number, 0 or more');
+  }
+  if (raw['screen'] !== undefined) {
+    const v = raw['screen'];
+    cfg.screen = v === 'new' || v === 'open' ? v : bad('screen must be "new" or "open"');
   }
   /** A path field, with a leading `~/` expanded to the home directory, as stateFile and logFile both are. */
   const pathField = (name: string): string | undefined => {

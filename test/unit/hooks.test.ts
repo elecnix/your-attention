@@ -18,8 +18,11 @@ function setup() {
 }
 
 describe('the card.created hook', () => {
-  it('lets a card through to the person when no extension is connected, and screens it once one connects', () => {
-    const { inbox, agent, ext, calls } = setup();
+  it('lets a card through to the person when no extension is connected, and screens it once one reconnects', () => {
+    const { inbox, agent, ext, calls, clock } = setup();
+    // The extension has been connected before, which is what makes a reconnection screen the gap.
+    inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'] }, () => {})();
+    clock.advance(1_000);
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
     assert.equal(inbox.state().states['c1'], 'open');
     assert.equal(inbox.getCard('c1').triage?.state, 'skipped');

@@ -296,6 +296,16 @@ describe('the example triage agent reads its local config', () => {
     assert.deepEqual(cfg.prVerdict, { command: ['/opt/verdict', 'predict'], acceptVerdicts: ['ACCEPT'], timeoutMs: 300_000 });
   });
 
+  it('screens new cards only by default, and takes screen: "open" to include the open cards', () => {
+    const file = path.join(dir, 'screen.json');
+    fs.writeFileSync(file, '{}');
+    assert.equal(loadConfig(file).screen, 'new');
+    fs.writeFileSync(file, JSON.stringify({ screen: 'open' }));
+    assert.equal(loadConfig(file).screen, 'open');
+    fs.writeFileSync(file, JSON.stringify({ screen: 'backlog' }));
+    assert.throws(() => loadConfig(file), /screen must be "new" or "open"/);
+  });
+
   it('reads the policy, and fills in the parts it leaves out', () => {
     const file = path.join(dir, 'policy.json');
     fs.writeFileSync(file, JSON.stringify({ policy: { classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 }, maxReturns: 5 }));
