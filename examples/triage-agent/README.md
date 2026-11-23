@@ -74,6 +74,9 @@ You don't need a config file. With `--config FILE`, the agent reads FILE. Withou
 | `policy.prVerdictBlockBelow` | `0.5` | the confidence, from 0 to 1, below which a verdict outside `acceptVerdicts` blocks the card |
 | `maxReturns` | `3` | how many times one card goes back before its next attempt passes with advice |
 | `stateFile` | `~/.local/state/your-attention/triage-example.json` | the return counts and the bypass codes |
+| `screen` | `new` | which cards a connection checks. With `new` it checks the cards that arrive while it is connected, and the ones that arrived while it was away. With `open` it also takes the open cards that have no verdict from it yet, as soon as it connects. |
+
+**Which cards it checks.** With `screen: "new"`, a connection checks only the cards that arrive from then on, and leaves every card the person already had as it was. A card that arrives while the agent is away waits, and the next connection checks it, which is the window an outage leaves. With `screen: "open"`, the connection also takes the open cards that have no verdict from this agent yet, so a long-standing backlog is checked once, and it costs one run of the checks on each card. `--screen-open` asks for that on one connection without changing the file, and the next connection without the flag goes back to new cards. A card that is already pending on the agent gets its call again, however old it is, because that call stopped when the agent dropped.
 
 An earlier version had a classifier step that asked a card to explain its names, with the fields `knownNames` and `policy.classifierNames`. A config that still has them loads, and the agent logs one line saying it ignores them.
 

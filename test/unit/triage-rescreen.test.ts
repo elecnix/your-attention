@@ -41,6 +41,20 @@ describe('an extension that connects', () => {
     assert.equal(inbox.getCard('old').triage?.state, 'skipped');
   });
 
+  it('takes the open cards too when it registers with screen: open', () => {
+    const { inbox, agent } = setup();
+    inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Which one?' });
+    const calls: HookEvent[] = [];
+    inbox.connectExtension({ ...ext }, { name: 'triage-example', hooks: ['card.created'], screen: 'open' }, (e) => calls.push(e));
+    assert.equal(calls.length, 1);
+    assert.equal(inbox.getCard('old').triage?.state, 'pending');
+  });
+
+  it('refuses a screen mode it does not know', () => {
+    const { inbox } = setup();
+    assert.throws(() => inbox.connectExtension(ext, { name: 'triage-example', hooks: ['card.created'], screen: 'backlog' as 'new' }, () => {}), /screen must be new or open/);
+  });
+
   it('replays a call it missed mid-flight, however old the card is', () => {
     const { inbox, agent } = setup();
     const first: HookEvent[] = [];

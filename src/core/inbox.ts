@@ -907,7 +907,7 @@ export class Inbox {
         if (t?.state === 'pending' && t.request && t.deadline && t.waiting?.includes(name)) {
           // A call this extension missed while it reconnected.
           send({ type: 'hook', version: HOOK_VERSION, id: t.request, hook: 'card.created', card: publicCard(card), deadline: t.deadline, person: this.person() });
-        } else if (away !== undefined && card.createdAt > away && (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length))) this.requestTriage(card, true);
+        } else if ((entry.reg.screen === 'open' || (away !== undefined && card.createdAt > away)) && (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length))) this.requestTriage(card, true);
       }
     }
     return () => {
@@ -925,9 +925,11 @@ export class Inbox {
     const hooks = (reg.hooks ?? []).map(String);
     if (!hooks.length || !hooks.every(isHook)) throw new InboxError(400, `hooks must name some of ${Object.keys(HOOKS).join(', ')}`);
     const policy = reg.policy === 'fail-closed' ? 'fail-closed' : 'fail-open';
+    const screen = reg.screen === undefined ? 'new' : reg.screen;
+    if (screen !== 'new' && screen !== 'open') throw new InboxError(400, 'screen must be new or open');
     const asked = Number(reg.timeoutMs);
     const timeoutMs = Math.min(Math.max(Number.isFinite(asked) && asked > 0 ? asked : HOOKS['card.created'].defaultTimeoutMs, 1000), 600_000);
-    return { name, hooks: hooks as HookName[], policy, timeoutMs };
+    return { name, hooks: hooks as HookName[], policy, timeoutMs, screen };
   }
 
   /** `rescreen` is for a card that arrived while no extension was there, which a hook that connects later screens again. It is not new, so it never pushes. */

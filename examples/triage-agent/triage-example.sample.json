@@ -15,5 +15,6 @@
     "prVerdictBlockBelow": 0.5
   },
   "maxReturns": 3,
+  "screen": "new",
   "stateFile": "~/.local/state/your-attention/triage-example.json"
 }
