@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-pre",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js\" claude-hook ask-pre",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-post",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js\" claude-hook ask-post",
             "timeout": 10
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-cancel",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js\" claude-hook ask-cancel",
             "timeout": 10
           }
         ]
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-cancel",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js\" claude-hook ask-cancel",
             "timeout": 10
           }
         ]
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-cancel",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js\" claude-hook ask-cancel",
             "timeout": 10
           }
         ]
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-cancel",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js\" claude-hook ask-cancel",
             "timeout": 10
           }
         ]

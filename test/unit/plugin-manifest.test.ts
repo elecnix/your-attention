@@ -27,7 +27,9 @@ describe('the Claude Code plugin manifest', () => {
   it('serves the channel server this package implements', () => {
     const server = pluginJson.mcpServers['your-attention'];
     assert.ok(server, 'the manifest declares the your-attention server');
-    assert.equal(server.args?.[0], 'claude-channel');
+    assert.equal(server.command, 'node');
+    assert.match(server.args?.[0] ?? '', /claude-plugin-runner\.js$/);
+    assert.equal(server.args?.[1], 'claude-channel');
     assert.deepEqual(pluginJson.channels?.map((channel) => channel.server), ['your-attention']);
   });
 
@@ -37,9 +39,9 @@ describe('the Claude Code plugin manifest', () => {
     );
     assert.ok(commands.length >= 6);
     for (const command of commands) {
-      assert.match(command, /^"\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/claude-plugin-runner\.sh" claude-hook /);
+      assert.match(command, /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/claude-plugin-runner\.js" claude-hook /);
     }
-    const runner = path.join(root, 'bin', 'claude-plugin-runner.sh');
+    const runner = path.join(root, 'bin', 'claude-plugin-runner.js');
     // Windows checks out without POSIX permission bits, so the mode carries no meaning there.
     if (process.platform !== 'win32') assert.ok(fs.statSync(runner).mode & 0o111, 'the runner is executable');
   });

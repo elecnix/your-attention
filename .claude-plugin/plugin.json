@@ -9,11 +9,19 @@
   "homepage": "https://github.com/elecnix/your-attention",
   "repository": "https://github.com/elecnix/your-attention",
   "license": "MIT",
-  "keywords": ["inbox", "channel", "claude-code", "coding-agents"],
+  "keywords": [
+    "inbox",
+    "channel",
+    "claude-code",
+    "coding-agents"
+  ],
   "mcpServers": {
     "your-attention": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh",
-      "args": ["claude-channel"]
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js",
+        "claude-channel"
+      ]
     }
   },
   "channels": [
