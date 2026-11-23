@@ -160,6 +160,8 @@ export interface Triage {
   waiting?: string[];
   /** Advice from the extensions that passed the card, which the inbox gives the agent once every extension passed it. */
   advice?: { by: string; text: string }[];
+  /** On a pass whose extension ran no checks because the agent used a bypass code. */
+  bypass?: boolean;
   at: number;
 }
 

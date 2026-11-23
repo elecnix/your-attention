@@ -420,7 +420,7 @@ export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unkn
     bypass = used.ok ? { used: true, issuedFor: used.issuedFor } : { used: false, why: used.why };
     if (used.ok) {
       log(card.id, `bypass used by agent ${card.agent} on card ${card.id}, with the code from card ${used.issuedFor}`);
-      return answer({ verdict: 'pass', reason: 'Passed without checks: the agent used a triage bypass code for an urgent card.' });
+      return answer({ verdict: 'pass', reason: 'Passed without checks: the agent used a triage bypass code for an urgent card.', bypass: true });
     }
     log(card.id, `bypass refused for agent ${card.agent} on card ${card.id}: ${used.why}`);
     note = `The ${BYPASS_TAG} code on this card is not valid: ${used.why}, so triage checked the card.`;

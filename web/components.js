@@ -10,11 +10,11 @@ import { groupCode, readSignIn } from './sign-in.js';
 import { naturalSize, zoomSize, zoomedSvg } from './zoom.js';
 import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, pushbackKey, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
-import { agentName, presenceOf } from './queue.js';
+import { agentName, presenceOf, triageState } from './queue.js';
 import { agentList, pickedAgent, searchAgents } from './agents.js';
 import { linkOutcome } from './details.js';
 
-export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions, secretFieldsOf };
+export { agentName, answerValues, approvalValues, cardSource, describe, formValues, parseSource, presenceOf, recommendedOptions, secretFieldsOf, triageState };
 
 const { React, Renderer, openuiChatLibrary } = window.__OpenUI;
 // Code on every card copies with a click, on the page and in each story.
