@@ -85,7 +85,7 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_patch',
-    description: 'Edit one of your cards with exact replacements, the way you edit a file: each old text must occur exactly once. Cheaper than posting a long card again, and the person sees what changed.',
+    description: 'Edit one of your cards with exact replacements, the way you edit a file: each old text must occur exactly once. Cheaper than posting a long card again, and the person sees what changed. Set pullRequests to replace the GitHub pull requests the card is about, with no edits when that is all that changes, or send [] or null to clear them.',
     schema: {
       type: 'object',
       properties: {
