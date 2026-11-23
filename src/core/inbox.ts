@@ -391,6 +391,11 @@ function keptTagFrom(from: Record<string, string> | undefined, tags: Record<stri
 /** When a card.created extension last went away, so a reconnecting one screens only the cards that arrived since. */
 const extensionAwayKey = (name: string): string => `extension-away:${name}`;
 
+/** Whether a card arrived or moved while the extension was away. A revision keeps the card's creation time and bumps
+ * its version, so the update time is what says it changed. */
+const movedWhileAway = (card: Card, away: number | undefined): boolean =>
+  away !== undefined && (card.createdAt > away || (card.version > 1 && card.updatedAt > away));
+
 export class Inbox {
   private readonly store: Storage;
   private readonly blobs: BlobStore;
@@ -907,7 +912,7 @@ export class Inbox {
         if (t?.state === 'pending' && t.request && t.deadline && t.waiting?.includes(name)) {
           // A call this extension missed while it reconnected.
           send({ type: 'hook', version: HOOK_VERSION, id: t.request, hook: 'card.created', card: publicCard(card), deadline: t.deadline, person: this.person() });
-        } else if ((entry.reg.screen === 'open' || (away !== undefined && card.createdAt > away)) && (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length))) this.requestTriage(card, true);
+        } else if ((entry.reg.screen === 'open' || movedWhileAway(card, away)) && (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length))) this.requestTriage(card, true);
       }
     }
     return () => {
