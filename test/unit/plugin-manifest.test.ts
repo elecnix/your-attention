@@ -37,7 +37,7 @@ describe('the Claude Code plugin manifest', () => {
     );
     assert.ok(commands.length >= 6);
     for (const command of commands) {
-      assert.match(command, /^\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/claude-plugin-runner\.sh claude-hook /);
+      assert.match(command, /^"\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/claude-plugin-runner\.sh" claude-hook /);
     }
     const runner = path.join(root, 'bin', 'claude-plugin-runner.sh');
     // Windows checks out without POSIX permission bits, so the mode carries no meaning there.

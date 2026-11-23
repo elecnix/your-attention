@@ -4,7 +4,11 @@
       {
         "matcher": "AskUserQuestion",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh claude-hook ask-pre", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-pre",
+            "timeout": 10
+          }
         ]
       }
     ],
@@ -12,7 +16,11 @@
       {
         "matcher": "AskUserQuestion",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh claude-hook ask-post", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-post",
+            "timeout": 10
+          }
         ]
       }
     ],
@@ -20,7 +28,11 @@
       {
         "matcher": "AskUserQuestion",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh claude-hook ask-cancel", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-cancel",
+            "timeout": 10
+          }
         ]
       }
     ],
@@ -28,21 +40,33 @@
       {
         "matcher": "AskUserQuestion",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh claude-hook ask-cancel", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-cancel",
+            "timeout": 10
+          }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh claude-hook ask-cancel", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-cancel",
+            "timeout": 10
+          }
         ]
       }
     ],
     "SessionEnd": [
       {
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh claude-hook ask-cancel", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.sh\" claude-hook ask-cancel",
+            "timeout": 10
+          }
         ]
       }
     ]
