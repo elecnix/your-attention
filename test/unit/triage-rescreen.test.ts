@@ -29,6 +29,8 @@ describe('an extension that connects', () => {
   it('screens only the cards that arrived while it was away', () => {
     const { inbox, agent, clock } = setup();
     inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Which one?' });
+    // A real clock moves between the card and the connection; a frozen one would put both on the same millisecond.
+    clock.advance(1);
     const first: CardCall[] = [];
     const leave = connect(inbox, first);
     leave();
@@ -40,6 +42,19 @@ describe('an extension that connects', () => {
     assert.equal(second.length, 1);
     assert.ok(hook(second, inbox.getCard('away').triage!.request!));
     assert.equal(inbox.getCard('old').triage?.state, 'skipped');
+  });
+
+  it('screens a card posted in the same millisecond the extension left', () => {
+    const { inbox, agent } = setup();
+    const first: CardCall[] = [];
+    const leave = connect(inbox, first);
+    leave();
+    // The clock does not move between the disconnect and the post, which is one millisecond on a fast machine.
+    inbox.postCard(agent, { id: 'same-ms', agent: 's1', title: 'Which one?' });
+    const second: CardCall[] = [];
+    connect(inbox, second);
+    assert.equal(second.length, 1);
+    assert.equal(second[0]!.card.id, 'same-ms');
   });
 
   it('screens a card an agent revised while it was away', () => {

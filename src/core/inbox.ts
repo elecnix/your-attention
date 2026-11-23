@@ -392,9 +392,10 @@ function keptTagFrom(from: Record<string, string> | undefined, tags: Record<stri
 const extensionAwayKey = (name: string): string => `extension-away:${name}`;
 
 /** Whether a card arrived or moved while the extension was away. A revision keeps the card's creation time and bumps
- * its version, so the update time is what says it changed. */
+ * its version, so the update time is what says it changed. Both times count the stamp itself: a card posted in the same
+ * millisecond the extension left is one it never saw, and a strict comparison would leave it unchecked for good. */
 const movedWhileAway = (card: Card, away: number | undefined): boolean =>
-  away !== undefined && (card.createdAt > away || (card.version > 1 && card.updatedAt > away));
+  away !== undefined && (card.createdAt >= away || (card.version > 1 && card.updatedAt >= away));
 
 export class Inbox {
   private readonly store: Storage;
