@@ -7,7 +7,7 @@ import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError, type SearchFilters, type SearchPage, type TriageFeedbackRecord } from './core/inbox.ts';
 import { isSealed } from './core/sealed.ts';
-import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, Origin, PublicSubscription, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, Origin, PublicSubscription, PullRequest, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 
@@ -204,7 +204,7 @@ export class Client {
   /** An inbox that does not check diagrams or bodies itself, such as the hosted one, takes them unchecked. So the client
    * reads what the inbox would store, after templates and widgets, and checks it as a laptop inbox would, before it sends the card.
    * It fails with the laptop inbox's own words. */
-  private async checkFirst(route: string, req: { card?: NewCard; id?: string; edits?: { old: string; new: string }[]; field?: string | undefined }): Promise<void> {
+  private async checkFirst(route: string, req: { card?: NewCard; id?: string; edits?: { old: string; new: string }[]; field?: string | undefined; pullRequests?: PullRequest | PullRequest[] | null }): Promise<void> {
     this.inboxChecks ??= this.call<{ checks?: { diagrams: boolean; body: boolean } }>('GET', '/v1/info')
       .then((i) => i.checks ?? { diagrams: true, body: true }, (e: unknown) => { this.inboxChecks = undefined; throw e; });
     const checks = await this.inboxChecks;
@@ -229,10 +229,10 @@ export class Client {
   close(id: string, kind: CloseKind, outcome: string, ifUnanswered = false): Promise<Card> {
     return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/close`, { kind, outcome, ifUnanswered });
   }
-  async patch(id: string, edits: { old: string; new: string }[], field?: string): Promise<Card & { warning?: string }> {
+  async patch(id: string, edits: { old: string; new: string }[], field?: string, pullRequests?: PullRequest | PullRequest[] | null): Promise<Card & { warning?: string }> {
     const route = `/v1/cards/${encodeURIComponent(id)}/patch`;
-    await this.checkFirst(`POST ${route}`, { id, edits, field });
-    return this.call('POST', route, { edits, field });
+    await this.checkFirst(`POST ${route}`, { id, edits, field, pullRequests });
+    return this.call('POST', route, { edits, field, pullRequests });
   }
   status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
   /** Merge tags into a card already posted, and drop a key whose value is empty. */
