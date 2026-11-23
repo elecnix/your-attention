@@ -642,7 +642,7 @@ switch (command) {
       console.log(`Signed in. The key is in ${triage.OPENROUTER_KEY_FILE()}.`);
       break;
     }
-    const { values } = parseCommand(command, { args: rest, options: { 'judge-cmd': { type: 'string' }, 'judge-url': { type: 'string' }, 'judge-model': { type: 'string' }, 'judge-key-env': { type: 'string' }, name: { type: 'string', default: 'triage' } } });
+    const { values } = parseCommand(command, { args: rest, options: { 'judge-cmd': { type: 'string' }, 'judge-url': { type: 'string' }, 'judge-model': { type: 'string' }, 'judge-key-env': { type: 'string' }, 'screen-open': { type: 'boolean', default: false }, name: { type: 'string', default: 'triage' } } });
     const { loadExtensionConfig } = await import('./client.ts');
     const config = loadExtensionConfig() ?? fail('No inbox found: start one, or set YOUR_ATTENTION_URL and YOUR_ATTENTION_TOKEN to an extension token.');
     const judge = values['judge-cmd'] ? triage.commandJudge(values['judge-cmd'])
@@ -651,7 +651,7 @@ switch (command) {
     const stop = new AbortController();
     process.on('SIGTERM', () => stop.abort());
     process.on('SIGINT', () => stop.abort());
-    await triage.runTriage({ ...config, judge, name: values.name }, stop.signal);
+    await triage.runTriage({ ...config, judge, name: values.name, screen: values['screen-open'] ? 'open' : 'new' }, stop.signal);
     break;
   }
   case 'service': {

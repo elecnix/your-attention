@@ -8,6 +8,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { Card, PersonPresence } from '../core/types.ts';
 import { homeDir, writePrivate } from '../node/home.ts';
+import type { ScreenMode } from '../core/hooks.ts';
 import { limiter, runCardHook, type Ruling } from './card-hook.ts';
 
 export { limiter, type Ruling };
@@ -21,6 +22,8 @@ export interface TriageConfig {
   judge: Judge;
   name?: string;
   timeoutMs?: number;
+  /** Which cards this connection screens: `open` also takes the open cards that have no verdict yet. Defaults to `new`. */
+  screen?: ScreenMode;
   /** Cards checked at once. A burst of cards waits its turn instead of hitting the judge's rate limit. */
   concurrency?: number;
   log?: (...a: unknown[]) => void;
@@ -182,7 +185,7 @@ export function defaultJudge(model = 'openrouter/auto'): Judge {
 
 /** Run triage until `signal` aborts. Reconnects after a drop, and the inbox resends calls it missed. */
 export async function runTriage(cfg: TriageConfig, signal: AbortSignal): Promise<void> {
-  await runCardHook({ url: cfg.url, token: cfg.token, name: cfg.name ?? 'triage', timeoutMs: cfg.timeoutMs, concurrency: cfg.concurrency, log: cfg.log }, async (ev, call, signal) => {
+  await runCardHook({ url: cfg.url, token: cfg.token, name: cfg.name ?? 'triage', timeoutMs: cfg.timeoutMs, concurrency: cfg.concurrency, screen: cfg.screen, log: cfg.log }, async (ev, call, signal) => {
     const guidance = (await call<{ text: string }>('/v1/guidance')).text;
     const words = ev.card.title.split(/\s+/).filter((w) => w.length > 3).slice(0, 4).join(' ');
     // A bare word search, so an inbox from before the paged reply and one after both answer the array.

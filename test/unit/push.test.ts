@@ -313,8 +313,11 @@ describe('a push waits for triage, and goes once', () => {
     assert.equal(sent.length, 0, 'the person already had this card');
   });
 
-  it('does not push a card stored before pushes existed when a hook that connects later passes it', async () => {
-    const { inbox, owner, agent, sent, settle, store } = setup();
+  it('does not push a card stored before pushes existed when a hook that reconnects passes it', async () => {
+    const { inbox, owner, agent, sent, settle, store, clock } = setup();
+    // The extension has been connected before, which is what makes a reconnection screen the gap.
+    inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'], timeoutMs: 5000 }, () => {})();
+    clock.advance(60_000);
     inbox.postCard(agent, { id: 'old', agent: 's1', title: 'Seen days ago' });
     const stored = store.get<Record<string, unknown>>('cards', 'old')!;
     delete stored['pushed'];

@@ -129,6 +129,7 @@ const OPTIONS: Record<string, [string, string][]> = {
     ['--judge-model M', 'the model to ask at --judge-url, required with it'],
     ['--judge-key-env VAR', 'the variable that holds the key for --judge-url'],
     ['--name NAME', 'the name of this extension, triage by default'],
+    ['--screen-open', 'also check the open cards that have no verdict from this extension yet, once'],
     ['--verdict any|agree|disagree|partly', 'with feedback: only the cards with this verdict from the agent'],
   ],
   service: [

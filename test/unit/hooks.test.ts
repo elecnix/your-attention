@@ -18,8 +18,11 @@ function setup() {
 }
 
 describe('the card.created hook', () => {
-  it('lets a card through to the person when no extension is connected, and screens it once one connects', () => {
-    const { inbox, agent, ext, calls } = setup();
+  it('lets a card through to the person when no extension is connected, and screens it once one reconnects', () => {
+    const { inbox, agent, ext, calls, clock } = setup();
+    // The extension has been connected before, which is what makes a reconnection screen the gap.
+    inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'] }, () => {})();
+    clock.advance(1_000);
     inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
     assert.equal(inbox.state().states['c1'], 'open');
     assert.equal(inbox.getCard('c1').triage?.state, 'skipped');
@@ -50,6 +53,17 @@ describe('the card.created hook', () => {
     inbox.close(agent, 'c1', 'retracted', 'Not needed.');
     assert.throws(() => inbox.reopen(owner, 'c1'), /only a card that triage returned/);
     assert.throws(() => inbox.reopen(agent, 'c1'), /only the owner reopens a card/);
+  });
+
+  it('keeps the bypass a pass reports, and leaves it off a pass that ran the checks', () => {
+    const { inbox, agent, ext, calls } = setup();
+    inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'] }, (e) => calls.push(e as CardCall));
+    inbox.postCard(agent, { id: 'skipped', agent: 's1', title: 'Urgent' });
+    inbox.postCard(agent, { id: 'checked', agent: 's1', title: 'Ordinary' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'pass', 'Passed without checks: the agent used a triage bypass code for an urgent card.', '', true);
+    inbox.hookVerdict(ext, calls[1]!.id, 'pass', 'Every check that ran passed the card.');
+    assert.equal(inbox.getCard('skipped').triage?.bypass, true);
+    assert.equal(inbox.getCard('checked').triage?.bypass, undefined);
   });
 
   it('passes, holds, or returns a card', () => {

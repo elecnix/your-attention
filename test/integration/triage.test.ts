@@ -17,17 +17,20 @@ after(async () => { stop.abort(); await h.stop(); });
 const state = async () => (await h.stored()) as { cards: Card[]; states: Record<string, string> };
 
 describe('the triage service', () => {
-  it('lets cards through while it is down, then screens them when it connects', async () => {
+  it('leaves a card that arrived before it first connected alone', async () => {
     const agent = new Client({ url: h.server.url, token: h.agentToken });
     await agent.post({ id: 'early', agent: 's1', title: 'Rename the flag?' });
     assert.equal((await state()).states['early'], 'open');
     const token = fs.readFileSync(path.join(h.home, 'extension-token'), 'utf8').trim();
+    let connected: () => void = () => {};
+    const up = new Promise<void>((resolve) => { connected = resolve; });
     void runTriage({
-      url: h.server.url, token, log: () => {},
+      url: h.server.url, token, log: (...a: unknown[]) => { if (a[0] === 'connected to') connected(); },
       judge: async (prompt) => { judged++; return prompt.includes('"recommendation": "') ? '{"verdict":"pass"}' : '{"verdict":"return","reason":"Say what you recommend."}'; },
     }, stop.signal);
-    await until(async () => (await state()).states['early'] === 'closed' || undefined);
-    assert.equal((await state()).cards.find((c) => c.id === 'early')?.closed?.kind, 'returned');
+    await up;
+    assert.equal((await state()).cards.find((c) => c.id === 'early')?.triage?.state, 'skipped');
+    assert.equal((await state()).states['early'], 'open');
   });
 
   it('passes a card with a recommendation, and tells the agent about a returned one', async () => {
@@ -41,6 +44,19 @@ describe('the triage service', () => {
     const ev = await until(() => got.find((e) => e.type === 'returned'));
     assert.equal(ev.type === 'returned' && ev.reason, 'Say what you recommend.');
     s.abort();
-    assert.ok(judged >= 3);
+    // One call for the card with a recommendation, and one for the card without.
+    assert.ok(judged >= 2);
+  });
+
+  it('screens the cards that were there before it connected when the person asks for them', async () => {
+    const token = fs.readFileSync(path.join(h.home, 'extension-token'), 'utf8').trim();
+    const backlog = new AbortController();
+    void runTriage({
+      url: h.server.url, token, name: 'triage-backlog', screen: 'open', log: () => {},
+      judge: async () => '{"verdict":"return","reason":"Say what you recommend."}',
+    }, backlog.signal);
+    await until(async () => (await state()).states['early'] === 'closed' || undefined);
+    assert.equal((await state()).cards.find((c) => c.id === 'early')?.closed?.kind, 'returned');
+    backlog.abort();
   });
 });

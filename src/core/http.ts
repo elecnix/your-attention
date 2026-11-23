@@ -4,7 +4,7 @@ import { VERSION } from './version.ts';
 import { randomId } from './crypto.ts';
 import { fileLinkPaths, folderFilePath } from './file-links.ts';
 import { parseSessionLink } from './session-link.ts';
-import type { FailurePolicy, HookName, Verdict } from './hooks.ts';
+import type { FailurePolicy, HookName, ScreenMode, Verdict } from './hooks.ts';
 import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller, type PushInput, type SearchFilters } from './inbox.ts';
 import { UNLOCK_HEADER, UNLOCK_IDLE_MS, pinKeyError, validKey, type PinKey } from './pin.ts';
 import type { Source } from './telemetry.ts';
@@ -598,14 +598,15 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         hooks: (url.searchParams.get('hooks') ?? '').split(',').filter(Boolean) as HookName[],
         timeoutMs: Number(url.searchParams.get('timeoutMs') ?? 0) || undefined,
         policy: (url.searchParams.get('policy') ?? 'fail-open') as FailurePolicy,
+        screen: (url.searchParams.get('screen') ?? undefined) as ScreenMode | undefined,
       };
       // Validate before the stream opens, so a bad registration gets a plain error.
       inbox.checkExtension(me, reg);
       return eventStream((send) => inbox.connectExtension(me, reg, (ev) => send(ev.type, ev)), heartbeatMs);
     }
     if (method === 'POST' && a === 'hooks' && b) {
-      const v = await readJson<{ verdict?: Verdict; reason?: string; advice?: string }>(req);
-      return json(publicCard(inbox.hookVerdict(me, b, v.verdict as Verdict, String(v.reason ?? ''), String(v.advice ?? ''))));
+      const v = await readJson<{ verdict?: Verdict; reason?: string; advice?: string; bypass?: boolean }>(req);
+      return json(publicCard(inbox.hookVerdict(me, b, v.verdict as Verdict, String(v.reason ?? ''), String(v.advice ?? ''), v.bypass === true)));
     }
     if (a === 'webhooks') {
       owner();
