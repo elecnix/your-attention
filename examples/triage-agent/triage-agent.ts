@@ -23,10 +23,10 @@ if (!inbox) {
 }
 const configFile = values.config ?? defaultConfigPath();
 const cfg = loadConfig(configFile, log);
-// `--screen-open` takes the open cards that have no verdict yet on this connection. A restart without it goes back to
-// screening new cards only.
+// `--screen-open` takes the open cards that have no triage verdict yet on this connection. A restart without it goes
+// back to screening new cards only.
 const screen = values['screen-open'] ? 'open' : cfg.screen;
-log(`config ${configFile}: vale ${JSON.stringify(cfg.vale)}, classifier ${JSON.stringify(cfg.classifier)}, PR verdict ${cfg.prVerdict ? JSON.stringify(cfg.prVerdict.command) : 'off'}, policy ${JSON.stringify(cfg.policy)}, at most ${cfg.maxReturns} returns, screening ${screen === 'open' ? 'the open cards too' : 'new cards only'}`);
+log(`config ${configFile}: vale ${JSON.stringify(cfg.vale)}, classifier ${JSON.stringify(cfg.classifier)}, PR verdict ${cfg.prVerdict ? JSON.stringify(cfg.prVerdict.command) : 'off'}, policy ${JSON.stringify(cfg.policy)}, at most ${cfg.maxReturns} returns, screening ${screen === 'open' ? 'the open cards too' : 'new cards only'}, rulings log ${cfg.logFile}`);
 const state = new TriageState(cfg.stateFile);
 if (state.warning) log(state.warning);
 const stop = new AbortController();

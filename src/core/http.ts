@@ -753,6 +753,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           owner(); return json(inbox.force(b));
         case 'release':
           owner(); return json(publicCard(inbox.release(b)));
+        case 'reopen':
+          owner(); return json(publicCard(inbox.reopen(me, b)));
         case 'open': {
           owner();
           if (!options.openOrigin) return json({ error: 'this inbox cannot open sessions' }, 501);

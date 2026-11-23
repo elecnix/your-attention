@@ -2156,6 +2156,19 @@ export class Inbox {
     return this.closeAs(card, 'dismissed', 'Nothing was sent to the agent.', { values, comment: String(input.comment ?? '').trim(), at: this.now() });
   }
 
+  /** The person takes back a card that triage sent to its agent. The card opens again and reads as never triaged, and
+   * the return the extension added goes with it, so the card's chain does not count a return that the person undid. */
+  reopen(caller: Caller, id: string): Card {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner reopens a card');
+    const card = this.getCard(id);
+    if (card.closed?.kind !== 'returned') throw new InboxError(409, 'only a card that triage returned reopens this way');
+    const pushback = card.pushback?.at(-1)?.kind === 'returned' ? card.pushback.slice(0, -1) : card.pushback;
+    const next: Card = { ...card, closed: undefined, triage: undefined, ...(pushback?.length ? { pushback } : { pushback: undefined }) };
+    this.store.put('cards', id, next);
+    this.emit({ type: 'change', card: id });
+    return next;
+  }
+
   /** A successor agent takes over a card, and with it any answer not yet delivered. */
   claim(caller: Caller, id: string, agent: string): Card {
     const card = this.getCard(id);

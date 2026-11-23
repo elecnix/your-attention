@@ -15,6 +15,7 @@ import path from 'node:path';
 import type { ScreenMode } from '../../src/core/hooks.ts';
 import type { Card } from '../../src/core/types.ts';
 import type { Ruling } from '../../src/extensions/card-hook.ts';
+import { logRuling, type LoggedCheck, type RulingLine } from './log.ts';
 import { TriageState } from './state.ts';
 
 export const VALE_INI = path.join(import.meta.dirname, 'vale', '.vale.ini');
@@ -53,8 +54,10 @@ export interface ExampleConfig {
   /** Where the agent keeps the return counts and the bypass codes. */
   stateFile: string;
   /** Which cards a connection screens: `new` checks the cards that arrive while it is connected, and `open` also
-   * takes the open cards that have no verdict yet, once, when it connects. */
+   * takes the open cards that have no triage verdict yet, once, when it connects. */
   screen: ScreenMode;
+  /** Where the agent appends one JSON line per ruling, for the operator to look back at. */
+  logFile: string;
 }
 
 export const DEFAULTS: ExampleConfig = {
@@ -63,6 +66,7 @@ export const DEFAULTS: ExampleConfig = {
   maxReturns: 3,
   stateFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'),
   screen: 'new',
+  logFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage.jsonl'),
 };
 /** The tag an agent sets, to the code a return notice gave it, to let one urgent card skip triage. */
 export const BYPASS_TAG = 'triage-bypass';
@@ -111,10 +115,16 @@ export function loadConfig(file = defaultConfigPath(), log: (line: string) => vo
     const v = raw['screen'];
     cfg.screen = v === 'new' || v === 'open' ? v : bad('screen must be "new" or "open"');
   }
-  if (raw['stateFile'] !== undefined) {
-    const f = typeof raw['stateFile'] === 'string' ? raw['stateFile'] : bad('stateFile must be a path');
-    cfg.stateFile = f.startsWith('~/') ? path.join(os.homedir(), f.slice(2)) : f;
-  }
+  /** A path field, with a leading `~/` expanded to the home directory, as stateFile and logFile both are. */
+  const pathField = (name: string): string | undefined => {
+    if (raw[name] === undefined) return undefined;
+    const f = typeof raw[name] === 'string' ? raw[name] : bad(`${name} must be a path`);
+    return f.startsWith('~/') ? path.join(os.homedir(), f.slice(2)) : f;
+  };
+  const stateFile = pathField('stateFile');
+  if (stateFile !== undefined) cfg.stateFile = stateFile;
+  const logFile = pathField('logFile');
+  if (logFile !== undefined) cfg.logFile = logFile;
   // The card prompt had a step that asked the card to explain names, with these two fields. The step is gone, and a
   // config written for it still loads.
   const retired = [raw['knownNames'] !== undefined && 'knownNames', policy['classifierNames'] !== undefined && 'policy.classifierNames'].filter((f) => f !== false);
@@ -391,24 +401,53 @@ export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unkn
   const state = opts.state ?? new TriageState(undefined);
   // A state file it cannot write leaves the verdict alone, and the log says why the counts live in memory.
   const logWriteError = (): void => { const why = state.takeWriteError(); if (why) log(card.id, why); };
+  let checks: LoggedCheck[] = [];
+  let checksMs = 0;
+  let bypass: RulingLine['bypass'];
   let note = '';
+  // Every ruling goes out through `answer`, which appends its line first, so the line and the ruling cannot drift apart.
+  const answer = (ruling: Ruling): Ruling => {
+    const pr = card.tags?.['pr'];
+    logRuling(cfg.logFile, {
+      at: new Date().toISOString(),
+      card: { id: card.id, agent: card.agent, title: card.title, tags: card.tags ?? {} },
+      ...(pr !== undefined ? { pr } : {}),
+      checks,
+      verdict: ruling.verdict,
+      reason: ruling.reason,
+      ...(ruling.advice !== undefined ? { advice: ruling.advice } : {}),
+      returns: { count: state.returnsOf(card), max: cfg.maxReturns },
+      ...(bypass !== undefined ? { bypass } : {}),
+      ms: checksMs,
+    }, log);
+    return ruling;
+  };
   const code = card.tags?.[BYPASS_TAG];
   if (code) {
     const used = state.useBypass(code, card.agent, card.id);
     logWriteError();
+    bypass = used.ok ? { used: true, issuedFor: used.issuedFor } : { used: false, why: used.why };
     if (used.ok) {
       log(card.id, `bypass used by agent ${card.agent} on card ${card.id}, with the code from card ${used.issuedFor}`);
-      return { verdict: 'pass', reason: 'Passed without checks: the agent used a triage bypass code for an urgent card.' };
+      return answer({ verdict: 'pass', reason: 'Passed without checks: the agent used a triage bypass code for an urgent card.' });
     }
     log(card.id, `bypass refused for agent ${card.agent} on card ${card.id}: ${used.why}`);
     note = `The ${BYPASS_TAG} code on this card is not valid: ${used.why}, so triage checked the card.`;
   }
+  const checksStarted = Date.now();
   const reports = await runChecks(card, cfg, opts.run ?? runCommand, opts.signal);
+  checksMs = Date.now() - checksStarted;
+  checks = reports.map((r) => ({
+    name: r.check,
+    sections: r.sections.map((s) => ({ level: s.level, lines: s.lines })),
+    ...(r.skipped !== undefined ? { skipped: r.skipped } : {}),
+    ...(r.detail !== undefined ? { detail: r.detail } : {}),
+  }));
   for (const r of reports) if (r.skipped) log(card.id, `${r.skipped}, so this check found nothing.`);
   const sections = reports.flatMap((r) => r.sections);
   const blocking = sections.some((s) => s.level === 'block');
-  if (opts.signal?.aborted) return { verdict: 'pass', reason: 'The triage agent stopped, so the card went through.' };
-  if (!sections.length) return { verdict: 'pass', reason: note || 'Every check that ran passed the card.' };
+  if (opts.signal?.aborted) return answer({ verdict: 'pass', reason: 'The triage agent stopped, so the card went through.' });
+  if (!sections.length) return answer({ verdict: 'pass', reason: note || 'Every check that ran passed the card.' });
   const chain = state.chainOf(card);
   if (blocking && state.returns(chain) < cfg.maxReturns) {
     const { returns, code: next } = state.recordReturn(chain, card);
@@ -418,9 +457,9 @@ export async function checkCard(card: Card, cfg: ExampleConfig, log: (...a: unkn
       `This is return ${returns} of ${cfg.maxReturns}. After that, triage lets the card through and sends these findings as advice.`,
       `If the card is urgent, post it again with the tag \`${BYPASS_TAG}: ${next}\` to skip triage once.`,
     ].join('\n');
-    return { verdict: 'return', reason: fit(head, sectionsText(sections), tail) };
+    return answer({ verdict: 'return', reason: fit(head, sectionsText(sections), tail) });
   }
   const advice = fit('Triage let this card through to the person, with this advice for it and the next cards:', sectionsText(sections, 'advise'), '');
   const reason = blocking ? `Passed after ${state.returns(chain)} returns, the most triage makes, with its findings as advice.` : 'Passed with advice for the agent.';
-  return { verdict: 'pass', reason: [note, reason].filter(Boolean).join(' '), advice };
+  return answer({ verdict: 'pass', reason: [note, reason].filter(Boolean).join(' '), advice });
 }
