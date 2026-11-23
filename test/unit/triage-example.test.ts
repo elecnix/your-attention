@@ -47,7 +47,8 @@ const complete = (): ReturnType<typeof stub> => stub('classifier', print({ verdi
 const missing = '/nonexistent/command-for-this-test';
 
 function config(over: Partial<ExampleConfig>): ExampleConfig {
-  return { ...DEFAULTS, vale: valeClean().argv, classifier: complete().argv, ...over };
+  // Every test writes its rulings log into the temp dir, never the default in the home directory.
+  return { ...DEFAULTS, vale: valeClean().argv, classifier: complete().argv, logFile: path.join(dir, `rulings-${n++}.jsonl`), ...over };
 }
 function logger(): { log: (...a: unknown[]) => void; lines: string[] } {
   const lines: string[] = [];
@@ -277,6 +278,15 @@ describe('the example triage agent reads its local config', () => {
     assert.deepEqual(cfg.vale, ['vale']);
     assert.deepEqual(cfg.classifier, ['pr-context-classifier']);
     assert.equal(cfg.prVerdict, undefined);
+    assert.equal(cfg.logFile, path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage.jsonl'));
+  });
+
+  it('reads logFile from the local config, expanding ~ as stateFile does, and refuses one that is not a path', () => {
+    const file = path.join(dir, 'log-file.json');
+    fs.writeFileSync(file, JSON.stringify({ logFile: '~/triage-test.jsonl' }));
+    assert.equal(loadConfig(file).logFile, path.join(os.homedir(), 'triage-test.jsonl'));
+    fs.writeFileSync(file, JSON.stringify({ logFile: 5 }));
+    assert.throws(() => loadConfig(file), /logFile must be a path/);
   });
 
   it('reads a PR-verdict command and fills in the accepted verdicts and the timeout', () => {
@@ -356,6 +366,7 @@ describe('the example triage agent reads its local config', () => {
     const raw = fs.readFileSync(path.join(import.meta.dirname, '../../examples/triage-agent/triage-example.sample.json'), 'utf8');
     assert.doesNotMatch(raw, /knownNames|classifierNames/, 'the sample has no field the agent ignores');
     assert.equal(cfg.stateFile, path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'));
+    assert.equal(cfg.logFile, path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage.jsonl'), 'the sample names the rulings log');
   });
 
   it('ships a card prompt with a text fence that asks for the classifier\'s reply format', () => {
@@ -485,10 +496,131 @@ describe('the example triage agent lets an urgent card through with a bypass cod
   });
 });
 
+describe('the example triage agent logs every ruling as one JSON line', () => {
+  const logPath = (): string => path.join(dir, `rulings-${n++}.jsonl`);
+  const readLines = (file: string): Record<string, any>[] =>
+    fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, any>);
+  const codeIn = (reason: string): string => new RegExp(`${BYPASS_TAG}: ([\\w-]+)`).exec(reason)?.[1] ?? '';
+  const blocked = (): string[] => stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] })).argv;
+
+  it('writes one parseable line for a ruling, with the card, each check, the verdict, the return count and the time', async () => {
+    const file = logPath();
+    const ruling = await checkCard({ ...card, tags: { pr: 'acme/api#42' } }, config({ classifier: blocked(), logFile: file }), logger().log);
+    assert.equal(ruling.verdict, 'return');
+    const lines = readLines(file);
+    assert.equal(lines.length, 1);
+    const entry = lines[0]!;
+    assert.ok(!Number.isNaN(Date.parse(String(entry['at']))), `at is an ISO timestamp: ${String(entry['at'])}`);
+    assert.deepEqual(entry['card'], { id: 'c1', agent: 's1', title: card.title, tags: { pr: 'acme/api#42' } });
+    assert.equal(entry['pr'], 'acme/api#42');
+    assert.equal(entry['verdict'], 'return');
+    assert.equal(entry['reason'], ruling.reason);
+    assert.deepEqual(entry['returns'], { count: 1, max: 3 });
+    assert.equal(typeof entry['ms'], 'number');
+    const checks = entry['checks'] as Record<string, any>[];
+    assert.deepEqual(checks.map((c) => c['name']), ['Vale', 'Card classifier', 'PR verdict']);
+    const byName = Object.fromEntries(checks.map((c) => [c['name'], c]));
+    assert.deepEqual(byName['Vale']['sections'], []);
+    assert.deepEqual(byName['Vale']['detail'], { vale: [] });
+    assert.deepEqual(byName['Card classifier']['sections'].map((s: { level: string }) => s.level), ['block']);
+    assert.match(byName['Card classifier']['sections'][0].lines.join('\n'), /What is the goal\?/);
+    assert.equal(byName['Card classifier']['detail'].classifier.verdict, 'MISSING_CONTEXT');
+    assert.match(String(byName['PR verdict']['skipped']), /PR verdict is off/);
+    assert.ok(!('detail' in byName['PR verdict']), 'a skipped check has no detail');
+  });
+
+  it('logs a returned card and a passed card, each with the return count of its chain', async () => {
+    const file = logPath();
+    const state = new TriageState(undefined);
+    const returned = await checkCard(card, config({ classifier: blocked(), logFile: file }), logger().log, { state });
+    assert.equal(returned.verdict, 'return');
+    const passed = await checkCard({ ...card, id: 'c2', title: 'A different decision' }, config({ logFile: file }), logger().log, { state });
+    assert.equal(passed.verdict, 'pass');
+    const [r, p] = readLines(file) as [Record<string, any>, Record<string, any>];
+    assert.equal(r['verdict'], 'return');
+    assert.deepEqual(r['returns'], { count: 1, max: 3 });
+    assert.equal(p['verdict'], 'pass');
+    assert.equal(p['reason'], passed.reason);
+    assert.deepEqual(p['returns'], { count: 0, max: 3 });
+    assert.ok(!('advice' in p), 'a card that passed with no finding has no advice');
+  });
+
+  it('logs the advice of a card that passed with findings', async () => {
+    const file = logPath();
+    const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 5], Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' }] }));
+    const ruling = await checkCard(card, config({ vale: vale.argv, logFile: file }), logger().log);
+    assert.equal(ruling.verdict, 'pass');
+    const [entry] = readLines(file) as [Record<string, any>];
+    assert.equal(entry['verdict'], 'pass');
+    assert.equal(entry['advice'], ruling.advice);
+    const valeEntry = (entry['checks'] as Record<string, any>[]).find((c) => c['name'] === 'Vale')!;
+    assert.deepEqual(valeEntry['sections'], [{ level: 'advise', lines: ['- title, line 1: Cards.Hedges: Hedge. ("maybe")'] }]);
+  });
+
+  it('logs a bypass code that was used, and one that was refused, and leaves the field out when there is no code', async () => {
+    const file = logPath();
+    const state = new TriageState(undefined);
+    const cfg = config({ classifier: blocked(), logFile: file });
+    const returned = await checkCard(card, cfg, logger().log, { state });
+    const code = codeIn(returned.reason);
+    assert.ok(code, returned.reason);
+    assert.equal((await checkCard({ ...card, tags: { [BYPASS_TAG]: code } }, cfg, logger().log, { state })).verdict, 'pass');
+    assert.equal((await checkCard({ ...card, tags: { [BYPASS_TAG]: code } }, cfg, logger().log, { state })).verdict, 'return');
+    const entries = readLines(file) as Record<string, any>[];
+    assert.equal(entries.length, 3);
+    assert.ok(!('bypass' in entries[0]!), 'a card without a code has no bypass field');
+    assert.deepEqual(entries[1]!['bypass'], { used: true, issuedFor: 'c1' });
+    assert.deepEqual(entries[1]!['checks'], [], 'a bypass card runs no check');
+    assert.equal(entries[1]!['verdict'], 'pass');
+    assert.deepEqual(entries[2]!['bypass'], { used: false, why: 'it was used already' });
+    assert.equal(entries[2]!['verdict'], 'return');
+  });
+
+  it('creates the log file mode 0600 and its directory mode 0700', { skip: process.platform === 'win32' ? 'Windows has no POSIX modes' : false }, async () => {
+    const folder = path.join(dir, `log-modes-${n++}`);
+    const file = path.join(folder, 'triage.jsonl');
+    await checkCard(card, config({ logFile: file }), logger().log);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(folder).mode & 0o777, 0o700);
+  });
+
+  it('rotates the log past 5 MB, replacing the earlier previous file so exactly one remains', async () => {
+    const file = path.join(dir, `log-rotate-${n++}.jsonl`);
+    // A fake runner answers both checks, so the 3 MB titles never go through a spawned command or its call record.
+    const run: RunCommand = async (argv) => argv[0] === 'vale'
+      ? { code: 0, stdout: JSON.stringify({ 'stdin.md': [] }), stderr: '' }
+      : { code: 0, stdout: JSON.stringify({ verdict: 'COMPLETE', rationale: '', clarifyingQuestions: [] }), stderr: '' };
+    const cfg = config({ vale: ['vale'], classifier: ['classifier'], logFile: file });
+    const big = 'x'.repeat(3_000_000);
+    for (let i = 0; i < 4; i++) await checkCard({ ...card, id: `big-${i}`, title: `big ${big}` }, cfg, logger().log, { run });
+    const base = path.basename(file);
+    assert.deepEqual(fs.readdirSync(dir).filter((f) => f.startsWith(base)).sort(), [base, `${base}.1`], 'the main file and one previous file');
+    assert.deepEqual(readLines(file).map((e) => (e['card'] as { id: string }).id), ['big-3'], 'the main file holds the newest ruling');
+    assert.deepEqual(readLines(`${file}.1`).map((e) => (e['card'] as { id: string }).id), ['big-2'], 'the previous file holds the one before it');
+  });
+
+  it('leaves the verdict, the reason and the advice unchanged when the log cannot be written', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs a folder this user cannot write' : false }, async () => {
+    const locked = path.join(dir, `log-locked-${n++}`);
+    fs.mkdirSync(locked, { recursive: true });
+    fs.chmodSync(locked, 0o500);
+    try {
+      const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 5], Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' }] }));
+      const { log, lines } = logger();
+      const ruling = await checkCard(card, config({ vale: vale.argv, logFile: path.join(locked, 'triage.jsonl') }), log);
+      assert.equal(ruling.verdict, 'pass');
+      assert.equal(ruling.reason, 'Passed with advice for the agent.');
+      assert.match(ruling.advice ?? '', /Cards\.Hedges/);
+      assert.match(lines.join('\n'), /could not write the rulings log .*triage\.jsonl/);
+    } finally {
+      fs.chmodSync(locked, 0o700);
+    }
+  });
+});
+
 describe('the example vale config', () => {
   const hasVale = ((): boolean => { try { execFileSync('vale', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
   it('returns a card whose prose breaks a rule, with the vale on this machine and no styles to download', { skip: hasVale ? false : 'vale is not installed' }, async () => {
-    const ruling = await checkCard({ ...card, title: 'I think we should retry the export', text: 'TODO: explain the the failure.' }, { ...DEFAULTS, classifier: [missing] }, logger().log);
+    const ruling = await checkCard({ ...card, title: 'I think we should retry the export', text: 'TODO: explain the the failure.' }, { ...DEFAULTS, classifier: [missing], logFile: path.join(dir, `vale-real-${n++}.jsonl`) }, logger().log);
     assert.equal(ruling.verdict, 'return');
     for (const part of ['Cards.FirstPerson', 'Cards.Placeholders', 'Cards.Repetition']) assert.ok(ruling.reason.includes(part), part);
   });

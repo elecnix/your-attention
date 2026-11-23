@@ -74,10 +74,21 @@ You don't need a config file. With `--config FILE`, the agent reads FILE. Withou
 | `policy.prVerdictBlockBelow` | `0.5` | the confidence, from 0 to 1, below which a verdict outside `acceptVerdicts` blocks the card |
 | `maxReturns` | `3` | how many times one card goes back before its next attempt passes with advice |
 | `stateFile` | `~/.local/state/your-attention/triage-example.json` | the return counts and the bypass codes |
+| `logFile` | `~/.local/state/your-attention/triage.jsonl` | one JSON line per ruling, so you can look back at what triage did |
 
 An earlier version had a classifier step that asked a card to explain its names, with the fields `knownNames` and `policy.classifierNames`. A config that still has them loads, and the agent logs one line saying it ignores them.
 
 Each command is a list, the program and then its arguments, and the agent runs it without a shell. The checks run at once, so the agent registers with the inbox for a wait of the longest timeout and ten seconds more, at most ten minutes.
+
+## The rulings log
+
+Every card the agent answers adds one line of JSON to `logFile`: the time, the card's id, agent, title and tags, and its `pr` tag when it has one.
+
+Each check contributes its own sections, the reason it skipped when it did not run, and its detail. Alongside them, the agent adds the verdict, the reason it gave the inbox, any advice, the return count of the card's chain, whether it used a bypass code, and how long the checks took.
+
+The file gets mode 0600, and its directory mode 0700, as the state file does. Disk use has a limit. Past 5 MB, the file rotates to `<logFile>.1` and replaces an earlier one.
+
+When a write fails, the agent logs why on standard error and carries on, and the ruling goes out unchanged.
 
 ## Running it
 
@@ -106,4 +117,4 @@ Its report counts the cards that would go back and what each check would block o
 
 ## Tests
 
-`test/unit/triage-example.test.ts` stands in a small Node script for vale, the classifier and the PR-verdict command. It covers a pass, a return with the findings of all three checks, each policy level, the PR-verdict threshold, the return limit across a restart, the bypass code, and each way a command can fail. One more test runs the vale rules in this folder with the vale on the machine. Without vale, the test runner skips it. `test/unit/triage-eval.test.ts` covers the eval's counts and report.
+`test/unit/triage-example.test.ts` stands in a small Node script for vale, the classifier and the PR-verdict command. It covers a pass, a return with the findings of all three checks, each policy level, the PR-verdict threshold, the return limit across a restart, the bypass code, each way a command can fail, and the rulings log. For the log it checks the fields of a line, the modes of the file and its directory, the rotation past 5 MB, and that a write that fails leaves the ruling alone. One more test runs the vale rules in this folder with the vale on the machine. Without vale, the test runner skips it. `test/unit/triage-eval.test.ts` covers the eval's counts and report.
