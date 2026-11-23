@@ -52,6 +52,17 @@ describe('the card.created hook', () => {
     assert.throws(() => inbox.reopen(agent, 'c1'), /only the owner reopens a card/);
   });
 
+  it('keeps the bypass a pass reports, and leaves it off a pass that ran the checks', () => {
+    const { inbox, agent, ext, calls } = setup();
+    inbox.connectExtension(ext, { name: 'triage', hooks: ['card.created'] }, (e) => calls.push(e as CardCall));
+    inbox.postCard(agent, { id: 'skipped', agent: 's1', title: 'Urgent' });
+    inbox.postCard(agent, { id: 'checked', agent: 's1', title: 'Ordinary' });
+    inbox.hookVerdict(ext, calls[0]!.id, 'pass', 'Passed without checks: the agent used a triage bypass code for an urgent card.', '', true);
+    inbox.hookVerdict(ext, calls[1]!.id, 'pass', 'Every check that ran passed the card.');
+    assert.equal(inbox.getCard('skipped').triage?.bypass, true);
+    assert.equal(inbox.getCard('checked').triage?.bypass, undefined);
+  });
+
   it('passes, holds, or returns a card', () => {
     const { inbox, agent, ext, calls } = setup();
     const back: AgentEvent[] = [];

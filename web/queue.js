@@ -31,7 +31,23 @@ export function presenceOf(card, state) {
   return unread ? ['busy', 'Agent busy: it has an answer it has not read yet'] : ['on', 'Agent listening'];
 }
 
-/** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. `pins` lists the pins, oldest first: a tag pin as [key, value], an agent pin as {agent}. `collapsed` holds the ids of the groups the person muted, each the group's kind and value. */
+/** How triage treated a card, for the badge in its header: `none` when no extension checked it, `done` when one did, and
+ * `bypass` when a pass reported that a bypass code skipped the checks. The second value is the sentence the badge shows
+ * as its tooltip. */
+export function triageState(card) {
+  const t = card.triage;
+  const by = t && t.by ? t.by : 'an extension';
+  if (t && t.bypass) return ['bypass', `Bypassed: ${by} ran no checks, because the agent used a bypass code`];
+  if (!t || t.state === 'skipped') return ['none', `Not triaged: ${(t && t.reason) || 'no triage extension checked this card'}`];
+  if (t.state === 'pending') return ['none', `Not triaged yet: ${by} is checking this card`];
+  const why = String(t.reason || '').trim();
+  const short = why && why.length <= 140 ? ` (${why.replace(/\.$/, '')})` : '';
+  if (t.state === 'returned') return ['done', `Triaged by ${by}: it sent this card back to its agent${short}`];
+  if (t.state === 'held') return ['done', `Triaged by ${by}: it held this card${short}`];
+  return ['done', `Triaged by ${by}${short}`];
+}
+
+/** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>./** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. `pins` lists the pins, oldest first: a tag pin as [key, value], an agent pin as {agent}. `collapsed` holds the ids of the groups the person muted, each the group's kind and value. */
 export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   const answers = state.answers;
   const byId = Object.fromEntries(state.cards.map((c) => [c.id, c]));

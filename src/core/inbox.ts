@@ -944,7 +944,7 @@ export class Inbox {
   }
 
   /** An extension answers a card.created call. A pass may carry advice, which goes to the card's agent. */
-  hookVerdict(caller: Caller, request: string, verdict: Verdict, reason: string, advice = ''): Card {
+  hookVerdict(caller: Caller, request: string, verdict: Verdict, reason: string, advice = '', bypass = false): Card {
     const card = this.store.list<Card>('cards').find((c) => c.triage?.request === request);
     if (!card?.triage) throw new InboxError(404, 'unknown hook call');
     const ext = [...this.extensions.values()].find((e) => e.token === caller.token && card.triage?.waiting?.includes(e.reg.name));
@@ -957,16 +957,17 @@ export class Inbox {
     if (verdict === 'return') {
       const reason = clean || 'Triage sent the card back.';
       const pushback = [...(card.pushback ?? []), { kind: 'returned' as const, by: ext.reg.name, reason, version: card.version, at: now }].slice(-PUSHBACK_LIMIT);
-      this.store.put('cards', card.id, { ...card, pushback, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], advice: undefined, at: now } });
+      this.store.put('cards', card.id, { ...card, pushback, triage: { ...card.triage, state: 'returned', by: ext.reg.name, reason: clean, waiting: [], advice: undefined, bypass: undefined, at: now } });
       return this.sendBack(card, reason, 'Triage', ext.reg.name);
     }
     const tip = verdict === 'pass' ? String(advice ?? '').trim().slice(0, MAX_HOOK_TEXT) : '';
     // Advice waits on the card until every extension has passed it, since another one may still hold it or send it back.
     const { advice: waitingAdvice = [], ...rest } = card.triage;
     const kept = [...waitingAdvice, ...(tip ? [{ by: ext.reg.name, text: tip }] : [])];
+    // A bypass belongs to the verdict that reported it, so a later pass over the same card clears it.
     const triage = verdict === 'hold'
-      ? { ...rest, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], at: now }
-      : { ...rest, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, ...(waiting.length && kept.length ? { advice: kept } : {}), at: now };
+      ? { ...rest, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], bypass: undefined, at: now }
+      : { ...rest, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, ...(waiting.length && kept.length ? { advice: kept } : {}), bypass: bypass ? true : undefined, at: now };
     const shown = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? kept : []);
     this.emit({ type: 'change', card: card.id });
     if (shown.first) this.pushNew(shown.card);

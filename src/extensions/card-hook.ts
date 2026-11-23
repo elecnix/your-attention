@@ -8,6 +8,8 @@ export interface Ruling {
   reason: string;
   /** On a pass, text the inbox sends the card's agent as an `advice` event. */
   advice?: string;
+  /** On a pass whose checks did not run, because the agent used a bypass code. */
+  bypass?: boolean;
 }
 
 export type CardCreated = Extract<HookEvent, { hook: 'card.created' }>;
