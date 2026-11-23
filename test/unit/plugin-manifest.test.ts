@@ -40,6 +40,7 @@ describe('the Claude Code plugin manifest', () => {
       assert.match(command, /^\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/claude-plugin-runner\.sh claude-hook /);
     }
     const runner = path.join(root, 'bin', 'claude-plugin-runner.sh');
-    assert.ok(fs.statSync(runner).mode & 0o111, 'the runner is executable');
+    // Windows checks out without POSIX permission bits, so the mode carries no meaning there.
+    if (process.platform !== 'win32') assert.ok(fs.statSync(runner).mode & 0o111, 'the runner is executable');
   });
 });
