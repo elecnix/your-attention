@@ -388,6 +388,9 @@ function keptTagFrom(from: Record<string, string> | undefined, tags: Record<stri
   return kept.length ? Object.fromEntries(kept) : undefined;
 }
 
+/** When a card.created extension last went away, so a reconnecting one screens only the cards that arrived since. */
+const extensionAwayKey = (name: string): string => `extension-away:${name}`;
+
 export class Inbox {
   private readonly store: Storage;
   private readonly blobs: BlobStore;
@@ -893,18 +896,25 @@ export class Inbox {
     const entry = { reg: this.checkExtension(caller, reg), token: caller.token, send };
     const name = entry.reg.name;
     this.extensions.set(name, entry);
-    // Screen the cards that came in while no extension was there.
+    // Screen the cards that came in while no extension was there, and nothing older. A first connection
+    // screens nothing: those cards are ones the person already had, and a return would close a card they
+    // never answered.
     if (entry.reg.hooks.includes('card.created')) {
+      const away = this.store.get<{ at?: number }>('meta', extensionAwayKey(name))?.at;
       for (const card of this.store.list<Card>('cards')) {
         if ((card.kind !== 'ask' && card.kind !== 'secret') || card.closed || this.store.get('answers', card.id)) continue;
         const t = card.triage;
         if (t?.state === 'pending' && t.request && t.deadline && t.waiting?.includes(name)) {
           // A call this extension missed while it reconnected.
           send({ type: 'hook', version: HOOK_VERSION, id: t.request, hook: 'card.created', card: publicCard(card), deadline: t.deadline, person: this.person() });
-        } else if (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length)) this.requestTriage(card, true);
+        } else if (away !== undefined && card.createdAt > away && (!t || t.state === 'skipped' || (t.state === 'pending' && !t.waiting?.length))) this.requestTriage(card, true);
       }
     }
-    return () => { if (this.extensions.get(name) === entry) this.extensions.delete(name); };
+    return () => {
+      if (this.extensions.get(name) !== entry) return;
+      this.extensions.delete(name);
+      this.store.put('meta', extensionAwayKey(name), { key: extensionAwayKey(name), at: this.now() });
+    };
   }
 
   /** Check and complete an extension registration without connecting it. */
@@ -920,7 +930,7 @@ export class Inbox {
     return { name, hooks: hooks as HookName[], policy, timeoutMs };
   }
 
-  /** `rescreen` is for a card the person already had, which a hook that connects later screens again. It is not new, so it never pushes. */
+  /** `rescreen` is for a card that arrived while no extension was there, which a hook that connects later screens again. It is not new, so it never pushes. */
   private requestTriage(card: Card, rescreen = false): Card {
     if (rescreen && !card.pushed && hadReached(card)) card = { ...card, pushed: true };
     const targets = [...this.extensions.values()].filter((e) => e.reg.hooks.includes('card.created'));
