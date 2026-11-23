@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
 import { typeFromName, type SearchFilters } from '../core/inbox.ts';
-import type { Approval, AskQuestion, CloseKind, FeedbackFinding, FeedbackVerdict, NewAttachment, NewCard, Option, Origin } from '../core/types.ts';
+import type { Approval, AskQuestion, CloseKind, FeedbackFinding, FeedbackVerdict, NewAttachment, NewCard, Option, Origin, PullRequest } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
 import { envRequireCard, ruleFromView } from './require-card.ts';
 import { describeDelays } from '../core/require-card.ts';
@@ -25,6 +25,11 @@ export function toAttachment(a: { path?: string; url?: string; name?: string; al
   if (!a.path) throw new Error('each attachment needs a path or a url');
   const type = typeFromName(a.path);
   return { src: `data:${type};base64,${fs.readFileSync(a.path).toString('base64')}`, name: a.name ?? path.basename(a.path), alt: a.alt };
+}
+
+/** The pull requests a card carries, each as `owner/repo#number`, in the order the card stores them. */
+function describePullRequests(value: PullRequest | PullRequest[]): string {
+  return (Array.isArray(value) ? value : [value]).map((p) => `${p.owner}/${p.repo}#${p.number}`).join(', ');
 }
 
 const str = (v: unknown): string | undefined => (v === undefined || v === null ? undefined : String(v));
@@ -82,6 +87,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         expiresAt: minutes > 0 ? Date.now() + minutes * 60_000 : undefined,
         follows: str(args['follows']),
         tags: args['tags'] as Record<string, string> | undefined,
+        pullRequests: args['pullRequests'] as PullRequest | PullRequest[] | undefined,
         from: str(args['from']),
         origin: await origin(),
       };
@@ -95,7 +101,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return `Posted card ${posted.id}. ${tags} The answer arrives ${ctx.arrival}; keep working meanwhile.${asks}`;
     }
     case 'card_patch': {
-      const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']));
+      const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']), args['pullRequests'] as PullRequest | PullRequest[] | null | undefined);
       return `Card ${card.id} is now version ${card.version}.${card.warning ? ` Warning: ${card.warning}` : ''}`;
     }
     case 'card_read': {
@@ -108,6 +114,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         .map((f) => `${f} (${String(card[f]).length} chars):\n${card[f]}`);
       return [
         `Card ${card.id}, version ${card.version}, state ${state}.${card.status ? ` Status: ${card.status}` : ''}`,
+        ...(card.pullRequests ? [`Pull requests: ${describePullRequests(card.pullRequests)}`] : []),
         ...shown,
         versions ? `${versions} earlier version${versions === 1 ? '' : 's'} exist; card_patch edits the text above.` : 'No earlier version; card_patch edits the text above.',
       ].join('\n\n');
@@ -209,6 +216,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         title: r.card.title,
         state: r.state,
         tags: r.card.tags ?? {},
+        ...(r.card.pullRequests ? { pullRequests: r.card.pullRequests } : {}),
         agent: r.card.agent,
         posted: new Date(r.card.createdAt).toISOString(),
         updated: new Date(r.card.updatedAt).toISOString(),

@@ -59,6 +59,13 @@ export const cardTools: CardTool[] = [
           'Example:\nroot = Card([intro, risks, pr12])\nintro = TextContent("#12 adds retries to the uploader.")\nrisks = Table([Col("Risk", ["Duplicate uploads"]), Col("Likelihood", ["low"])])\npr12 = Form("pr12", none, [merge, note12])\nnone = Buttons([])\nmerge = FormControl("Merge #12?", RadioGroup("merge12", [RadioItem("Merge it", "", "yes"), RadioItem("Wait", "", "no")]))\nnote12 = FormControl("Comment on #12", Input("note12", "Optional"))',
         ].join(' ') },
         tags: { type: 'object', additionalProperties: { type: 'string' }, description: 'Properties for grouping, such as topic. Reuse a value that card_guidance lists when one fits, so the inbox groups your card with the ones that already set it.' },
+        pullRequests: {
+          description: 'The GitHub pull request this card is about, as structured data: {owner, repo, number}, or an array of them when the card concerns several (1 to 20). Use it on a card that reviews, merges or reports on a pull request, so widgets and triage read the identifier directly. Store only the identifier, never a title, address or state, which go stale: GitHub is the source. A single pull request stays a single object. The pr tag keeps its own text beside this field; this field does not replace it yet.',
+          oneOf: [
+            { type: 'object', properties: { owner: { type: 'string', description: 'The GitHub owner or organization, such as elecnix.' }, repo: { type: 'string', description: 'The repository name alone, without the owner and without a slash.' }, number: { type: 'integer', minimum: 1, description: 'The pull request number.' } }, required: ['owner', 'repo', 'number'], additionalProperties: false },
+            { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: { owner: { type: 'string', description: 'The GitHub owner or organization, such as elecnix.' }, repo: { type: 'string', description: 'The repository name alone, without the owner and without a slash.' }, number: { type: 'integer', minimum: 1, description: 'The pull request number.' } }, required: ['owner', 'repo', 'number'], additionalProperties: false } },
+          ],
+        },
         id: { type: 'string', description: 'Reuse an id to revise your own card.' },
         from: { type: 'string', description: 'Optional. The name you give yourself, such as "the release agent", shown on the card. The card already shows your session name and where you run.' },
         attachments: {
@@ -78,15 +85,23 @@ export const cardTools: CardTool[] = [
   },
   {
     name: 'card_patch',
-    description: 'Edit one of your cards with exact replacements, the way you edit a file: each old text must occur exactly once. Cheaper than posting a long card again, and the person sees what changed.',
+    description: 'Edit one of your cards with exact replacements, the way you edit a file: each old text must occur exactly once. Cheaper than posting a long card again, and the person sees what changed. Set pullRequests to replace the GitHub pull requests the card is about, with no edits when that is all that changes, or send [] or null to clear them.',
     schema: {
       type: 'object',
       properties: {
         card_id: { type: 'string' },
-        edits: { type: 'array', items: { type: 'object', properties: { old: { type: 'string' }, new: { type: 'string' } }, required: ['old', 'new'] } },
+        edits: { type: 'array', items: { type: 'object', properties: { old: { type: 'string' }, new: { type: 'string' } }, required: ['old', 'new'] }, description: 'Text replacements, each old occurring exactly once. Required unless pullRequests is the only change.' },
         field: { type: 'string', enum: ['text', 'body', 'html', 'title', 'recommendation'], description: 'The body when the card has one, else the text.' },
+        pullRequests: {
+          description: 'Replace the pull requests the card is about, beside edits: {owner, repo, number}, or an array of them. Send [] or null to clear the field. Leave it out to keep the pull requests the card already has. The edits and this field are independent, so a patch may change only the pull requests.',
+          oneOf: [
+            { type: 'null' },
+            { type: 'object', properties: { owner: { type: 'string', description: 'The GitHub owner or organization, such as elecnix.' }, repo: { type: 'string', description: 'The repository name alone, without the owner and without a slash.' }, number: { type: 'integer', minimum: 1, description: 'The pull request number.' } }, required: ['owner', 'repo', 'number'], additionalProperties: false },
+            { type: 'array', maxItems: 20, items: { type: 'object', properties: { owner: { type: 'string', description: 'The GitHub owner or organization, such as elecnix.' }, repo: { type: 'string', description: 'The repository name alone, without the owner and without a slash.' }, number: { type: 'integer', minimum: 1, description: 'The pull request number.' } }, required: ['owner', 'repo', 'number'], additionalProperties: false } },
+          ],
+        },
       },
-      required: ['card_id', 'edits'],
+      required: ['card_id'],
     },
   },
   {

@@ -15,10 +15,10 @@ import { MemoryBlobs, type BlobStore, type Storage } from './storage.ts';
 import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, type ClearedCard } from './summary.ts';
 import { Usage } from './telemetry.ts';
 import { generateVapid, sendPush, b64urlDecode, type Vapid } from './webpush.ts';
-import { MAX_TAGS } from './types.ts';
+import { MAX_PULL_REQUESTS, MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
-  Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, RequireCardInput, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
+  Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, PullRequest, RequireCardInput, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
   FeedbackFinding, FeedbackVerdict, LateAnswer, TriageFeedback, TriagePushback,
 } from './types.ts';
 
@@ -680,6 +680,9 @@ export class Inbox {
     if (input.rating !== undefined && !(Number.isInteger(input.rating) && input.rating >= 1 && input.rating <= 5)) throw new InboxError(400, 'rating must be 1 to 5');
     if (!input.multiple && Array.isArray(input.options) && input.options.filter((o) => o?.recommended === true).length > 1) throw new InboxError(400, 'a card without multiple takes at most one recommended option');
     checkQuestions(input.questions);
+    // The pull requests the card is about, as the caller gives them: one object or an array. Stored as given, so a reader
+    // sees which shape it has; a repost without the field leaves the card without one, as a repost of its text does.
+    const pullRequests = input.pullRequests === undefined ? undefined : checkPullRequests(input.pullRequests);
     const id = input.id ? String(input.id) : randomId(8);
     if (!/^[\w.:-]{1,80}$/.test(id)) throw new InboxError(400, 'id must be 1 to 80 letters, digits, dots, colons, dashes or underscores');
 
@@ -772,6 +775,7 @@ export class Inbox {
       tags: mergedTags.tags,
       // A revision keeps the record of who set each tag for the keys the card still carries. A client never sends it.
       tagFrom: keptTagFrom(before?.tagFrom, mergedTags.tags),
+      pullRequests,
       follows: input.follows ?? before?.follows,
       followedBy: before?.followedBy,
       deliver: input.deliver ?? 'stream',
@@ -851,9 +855,9 @@ export class Inbox {
 
   /** The text, recommendation and body a post or a patch would store, after templates and widgets, without storing anything.
    * A client that checks diagrams and bodies itself reads them here. */
-  preview(caller: Caller, req: { card?: NewCard; id?: string; edits?: { old: string; new: string }[]; field?: string }): { text?: string; recommendation?: string; body?: string } {
+  preview(caller: Caller, req: { card?: NewCard; id?: string; edits?: { old: string; new: string }[]; field?: string; pullRequests?: PullRequest | PullRequest[] | null }): { text?: string; recommendation?: string; body?: string } {
     if (caller.role === 'extension') throw new InboxError(403, 'only the client that posts a card can preview it');
-    const input = req.id !== undefined ? this.patched(caller, String(req.id), req.edits ?? [], req.field).input : req.card;
+    const input = req.id !== undefined ? this.patched(caller, String(req.id), req.edits ?? [], req.field, req.pullRequests).input : req.card;
     if (!input || typeof input !== 'object') throw new InboxError(400, 'send {card} for a post, or {id, edits, field} for a patch');
     return { text: input.text, recommendation: input.recommendation, body: this.cardBody(input).body };
   }
@@ -1487,8 +1491,8 @@ export class Inbox {
   }
 
   /** Edit a card the way a coding agent edits a file: each edit replaces text that occurs exactly once. */
-  patchCard(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string, checked?: CheckedDiagrams): Card {
-    const { card, input } = this.patched(caller, id, edits, field);
+  patchCard(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string, checked?: CheckedDiagrams, pullRequests?: PullRequest | PullRequest[] | null): Card {
+    const { card, input } = this.patched(caller, id, edits, field, pullRequests);
     const next = this.postCard(caller, input, undefined, checked, undefined, { revise: true });
     // A patch edits the body the widgets already filled, so the card still shows them and keeps their responses, and any the patch placed.
     if (!card.widgets) return next;
@@ -1499,19 +1503,23 @@ export class Inbox {
   }
 
   /** patchCard, with the diagrams of the patched card checked first. */
-  async patchCardChecked(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string): Promise<Card> {
-    const checked = await this.checkCard(this.patched(caller, id, edits, field).input);
-    return this.patchCard(caller, id, edits, field, checked);
+  async patchCardChecked(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string, pullRequests?: PullRequest | PullRequest[] | null): Promise<Card> {
+    const checked = await this.checkCard(this.patched(caller, id, edits, field, pullRequests).input);
+    return this.patchCard(caller, id, edits, field, checked, pullRequests);
   }
 
   /** The card a patch would post, and the card it edits. */
-  private patched(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string): { card: Card; input: NewCard } {
+  private patched(caller: Caller, id: string, edits: { old: string; new: string }[], field?: string, pullRequests?: PullRequest | PullRequest[] | null): { card: Card; input: NewCard } {
     const card = this.owned(caller, id);
+    // pullRequests is its own argument, separate from the text edits: absent keeps the card's, null or an empty array
+    // clears it, and one object or a non-empty array replaces it.
+    const hasField = pullRequests !== undefined;
     const f = field ?? (card.body !== undefined ? 'body' : card.html !== undefined ? 'html' : 'text');
     if (!PATCH_FIELDS.has(f)) throw new InboxError(400, `field must be one of ${[...PATCH_FIELDS].join(', ')}`);
-    if (!Array.isArray(edits) || !edits.length) throw new InboxError(400, 'edits must be a list of {old, new}');
+    if (!hasField && (!Array.isArray(edits) || !edits.length)) throw new InboxError(400, 'edits must be a list of {old, new}');
+    const list = Array.isArray(edits) ? edits : [];
     let text = String((card as unknown as Record<string, unknown>)[f] ?? '');
-    for (const [i, e] of edits.entries()) {
+    for (const [i, e] of list.entries()) {
       const old = String(e?.old ?? '');
       // An empty old text fills a field that is empty.
       if (!old && !text) { text = String(e.new ?? ''); continue; }
@@ -1532,7 +1540,11 @@ export class Inbox {
       text = text.replace(old, () => String(e.new ?? ''));
     }
     const { token: _t, version: _v, createdAt: _c, updatedAt: _u, closed: _cl, replies: _r, history: _h, triage: _tr, followedBy: _fb, broadcast: _b, template: _tp, attachments: _a, widgets: _w, responses: _rs, ...rest } = card;
-    return { card, input: { ...rest, [f]: text } };
+    // Absent leaves the card's pullRequests, which rest carries; null or an empty array clears it; anything else replaces it.
+    const nextPullRequests = hasField
+      ? (pullRequests === null || (Array.isArray(pullRequests) && !pullRequests.length) ? undefined : checkPullRequests(pullRequests))
+      : rest.pullRequests;
+    return { card, input: { ...rest, [f]: text, pullRequests: nextPullRequests } };
   }
 
   /** Merge tags into a card that is already posted, so a card that went out without a topic can be found by a search
@@ -3277,6 +3289,33 @@ const PRESENCE_ORIGIN_FIELDS = ['harness', 'session', 'name', 'host', 'herdrPane
  * tags it sent on the card, as it always did. */
 function ownTags(tags: unknown): Record<string, string> | undefined {
   return tags && typeof tags === 'object' && !Array.isArray(tags) ? (tags as Record<string, string>) : undefined;
+}
+
+/** One pull request an agent names on a card: the owner, the repo and the number, and nothing else. The identifier is
+ * all the inbox keeps, because GitHub holds the title, the address and the state, and they go stale here. */
+function checkPullRequest(raw: unknown, at: string): PullRequest {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new InboxError(400, `${at} must be an object with owner, repo and number`);
+  const extra = Object.keys(raw as object).filter((k) => k !== 'owner' && k !== 'repo' && k !== 'number');
+  if (extra.length) throw new InboxError(400, `${at} takes only owner, repo and number, and names ${extra.join(', ')}`);
+  const fields = raw as Record<string, unknown>;
+  for (const key of ['owner', 'repo'] as const) {
+    const v = fields[key];
+    if (typeof v !== 'string' || !/^[\w.-]{1,100}$/.test(v)) throw new InboxError(400, `${at}.${key} must be 1 to 100 letters, digits, dots, dashes or underscores`);
+  }
+  const number = fields['number'];
+  if (!Number.isInteger(number) || (number as number) < 1) throw new InboxError(400, `${at}.number must be a positive whole number`);
+  return { owner: fields['owner'] as string, repo: fields['repo'] as string, number: number as number };
+}
+
+/** The pullRequests field as a card post gives it: one object, or an array of 1 to 20. The shape is stored as given, so
+ * a reader sees whether the card names one pull request or several. An empty array or object names nothing, and is a 400. */
+function checkPullRequests(raw: unknown): PullRequest | PullRequest[] {
+  if (Array.isArray(raw)) {
+    if (!raw.length) throw new InboxError(400, `pullRequests must name 1 to ${MAX_PULL_REQUESTS} pull requests, and the array is empty`);
+    if (raw.length > MAX_PULL_REQUESTS) throw new InboxError(400, `pullRequests takes at most ${MAX_PULL_REQUESTS} pull requests, and this list has ${raw.length}`);
+    return raw.map((r, i) => checkPullRequest(r, `pullRequests[${i}]`));
+  }
+  return checkPullRequest(raw, 'pullRequests');
 }
 
 /** The origin fields the page knows, each a string of at most 200 characters. */

@@ -8,7 +8,7 @@ import type { FailurePolicy, HookName, ScreenMode, Verdict } from './hooks.ts';
 import { Inbox, InboxError, MAX_ATTACHMENT_BYTES, attachmentType, publicCard, type Caller, type PushInput, type SearchFilters } from './inbox.ts';
 import { UNLOCK_HEADER, UNLOCK_IDLE_MS, pinKeyError, validKey, type PinKey } from './pin.ts';
 import type { Source } from './telemetry.ts';
-import type { AgentEvent, Card, CloseKind, Delivery, GuidanceEdit, NewCard, PriorityLevel, Role, Settings, Token } from './types.ts';
+import type { AgentEvent, Card, CloseKind, Delivery, GuidanceEdit, NewCard, PriorityLevel, PullRequest, Role, Settings, Token } from './types.ts';
 import { PROTOCOL_VERSION } from './types.ts';
 
 export const COOKIE = 'ya_token';
@@ -737,7 +737,9 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         case 'ack':
           return json(inbox.ack(me, b));
         case 'patch':
-          return json(withWarning(publicCard(await inbox.patchCardChecked(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined))));
+          // pullRequests is its own parameter, beside the text edits: null or an empty array clears it, and leaving it out
+          // keeps the card's.
+          return json(withWarning(publicCard(await inbox.patchCardChecked(me, b, body['edits'] as { old: string; new: string }[], body['field'] as string | undefined, body['pullRequests'] as PullRequest | PullRequest[] | null | undefined))));
         case 'status':
           return json(publicCard(inbox.setStatus(me, b, String(body['status'] ?? ''))));
         case 'triage-feedback':

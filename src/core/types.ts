@@ -6,6 +6,9 @@ export const PROTOCOL_VERSION = 1;
 export const MAX_TAGS = 10;
 export const MAX_TAG_CHARS = 100;
 
+/** A card holds at most this many pull requests, whether it stores one or an array. */
+export const MAX_PULL_REQUESTS = 20;
+
 /** The id of a priority level. The defaults are now, soon and later. */
 export type Priority = string;
 /** `secret` is a card an older inbox stored. The inbox refuses a new one: a body asks for a secret with the secret widget. */
@@ -74,6 +77,14 @@ export interface Origin {
 /** Where a connected session runs, as its connection reports it: the fields a presence row keeps, and the page labels
  * a row with, or opens from. A card's origin carries `cwd` and the herdr workspace and tab labels as well. */
 export type PresenceOrigin = Pick<Origin, 'harness' | 'session' | 'name' | 'host' | 'herdrPane'>;
+
+/** The GitHub pull request a card is about, as structured data: the repository and its number. The inbox stores only
+ * this identifier, never a title, address or state, because GitHub is the source and those would go stale. */
+export interface PullRequest {
+  owner: string;
+  repo: string;
+  number: number;
+}
 
 export interface Reply {
   text: string;
@@ -412,6 +423,9 @@ export interface Card {
   tags?: Record<string, string>;
   /** Which client set each tag through the tag route, by tag key: the name of its token, as a default tag records what set it. Tags the card posted with record nothing. */
   tagFrom?: Record<string, string>;
+  /** The GitHub pull requests the card is about, as the caller gave them: one object when it named one, an array when it
+   * named several. Only the identifier is stored; the `pr` tag keeps its own text beside this field. */
+  pullRequests?: PullRequest | PullRequest[];
   /** The card this one follows, and the card that follows it. */
   follows?: string;
   followedBy?: string;
@@ -607,6 +621,8 @@ export interface NewCard {
   origin?: Origin;
   from?: string;
   tags?: Record<string, string>;
+  /** One pull request, or an array of them, that the card is about. Stored as given; the identifier alone is kept. */
+  pullRequests?: PullRequest | PullRequest[];
   follows?: string;
   deliver?: 'stream' | 'none';
   /** On a card of kind `system` from a client: what it asks the inbox to do. */
