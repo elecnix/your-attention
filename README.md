@@ -136,6 +136,28 @@ claude() {
 } }
 ```
 
+**Install the plugin instead (one step).** The plugin adds the channel server and the `AskUserQuestion` hooks together. It runs the CLI already on your `PATH`, and falls back to the package version this plugin pins.
+
+Inside a session:
+
+```
+/plugin install your-attention --marketplace elecnix/claude-plugins
+```
+
+From a shell, the same install:
+
+```sh
+claude plugin install your-attention --marketplace elecnix/claude-plugins
+```
+
+The channel still needs the launch flag, and the plugin names it:
+
+```sh
+claude --dangerously-load-development-channels=plugin:your-attention@elecnix-plugins
+```
+
+Remove the `claude mcp add` server and the hooks above once the plugin is installed, so you answer each question once. If you added the shell wrapper, point its flag at `plugin:your-attention@elecnix-plugins` too. Otherwise the flag references a server you removed, so the channel never loads.
+
 **A card from a session that goes inactive without one (optional, off until asked for).** This hook records when the session's turn ends, and never blocks the stop. When the inbox's rule covers the session and none of its cards is open, the channel sends the session a request for a card at 2, 5 and 10 minutes of inactivity, counted from that moment, and names the `card_post` call to make. The rule's `delays` sets those minutes. The person typing a prompt, an answer or a card arriving through the channel, a card tool call, and a card of the session's own all cancel the asks still to come. Whether the session gets asked comes from the inbox, not the environment, so turning it on reaches a session that is already running. A session turns it on with `settings {"scope": "self", "on": true}`, and a proposal that would apply to all agents waits for the person's approval on a card. `YOUR_ATTENTION_REQUIRE_CARD` stays as a per-session override: `1` asks on the default schedule and any other value stops the ask, and that decision stands in place of the inbox for as long as the session runs. A background agent gets neither. Set the variable at the agent's start rather than in a startup file, since a launcher that starts a non-interactive harness leaves it out.
 
 ```json

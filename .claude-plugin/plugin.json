@@ -1,0 +1,33 @@
+{
+  "name": "your-attention",
+  "version": "0.1.1",
+  "description": "One inbox where all your coding agents ask you questions as cards, and your answers reach them at once.",
+  "author": {
+    "name": "Nicolas Marchildon",
+    "url": "https://github.com/elecnix"
+  },
+  "homepage": "https://github.com/elecnix/your-attention",
+  "repository": "https://github.com/elecnix/your-attention",
+  "license": "MIT",
+  "keywords": [
+    "inbox",
+    "channel",
+    "claude-code",
+    "coding-agents"
+  ],
+  "mcpServers": {
+    "your-attention": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js",
+        "claude-channel"
+      ]
+    }
+  },
+  "channels": [
+    {
+      "server": "your-attention",
+      "displayName": "Your attention inbox"
+    }
+  ]
+}
