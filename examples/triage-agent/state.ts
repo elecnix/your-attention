@@ -56,22 +56,33 @@ export class TriageState {
     this.warning = warning;
   }
 
-  /** The chain a card belongs to, recorded so its revisions and follow-ups find it. */
-  chainOf(card: { id: string; agent: string; title: string; follows?: string }): string {
+  /** The chain a card belongs to, from its id, its `follows` or its title, or undefined when none has seen it. */
+  private findChain(card: { id: string; agent: string; title: string; follows?: string }): string | undefined {
     const now = this.now();
     // A chain counts one agent's attempts, so the agent is part of every key: a card joins a chain only from the same
     // agent, even when another agent posts under the same card id. JSON keeps the two apart when either holds a space.
     const key = (id: string): string => JSON.stringify([card.agent, id]);
     const mine = (chain: string | undefined): string | undefined => chain && this.data.chains[chain]?.agent === card.agent ? chain : undefined;
-    const known = mine(this.data.cards[key(card.id)]?.chain) ?? mine(card.follows ? this.data.cards[key(card.follows)]?.chain : undefined)
+    return mine(this.data.cards[key(card.id)]?.chain) ?? mine(card.follows ? this.data.cards[key(card.follows)]?.chain : undefined)
       // Of the same agent's chains with this title seen in the last day, the most recently seen one.
       ?? Object.entries(this.data.chains).filter(([, c]) => c.agent === card.agent && c.title === normal(card.title) && now - c.at < DAY).sort((a, b) => b[1].at - a[1].at)[0]?.[0];
-    const chain = known ?? key(card.id);
+  }
+
+  /** The chain a card belongs to, recorded so its revisions and follow-ups find it. */
+  chainOf(card: { id: string; agent: string; title: string; follows?: string }): string {
+    const now = this.now();
+    const chain = this.findChain(card) ?? JSON.stringify([card.agent, card.id]);
     this.data.chains[chain] ??= { agent: card.agent, title: normal(card.title), returns: 0, at: now };
     // Seeing a card keeps its chain as fresh as its card entry, so a save never prunes one and keeps the other.
     this.data.chains[chain].at = now;
-    this.data.cards[key(card.id)] = { chain, at: now };
+    this.data.cards[JSON.stringify([card.agent, card.id])] = { chain, at: now };
     return chain;
+  }
+
+  /** The return count of the chain a card belongs to, without recording the card. */
+  returnsOf(card: { id: string; agent: string; title: string; follows?: string }): number {
+    const chain = this.findChain(card);
+    return chain === undefined ? 0 : this.returns(chain);
   }
 
   returns(chain: string): number {
