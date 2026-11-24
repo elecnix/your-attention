@@ -22,9 +22,13 @@ import { herdrPlace } from '../herdr/place.ts';
 const ASK_WAIT_MS = 8000;
 const ASK_POLL_MS = 200;
 
-/** The wait ask-pre uses: `ASK_WAIT_MS`, or a shorter value from `YOUR_ATTENTION_ASK_WAIT_MS` for a test. Never longer. */
-function askWaitMs(): number {
-  const asked = Number(process.env['YOUR_ATTENTION_ASK_WAIT_MS']);
+/** The wait ask-pre uses: `ASK_WAIT_MS`, or a shorter value from `YOUR_ATTENTION_ASK_WAIT_MS` for a test. Never longer,
+ * and an empty or unreadable value means the default, since a shell that exports an empty variable must not turn
+ * screening off. */
+export function askWaitMs(): number {
+  const raw = process.env['YOUR_ATTENTION_ASK_WAIT_MS'];
+  if (raw === undefined || raw.trim() === '') return ASK_WAIT_MS;
+  const asked = Number(raw);
   return Number.isFinite(asked) && asked >= 0 ? Math.min(asked, ASK_WAIT_MS) : ASK_WAIT_MS;
 }
 
