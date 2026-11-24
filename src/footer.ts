@@ -74,8 +74,9 @@ export function footerSegment(state: InboxState, url: string, max = 5, agent?: s
   const pins = Array.isArray(settings.pins) ? settings.pins : [];
   const queue = buildQueue(state, groupBy, pins);
   // A session's status line can ask for that agent's cards alone: the ones it posted and the ones the person sent it.
-  // Without a name, the segment speaks for the whole inbox.
-  const owed = (cards: typeof queue.pending): typeof queue.pending => (agent === undefined ? cards : cards.filter((c) => c.agent === agent));
+  // Without a name, or with a blank one, the segment speaks for the whole inbox.
+  const named = typeof agent === 'string' && agent.trim() !== '' ? agent.trim() : undefined;
+  const owed = (cards: typeof queue.pending): typeof queue.pending => (named === undefined ? cards : cards.filter((c) => c.agent === named));
   const waiting = owed(queue.pending).length;
   if (waiting === 0) return '';
   const base = url.replace(/\/$/, '');

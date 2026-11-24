@@ -233,6 +233,13 @@ describe('footerSegment for one agent', () => {
     assert.equal(segment(inbox, 5, 's1'), '');
   });
 
+  it('keeps the count of every card for a blank agent, as for no agent at all', () => {
+    const { inbox, post } = setup();
+    post('mine');
+    post('theirs', { agent: 's2' });
+    assert.equal(segment(inbox, 5, '  '), `2 cards ${link('mine', 1)} ${link('theirs', 2)}`);
+  });
+
   it('keeps the count of every card when no agent is named', () => {
     const { inbox, post } = setup();
     post('mine');
