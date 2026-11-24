@@ -135,6 +135,19 @@
   .tag-pin svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .tag-pin.on svg { fill: currentColor; }
   .queue h3 .tag-pin { margin: -4px 0; }
+  /* A pinned group's heading carries the arrows that move its pin. They come from nowhere: out of sight until the
+     heading is hovered or a control in it has the focus, and always there where the pointer cannot hover. */
+  .queue h3 .pin-move { display: inline-flex; align-items: center; gap: 1px; margin: -4px 0; opacity: 0; transition: opacity .12s ease; }
+  .queue h3:hover .pin-move, .queue h3:focus-within .pin-move { opacity: 1; }
+  @media (hover: none) { .queue h3 .pin-move { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .queue h3 .pin-move { transition: none; } }
+  .pin-move-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  .pin-move-btn:hover, .pin-move-btn:focus-visible { color: var(--ink); border-color: var(--line); }
+  .pin-move-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* The direction a pin cannot take stays in the layout, so the pair does not jump, and out of the tab order and the
+     accessibility tree, so nothing dead sits in the heading. */
+  .pin-move-btn.pin-move-off { visibility: hidden; }
+  .pin-move-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .prio { font-weight: 700; white-space: nowrap; padding: 2px 8px; border-radius: 6px; font-size: calc(12px * var(--text-scale)); }
   .prio.now { color: var(--bad); background: var(--bad-bg); }
@@ -478,6 +491,7 @@
     input, textarea, select { font-size: max(16px, 1em); }
     .queue select, .group-by select { min-height: 36px; font-size: 16px; }
     .queue h3 .fold { min-height: 36px; }
+    .pin-move-btn { width: 28px; height: 28px; }
     /* A terminal screen keeps its lines, so it scrolls sideways; smaller text and padding show more of each line. The highlighter sets both inline or as important. */
     .layout .openui-code-block-syntax-highlighter { padding: 12px !important; }
     .layout .openui-code-block-syntax-highlighter, .layout .openui-code-block-syntax-highlighter code { font-size: 11px !important; }

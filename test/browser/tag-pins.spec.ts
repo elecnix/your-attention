@@ -16,6 +16,8 @@ test.afterAll(async () => { await inbox.close(); });
 const heading = (page: Page, name: string) => page.locator('.queue h3', { hasText: name });
 // The heading's name, without the triangle that opens and collapses its group.
 const headings = (page: Page) => page.locator('.queue h3 .fold-name').allInnerTexts();
+// The pinned headings only: an earlier test may leave a system card above them.
+const pinnedHeadings = (page: Page) => page.locator('.queue h3.pinned .fold-name').allInnerTexts();
 const groupOf = (page: Page, title: string) => page.locator('.queue .q', { hasText: title }).evaluate((el) => {
   let n = el.previousElementSibling;
   while (n && n.tagName !== 'H3') n = n.previousElementSibling;
@@ -106,4 +108,42 @@ test('a system card sits above the pinned groups, under its own heading', async 
   const card = page.locator('.queue .q', { hasText: 'Send new card guidance to agents?' });
   await expect(card).toBeVisible();
   expect(await groupOf(page, 'Send new card guidance to agents?')).toContain('Needs your approval');
+});
+
+// The arrows on a pinned heading move its pin. The group travels with the pin, and so does a card that matches two
+// pins: it sits in the one that comes first, so reordering the pins moves it.
+test('a pinned heading shows up and down arrows on hover, and a click moves the pin and its cards', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ pins: [['topic', 'billing'], ['repo', 'acme/api']] });
+  await inbox.open(page);
+  const first = heading(page, 'topic: billing');
+  expect((await pinnedHeadings(page)).map((t) => t.toLowerCase())).toEqual(['topic: billing', 'repo: acme/api']);
+  // The arrows come from nowhere: out of sight until the heading is under the pointer.
+  const arrows = first.locator('.pin-move');
+  expect(await arrows.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(0);
+  await first.hover();
+  await expect.poll(() => arrows.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+  // The first pin offers no way up, so nothing dead sits in the heading.
+  await expect(first.getByRole('button', { name: 'Move topic: billing up' })).toHaveCount(0);
+  await first.getByRole('button', { name: 'Move topic: billing down' }).click();
+  await expect.poll(async () => (await pinnedHeadings(page)).map((t) => t.toLowerCase())).toEqual(['repo: acme/api', 'topic: billing']);
+  // The order is the inbox's setting, so the terminal client and the next page read it too.
+  expect(inbox.server.inbox.settings().pins).toEqual([['repo', 'acme/api'], ['topic', 'billing']]);
+  // The card that matches both pins moved with the order: it now sits in the group that comes first.
+  expect(await groupOf(page, 'Ship the invoice fix?')).toMatch(/repo: acme\/api/i);
+  await page.reload();
+  await page.locator('.bar .pill.on').waitFor();
+  expect((await pinnedHeadings(page)).map((t) => t.toLowerCase())).toEqual(['repo: acme/api', 'topic: billing']);
+});
+
+test('the arrows come up for the keyboard, and the last pin offers no way down', async ({ page }) => {
+  await inbox.server.inbox.setSettings({ pins: [['topic', 'billing'], ['repo', 'acme/api']] });
+  await inbox.open(page);
+  const last = heading(page, 'repo: acme/api');
+  await expect(last.getByRole('button', { name: 'Move repo: acme/api down' })).toHaveCount(0);
+  const up = last.getByRole('button', { name: 'Move repo: acme/api up' });
+  await up.focus();
+  await expect.poll(() => last.locator('.pin-move').evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await pinnedHeadings(page)).map((t) => t.toLowerCase())).toEqual(['repo: acme/api', 'topic: billing']);
+  await inbox.server.inbox.setSettings({ pins: [] });
 });

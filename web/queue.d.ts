@@ -49,6 +49,10 @@ export interface Queue {
   order: Card[];
 }
 export function buildQueue(state: InboxState, groupBy: string, pins?: Pin[], collapsed?: ReadonlySet<string>): Queue;
+/** Whether two pins name the same tag and value, or the same agent. */
+export function samePin(a: Pin, b: Pin): boolean;
+/** The pins with one pin swapped with the neighbour it moves toward, or the same list when it cannot move that way. */
+export function movePin(pins: Pin[], pin: Pin, delta: number): Pin[];
 export function after(order: Card[], id: string | null): string | null;
 /** Whether a card that just arrived raises a notification: not when its group is collapsed, unless it is at the highest level. */
 export function notifies(state: InboxState, card: Card, collapsed?: ReadonlySet<string>, groupBy?: string, pins?: Pin[]): boolean;

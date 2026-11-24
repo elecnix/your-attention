@@ -48,6 +48,22 @@ export function triageState(card) {
 }
 
 /** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>./** The queue for GET /v1/state, grouped by nothing, priority, agent or tag:<key>. `pins` lists the pins, oldest first: a tag pin as [key, value], an agent pin as {agent}. `collapsed` holds the ids of the groups the person muted, each the group's kind and value. */
+/** Two pins are the same pin when they name the same tag and value, or the same agent. */
+export const samePin = (a, b) => (Array.isArray(a) && Array.isArray(b) ? a[0] === b[0] && a[1] === b[1] : !Array.isArray(a) && !Array.isArray(b) && a.agent === b.agent);
+
+/** The pins with one pin and the neighbour it moves toward swapped, so its group goes one place up or down the queue.
+ * The list comes back as it was when the pin is not in it or has nowhere to go, so a click at either end changes
+ * nothing. The pins are the inbox's settings, oldest first, so the order also decides which pin a card that matches
+ * two of them joins. */
+export function movePin(pins, pin, delta) {
+  const i = pins.findIndex((p) => samePin(p, pin));
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= pins.length) return pins;
+  const next = pins.slice();
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+
 export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   const answers = state.answers;
   const byId = Object.fromEntries(state.cards.map((c) => [c.id, c]));
