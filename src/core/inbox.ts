@@ -402,7 +402,7 @@ const movedWhileAway = (card: Card, away: number | undefined): boolean =>
  * paths an agent posts through refuse it. */
 export const readsSomething = (c: NewCard): boolean =>
   [c.text, c.html, c.recommendation, c.body].some((t) => typeof t === 'string' && t.trim() !== '')
-  || c.template !== undefined
+  || (typeof c.template === 'object' && c.template !== null && typeof c.template.name === 'string' && c.template.name.trim() !== '')
   || (Array.isArray(c.questions) ? c.questions : []).some((q: { question?: unknown } | null) => typeof q?.question === 'string' && q.question.trim() !== '')
   || (Array.isArray(c.options) ? c.options : []).some((o: { label?: unknown } | null) => typeof o?.label === 'string' && o.label.trim() !== '')
   || (c.attachments?.length ?? 0) > 0 || (c.approvals?.length ?? 0) > 0;

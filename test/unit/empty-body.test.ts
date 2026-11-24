@@ -2,7 +2,7 @@
 // empty string, must get a card, not a message telling it to rewrite a body that does not exist.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Inbox, type Caller } from '../../src/core/inbox.ts';
+import { Inbox, readsSomething, type Caller } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import { bodyErrors } from '../../src/adapters/openui-body.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
@@ -126,5 +126,20 @@ describe('a card with nothing to read', () => {
     const { inbox } = setup();
     const card = inbox.postCard({ token: '', role: 'owner' }, { id: 'sys', agent: 'system', kind: 'system', title: 'Send new card guidance to agents?' });
     assert.equal(card.id, 'sys');
+  });
+});
+
+
+// A template fills into a body only when it names one, so a falsy template leaves nothing to read, as the inbox's own
+// expansion decides.
+describe('a template that names nothing', () => {
+  it('counts as no content', () => {
+    assert.equal(readsSomething({ title: 'Merge layer 3', agent: 's1', template: '' as never }), false);
+    assert.equal(readsSomething({ title: 'Merge layer 3', agent: 's1', template: null as never }), false);
+    assert.equal(readsSomething({ title: 'Merge layer 3', agent: 's1', template: {} as never }), false);
+  });
+
+  it('counts as content when it names a template', () => {
+    assert.equal(readsSomething({ title: 'Merge layer 3', agent: 's1', template: { name: 'release' } }), true);
   });
 });
