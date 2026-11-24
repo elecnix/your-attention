@@ -403,7 +403,9 @@ const movedWhileAway = (card: Card, away: number | undefined): boolean =>
 export const readsSomething = (c: NewCard): boolean =>
   [c.text, c.html, c.recommendation, c.body].some((t) => typeof t === 'string' && t.trim() !== '')
   || c.template !== undefined
-  || (c.questions?.length ?? 0) > 0 || (c.options?.length ?? 0) > 0 || (c.attachments?.length ?? 0) > 0 || (c.approvals?.length ?? 0) > 0;
+  || (c.questions ?? []).some((q) => typeof q?.question === 'string' && q.question.trim() !== '')
+  || (c.options ?? []).some((o) => typeof o?.label === 'string' && o.label.trim() !== '')
+  || (c.attachments?.length ?? 0) > 0 || (c.approvals?.length ?? 0) > 0;
 
 export class Inbox {
   private readonly store: Storage;
