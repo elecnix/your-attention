@@ -654,12 +654,30 @@ export function App() {
     : h(AgentPin, { agent: pin.agent, name: agentName(pin.agent, state.cards, state.presence), on, onToggle: togglePin }));
   // A tag key saved as Group by stays on offer after its last card leaves, so the choice still reads.
   const groupTags = groupBy.startsWith('tag:') && !tagKeys.includes(groupBy.slice(4)) ? [...tagKeys, groupBy.slice(4)] : tagKeys;
+  // The search sits in the queue beside Group by, next to the list it filters, so the pointer travels less between them.
+  const searchField = h('input', {
+    ref: searchRef, type: 'search', className: 'search-field', value: query, autoComplete: 'off', spellCheck: false,
+    'aria-label': 'Search cards', 'aria-keyshortcuts': IS_MAC ? 'Meta+K' : 'Control+K',
+    placeholder: IS_MAC ? 'Search  ⌘K' : 'Search  Ctrl+K',
+    onChange: (e) => setQuery(e.target.value),
+    onKeyDown: (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setQuery('');
+      const back = beforeSearchRef.current;
+      beforeSearchRef.current = null;
+      if (back && back.isConnected && back !== document.body) back.focus(); else e.currentTarget.blur();
+    },
+  });
   const queue = h('nav', { className: 'queue' },
     terms.length > 0 && h('div', { className: 'search-count', role: 'status' }, matches.size ? `${matches.size} card${matches.size === 1 ? '' : 's'} match${matches.size === 1 ? 'es' : ''}` : 'No card matches'),
-    h('label', { className: 'group-by' }, 'Group by ',
+    h('div', { className: 'queue-head' },
+      h('label', { className: 'group-by' }, 'Group by ',
       h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); savingGroupBy.current += 1; const mine = savingGroupBy.current; api(`${BASE}v1/settings`, { groupBy: e.target.value }, 'PUT').catch(() => {}).finally(() => { if (savingGroupBy.current === mine) savingGroupBy.current = 0; }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
+      searchField),
     systems.length > 0 && group('Needs your approval', systems, '', 'system', undefined, SECTION_ID.system),
     pinnedGroups.map(({ pin, title, id, items }, i) => group(title, items, 'Nothing waiting', 'pinned',
       h(React.Fragment, null,
@@ -785,21 +803,6 @@ export function App() {
   return h(React.Fragment, null,
     h('div', { className: 'bar' }, h('div', { className: 'bar-inner' },
       h('h1', null, 'Your attention'),
-      h('input', {
-        ref: searchRef, type: 'search', className: 'bar-search', value: query, autoComplete: 'off', spellCheck: false,
-        'aria-label': 'Search cards', 'aria-keyshortcuts': IS_MAC ? 'Meta+K' : 'Control+K',
-        placeholder: IS_MAC ? 'Search  ⌘K' : 'Search  Ctrl+K',
-        onChange: (e) => setQuery(e.target.value),
-        onKeyDown: (e) => {
-          if (e.key !== 'Escape') return;
-          e.preventDefault();
-          e.stopPropagation();
-          setQuery('');
-          const back = beforeSearchRef.current;
-          beforeSearchRef.current = null;
-          if (back && back.isConnected && back !== document.body) back.focus(); else e.currentTarget.blur();
-        },
-      }),
       h(NotifyToggle, { collapsed: collapsedGroups }),
       h('span', { className: `pill status-pill ${up ? 'on' : 'down'}`, title: up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable' }, h('span', { className: 'pill-text' }, up ? 'Inbox connected' : reach === 'reconnecting' ? 'Inbox reconnecting' : 'Inbox unreachable')),
       h(DevicesLink),
