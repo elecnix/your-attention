@@ -183,7 +183,7 @@ describe('the card tools and default tags', () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     const post = async (inheritedTags?: string[]) => {
       const inbox = { post: async () => ({ id: 'c9', inheritedTags }) } as never;
-      return runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a channel event' }, 'card_post', { title: 'q' });
+      return runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a channel event' }, 'card_post', { title: 'q', text: 'A card.' });
     };
     assert.match(await post(['repo', 'topic']), /Posted card c9. It took the default tags repo, topic./);
     assert.match(await post([]), /Posted card c9. It took no default tags./);

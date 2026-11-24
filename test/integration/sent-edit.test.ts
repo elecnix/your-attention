@@ -45,11 +45,11 @@ describe('revising a sent card', () => {
 
   it('passes the warning to the agent in the tool reply', async () => {
     const ctx: ToolContext = { inbox: agent, secrets: new SecretRequests(), agent: 's1', arrival: 'in this session', origin: async () => undefined };
-    await runTool(ctx, 'card_post', { id: 'c3', title: 'Rename it?' });
+    await runTool(ctx, 'card_post', { id: 'c3', title: 'Rename it?', text: 'A card.' });
     await owner.answer('c3', { comment: 'No.' });
     const reply = await runTool(ctx, 'card_patch', { card_id: 'c3', edits: [{ old: 'Rename', new: 'Really rename' }], field: 'title' });
     assert.match(reply, /version 2/);
     assert.match(reply, /already answered/);
-    assert.match(await runTool(ctx, 'card_post', { id: 'c3', title: 'Really rename it now?' }), /already answered/);
+    assert.match(await runTool(ctx, 'card_post', { id: 'c3', title: 'Really rename it now?', text: 'A card.' }), /already answered/);
   });
 });

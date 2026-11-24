@@ -108,3 +108,21 @@ describe('a card with questions', () => {
     assert.equal(new Inbox(store, () => 1).getCard('ask-99999999').dialog, undefined);
   });
 });
+
+
+// A model that fills `vars` without naming a template loses whatever it put there, and posts a card with nothing to
+// read. card_post refuses that shape and says where the text goes.
+describe('vars without a template', () => {
+  it('is refused, naming the field the card\'s own words belong in', async () => {
+    const inbox = { post: async () => ({ id: 'c1' }) } as never;
+    await assert.rejects(
+      runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', { title: 'Merge layer 3', vars: {} }),
+      /vars fills a template: name one with template, and put the card's own text in text/,
+    );
+  });
+
+  it('still posts a card whose text carries the content', async () => {
+    const posted = await post({ title: 'Merge layer 3', text: 'Ship layer 3?' });
+    assert.equal(posted.text, 'Ship layer 3?');
+  });
+});

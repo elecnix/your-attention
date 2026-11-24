@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
-import { typeFromName, type SearchFilters } from '../core/inbox.ts';
+import { readsSomething, typeFromName, type SearchFilters } from '../core/inbox.ts';
 import type { Approval, AskQuestion, CloseKind, FeedbackFinding, FeedbackVerdict, NewAttachment, NewCard, Option, Origin, PullRequest } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
 import { envRequireCard, ruleFromView } from './require-card.ts';
@@ -74,13 +74,14 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         title: String(args['title'] ?? ''),
         text: str(args['text']),
         recommendation: str(args['recommendation']),
-        options: (args['options'] as OptionArg[] | undefined)?.map((o, i): Option => ({ id: `o${i + 1}`, ...optionArg(o) })),
+        // A malformed list is no list: the guard below refuses the card and names what it needs, rather than a TypeError.
+        options: Array.isArray(args['options']) ? (args['options'] as OptionArg[]).map((o, i): Option => ({ id: `o${i + 1}`, ...optionArg(o) })) : undefined,
         multiple: args['multiple'] as boolean | undefined,
         approvals: args['approvals'] as Approval[] | undefined,
         questions: Array.isArray(args['questions']) ? (args['questions'] as Parameters<typeof questionArg>[0][]).map(questionArg) : undefined,
         body: str(args['body']),
         html: str(args['html']),
-        attachments: (args['attachments'] as { path?: string; url?: string; name?: string; alt?: string }[] | undefined)?.map(toAttachment),
+        attachments: Array.isArray(args['attachments']) ? (args['attachments'] as { path?: string; url?: string; name?: string; alt?: string }[]).map(toAttachment) : undefined,
         template: args['template'] ? { name: String(args['template']), version: args['template_version'] === undefined ? undefined : Number(args['template_version']), vars: args['vars'] as Record<string, string> | undefined } : undefined,
         priority: str(args['priority']),
         rating: args['rating'] === undefined ? undefined : Number(args['rating']),
@@ -91,6 +92,14 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         from: str(args['from']),
         origin: await origin(),
       };
+      // A card with nothing to read shows the person a title and nothing under it. Refuse it here, where every agent's
+      // card_post lands, rather than posting it and letting triage return it until it gives up. `vars` without a template
+      // fills no field, so a call that leans on it gets the sentence that names the field the words belong in.
+      if (!readsSomething(card)) {
+        throw new Error(args['vars'] !== undefined && !args['template']
+          ? 'vars fills a template: name one with template, and put the card\'s own text in text'
+          : 'a card needs something the person can read: give text, a body, questions, options, html, an attachment, or approvals');
+      }
       const sealing = await ctx.secrets.prepare(card.body);
       const posted = await inbox.post({ ...card, body: sealing.body });
       sealing.keep(posted.id);

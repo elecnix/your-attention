@@ -75,7 +75,7 @@ describe('the Claude Code channel', () => {
   });
 
   it('closes its own card', async () => {
-    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-2', title: 'Still needed?' } });
+    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-2', title: 'Still needed?', text: 'A card.' } });
     await mcp.callTool({ name: 'card_close', arguments: { card_id: 'cc-2', kind: 'self-answered', outcome: 'Found it in the README.' } });
     const s = (await h.stored()) as { states: Record<string, string> };
     assert.equal(s.states['cc-2'], 'closed');
@@ -99,7 +99,7 @@ describe('the Claude Code channel', () => {
   });
 
   it('saves a pasted image to a private file and names its path in the event', async () => {
-    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-img', title: 'Which layout?' } });
+    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-img', title: 'Which layout?', text: 'A card.' } });
     const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     await h.owner('POST', '/v1/cards/cc-img/answer', { values: {}, comment: 'like this', images: [{ src: png, name: 'mock.png', field: 'comment' }] });
     const note = await until(() => notes.find((n) => n.meta.card_id === 'cc-img'));
@@ -120,8 +120,8 @@ describe('the Claude Code channel', () => {
   });
 
   it('lists cards by a filter, with each result carrying its state, tags, agent and times', async () => {
-    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-filter-open', title: 'Still waiting?', tags: { repo: 'search-test' } } });
-    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-filter-done', title: 'Settled?', tags: { repo: 'search-test' } } });
+    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-filter-open', title: 'Still waiting?', text: 'A card.', tags: { repo: 'search-test' } } });
+    await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-filter-done', title: 'Settled?', text: 'A card.', tags: { repo: 'search-test' } } });
     await h.owner('POST', '/v1/cards/cc-filter-done/answer', { values: {} });
     type Row = { id: string; state: string; tags: Record<string, string>; agent: string; posted: string; updated: string };
     const reply = async (args: Record<string, unknown>): Promise<{ results: Row[]; next_cursor?: string }> => {

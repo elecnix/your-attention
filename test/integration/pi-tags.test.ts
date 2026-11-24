@@ -47,7 +47,7 @@ describe('a pi session launched with --tags', () => {
       repo: { value: 'acme/store', from: 'YOUR_ATTENTION_TAGS' },
       topic: { value: 'billing', from: 'YOUR_ATTENTION_TAGS' },
     });
-    const posted = await tools.get('card_post')!.execute('c1', { id: 'tagged-1', title: 'Which store?' }, undefined, undefined, ctx);
+    const posted = await tools.get('card_post')!.execute('c1', { id: 'tagged-1', title: 'Which store?', text: 'A card.' }, undefined, undefined, ctx);
     assert.match(posted.content[0]!.text, /It took the default tags repo, topic\./);
     assert.deepEqual((await card('tagged-1'))?.tags, { repo: 'acme/store', topic: 'billing' });
   });
@@ -56,7 +56,7 @@ describe('a pi session launched with --tags', () => {
     const read = await tools.get('card_tags')!.execute('c2', {}, undefined, undefined, ctx);
     assert.match(read.content[0]!.text, /repo: acme\/store \(from YOUR_ATTENTION_TAGS\)/);
     assert.match(read.content[0]!.text, /topic: billing \(from YOUR_ATTENTION_TAGS\)/);
-    await tools.get('card_post')!.execute('c3', { id: 'tagged-2', title: 'Which repository?', tags: { topic: '' } }, undefined, undefined, ctx);
+    await tools.get('card_post')!.execute('c3', { id: 'tagged-2', title: 'Which repository?', text: 'A card.', tags: { topic: '' } }, undefined, undefined, ctx);
     assert.deepEqual((await card('tagged-2'))?.tags, { repo: 'acme/store' });
   });
 

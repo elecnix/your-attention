@@ -13,7 +13,7 @@ const pr = { owner: 'elecnix', repo: 'your-attention', number: 160 };
 describe('pullRequests', () => {
   it('stores one pull request and returns it on read', async () => {
     const { post, call, agentA } = await httpInbox();
-    const card = await post(agentA, { title: 'Review the fix', pullRequests: pr });
+    const card = await post(agentA, { title: 'Review the fix', text: 'Ship it?', pullRequests: pr });
     assert.deepEqual(card.pullRequests, pr);
     const res = await call('GET', `/v1/cards/${card.id}`, { token: agentA });
     const detail = (await res.json()) as { card: { pullRequests?: unknown } };
@@ -62,7 +62,7 @@ describe('pullRequests', () => {
 
   it('returns the field on a search result, as publicCard gives it', async () => {
     const { post, call, agentA } = await httpInbox();
-    const card = await post(agentA, { title: 'Review the fix', pullRequests: pr });
+    const card = await post(agentA, { title: 'Review the fix', text: 'Ship it?', pullRequests: pr });
     const res = await call('GET', `/v1/search?q=Review&format=page`, { token: agentA });
     const page = (await res.json()) as { results: { card: { id: string; pullRequests?: unknown } }[] };
     const hit = page.results.find((r) => r.card.id === card.id);
@@ -119,7 +119,7 @@ describe('pullRequests', () => {
 
   it('a null pullRequests on a patch clears the field', async () => {
     const { post, call, agentA } = await httpInbox();
-    const card = await post(agentA, { title: 'Review the fix', pullRequests: pr });
+    const card = await post(agentA, { title: 'Review the fix', text: 'Ship it?', pullRequests: pr });
     assert.deepEqual(card.pullRequests, pr);
     const cleared = (await (await call('POST', `/v1/cards/${card.id}/patch`, { token: agentA, body: { pullRequests: null } })).json()) as { pullRequests?: unknown };
     assert.equal(cleared.pullRequests, undefined);
@@ -133,15 +133,15 @@ describe('pullRequests through the card tools', () => {
   it('card_post carries the field to the inbox unchanged', async () => {
     let posted: NewCard | undefined;
     const inbox = { post: async (c: NewCard) => { posted = c; return { id: 'c1', inheritedTags: [] }; } };
-    await runTool(toolCtx(inbox), 'card_post', { title: 'Review the fix', pullRequests: pr });
+    await runTool(toolCtx(inbox), 'card_post', { title: 'Review the fix', text: 'Ship it?', pullRequests: pr });
     assert.deepEqual(posted?.pullRequests, pr);
-    await runTool(toolCtx(inbox), 'card_post', { title: 'Review both', pullRequests: [pr, { owner: 'acme', repo: 'api', number: 7 }] });
+    await runTool(toolCtx(inbox), 'card_post', { title: 'Review both', text: 'Ship it?', pullRequests: [pr, { owner: 'acme', repo: 'api', number: 7 }] });
     assert.deepEqual(posted?.pullRequests, [pr, { owner: 'acme', repo: 'api', number: 7 }]);
   });
 
   it('card_post refuses each bad shape, because the inbox is the gate', async () => {
     const { inbox } = setup();
-    const post = (pullRequests: unknown) => runTool(toolCtx({ post: async (c: NewCard) => inbox.postCard(agent, c) }), 'card_post', { title: 'q', pullRequests });
+    const post = (pullRequests: unknown) => runTool(toolCtx({ post: async (c: NewCard) => inbox.postCard(agent, c) }), 'card_post', { title: 'q', text: 'Ship it?', pullRequests });
     const cases: [string, unknown, RegExp][] = [
       ['a missing number', { owner: 'elecnix', repo: 'your-attention' }, /number/],
       ['a string number', { ...pr, number: '160' }, /number/],
