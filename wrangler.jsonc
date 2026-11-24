@@ -3,7 +3,8 @@
   "name": "app",
   "main": "src/cloudflare/worker.ts",
   "compatibility_date": "2026-10-01",
-  "assets": { "directory": ".cloudflare/assets", "binding": "ASSETS", "run_worker_first": true },
+  // The Worker serves "/" itself, so the asset layer hands back index.html as a file, never as a redirect to "/".
+  "assets": { "directory": ".cloudflare/assets", "binding": "ASSETS", "run_worker_first": true, "html_handling": "none" },
   "durable_objects": {
     "bindings": [{ "name": "INBOX", "class_name": "InboxObject" }, { "name": "REGISTRY", "class_name": "RegistryObject" }],
     // An active object keeps its old code until it hibernates, and the sweep alarm keeps the inbox awake, so a deploy

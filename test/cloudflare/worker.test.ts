@@ -109,6 +109,7 @@ describe('the hosted Cloudflare build', () => {
     const page = await fetch(`${inbox}/`, { redirect: 'manual' });
     assert.equal(page.status, 200, 'the page comes back itself, with no redirect');
     assert.match(await page.text(), /<title>Your Attention<\/title>/);
+    assert.equal((await fetch(`${inbox}/index.html`)).status, 200, 'index.html comes back as a file, not as a redirect to /');
     assert.equal((await fetch(`${inbox}/vendor/openui-bundle.min.js`)).status, 200);
     assert.equal((await fetch(`${base}/i/${'0'.repeat(32)}/v1/info`)).status, 404);
     assert.equal((await fetch(`${inbox}/v1/state`)).status, 401);
