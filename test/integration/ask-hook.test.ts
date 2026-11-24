@@ -20,7 +20,8 @@ const hook = (mode: string, input: Record<string, unknown>, env: Record<string, 
   });
   let out = '';
   child.stdout.on('data', (d) => { out += String(d); });
-  child.on('exit', (status) => resolve({ status, out }));
+  // `close` follows the exit and the closed stdio streams, so the last `data` chunk of the deny is in `out`.
+  child.on('close', (status) => resolve({ status, out }));
   child.stdin.end(JSON.stringify(input));
 });
 
@@ -64,6 +65,17 @@ const pending = (sid: string): string | undefined => {
 };
 const deny = (out: string): { hookEventName: string; permissionDecision: string; permissionDecisionReason: string } | undefined =>
   (JSON.parse(out) as { hookSpecificOutput?: { hookEventName: string; permissionDecision: string; permissionDecisionReason: string } }).hookSpecificOutput;
+
+/** Ask a question while an extension holds the stream, send one verdict, and give the hook's result. The extension
+ * closes once the hook has finished, so a pass or a deny both end in the same place. */
+async function screened(sid: string, question: string, verdict: 'pass' | 'return' | 'hold', reason: string): Promise<{ status: number | null; out: string }> {
+  const t = await triage(`triage-${sid}`);
+  try {
+    const running = hook('ask-pre', ask(sid, question), { YOUR_ATTENTION_ASK_WAIT_MS: '5000' });
+    await t.verdict(verdict, reason);
+    return await running;
+  } finally { t.close(); }
+}
 const ask = (session: string, question: string) => ({ session_id: session, tool_name: 'AskUserQuestion', tool_input: { questions: [{ question, header: 'Q', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] }] } });
 const card = async (session: string, title: string) => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.agent === `claude:${session}` && c.questions?.[0]?.question === title);
 
@@ -113,54 +125,35 @@ describe('the AskUserQuestion hooks', () => {
 
 describe('a question under triage', () => {
   it('is denied with its reason before the dialog opens when triage returns it, and its pending file goes', async () => {
-    const t = await triage('triage-s7');
-    try {
-      const running = hook('ask-pre', ask('s7', 'Weak question?'), { YOUR_ATTENTION_ASK_WAIT_MS: '5000' });
-      await t.verdict('return', 'State the options you weighed, and recommend one.');
-      const r = await running;
-      assert.equal(r.status, 0);
-      assert.equal(deny(r.out)?.hookEventName, 'PreToolUse');
-      assert.equal(deny(r.out)?.permissionDecision, 'deny');
-      assert.match(deny(r.out)!.permissionDecisionReason, /State the options you weighed, and recommend one\./);
-      assert.ok(pending('s7') === undefined, 'a deny fires PermissionDenied, so its ask-cancel must find no pending file');
-      assert.equal((await card('s7', 'Weak question?'))?.closed?.kind, 'returned');
-    } finally { t.close(); }
+    const r = await screened('s7', 'Weak question?', 'return', 'State the options you weighed, and recommend one.');
+    assert.equal(r.status, 0);
+    assert.equal(deny(r.out)?.hookEventName, 'PreToolUse');
+    assert.equal(deny(r.out)?.permissionDecision, 'deny');
+    assert.match(deny(r.out)!.permissionDecisionReason, /State the options you weighed, and recommend one\./);
+    assert.ok(pending('s7') === undefined, 'a deny fires PermissionDenied, so its ask-cancel must find no pending file');
+    assert.equal((await card('s7', 'Weak question?'))?.closed?.kind, 'returned');
   });
 
   it('is denied when triage holds it, so the dialog never opens', async () => {
-    const t = await triage('triage-s8');
-    try {
-      const running = hook('ask-pre', ask('s8', 'Held question?'), { YOUR_ATTENTION_ASK_WAIT_MS: '5000' });
-      await t.verdict('hold', 'Hold it until the goal is stated.');
-      const r = await running;
-      assert.equal(deny(r.out)?.permissionDecision, 'deny');
-      assert.match(deny(r.out)!.permissionDecisionReason, /Hold it until the goal is stated\./);
-      assert.equal(pending('s8'), undefined);
-    } finally { t.close(); }
+    const r = await screened('s8', 'Held question?', 'hold', 'Hold it until the goal is stated.');
+    assert.equal(deny(r.out)?.permissionDecision, 'deny');
+    assert.match(deny(r.out)!.permissionDecisionReason, /Hold it until the goal is stated\./);
+    assert.equal(pending('s8'), undefined);
   });
 
   it('keeps the returned close when Claude Code fires PermissionDenied after the deny', async () => {
-    const t = await triage('triage-s11');
-    try {
-      const running = hook('ask-pre', ask('s11', 'Returned then denied?'), { YOUR_ATTENTION_ASK_WAIT_MS: '5000' });
-      await t.verdict('return', 'Too vague.');
-      assert.equal(deny((await running).out)?.permissionDecision, 'deny');
-      // Claude Code fires PermissionDenied for the denied call, which hooks.json maps to ask-cancel.
-      assert.equal((await hook('ask-cancel', { session_id: 's11', hook_event_name: 'PermissionDenied', tool_name: 'AskUserQuestion' })).status, 0);
-      assert.equal((await card('s11', 'Returned then denied?'))?.closed?.kind, 'returned', 'ask-cancel must not overwrite the return');
-    } finally { t.close(); }
+    const r = await screened('s11', 'Returned then denied?', 'return', 'Too vague.');
+    assert.equal(deny(r.out)?.permissionDecision, 'deny');
+    // Claude Code fires PermissionDenied for the denied call, which hooks.json maps to ask-cancel.
+    assert.equal((await hook('ask-cancel', { session_id: 's11', hook_event_name: 'PermissionDenied', tool_name: 'AskUserQuestion' })).status, 0);
+    assert.equal((await card('s11', 'Returned then denied?'))?.closed?.kind, 'returned', 'ask-cancel must not overwrite the return');
   });
 
   it('lets the dialog open when triage passes the question', async () => {
-    const t = await triage('triage-s10');
-    try {
-      const running = hook('ask-pre', ask('s10', 'Good question?'), { YOUR_ATTENTION_ASK_WAIT_MS: '5000' });
-      await t.verdict('pass', 'Fine.');
-      const r = await running;
-      assert.equal(r.status, 0);
-      assert.equal(r.out, '', 'a pass prints no decision, so the dialog opens');
-      assert.ok(pending('s10'), 'the pending file stays for ask-post or ask-cancel');
-    } finally { t.close(); }
+    const r = await screened('s10', 'Good question?', 'pass', 'Fine.');
+    assert.equal(r.status, 0);
+    assert.equal(r.out, '', 'a pass prints no decision, so the dialog opens');
+    assert.ok(pending('s10'), 'the pending file stays for ask-post or ask-cancel');
   });
 
   it('lets the dialog open when triage does not answer in time, and keeps the pending file', async () => {
