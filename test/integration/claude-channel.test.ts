@@ -39,6 +39,13 @@ describe('the Claude Code channel', () => {
     assert.deepEqual(tools.map((t) => t.name).sort(), ['card_close', 'card_guidance', 'card_patch', 'card_post', 'card_read', 'card_search', 'card_status', 'card_tag', 'card_tags', 'card_template_save', 'card_triage_feedback', 'card_widget_save', 'settings']);
   });
 
+  it('tells the session that its AskUserQuestion also becomes a card, and triage may send a weak one back', () => {
+    const instructions = mcp.getInstructions() ?? '';
+    assert.match(instructions, /AskUserQuestion/);
+    assert.match(instructions, /triage may send a weak one back/);
+    assert.match(instructions, /state the goal, the options you weighed, and your recommendation/);
+  });
+
   it('posts a card, pushes the answer into the session, and marks it read from the transcript', async () => {
     const transcript = path.join(h.home, '.claude', 'projects', '-repo', `${SESSION}.jsonl`);
     fs.mkdirSync(path.dirname(transcript), { recursive: true });

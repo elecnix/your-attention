@@ -1,5 +1,7 @@
 // The herdr sidecar turns a blocked agent's dialog into a card, and presses the answered choice in that pane only.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { Client } from '../../src/client.ts';
 import type { Card } from '../../src/core/types.ts';
@@ -102,5 +104,29 @@ describe('the herdr sidecar', () => {
       await second.tick();
       assert.equal((await cardFor('w1:p4')).version, card.version);
     } finally { second.stop(); }
+  });
+
+  it('posts no second card for a question that a verdict has not closed, such as one still in triage', async () => {
+    const fake = fakeHerdr('w1:p9', () => {});
+    const client = new Client({ url: h.server.url, token: h.agentToken });
+    // A triage connection that never sends a verdict keeps the plugin's dialog card in triage.
+    const token = fs.readFileSync(path.join(h.home, 'extension-token'), 'utf8').trim();
+    const ctl = new AbortController();
+    const stream = await fetch(`${h.server.url}/v1/extensions/stream?name=triage&hooks=card.created&policy=fail-open&timeoutMs=120000&screen=new`, { headers: { authorization: `Bearer ${token}` }, signal: ctl.signal });
+    try {
+      await client.post({ id: 'ask-triage-1', agent: 'claude:q', dialog: true, title: 'A question', origin: { herdrPane: 'w1:p9' } });
+      const states = async () => (await h.stored()) as { states: Record<string, string> };
+      await until(async () => (await states()).states['ask-triage-1'] === 'in-triage' || undefined);
+      const sidecar = createSidecar(client, fake.herdr, 50);
+      try {
+        await sidecar.tick();
+        const cards = ((await h.stored()) as { cards: Card[] }).cards.filter((c) => c.origin?.herdrPane === 'w1:p9');
+        assert.deepEqual(cards.map((c) => c.kind), ['ask'], 'the question under triage is present, so no blocked card joins it');
+        assert.equal((await states()).states['ask-triage-1'], 'in-triage');
+      } finally { sidecar.stop(); }
+    } finally {
+      ctl.abort();
+      void stream.body?.cancel().catch(() => {});
+    }
   });
 });
