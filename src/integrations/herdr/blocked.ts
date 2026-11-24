@@ -65,9 +65,10 @@ export function matchesCard(raw: string, card: Card): boolean {
 
 const sameDialog = (a: Dialog | undefined, b: Dialog | undefined): boolean => JSON.stringify(a) === JSON.stringify(b);
 
-/** The states of a question card that has no close and no answer: the dialog may still be open, whether the person has
- * not seen it yet, it is open, or triage is checking it. */
-const NO_ANSWER_YET: ReadonlySet<CardState> = new Set<CardState>(['in-triage', 'held', 'open', 'orphaned']);
+/** The states of a question card that has no close and no answer, and whose agent can still answer it: the dialog may
+ * still be open, whether the person has not seen it yet, it is open, or triage is checking it. An orphaned dialog card
+ * stays out: its agent has been offline for an hour, so only the sidecar's card can answer in the pane. */
+const NO_ANSWER_YET: ReadonlySet<CardState> = new Set<CardState>(['in-triage', 'held', 'open']);
 
 /** A question card whose dialog may still be open: a verdict has not closed it and the person has not answered it. It
  * reads `in-triage` or `held` while triage checks it, not only `open`, so the sidecar skips a question the plugin

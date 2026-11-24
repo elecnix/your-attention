@@ -71,7 +71,7 @@ export const ROOT = path.resolve(import.meta.dirname, '..', '..');
  * deny is written; `stderr` reads a hook that logs, and the other stream is inherited. */
 export function runHook(h: Harness, mode: string, input: Record<string, unknown>, opts: { env?: Record<string, string>; capture?: 'stdout' | 'stderr' } = {}): Promise<{ status: number | null; out: string }> {
   const capture = opts.capture ?? 'stdout';
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts'), 'claude-hook', mode], {
       env: { ...process.env, YOUR_ATTENTION_HOME: h.home, YOUR_ATTENTION_URL: h.server.url, YOUR_ATTENTION_TOKEN: h.agentToken, ...opts.env },
       stdio: ['pipe', capture === 'stdout' ? 'pipe' : 'ignore', capture === 'stderr' ? 'pipe' : 'inherit'],
@@ -79,10 +79,17 @@ export function runHook(h: Harness, mode: string, input: Record<string, unknown>
     let out = '';
     const stream = capture === 'stdout' ? child.stdout! : child.stderr!;
     stream.on('data', (d) => { out += String(d); });
+    // A spawn that fails, such as EAGAIN on a loaded box, rejects this test instead of throwing out of the whole file.
+    child.on('error', reject);
     // `close` follows the exit and the closed stdio streams, so the last chunk of a hook's output is in `out`.
     child.on('close', (status) => resolve({ status, out }));
     child.stdin!.end(JSON.stringify(input));
   });
+}
+
+/** Read one file of the inbox home, trimmed, or undefined when it is not there. */
+export function homeFile(h: Harness, name: string): string | undefined {
+  try { return fs.readFileSync(path.join(h.home, name), 'utf8').trim(); } catch { return undefined; }
 }
 
 /** Stop a process this test spawned, and remove its home once the process has let go of the files in it. A Windows

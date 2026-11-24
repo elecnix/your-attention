@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { runHook, start, type Harness } from './harness.ts';
+import { homeFile, runHook, start, type Harness } from './harness.ts';
 
 let h: Harness;
 before(async () => { h = await start(); });
@@ -14,7 +14,8 @@ const hook = (input: Record<string, unknown>, env: Record<string, string> = {}):
   runHook(h, 'turn-end', input, { env, capture: 'stderr' });
 
 const stretch = (session: string): unknown => {
-  try { return JSON.parse(fs.readFileSync(path.join(h.home, 'claude', `${session}.card-ask`), 'utf8')); } catch { return undefined; }
+  const raw = homeFile(h, path.join('claude', `${session}.card-ask`));
+  return raw === undefined ? undefined : JSON.parse(raw);
 };
 
 // The prompt hook runs `claude-hook ask-cancel` on UserPromptSubmit and on SessionEnd, which is where a stretch ends.

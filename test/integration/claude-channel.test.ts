@@ -41,9 +41,8 @@ describe('the Claude Code channel', () => {
 
   it('tells the session that its AskUserQuestion also becomes a card, and triage may send a weak one back', () => {
     const instructions = mcp.getInstructions() ?? '';
-    assert.match(instructions, /AskUserQuestion/);
-    assert.match(instructions, /triage may send a weak one back/);
-    assert.match(instructions, /state the goal, the options you weighed, and your recommendation/);
+    assert.match(instructions, /An AskUserQuestion you ask also becomes a card in that inbox, and triage may send a weak one back before the person sees it/);
+    assert.match(instructions, /state the goal, the options you weighed, and your recommendation, and ask again if it comes back/);
   });
 
   it('posts a card, pushes the answer into the session, and marks it read from the transcript', async () => {

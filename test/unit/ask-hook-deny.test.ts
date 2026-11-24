@@ -17,12 +17,9 @@ describe('the ask-pre deny', () => {
     assert.match(denyReason('  '), /it lacked the goal, the options you weighed, the evidence, or a recommendation/);
   });
 
-  it('stops a returned card with the close outcome', () => {
+  it('stops a returned card with its close outcome, and a held card with triage\'s reason', () => {
     const returned: Card = { ...card, closed: { kind: 'returned', outcome: 'Too vague.', at: 2 } };
     assert.match(stoppedReason(returned, 'closed') ?? '', /Too vague\./);
-  });
-
-  it('stops a held card with triage\'s reason', () => {
     const held: Card = { ...card, triage: { state: 'held', by: 'triage', reason: 'Wait for the goal.', at: 2 } };
     assert.match(stoppedReason(held, 'held') ?? '', /Wait for the goal\./);
   });

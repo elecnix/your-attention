@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { Card } from '../../src/core/types.ts';
-import { runHook, start, until, type Harness } from './harness.ts';
+import { homeFile, runHook, start, until, type Harness } from './harness.ts';
 
 let h: Harness;
 before(async () => { h = await start(); });
@@ -50,9 +50,7 @@ async function triage(name: string): Promise<{ verdict(verdict: 'pass' | 'return
   };
 }
 
-const pending = (sid: string): string | undefined => {
-  try { return fs.readFileSync(path.join(h.home, 'claude', `${sid}.pending`), 'utf8').trim(); } catch { return undefined; }
-};
+const pending = (sid: string): string | undefined => homeFile(h, path.join('claude', `${sid}.pending`));
 const deny = (out: string): { hookEventName: string; permissionDecision: string; permissionDecisionReason: string } | undefined =>
   (JSON.parse(out) as { hookSpecificOutput?: { hookEventName: string; permissionDecision: string; permissionDecisionReason: string } }).hookSpecificOutput;
 
