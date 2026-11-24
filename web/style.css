@@ -350,9 +350,11 @@
   details.changes .step { margin: 6px 0; }
   details.changes .step-head { font-weight: 600; }
   details.changes .field { color: var(--muted); margin-top: 2px; }
-  /* Triage pushback: each reason as the extension wrote it, and the agent's feedback under an accent line, colored by its verdict. */
+  /* Triage pushback: each reason as the extension wrote it, and the agent's feedback under an accent line, colored by its verdict.
+     The triage entry itself hangs behind a left rule, so its words read apart from the card text, and the feedback nests one level in. */
+  details.pushback .step { padding-left: 10px; border-left: 3px solid var(--line); }
   details.pushback .reason { white-space: pre-wrap; margin-top: 2px; }
-  details.pushback .feedback { margin: 6px 0 0; padding-left: 10px; border-left: 3px solid var(--line); }
+  details.pushback .feedback { margin: 6px 0 0 6px; padding-left: 10px; border-left: 3px solid var(--line); }
   details.pushback .feedback.agree { border-left-color: var(--ok); }
   details.pushback .feedback.disagree { border-left-color: var(--bad); }
   details.pushback .feedback.partly { border-left-color: var(--warn); }
