@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { Card } from '../../src/core/types.ts';
-import { ROOT, start, type Harness } from './harness.ts';
+import { ROOT, start, until, type Harness } from './harness.ts';
 
 let h: Harness;
 before(async () => { h = await start(); });
@@ -139,6 +139,22 @@ describe('a question under triage', () => {
     assert.equal(deny(r.out)?.permissionDecision, 'deny');
     assert.match(deny(r.out)!.permissionDecisionReason, /Hold it until the goal is stated\./);
     assert.equal(pending('s8'), undefined);
+    // The hook closes the held card, because its dialog will not open. A held card would keep the herdr sidecar off
+    // the pane and hide a later block there.
+    assert.equal((await card('s8', 'Held question?'))?.closed?.kind, 'resolved');
+  });
+
+  it('leaves a card held when the hold arrives after the wait, since its dialog is already open', async () => {
+    const t = await triage('triage-s12');
+    try {
+      const r = await hook('ask-pre', ask('s12', 'Late hold?'), { YOUR_ATTENTION_ASK_WAIT_MS: '400' });
+      assert.equal(r.status, 0);
+      assert.equal(r.out, '', 'the dialog opened before the hold arrived');
+      await t.verdict('hold', 'Too late.');
+      await until(async () => (await card('s12', 'Late hold?'))?.triage?.state === 'held' || undefined);
+      assert.equal((await card('s12', 'Late hold?'))?.closed, undefined, 'a late hold leaves the card held for the owner');
+      assert.ok(pending('s12'), 'the pending file stays, so ask-post or ask-cancel closes the card the dialog opened');
+    } finally { t.close(); }
   });
 
   it('keeps the returned close when Claude Code fires PermissionDenied after the deny', async () => {

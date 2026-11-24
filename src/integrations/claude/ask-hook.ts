@@ -66,9 +66,16 @@ export function terminalOutcome(response: unknown): string {
   return parts.join(' · ') || 'Answered in the terminal.';
 }
 
+/** A question triage stopped, with the reason for the deny, and whether triage held it. A hold observed inside the
+ * wait means the dialog never opens, so the hook closes the card; a return already closed it. */
+export interface Stopped {
+  reason: string;
+  held: boolean;
+}
+
 /** Poll the posted card until triage returns or holds it, it reaches the person, or `deadline` passes. It gives the deny
  * reason only for a return or a hold; anything else, including a read the inbox refuses, lets the dialog open. */
-export async function awaitTriage(inbox: Client, id: string, deadline: number): Promise<string | undefined> {
+export async function awaitTriage(inbox: Client, id: string, deadline: number): Promise<Stopped | undefined> {
   for (;;) {
     let seen: { card: Card; state: string };
     try {
@@ -77,8 +84,8 @@ export async function awaitTriage(inbox: Client, id: string, deadline: number): 
       // No card to wait on, so there is nothing to deny: the dialog opens.
       return undefined;
     }
-    const stopped = stoppedReason(seen.card, seen.state);
-    if (stopped !== undefined) return stopped;
+    const reason = stoppedReason(seen.card, seen.state);
+    if (reason !== undefined) return { reason, held: seen.state === 'held' };
     // A card past triage is open (a pass), answered, or closed for another reason. The dialog belongs to the person now.
     if (seen.state !== 'in-triage') return undefined;
     if (Date.now() >= deadline) return undefined;
@@ -136,7 +143,11 @@ export async function main(mode: string): Promise<void> {
       // A deny fires PermissionDenied, which hooks.json maps to ask-cancel. That must not close the returned card as
       // resolved, so the pending file goes before the deny: ask-cancel then finds no card to close.
       fs.rmSync(pendingFile, { force: true });
-      process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: stopped } })}\n`);
+      // A hold observed inside the wait means the dialog never opens, so the card must not stay `held`: the herdr
+      // sidecar would keep its pane carded and hide a later, different block there. A hold that arrives after the wait
+      // leaves the card `held` instead, because the dialog it names is already open for the person.
+      if (stopped.held) await inbox.close(id, 'resolved', 'Triage held this question, so its dialog did not open.', true).catch(() => {});
+      process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: stopped.reason } })}\n`);
     }
     return;
   }
