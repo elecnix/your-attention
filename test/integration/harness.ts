@@ -87,11 +87,6 @@ export function runHook(h: Harness, mode: string, input: Record<string, unknown>
   });
 }
 
-/** Read one file of the inbox home, trimmed, or undefined when it is not there. */
-export function homeFile(h: Harness, name: string): string | undefined {
-  try { return fs.readFileSync(path.join(h.home, name), 'utf8').trim(); } catch { return undefined; }
-}
-
 /** Stop a process this test spawned, and remove its home once the process has let go of the files in it. A Windows
  * process holds its SQLite file until it exits, so a delete right after the kill fails with EBUSY. */
 export async function stopAndRemove(child: ChildProcess, home: string): Promise<void> {

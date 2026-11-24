@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { Card } from '../../src/core/types.ts';
-import { homeFile, runHook, start, until, type Harness } from './harness.ts';
+import { readHome } from '../../src/node/home.ts';
+import { runHook, start, until, type Harness } from './harness.ts';
 
 let h: Harness;
 before(async () => { h = await start(); });
@@ -50,9 +51,19 @@ async function triage(name: string): Promise<{ verdict(verdict: 'pass' | 'return
   };
 }
 
-const pending = (sid: string): string | undefined => homeFile(h, path.join('claude', `${sid}.pending`));
+const pending = (sid: string): string | undefined => readHome(path.join('claude', `${sid}.pending`), h.home);
 const deny = (out: string): { hookEventName: string; permissionDecision: string; permissionDecisionReason: string } | undefined =>
   (JSON.parse(out) as { hookSpecificOutput?: { hookEventName: string; permissionDecision: string; permissionDecisionReason: string } }).hookSpecificOutput;
+
+/** Assert that a hook run denied with triage's reason, and give the reason for a later check. */
+function expectDeny(r: { status: number | null; out: string }, reason: RegExp): string {
+  assert.equal(r.status, 0);
+  const out = deny(r.out);
+  assert.equal(out?.hookEventName, 'PreToolUse');
+  assert.equal(out?.permissionDecision, 'deny');
+  assert.match(out!.permissionDecisionReason, reason);
+  return out!.permissionDecisionReason;
+}
 
 /** Ask a question while an extension holds the stream, send one verdict, and give the hook's result. The extension
  * closes once the hook has finished, so a pass or a deny both end in the same place. */
@@ -112,20 +123,14 @@ describe('the AskUserQuestion hooks', () => {
 });
 
 describe('a question under triage', () => {
-  it('is denied with its reason before the dialog opens when triage returns it, and its pending file goes', async () => {
-    const r = await screened('s7', 'Weak question?', 'return', 'State the options you weighed, and recommend one.');
-    assert.equal(r.status, 0);
-    assert.equal(deny(r.out)?.hookEventName, 'PreToolUse');
-    assert.equal(deny(r.out)?.permissionDecision, 'deny');
-    assert.match(deny(r.out)!.permissionDecisionReason, /State the options you weighed, and recommend one\./);
+  it('denies a returned or held question before the dialog opens, and removes its pending file', async () => {
+    const returned = await screened('s7', 'Weak question?', 'return', 'State the options you weighed, and recommend one.');
+    expectDeny(returned, /State the options you weighed, and recommend one\./);
     assert.ok(pending('s7') === undefined, 'a deny fires PermissionDenied, so its ask-cancel must find no pending file');
     assert.equal((await card('s7', 'Weak question?'))?.closed?.kind, 'returned');
-  });
 
-  it('is denied when triage holds it, so the dialog never opens', async () => {
-    const r = await screened('s8', 'Held question?', 'hold', 'Hold it until the goal is stated.');
-    assert.equal(deny(r.out)?.permissionDecision, 'deny');
-    assert.match(deny(r.out)!.permissionDecisionReason, /Hold it until the goal is stated\./);
+    const held = await screened('s8', 'Held question?', 'hold', 'Hold it until the goal is stated.');
+    expectDeny(held, /Hold it until the goal is stated\./);
     assert.equal(pending('s8'), undefined);
     // The hook closes the held card, because its dialog will not open. A held card would keep the herdr sidecar off
     // the pane and hide a later block there.

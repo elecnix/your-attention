@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { homeFile, runHook, start, type Harness } from './harness.ts';
+import { readHome } from '../../src/node/home.ts';
+import { runHook, start, type Harness } from './harness.ts';
 
 let h: Harness;
 before(async () => { h = await start(); });
@@ -14,7 +15,7 @@ const hook = (input: Record<string, unknown>, env: Record<string, string> = {}):
   runHook(h, 'turn-end', input, { env, capture: 'stderr' });
 
 const stretch = (session: string): unknown => {
-  const raw = homeFile(h, path.join('claude', `${session}.card-ask`));
+  const raw = readHome(path.join('claude', `${session}.card-ask`), h.home);
   return raw === undefined ? undefined : JSON.parse(raw);
 };
 
