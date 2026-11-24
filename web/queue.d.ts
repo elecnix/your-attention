@@ -19,7 +19,7 @@ export type ShownState = CardState;
 export const CLOSED_LABEL: Record<string, string>;
 export const STATE_LABEL: Record<string, string>;
 /** The ids of the sections every Group by choice shows. */
-export const SECTION_ID: { system: string; checking: string; outbox: string; sent: string };
+export const SECTION_ID: { system: string; outbox: string; sent: string };
 export function agentName(id: string, cards: Card[], presence?: Record<string, Presence>): string;
 export function presenceOf(card: Pick<Card, 'agent' | 'deliver'>, state: InboxState): ['off' | 'busy' | 'on', string] | null;
 /** How triage treated a card, and the sentence the header badge shows as its tooltip. */
@@ -33,7 +33,6 @@ export interface Queue {
   pending: Card[];
   /** The inbox's own cards among them, which sit above every pinned group and every group. */
   systems: Card[];
-  checking: Card[];
   /** One group per pin, in pin order: the pin, the heading it reads, its collapse id, and the waiting cards it holds. */
   pinned: { pin: Pin; title: string; id: string; items: Card[] }[];
   outbox: Card[];

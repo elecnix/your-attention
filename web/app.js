@@ -454,7 +454,7 @@ export function App() {
   const terms = searchTerms(query);
   const matches = new Map();
   if (terms.length) for (const c of state.cards) { const m = matchCard(terms, c, details.get(c)); if (m) matches.set(c.id, m); }
-  const { systems, checking, pinned: pinnedGroups, outbox, sent, groups, order } = terms.length
+  const { systems, pinned: pinnedGroups, outbox, sent, groups, order } = terms.length
     ? buildQueue({ ...state, cards: state.cards.filter((c) => matches.has(c.id)) }, groupBy, pins, collapsedGroups)
     : all;
   const visible = state.cards;
@@ -667,7 +667,6 @@ export function App() {
         pinControl(pin, true)),
       id, id)),
     groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),
-    checking.length > 0 && group('Being checked by triage', checking, '', undefined, undefined, SECTION_ID.checking),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent', undefined, SECTION_ID.outbox),
     group('Sent, newest first', sent, 'Nothing sent yet', 'sent', dealt.length > 0 && h(ClearButton, { count: dealt.length }), SECTION_ID.sent),
     dealt.length > 0 && h('button', { className: 'btn clear-dealt', onClick: () => api(`${BASE}v1/archive`, {}) },

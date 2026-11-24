@@ -111,7 +111,6 @@ export function listRows(m: Model, width: number): Row[] {
   for (const p of q.pinned) section(p.title, p.items, 'Nothing waiting', false);
   if (waitingGroups.length) for (const [title, cards, , id] of waitingGroups) section(title, cards, 'Nothing waiting', false, id);
   else section('Waiting for you', [], 'Nothing waiting', false);
-  if (q.checking.length) section('Being checked by triage', q.checking, '', false, SECTION_ID.checking);
   section('Outbox: not read by the agent yet', q.outbox, 'Empty', true, SECTION_ID.outbox);
   section('Sent, newest first', q.sent, 'Nothing sent yet', true, SECTION_ID.sent);
   if (q.dealt.length) {
