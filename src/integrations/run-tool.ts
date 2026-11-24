@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describeAnswer, type Client } from '../client.ts';
-import { typeFromName, type SearchFilters } from '../core/inbox.ts';
+import { readsSomething, typeFromName, type SearchFilters } from '../core/inbox.ts';
 import type { Approval, AskQuestion, CloseKind, FeedbackFinding, FeedbackVerdict, NewAttachment, NewCard, Option, Origin, PullRequest } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
 import { envRequireCard, ruleFromView } from './require-card.ts';
@@ -67,6 +67,9 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
   if (unknown.length) throw new Error(`${name} does not take ${unknown.join(', ')}. It takes ${Object.keys(known ?? {}).join(', ')}.`);
   switch (name) {
     case 'card_post': {
+      // `vars` fills a template, and without one it reaches no field. A caller that sends the card's own words there posts
+      // a card with nothing to read, which the inbox now refuses; say which field the content belongs in instead.
+      if (args['vars'] !== undefined && !args['template']) throw new Error('vars fills a template: name one with template, and put the card\'s own text in text');
       const minutes = Number(args['expires_in_minutes'] ?? 0);
       const card: NewCard = {
         id: str(args['id']),
@@ -91,6 +94,9 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
         from: str(args['from']),
         origin: await origin(),
       };
+      // A card with nothing to read shows the person a title and nothing under it. Refuse it here, where every agent's
+      // card_post lands, rather than posting it and letting triage return it until it gives up.
+      if (!readsSomething(card)) throw new Error('a card needs something the person can read: give text, a body, questions, options, html, an attachment, or approvals');
       const sealing = await ctx.secrets.prepare(card.body);
       const posted = await inbox.post({ ...card, body: sealing.body });
       sealing.keep(posted.id);

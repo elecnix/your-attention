@@ -397,6 +397,14 @@ const extensionAwayKey = (name: string): string => `extension-away:${name}`;
 const movedWhileAway = (card: Card, away: number | undefined): boolean =>
   away !== undefined && (card.createdAt >= away || (card.version > 1 && card.updatedAt >= away));
 
+/** Whether a new card gives the person something to read: prose, a question, choices, a form, a file, an approval, or a
+ * template that fills into a body. An agent's card that carries none of these shows a title and nothing under it, so the
+ * paths an agent posts through refuse it. */
+export const readsSomething = (c: NewCard): boolean =>
+  [c.text, c.html, c.recommendation].some((t) => typeof t === 'string' && t.trim() !== '')
+  || c.body !== undefined || c.template !== undefined
+  || (c.questions?.length ?? 0) > 0 || (c.options?.length ?? 0) > 0 || (c.attachments?.length ?? 0) > 0 || (c.approvals?.length ?? 0) > 0;
+
 export class Inbox {
   private readonly store: Storage;
   private readonly blobs: BlobStore;

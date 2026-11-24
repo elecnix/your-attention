@@ -110,7 +110,7 @@ describe('card tools', () => {
     const { runTool } = await import('../../src/integrations/run-tool.ts');
     let posted: Record<string, unknown> = {};
     const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
-    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => { throw new Error('no transcript'); }, arrival: 'as a test' }, 'card_post', { title: 'q' });
+    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => { throw new Error('no transcript'); }, arrival: 'as a test' }, 'card_post', { title: 'q', text: 'A card.' });
     assert.equal(posted['title'], 'q');
     assert.equal(posted['origin'], undefined);
   });
@@ -120,7 +120,7 @@ describe('card tools', () => {
     let posted: Record<string, unknown> = {};
     const inbox = { post: async (c: Record<string, unknown>) => { posted = c; return { id: 'c1' }; } } as never;
     const origin = async () => ({ harness: 'claude-code', herdrWorkspace: 'DevEx', herdrTab: 'login fix' });
-    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin, arrival: 'as a test' }, 'card_post', { title: 'q', from: 'the release agent' });
+    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin, arrival: 'as a test' }, 'card_post', { title: 'q', text: 'A card.', from: 'the release agent' });
     assert.equal(posted['from'], 'the release agent');
     assert.deepEqual(posted['origin'], { harness: 'claude-code', herdrWorkspace: 'DevEx', herdrTab: 'login fix' });
   });

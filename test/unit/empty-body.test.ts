@@ -5,6 +5,9 @@ import { describe, it } from 'node:test';
 import { Inbox, type Caller } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import { bodyErrors } from '../../src/adapters/openui-body.ts';
+import { SecretRequests } from '../../src/integrations/secrets.ts';
+import { runTool } from '../../src/integrations/run-tool.ts';
+import { httpInbox } from './fixture.ts';
 
 function setup() {
   // The laptop inbox refuses a body the page cannot draw; the unit store has to be told to, as server.ts does.
@@ -24,7 +27,7 @@ describe('an empty card body', () => {
 
   it('posts a card whose body is only whitespace as a card with no body', () => {
     const { inbox, agent } = setup();
-    assert.equal(inbox.postCard(agent, { id: 'c2', agent: 's1', title: 'Plan', body: '  \n ' }).body, undefined);
+    assert.equal(inbox.postCard(agent, { id: 'c2', agent: 's1', title: 'Plan', text: 'Prose.', body: '  \n ' }).body, undefined);
   });
 
   it('reads no faults from an empty body, which an inbox may already hold', () => {
@@ -41,5 +44,52 @@ describe('an empty card body', () => {
         && /root = TextContent/.test(e.message)
         && /leave body out/.test(e.message),
     );
+  });
+});
+
+
+
+// A card with only a title gives the person nothing to read: no question, no options, no body. Both paths an agent posts
+// through refuse it, so a client that loses the card's content learns it then, not from an empty card in the inbox.
+describe('a card with nothing to read', () => {
+  const refusal = /needs something the person can read/;
+
+  it('is refused by card_post, before the inbox stores it', async () => {
+    let posted = 0;
+    const inbox = { post: async () => { posted += 1; return { id: 'c1' }; } } as never;
+    await assert.rejects(
+      runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', { title: 'Merge layer 3' }),
+      refusal,
+    );
+    assert.equal(posted, 0);
+  });
+
+  it('is refused by card_post, the route every MCP and extension tool lands on', async () => {
+    const inbox = { post: async () => ({ id: 'c1' }) } as never;
+    await assert.rejects(
+      runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', { title: 'Merge layer 3', vars: {} }),
+      /vars fills a template/,
+    );
+  });
+
+  it('still posts a card that carries any one thing to read', async () => {
+    const bodies = [
+      { title: 'Text', text: 'Ship it?' },
+      { title: 'Options', options: [{ label: 'Ship it' }] },
+      { title: 'Questions', questions: [{ question: 'Ship it?' }] },
+      { title: 'Html', html: '<p>Ship it?</p>' },
+      { title: 'File', attachments: [{ url: 'https://example.com/a.png' }] },
+      { title: 'Rec', text: 'Ship it?', recommendation: 'Yes.' },
+    ];
+    for (const body of bodies) {
+      const inbox = { post: async () => ({ id: 'c1' }) } as never;
+      await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', body);
+    }
+  });
+
+  it('lets the inbox post a card of its own with only a title, since it carries its ask elsewhere', () => {
+    const { inbox } = setup();
+    const card = inbox.postCard({ token: '', role: 'owner' }, { id: 'sys', agent: 'system', kind: 'system', title: 'Send new card guidance to agents?' });
+    assert.equal(card.id, 'sys');
   });
 });

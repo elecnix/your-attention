@@ -65,7 +65,7 @@ describe('the pi extension', () => {
   it('names a card with the name the session has now, after a rename', async () => {
     piName = 'release prep';
     try {
-      await tools.get('card_post')!.execute('call-r', { id: 'pi-renamed', title: 'Tag the release?' }, undefined, undefined, ctx);
+      await tools.get('card_post')!.execute('call-r', { id: 'pi-renamed', title: 'Tag the release?', text: 'A card.' }, undefined, undefined, ctx);
       const card = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'pi-renamed');
       assert.equal(card?.origin?.name, 'release prep');
     } finally {
@@ -101,10 +101,10 @@ describe('the pi extension', () => {
 
   it('steers a busy agent, and queues an answer marked as a follow-up', async () => {
     idle = false;
-    await tools.get('card_post')!.execute('call-2', { id: 'pi-2', title: 'Rename it?' }, undefined, undefined, ctx);
+    await tools.get('card_post')!.execute('call-2', { id: 'pi-2', title: 'Rename it?', text: 'A card.' }, undefined, undefined, ctx);
     await h.owner('POST', '/v1/cards/pi-2/answer', { comment: 'yes' });
     assert.equal((await until(() => sent.find((m) => m.text.includes('pi-2')))).options?.deliverAs, 'steer');
-    await tools.get('card_post')!.execute('call-3', { id: 'pi-3', title: 'Tests too?' }, undefined, undefined, ctx);
+    await tools.get('card_post')!.execute('call-3', { id: 'pi-3', title: 'Tests too?', text: 'A card.' }, undefined, undefined, ctx);
     await h.owner('POST', '/v1/cards/pi-3/answer', { comment: 'later', delivery: 'followUp' });
     assert.equal((await until(() => sent.find((m) => m.text.includes('pi-3')))).options?.deliverAs, 'followUp');
   });
@@ -163,7 +163,7 @@ describe('the asks for a card', () => {
       assert.ok(old >= 5.5, `the old stretch's 5 minute ask was cancelled, but an ask came at ${old}`);
       // A card of its own is what the asks are for: once one is open, the stretch ends without an ask.
       await turnStart();
-      await tools.get('card_post')!.execute('call-4', { id: 'pi-4', title: 'Still working?' }, undefined, undefined, ctx);
+      await tools.get('card_post')!.execute('call-4', { id: 'pi-4', title: 'Still working?', text: 'A card.' }, undefined, undefined, ctx);
       await turnEnd();
       await sleep(MINUTE * 12);
       assert.equal(asks().length, 5);
