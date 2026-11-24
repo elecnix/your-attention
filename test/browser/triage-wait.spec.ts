@@ -18,7 +18,8 @@ test('a card under triage stays out of the queue until a verdict lets it through
   // While triage checks it, the card appears nowhere: not in the list, and under no heading of its own.
   await expect(page.locator('.queue', { hasText: 'Restart the worker pool?' })).toHaveCount(0);
   await expect(page.locator('.queue h3', { hasText: 'Being checked' })).toHaveCount(0);
-  // A verdict that lets it through puts it in its group.
+  // A verdict that lets it through puts it in its group, once the extension has the card.
+  await expect.poll(() => calls.length).toBe(1);
   core.hookVerdict({ token: ext.token.id, role: 'extension' }, calls.at(-1)!.id, 'pass', '');
   await expect(page.locator('.queue .q', { hasText: 'Restart the worker pool?' })).toBeVisible();
   stop();
