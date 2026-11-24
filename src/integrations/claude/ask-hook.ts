@@ -37,10 +37,11 @@ interface HookInput {
   tool_response?: unknown;
 }
 
-/** Why the question did not reach the person, for the deny the agent reads. */
+/** Why the question did not open as a dialog, for the deny the agent reads. A hold leaves the card in the person's
+ * queue, so the reason names the dialog and not the card. */
 export function denyReason(reason: string): string {
   const why = reason.trim() || 'it lacked the goal, the options you weighed, the evidence, or a recommendation';
-  return `Triage stopped this question before the person saw it: ${why}. Ask again with the goal, the options you weighed, and your recommendation.`;
+  return `Triage stopped this question before the terminal dialog opened: ${why}. Ask again with the goal, the options you weighed, and your recommendation.`;
 }
 
 /** Triage's reason once the question is returned or held, or undefined while it is still unchecked or on its way to the

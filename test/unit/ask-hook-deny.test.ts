@@ -9,7 +9,7 @@ const card: Card = { id: 'ask-1', agent: 'claude:s', kind: 'ask', dialog: true, 
 describe('the ask-pre deny', () => {
   it('names triage as the sender, gives its reason, and says to ask again with the missing parts', () => {
     const r = denyReason('State the options you weighed.');
-    assert.match(r, /Triage stopped this question before the person saw it: State the options you weighed\./);
+    assert.match(r, /Triage stopped this question before the terminal dialog opened: State the options you weighed\./);
     assert.match(r, /Ask again with the goal, the options you weighed, and your recommendation\./);
   });
 
