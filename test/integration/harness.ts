@@ -81,6 +81,8 @@ export function runHook(h: Harness, mode: string, input: Record<string, unknown>
     stream.on('data', (d) => { out += String(d); });
     // A spawn that fails, such as EAGAIN on a loaded box, rejects this test instead of throwing out of the whole file.
     child.on('error', reject);
+    // A hook can exit before it reads stdin, which closes the pipe; this keeps that write from throwing out of the test.
+    child.stdin!.on('error', () => {});
     // `close` follows the exit and the closed stdio streams, so the last chunk of a hook's output is in `out`.
     child.on('close', (status) => resolve({ status, out }));
     child.stdin!.end(JSON.stringify(input));

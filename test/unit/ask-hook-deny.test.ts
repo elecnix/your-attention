@@ -24,6 +24,11 @@ describe('the ask-pre deny', () => {
     assert.match(stoppedReason(held, 'held') ?? '', /Wait for the goal\./);
   });
 
+  it('does not stop a returned card the person already answered, so the agent is not told to ask again', () => {
+    const returned: Card = { ...card, closed: { kind: 'returned', outcome: 'Too vague.', at: 2 } };
+    for (const state of ['answered', 'delivered', 'read'] as const) assert.equal(stoppedReason(returned, state), undefined, state);
+  });
+
   it('lets through a card in triage, one that passed, and one closed for another reason', () => {
     assert.equal(stoppedReason({ ...card, triage: { state: 'pending', at: 2 } }, 'in-triage'), undefined);
     assert.equal(stoppedReason(card, 'open'), undefined);

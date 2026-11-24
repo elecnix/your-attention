@@ -161,9 +161,11 @@ describe('triage prompts by card kind', () => {
 
   it('judges a harness question on its own terms, without a separate recommendation', () => {
     const p = triagePrompt({ ...card, dialog: true }, '', []);
-    // A question the harness also asks in the terminal needs its question and distinct options, not a recommendation.
+    // The dialog terms replace the general ones: a question that says what the agent needs, and distinct options.
     assert.match(p, /a question the harness also asks in the terminal/);
-    assert.match(p, /no separate recommendation/);
+    assert.match(p, /It needs a question that says what the agent needs, and distinct options/);
+    // Neither the evidence paragraph nor the recommendation belongs in a dialog the harness draws.
+    assert.match(p, /Neither a separate evidence paragraph nor a recommendation/);
     // The rule that such a card always passes is gone: that is what let a weak question reach the person.
     assert.doesNotMatch(p, /blocks the agent always pass/);
   });

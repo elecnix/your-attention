@@ -49,9 +49,11 @@ export function denyReason(reason: string): string {
 }
 
 /** Triage's reason once the question is returned or held, or undefined while it is still unchecked or on its way to the
- * person. A return closes the card, a hold leaves it held, and either keeps it from the person. */
+ * person. A return closes the card, a hold leaves it held, and either keeps it from the person. A card the person
+ * already answered is no stop: the answer is on its way to the agent, and a deny would make it ask again. */
 export function stoppedReason(card: Card, state: string): string | undefined {
-  if (card.closed?.kind === 'returned') return denyReason(card.closed.outcome ?? '');
+  const answered = state === 'answered' || state === 'delivered' || state === 'read';
+  if (!answered && card.closed?.kind === 'returned') return denyReason(card.closed.outcome ?? '');
   if (state === 'held') return denyReason(card.triage?.reason ?? '');
   return undefined;
 }
