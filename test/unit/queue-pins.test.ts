@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { summarize } from '../../src/core/summary.ts';
-import type { Card } from '../../src/core/types.ts';
-import { buildQueue, SECTION_ID, type InboxState } from '../../web/queue.js';
+import type { Card, Pin } from '../../src/core/types.ts';
+import { buildQueue, movePin, SECTION_ID, type InboxState } from '../../web/queue.js';
 
 const card = (id: string, tags: Record<string, string>, extra: Partial<Card> = {}): Card => ({ id, agent: 'a', kind: 'ask', title: `Card ${id}`, priority: 'now', deliver: 'stream', version: 1, createdAt: id.charCodeAt(0), updatedAt: 1, replies: [], tags, ...extra });
 
@@ -104,5 +104,37 @@ describe('system cards', () => {
     assert.deepEqual(ids(q.systems), ['s']);
     assert.ok(!q.groups.some(([, items]) => ids(items).includes('s')), 'not inside a group');
     assert.equal(q.order[0]!.id, 's');
+  });
+});
+
+// The arrows on a pinned group's heading move its pin one place. The group goes with the pin, and so does a card that
+// matches two pins, which sits in the one that now comes first.
+describe('moving a pin', () => {
+  const pins: Pin[] = [['topic', 'billing'], ['repo', 'acme/api']];
+
+  it('swaps a pin with its neighbour, and the queue draws the groups in the new order', () => {
+    assert.deepEqual(movePin(pins, ['repo', 'acme/api'], -1), [['repo', 'acme/api'], ['topic', 'billing']]);
+    assert.deepEqual(movePin(pins, ['topic', 'billing'], 1), [['repo', 'acme/api'], ['topic', 'billing']]);
+    const q = buildQueue(state(cards), 'none', movePin(pins, ['repo', 'acme/api'], -1));
+    assert.deepEqual(q.pinned.map((p) => p.title), ['repo: acme/api', 'topic: billing']);
+  });
+
+  it('leaves the list as it is when the pin cannot move that way', () => {
+    assert.equal(movePin(pins, ['topic', 'billing'], -1), pins);
+    assert.equal(movePin(pins, ['repo', 'acme/api'], 1), pins);
+  });
+
+  it('moves an agent pin among the tag pins', () => {
+    const mixed: Pin[] = [['topic', 'billing'], { agent: 's-alpha' }];
+    assert.deepEqual(movePin(mixed, { agent: 's-alpha' }, -1), [{ agent: 's-alpha' }, ['topic', 'billing']]);
+    assert.deepEqual(movePin(mixed, { agent: 's-alpha' }, 1), mixed);
+  });
+
+  it('hands a card that matches two pins to the pin that moved above the other', () => {
+    // Card a carries both tags, so it sits in the billing pin; moving that pin down sends it to the repo pin.
+    const before = buildQueue(state(cards), 'none', pins);
+    assert.deepEqual(before.pinned.map((p) => [p.title, ids(p.items)]), [['topic: billing', ['a', 'b']], ['repo: acme/api', ['d']]]);
+    const after = buildQueue(state(cards), 'none', movePin(pins, ['topic', 'billing'], 1));
+    assert.deepEqual(after.pinned.map((p) => [p.title, ids(p.items)]), [['repo: acme/api', ['a', 'd']], ['topic: billing', ['b']]]);
   });
 });

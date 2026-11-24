@@ -3,8 +3,8 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, AgentPin, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetDrafts, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions, triageState } from './components.js';
-import { after, agentName, buildQueue, notifies, SECTION_ID } from './queue.js';
+import { Approvals, AgentPin, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, PinMove, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetDrafts, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions, triageState } from './components.js';
+import { after, agentName, buildQueue, movePin, notifies, samePin, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
 import { arrivals, notifiable, readFocusMode, releaseNotice } from './focus.js';
@@ -80,8 +80,6 @@ export function App() {
     store.set('collapsedGroups', [...next]);
     return next;
   });
-  // Two pins are the same pin when they name the same tag and value, or the same agent.
-  const samePin = (a, b) => (Array.isArray(a) && Array.isArray(b) ? a[0] === b[0] && a[1] === b[1] : !Array.isArray(a) && !Array.isArray(b) && a.agent === b.agent);
   const isPinned = (tag) => pins.some((p) => Array.isArray(p) && p[0] === tag[0] && p[1] === tag[1]);
   const isAgentPinned = (agent) => pins.some((p) => !Array.isArray(p) && p.agent === agent);
   const saveSettings = (patch) => api(`${BASE}v1/settings`, patch, 'PUT').catch(() => {});
@@ -91,6 +89,16 @@ export function App() {
   const savingGroupBy = React.useRef(0);
   const togglePin = (pin) => setPins((pins) => {
     const next = pins.some((p) => samePin(p, pin)) ? pins.filter((p) => !samePin(p, pin)) : [...pins, pin];
+    savingPins.current += 1;
+    const mine = savingPins.current;
+    api(`${BASE}v1/settings`, { pins: next }, 'PUT').catch(() => {}).finally(() => { if (savingPins.current === mine) savingPins.current = 0; });
+    return next;
+  });
+  // Move a pin one place up or down. The pins are the inbox's settings, oldest first, so the order is the groups'
+  // order and it decides which pin a card that matches two of them joins.
+  const movePinBy = (pin, delta) => setPins((pins) => {
+    const next = movePin(pins, pin, delta);
+    if (next === pins) return pins;
     savingPins.current += 1;
     const mine = savingPins.current;
     api(`${BASE}v1/settings`, { pins: next }, 'PUT').catch(() => {}).finally(() => { if (savingPins.current === mine) savingPins.current = 0; });
@@ -653,7 +661,11 @@ export function App() {
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
     systems.length > 0 && group('Needs your approval', systems, '', 'system', undefined, SECTION_ID.system),
-    pinnedGroups.map(({ pin, title, id, items }) => group(title, items, 'Nothing waiting', 'pinned', pinControl(pin, true), id, id)),
+    pinnedGroups.map(({ pin, title, id, items }, i) => group(title, items, 'Nothing waiting', 'pinned',
+      h(React.Fragment, null,
+        h(PinMove, { title, up: i > 0, down: i < pinnedGroups.length - 1, onMove: (delta) => movePinBy(pin, delta) }),
+        pinControl(pin, true)),
+      id, id)),
     groups.length ? groups.map(([title, items, tag, id]) => group(title, items, 'Nothing waiting', undefined, tag && h(TagPin, { tag, on: false, onToggle: togglePin }), id)) : group('Waiting for you', [], 'Nothing waiting'),
     checking.length > 0 && group('Being checked by triage', checking, '', undefined, undefined, SECTION_ID.checking),
     group('Outbox: not read by the agent yet', outbox, 'Empty', 'sent', undefined, SECTION_ID.outbox),

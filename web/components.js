@@ -497,6 +497,16 @@ export function AgentPin({ agent, name, on, onToggle }) {
   return h(PinButton, { on, tip, onClick: () => onToggle({ agent }) });
 }
 
+/** The up and down arrows a pinned group's heading shows while it is hovered or focused: a click moves the pin one
+ * place, and its group and cards travel with it. The first pin has no way up and the last none down, so that arrow
+ * stays out of the heading and out of the tab order rather than sitting there dead. */
+export function PinMove({ title, up, down, onMove }) {
+  const arrow = (dir, on) => h('button', { key: dir, type: 'button', className: `pin-move-btn pm-${dir}${on ? '' : ' pin-move-off'}`,
+    title: `Move ${title} ${dir}`, 'aria-label': `Move ${title} ${dir}`, onClick: (e) => { e.stopPropagation(); onMove(dir === 'up' ? -1 : 1); } },
+    h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true' }, ICONS[dir === 'up' ? 'arrow-up' : 'arrow-down'].map((d) => h('path', { key: d, d }))));
+  return h('span', { className: 'pin-move' }, arrow('up', up), arrow('down', down));
+}
+
 /** The card's tags as chips, `topic: billing`, each with its pin, then the agent that posted it with a pin of its own. */
 export function CardTags({ tags, isPinned, onToggle, agent, name, agentPinned }) {
   const entries = Object.entries(tags || {}).map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v);
