@@ -92,6 +92,21 @@ describe('a card with nothing to read', () => {
     }
   });
 
+  it('refuses questions or options that are not a list, without throwing a type error', async () => {
+    for (const args of [{ questions: {} }, { options: 'x' }]) {
+      const inbox = { post: async () => ({ id: 'c1' }) } as never;
+      await assert.rejects(
+        runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', { title: 'Merge layer 3', ...args }),
+        refusal,
+      );
+    }
+  });
+
+  it('posts a card that reads, even when it also passes vars without a template', async () => {
+    const inbox = { post: async () => ({ id: 'c1' }) } as never;
+    await runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', { title: 'Merge layer 3', text: 'Ship it?', vars: {} });
+  });
+
   it('still posts a card that carries any one thing to read', async () => {
     const bodies = [
       { title: 'Text', text: 'Ship it?' },
