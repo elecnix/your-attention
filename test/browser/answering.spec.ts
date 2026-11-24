@@ -23,9 +23,12 @@ test('the person picks an option, adds a comment, and the agent receives both at
   await inbox.open(page);
   await expect(page.locator('.card-title')).toHaveText('Which storage?');
   await expect(page.locator('.pill.small.on')).toHaveText('Agent listening');
-  // No triage extension is connected here, so the header badge says so, in grey.
-  await expect(page.locator('.triage-dot')).toHaveClass(/none/);
+  // No triage extension is connected here, so the header badge says so, in grey, at dot size.
+  await expect(page.locator('.triage-dot')).toHaveClass(/tone-none/);
   await expect(page.locator('.triage-dot')).toHaveAttribute('title', /^Not triaged/);
+  const dot = await page.locator('.triage-dot').boundingBox();
+  expect(dot?.width).toBeLessThanOrEqual(18);
+  expect(dot?.height).toBeLessThanOrEqual(18);
   await page.getByText('SQLite', { exact: true }).click();
   await page.locator('textarea').fill('One file is enough.');
   await page.getByRole('button', { name: 'Send answer' }).click();
