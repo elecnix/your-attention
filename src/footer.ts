@@ -28,12 +28,14 @@ export function footerTarget(env: NodeJS.ProcessEnv = process.env, home = homeDi
 }
 
 /** Whether a reply carries what the queue reads: another program on the address can answer 200 with JSON of its own,
- * and `buildQueue` would throw on it. */
+ * and `buildQueue` would throw on it. A card needs an id the queue can link, and one entry it cannot read makes the
+ * whole reply a reply that is not a state. */
 function asState(data: unknown): InboxState | undefined {
   if (typeof data !== 'object' || data === null) return undefined;
   const s = data as Partial<InboxState>;
   const objects = [s.answers, s.presence, s.states];
   if (!Array.isArray(s.cards) || !objects.every((o) => typeof o === 'object' && o !== null)) return undefined;
+  if (!s.cards.every((c) => typeof c === 'object' && c !== null && typeof (c as { id?: unknown }).id === 'string')) return undefined;
   if (s.levels !== undefined && !Array.isArray(s.levels)) return undefined;
   if (s.priorities !== undefined && (typeof s.priorities !== 'object' || s.priorities === null)) return undefined;
   if (s.settings !== undefined && (typeof s.settings !== 'object' || s.settings === null)) return undefined;
@@ -67,7 +69,10 @@ export function osc8(text: string, target: string): string {
  * the page gives them. `max` cuts the links only: the count still says how many cards wait. */
 export function footerSegment(state: InboxState, url: string, max = 5): string {
   const settings = state.settings ?? { allowHtml: false };
-  const queue = buildQueue(state, settings.groupBy ?? 'none', settings.pins ?? []);
+  // The settings object may hold anything at all on the wire, and only the shapes the queue reads go to it.
+  const groupBy = typeof settings.groupBy === 'string' ? settings.groupBy : 'none';
+  const pins = Array.isArray(settings.pins) ? settings.pins : [];
+  const queue = buildQueue(state, groupBy, pins);
   const waiting = queue.pending.length;
   if (waiting === 0) return '';
   const base = url.replace(/\/$/, '');

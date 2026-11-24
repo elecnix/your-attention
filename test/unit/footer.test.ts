@@ -174,16 +174,35 @@ describe('footerState', () => {
   });
 
   it('answers undefined for a reply that is not a state', async () => {
-    const server = (await import('node:http')).createServer((req, res) => {
-      res.setHeader('content-type', 'application/json');
-      res.end(req.url === '/v1/state' ? JSON.stringify({ hello: 'world' }) : JSON.stringify({ error: 'no' }));
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address() as { port: number };
-    try {
-      assert.equal(await footerState({ url: `http://127.0.0.1:${port}`, token: 't' }), undefined);
-    } finally {
-      server.close();
-    }
+    const reply = async (body: unknown): Promise<InboxState | undefined> => {
+      const server = (await import('node:http')).createServer((req, res) => {
+        res.setHeader('content-type', 'application/json');
+        res.end(req.url === '/v1/state' ? JSON.stringify(body) : JSON.stringify({ error: 'no' }));
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const { port } = server.address() as { port: number };
+      try {
+        return await footerState({ url: `http://127.0.0.1:${port}`, token: 't' });
+      } finally {
+        server.close();
+      }
+    };
+    assert.equal(await reply({ hello: 'world' }), undefined);
+    // A card with no object could never render, and the queue would throw on it: the whole reply counts as no state.
+    assert.equal(await reply({ cards: [null], answers: {}, presence: {}, states: {} }), undefined);
+    assert.equal(await reply({ cards: [{ title: 'no id' }], answers: {}, presence: {}, states: {} }), undefined);
+  });
+
+  it('renders a state whose settings carry pins of the wrong shape', () => {
+    // A settings object passes the check, but a string where the pins go is not the queue's business.
+    const state = {
+      cards: [{ id: 'c1', agent: 's1', kind: 'ask', title: 'Card c1', priority: 'soon', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, rev: 'r1' }],
+      answers: {},
+      presence: {},
+      states: { c1: 'open' },
+      levels: DEFAULT_PRIORITIES,
+      settings: { allowHtml: false, pins: 'nope', groupBy: 7 },
+    } as unknown as InboxState;
+    assert.equal(footerSegment(state, URL), `1 card ${link('c1', 1)}`);
   });
 });
