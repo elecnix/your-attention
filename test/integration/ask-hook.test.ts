@@ -1,29 +1,19 @@
 // The AskUserQuestion hooks: a card opens with the terminal dialog, and closes however the dialog ends. A weak
 // question is denied before the dialog opens, so the agent revises it instead of the person seeing it.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { Card } from '../../src/core/types.ts';
-import { ROOT, start, until, type Harness } from './harness.ts';
+import { runHook, start, until, type Harness } from './harness.ts';
 
 let h: Harness;
 before(async () => { h = await start(); });
 after(async () => { await h.stop(); });
 
 // The hook runs as its own process, as Claude Code runs it. The inbox is in this process, so the spawn must not block.
-const hook = (mode: string, input: Record<string, unknown>, env: Record<string, string> = {}): Promise<{ status: number | null; out: string }> => new Promise((resolve) => {
-  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts'), 'claude-hook', mode], {
-    env: { ...process.env, YOUR_ATTENTION_HOME: h.home, YOUR_ATTENTION_URL: h.server.url, YOUR_ATTENTION_TOKEN: h.agentToken, ...env },
-    stdio: ['pipe', 'pipe', 'inherit'],
-  });
-  let out = '';
-  child.stdout.on('data', (d) => { out += String(d); });
-  // `close` follows the exit and the closed stdio streams, so the last `data` chunk of the deny is in `out`.
-  child.on('close', (status) => resolve({ status, out }));
-  child.stdin.end(JSON.stringify(input));
-});
+const hook = (mode: string, input: Record<string, unknown>, env: Record<string, string> = {}): Promise<{ status: number | null; out: string }> =>
+  runHook(h, mode, input, { env });
 
 /** A card.created extension that holds its stream open, so the next question is screened rather than skipped. Its
  * `verdict` sends the answer for the card the hook posts, while the hook is still waiting for it. Each test connects
