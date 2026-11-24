@@ -32,7 +32,7 @@ function setup(): { inbox: Inbox; post: (id: string, card?: Partial<NewCard>) =>
 }
 
 /** The segment of an inbox's state, as `your-attention footer` prints it. */
-const segment = (inbox: Inbox, max = 5): string => footerSegment(inbox.summaryState(), URL, max);
+const segment = (inbox: Inbox, max = 5, agent?: string): string => footerSegment(inbox.summaryState(), URL, max, agent);
 
 describe('footerSegment', () => {
   it('prints nothing for an inbox with no card waiting', () => {
@@ -211,5 +211,32 @@ describe('footerState', () => {
       settings: { allowHtml: false, pins: 'nope', groupBy: 7 },
     } as unknown as InboxState;
     assert.equal(footerSegment(state, URL), `1 card ${link('c1', 1)}`);
+  });
+});
+
+
+// A status line belongs to one session, so the session can ask for its own cards: the ones it posted and the ones the
+// person sent it. The inbox's other sessions' cards never reach that line.
+describe('footerSegment for one agent', () => {
+  it('counts and links only the cards of that agent', () => {
+    const { inbox, post } = setup();
+    post('mine-1');
+    post('theirs', { agent: 's2' });
+    post('mine-2');
+    assert.equal(segment(inbox, 5, 's1'), `2 cards ${link('mine-1', 1)} ${link('mine-2', 2)}`);
+    assert.equal(segment(inbox, 5, 's2'), `1 card ${link('theirs', 1)}`);
+  });
+
+  it('prints nothing when the agent has no card, whatever the rest of the inbox holds', () => {
+    const { inbox, post } = setup();
+    post('theirs', { agent: 's2' });
+    assert.equal(segment(inbox, 5, 's1'), '');
+  });
+
+  it('keeps the count of every card when no agent is named', () => {
+    const { inbox, post } = setup();
+    post('mine');
+    post('theirs', { agent: 's2' });
+    assert.equal(segment(inbox), `2 cards ${link('mine', 1)} ${link('theirs', 2)}`);
   });
 });

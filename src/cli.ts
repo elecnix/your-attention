@@ -361,16 +361,17 @@ switch (command) {
   case 'footer': {
     // One status-line segment, for Claude Code's `statusLine.command`. The line runs on a timer and must never break,
     // so a stopped, unpaired or slow inbox prints nothing and the command still exits 0. Only a usage mistake fails.
-    const { values } = parseCommand(command, { args: rest, options: { max: { type: 'string', default: '5' } } });
+    const { values } = parseCommand(command, { args: rest, options: { max: { type: 'string', default: '5' }, agent: { type: 'string' } } });
     const raw = String(values.max).trim();
     const max = raw === '' ? NaN : Number(raw);
     if (!Number.isInteger(max) || max < 0) usageError(command, `--max takes a whole number of links, 0 or more, not ${values.max}`);
+    const agent = typeof values.agent === 'string' && values.agent.trim() !== '' ? values.agent.trim() : undefined;
     const { footerSegment, footerState, footerTarget } = await import('./footer.ts');
     const target = footerTarget();
     if (!target) break;
     const state = await footerState(target);
     if (!state) break;
-    const segment = footerSegment(state, target.url, max);
+    const segment = footerSegment(state, target.url, max, agent);
     if (segment) console.log(segment);
     break;
   }

@@ -67,15 +67,18 @@ export function osc8(text: string, target: string): string {
  * The states that count are the queue's own: a card the person can answer, release or claim, and not one triage is
  * still checking, nor one in the outbox waiting for its agent (DP23). System cards and pinned groups keep the place
  * the page gives them. `max` cuts the links only: the count still says how many cards wait. */
-export function footerSegment(state: InboxState, url: string, max = 5): string {
+export function footerSegment(state: InboxState, url: string, max = 5, agent?: string): string {
   const settings = state.settings ?? { allowHtml: false };
   // The settings object may hold anything at all on the wire, and only the shapes the queue reads go to it.
   const groupBy = typeof settings.groupBy === 'string' ? settings.groupBy : 'none';
   const pins = Array.isArray(settings.pins) ? settings.pins : [];
   const queue = buildQueue(state, groupBy, pins);
-  const waiting = queue.pending.length;
+  // A session's status line can ask for that agent's cards alone: the ones it posted and the ones the person sent it.
+  // Without a name, the segment speaks for the whole inbox.
+  const owed = (cards: typeof queue.pending): typeof queue.pending => (agent === undefined ? cards : cards.filter((c) => c.agent === agent));
+  const waiting = owed(queue.pending).length;
   if (waiting === 0) return '';
   const base = url.replace(/\/$/, '');
-  const links = queue.order.slice(0, Math.max(0, max)).map((card, i) => osc8(String(i + 1), `${base}/#card=${encodeURIComponent(card.id)}`));
+  const links = owed(queue.order).slice(0, Math.max(0, max)).map((card, i) => osc8(String(i + 1), `${base}/#card=${encodeURIComponent(card.id)}`));
   return `${waiting} card${waiting === 1 ? '' : 's'}${links.length ? ` ${links.join(' ')}` : ''}`;
 }
