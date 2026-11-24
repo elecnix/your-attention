@@ -72,6 +72,16 @@ describe('a card with nothing to read', () => {
     );
   });
 
+  it('refuses a body that normalizes to nothing, as the inbox stores no body for it', async () => {
+    for (const body of ['', '   ', '\n']) {
+      const inbox = { post: async () => ({ id: 'c1' }) } as never;
+      await assert.rejects(
+        runTool({ inbox, secrets: new SecretRequests(), agent: 's1', origin: async () => undefined, arrival: 'as a test' }, 'card_post', { title: 'Merge layer 3', body }),
+        refusal,
+      );
+    }
+  });
+
   it('still posts a card that carries any one thing to read', async () => {
     const bodies = [
       { title: 'Text', text: 'Ship it?' },

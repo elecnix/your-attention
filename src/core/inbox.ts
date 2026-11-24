@@ -401,8 +401,8 @@ const movedWhileAway = (card: Card, away: number | undefined): boolean =>
  * template that fills into a body. An agent's card that carries none of these shows a title and nothing under it, so the
  * paths an agent posts through refuse it. */
 export const readsSomething = (c: NewCard): boolean =>
-  [c.text, c.html, c.recommendation].some((t) => typeof t === 'string' && t.trim() !== '')
-  || c.body !== undefined || c.template !== undefined
+  [c.text, c.html, c.recommendation, c.body].some((t) => typeof t === 'string' && t.trim() !== '')
+  || c.template !== undefined
   || (c.questions?.length ?? 0) > 0 || (c.options?.length ?? 0) > 0 || (c.attachments?.length ?? 0) > 0 || (c.approvals?.length ?? 0) > 0;
 
 export class Inbox {
