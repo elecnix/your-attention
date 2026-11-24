@@ -4,7 +4,7 @@
 export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back to its agent', dismissed: 'Dismissed' };
 export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed' };
 /** The ids of the sections that every Group by choice shows, so a collapsed one keeps its state across the choices. */
-export const SECTION_ID = { system: 'section: system', checking: 'section: checking', outbox: 'section: outbox', sent: 'section: sent' };
+export const SECTION_ID = { system: 'section: system', outbox: 'section: outbox', sent: 'section: sent' };
 
 // A group's id is its kind and value, such as tag: topic: billing. The ':' and '%' of a part are escaped, because an
 // agent picks tag keys and values: without the escape, a tag named `section: outbox` would take the outbox's id.
@@ -74,9 +74,9 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   const rank = (c) => { const i = levels.findIndex((l) => l.id === levelOf(c)); return i < 0 ? levels.length : i; };
   const label = (id) => (levels.find((l) => l.id === id) || {}).label || id;
   const waiting = (s) => ['open', 'orphaned', 'held'].includes(s);
+  // A card triage still checks has no verdict yet: it does not wait for the person, so the queue leaves it out.
   const pending = visible.filter((c) => waiting(st(c)))
     .sort((a, b) => rank(a) - rank(b) || a.createdAt - b.createdAt);
-  const checking = visible.filter((c) => st(c) === 'in-triage');
   const tagOf = (c, key) => String((c.tags || {})[key] || '').trim();
   // The inbox's own cards come first, above every pinned group and every Group by choice, so an approval never waits
   // behind a pin. A system card keeps out of the groups, even when it carries the tag a pin matches.
@@ -119,7 +119,6 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
   for (const c of systems) groupOf[c.id] = SECTION_ID.system;
   for (const p of pinned) for (const c of p.items) groupOf[c.id] = p.id;
   for (const [, items, , id] of groups) for (const c of items) groupOf[c.id] = id;
-  for (const c of checking) groupOf[c.id] = SECTION_ID.checking;
   for (const c of outbox) groupOf[c.id] = SECTION_ID.outbox;
   for (const c of sent) groupOf[c.id] = SECTION_ID.sent;
   // A collapsed group keeps its heading and its cards, for the count, but its cards leave the queue order: Skip for
@@ -130,7 +129,7 @@ export function buildQueue(state, groupBy, pins = [], collapsed = new Set()) {
     ...pinned.flatMap((p) => (collapsed.has(p.id) ? [] : p.items)),
     ...groups.flatMap(([, items, , id]) => (collapsed.has(id) ? [] : items)),
   ];
-  return { byId, st, levelOf, label, waiting, pending, systems, checking, pinned, outbox, sent, tagKeys, dealt, groups, groupOf, hidden, order };
+  return { byId, st, levelOf, label, waiting, pending, systems, pinned, outbox, sent, tagKeys, dealt, groups, groupOf, hidden, order };
 }
 
 /** Whether a card that just arrived raises a notification. A card in a collapsed group raises none, unless it is at the highest
