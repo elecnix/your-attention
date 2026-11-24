@@ -73,8 +73,9 @@ describe('footerSegment', () => {
   });
 
   it('counts a held or an orphaned card, and not one triage is still checking', () => {
-    const state = (states: Record<string, string>): InboxState => ({
-      cards: [{ id: 'c1', agent: 's1', kind: 'ask', title: 'Card c1', priority: 'soon', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, rev: 'r1' }],
+    const card = (id: string) => ({ id, agent: 's1', kind: 'ask' as const, title: `Card ${id}`, priority: 'soon', deliver: 'stream' as const, version: 1, createdAt: 1, updatedAt: 1, rev: `r-${id}` });
+    const state = (states: Record<string, string>, cards = [card('c1')]): InboxState => ({
+      cards,
       answers: {},
       presence: {},
       states: states as InboxState['states'],
@@ -83,6 +84,9 @@ describe('footerSegment', () => {
     });
     for (const waiting of ['open', 'held', 'orphaned']) assert.equal(footerSegment(state({ c1: waiting }), URL), `1 card ${link('c1', 1)}`, waiting);
     for (const gone of ['in-triage', 'answered', 'delivered', 'read', 'closed']) assert.equal(footerSegment(state({ c1: gone }), URL), '', gone);
+    // The queue order holds the waiting cards only: a card in triage beside an open one leaves the digits to the open
+    // one, even though the page still draws the triage section.
+    assert.equal(footerSegment(state({ c1: 'open', c2: 'in-triage' }, [card('c1'), card('c2')]), URL), `1 card ${link('c1', 1)}`);
   });
 
   it('puts the inbox’s own system cards first', () => {
