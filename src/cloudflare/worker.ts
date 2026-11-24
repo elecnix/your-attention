@@ -110,10 +110,13 @@ export async function validAddress(secret: string, id: string): Promise<boolean>
 /** The owner token this isolate has given its inbox, so single mode sends it once per isolate instead of once per request. */
 let adoptedOwner: string | undefined;
 
-/** Serve the built-in page and its files. Assets serve index.html at "/", and answer "/index.html" with a redirect to "/". */
+/** Serve the built-in page and its files. The page is `index.html` at the worker's root, so a request for "/" is asked
+ * for as that file: handed the bare root, the deployed asset layer goes back to the Worker, which asks for "/" again,
+ * and the request ends in the platform's exception page. `assets.html_handling` is "none" so the file comes back
+ * itself, rather than as a redirect to "/". */
 function asset(env: Env, req: Request, path: string): Promise<Response> {
   const url = new URL(req.url);
-  return env.ASSETS.fetch(new Request(new URL(path, url.origin), req));
+  return env.ASSETS.fetch(new Request(new URL(path === '/' ? '/index.html' : path, url.origin), req));
 }
 
 const LANDING = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
