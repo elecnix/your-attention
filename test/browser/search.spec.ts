@@ -1,5 +1,5 @@
-// The search field in the bar: ⌘K (Ctrl+K elsewhere) focuses it, and typing filters the queue in the browser over the card
-// summaries and the whole cards the page has fetched. Typing never asks the inbox for anything.
+// The search field in the queue, beside Group by: ⌘K (Ctrl+K elsewhere) focuses it, and typing filters the queue in the
+// browser over the card summaries and the whole cards the page has fetched. Typing never asks the inbox for anything.
 import { expect, test, type Page } from '@playwright/test';
 import { startInbox, type TestInbox } from './inbox.ts';
 
@@ -17,16 +17,18 @@ test.afterAll(async () => { await inbox.close(); });
 const search = (page: Page) => page.getByRole('searchbox', { name: 'Search cards' });
 const titles = (page: Page) => page.locator('.queue .q .t-title').allInnerTexts();
 
-test('the bar has a quiet search field, and the shortcut focuses it', async ({ page }) => {
+test('the queue has a quiet search field beside Group by, and the shortcut focuses it', async ({ page }) => {
   await inbox.open(page);
   await expect(search(page)).toBeVisible();
   await expect(search(page)).not.toBeFocused();
   await page.keyboard.press('ControlOrMeta+k');
   await expect(search(page)).toBeFocused();
-  // The field sits in the bar beside the other controls, and is no taller than the status pill.
-  const [field, pill] = await Promise.all([search(page).boundingBox(), page.locator('.status-pill').boundingBox()]);
-  expect(field!.y).toBeLessThan(80);
-  expect(field!.height).toBeLessThanOrEqual(pill!.height + 12);
+  // The field sits in the queue, right of the Group by choice, next to the list it filters.
+  expect(await search(page).evaluate((el) => !!el.closest('.queue'))).toBe(true);
+  const [field, select] = await Promise.all([search(page).boundingBox(), page.locator('.group-by select').boundingBox()]);
+  expect(field!.x).toBeGreaterThan(select!.x + select!.width - 1);
+  // Beside it, not above it: the two share a line.
+  expect(Math.abs(field!.y - select!.y)).toBeLessThanOrEqual(8);
 });
 
 test('a title match filters the queue and highlights the match', async ({ page }) => {
