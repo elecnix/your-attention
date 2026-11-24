@@ -66,6 +66,29 @@ export async function until<T>(check: () => T | undefined | Promise<T | undefine
 
 export const ROOT = path.resolve(import.meta.dirname, '..', '..');
 
+/** Run one Claude Code hook as its own process, as Claude Code runs it, and give its exit code and one captured stream.
+ * The inbox lives in the test process, so the spawn must not block. `capture` defaults to stdout, where a PreToolUse
+ * deny is written; `stderr` reads a hook that logs, and the other stream is inherited. */
+export function runHook(h: Harness, mode: string, input: Record<string, unknown>, opts: { env?: Record<string, string>; capture?: 'stdout' | 'stderr' } = {}): Promise<{ status: number | null; out: string }> {
+  const capture = opts.capture ?? 'stdout';
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts'), 'claude-hook', mode], {
+      env: { ...process.env, YOUR_ATTENTION_HOME: h.home, YOUR_ATTENTION_URL: h.server.url, YOUR_ATTENTION_TOKEN: h.agentToken, ...opts.env },
+      stdio: ['pipe', capture === 'stdout' ? 'pipe' : 'ignore', capture === 'stderr' ? 'pipe' : 'inherit'],
+    });
+    let out = '';
+    const stream = capture === 'stdout' ? child.stdout! : child.stderr!;
+    stream.on('data', (d) => { out += String(d); });
+    // A spawn that fails, such as EAGAIN on a loaded box, rejects this test instead of throwing out of the whole file.
+    child.on('error', reject);
+    // A hook can exit before it reads stdin, which closes the pipe; this keeps that write from throwing out of the test.
+    child.stdin!.on('error', () => {});
+    // `close` follows the exit and the closed stdio streams, so the last chunk of a hook's output is in `out`.
+    child.on('close', (status) => resolve({ status, out }));
+    child.stdin!.end(JSON.stringify(input));
+  });
+}
+
 /** Stop a process this test spawned, and remove its home once the process has let go of the files in it. A Windows
  * process holds its SQLite file until it exits, so a delete right after the kill fails with EBUSY. */
 export async function stopAndRemove(child: ChildProcess, home: string): Promise<void> {

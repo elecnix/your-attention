@@ -52,7 +52,7 @@ export function triagePrompt(card: Card, guidance: string, earlier: { title: str
     'You check a card that a coding agent wants to show a person. The person has little time.',
     'Return the card when it lacks one of these: the goal, the options the agent weighed, the evidence, or a recommendation.',
     'Also return it when an earlier answer below already answers the same question.',
-    'Pass it otherwise. Cards from a harness prompt that blocks the agent always pass.',
+    'Pass it otherwise. A card with `dialog` is a question the harness also asks in the terminal, so the person can answer it there, and these terms replace the general ones. It needs a question that says what the agent needs, and distinct options. Neither a separate evidence paragraph nor a recommendation belongs in it, since the dialog has no field for either. Return it when the question does not say what the agent needs, or its options do not give the person distinct choices.',
     'A card with `secrets` asks for those values, such as an API key, in sealed fields the secret widget places: pass it when the card says why the agent needs each one. A card that asks only for a secret has no options or recommendation, by design.',
     'An HTML card brings its own form in "html": read its options and recommendation there.',
     'Return a card whose text asks two or more questions above one options list: each question goes in "questions", with its own text and options, so the person answers it beside its context.',
@@ -61,7 +61,7 @@ export function triagePrompt(card: Card, guidance: string, earlier: { title: str
     '',
     'The card:',
     JSON.stringify({
-      kind: card.kind, title: card.title, text: card.text, recommendation: card.recommendation, options: card.options?.map((o) => o.label),
+      kind: card.kind, dialog: card.dialog || undefined, title: card.title, text: card.text, recommendation: card.recommendation, options: card.options?.map((o) => o.label),
       questions: card.questions, secrets: card.secrets, html: card.html?.slice(0, 4000), body: card.body?.slice(0, 4000), attachments: card.attachments?.map((a) => a.name),
       tags: card.tags ?? {},
     }, null, 2),

@@ -55,6 +55,7 @@ const mcp = new Server(
     instructions: [
       `Events from this channel are answers the person saved on cards in their inbox at ${inbox.url}.`,
       'Post a card with card_post when you need a decision from the person and can keep working meanwhile. Give a goal, the options you weighed, and your recommendation.',
+      'An AskUserQuestion you ask also becomes a card in that inbox, and triage may send a weak one back before the person sees it: state the goal, the options you weighed, and your recommendation, and ask again if it comes back.',
       'Search past answers with card_search before you post, so you never ask twice.',
       'Each event carries card_id. Act on the answer. The person reads the inbox, not this chat.',
       'Call card_close to retract a card you no longer need or to answer it yourself. Read receipts are automatic.',

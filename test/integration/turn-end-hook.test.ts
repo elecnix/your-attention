@@ -1,46 +1,33 @@
 // The Stop hook: it records when a turn ended, and never blocks the stop. The channel asks for a card later.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
-import { ROOT, start, type Harness } from './harness.ts';
+import { readHome } from '../../src/node/home.ts';
+import { runHook, start, type Harness } from './harness.ts';
 
 let h: Harness;
 before(async () => { h = await start(); });
 after(async () => { await h.stop(); });
 
 // The hook runs as its own process, as Claude Code runs it. The inbox is in this process, so the spawn must not block.
-const hook = (input: Record<string, unknown>, env: Record<string, string> = {}): Promise<{ status: number | null; stderr: string }> => new Promise((resolve) => {
-  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts'), 'claude-hook', 'turn-end'], {
-    env: { ...process.env, YOUR_ATTENTION_HOME: h.home, YOUR_ATTENTION_URL: h.server.url, YOUR_ATTENTION_TOKEN: h.agentToken, ...env },
-    stdio: ['pipe', 'ignore', 'pipe'],
-  });
-  let stderr = '';
-  child.stderr.on('data', (d) => { stderr += d; });
-  child.on('exit', (status) => resolve({ status, stderr }));
-  child.stdin.end(JSON.stringify(input));
-});
+const hook = (input: Record<string, unknown>, env: Record<string, string> = {}): Promise<{ status: number | null; out: string }> =>
+  runHook(h, 'turn-end', input, { env, capture: 'stderr' });
 
 const stretch = (session: string): unknown => {
-  try { return JSON.parse(fs.readFileSync(path.join(h.home, 'claude', `${session}.card-ask`), 'utf8')); } catch { return undefined; }
+  const raw = readHome(path.join('claude', `${session}.card-ask`), h.home);
+  return raw === undefined ? undefined : JSON.parse(raw);
 };
 
 // The prompt hook runs `claude-hook ask-cancel` on UserPromptSubmit and on SessionEnd, which is where a stretch ends.
-const promptHook = (input: Record<string, unknown>): Promise<{ status: number | null }> => new Promise((resolve) => {
-  const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts'), 'claude-hook', 'ask-cancel'], {
-    env: { ...process.env, YOUR_ATTENTION_HOME: h.home, YOUR_ATTENTION_URL: h.server.url, YOUR_ATTENTION_TOKEN: h.agentToken },
-    stdio: ['pipe', 'ignore', 'ignore'],
-  });
-  child.on('exit', (status) => resolve({ status }));
-  child.stdin.end(JSON.stringify(input));
-});
+const promptHook = (input: Record<string, unknown>): Promise<{ status: number | null }> =>
+  runHook(h, 'ask-cancel', input).then(({ status }) => ({ status }));
 
 describe('the Stop hook', () => {
   it('never blocks the stop, even for a session the rule asks for a card', async () => {
     const r = await hook({ session_id: 'stop-1', stop_hook_active: false }, { YOUR_ATTENTION_REQUIRE_CARD: '1' });
     assert.equal(r.status, 0);
-    assert.equal(r.stderr.trim(), '', 'no request reaches the model from the hook');
+    assert.equal(r.out.trim(), '', 'no request reaches the model from the hook');
   });
 
   it('starts a stretch of inactivity, which the channel times its asks from', async () => {

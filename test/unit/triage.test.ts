@@ -153,6 +153,22 @@ describe('triage prompts by card kind', () => {
     const html = triagePrompt({ ...card, html: '<button>Ship it (recommended)</button>' }, '', []);
     assert.match(html, /Ship it \(recommended\)/);
   });
+
+  it('carries `dialog` to the judge, and leaves it off a card the agent posted on its own', () => {
+    assert.match(triagePrompt({ ...card, dialog: true }, '', []), /"dialog": true/);
+    assert.doesNotMatch(triagePrompt(card, '', []), /"dialog"/);
+  });
+
+  it('judges a harness question on its own terms, without a separate recommendation', () => {
+    const p = triagePrompt({ ...card, dialog: true }, '', []);
+    // The dialog terms replace the general ones: a question that says what the agent needs, and distinct options.
+    assert.match(p, /a question the harness also asks in the terminal/);
+    assert.match(p, /It needs a question that says what the agent needs, and distinct options/);
+    // Neither the evidence paragraph nor the recommendation belongs in a dialog the harness draws.
+    assert.match(p, /Neither a separate evidence paragraph nor a recommendation/);
+    // The rule that such a card always passes is gone: that is what let a weak question reach the person.
+    assert.doesNotMatch(p, /blocks the agent always pass/);
+  });
 });
 
 describe('service files from review', () => {
