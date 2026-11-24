@@ -28,15 +28,15 @@ export function footerTarget(env: NodeJS.ProcessEnv = process.env, home = homeDi
 }
 
 /** Whether a reply carries what the queue reads: another program on the address can answer 200 with JSON of its own,
- * and `buildQueue` would throw on it. A card needs an id the queue can link, and one entry it cannot read makes the
- * whole reply a reply that is not a state. */
+ * and `buildQueue` would throw on it. A card needs an id the queue can link, and a level an id the queue can rank by;
+ * one entry it cannot read makes the whole reply a reply that is not a state. */
 function asState(data: unknown): InboxState | undefined {
   if (typeof data !== 'object' || data === null) return undefined;
   const s = data as Partial<InboxState>;
   const objects = [s.answers, s.presence, s.states];
   if (!Array.isArray(s.cards) || !objects.every((o) => typeof o === 'object' && o !== null)) return undefined;
   if (!s.cards.every((c) => typeof c === 'object' && c !== null && typeof (c as { id?: unknown }).id === 'string')) return undefined;
-  if (s.levels !== undefined && !Array.isArray(s.levels)) return undefined;
+  if (s.levels !== undefined && (!Array.isArray(s.levels) || !s.levels.every((l) => typeof l === 'object' && l !== null && typeof (l as { id?: unknown }).id === 'string'))) return undefined;
   if (s.priorities !== undefined && (typeof s.priorities !== 'object' || s.priorities === null)) return undefined;
   if (s.settings !== undefined && (typeof s.settings !== 'object' || s.settings === null)) return undefined;
   return s as InboxState;

@@ -195,6 +195,9 @@ describe('footerState', () => {
     // A card with no object could never render, and the queue would throw on it: the whole reply counts as no state.
     assert.equal(await reply({ cards: [null], answers: {}, presence: {}, states: {} }), undefined);
     assert.equal(await reply({ cards: [{ title: 'no id' }], answers: {}, presence: {}, states: {} }), undefined);
+    // A level with no id is the same: the queue reads every level's id, and one it cannot read is not a state either.
+    const card = { id: 'c1', agent: 's1', kind: 'ask', title: 'Card c1', priority: 'soon', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, rev: 'r1' };
+    assert.equal(await reply({ cards: [card], answers: {}, presence: {}, states: { c1: 'open' }, levels: [null], settings: { allowHtml: false, groupBy: 'priority' } }), undefined);
   });
 
   it('renders a state whose settings carry pins of the wrong shape', () => {
