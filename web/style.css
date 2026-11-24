@@ -35,7 +35,7 @@
   .notify:has(.notify-why) { white-space: nowrap; }
   .notify-why { font-size: calc(12px * var(--text-scale)); font-style: italic; white-space: normal; }
   /* The search field is as quiet as the other bar controls: small, hairline outline, no fill, muted until it has focus. */
-  .search-field { flex: 1 1 auto; min-width: 90px; height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale)); transition: border-color .15s; }
+  .search-field { flex: 1 1 60px; min-width: 60px; height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale)); transition: border-color .15s; }
   .search-field::placeholder { color: var(--muted); }
   .search-field:hover { border-color: color-mix(in srgb, var(--muted) 60%, transparent); }
   .search-field:focus-visible { outline: none; border-color: var(--accent); }
@@ -239,7 +239,7 @@
   .late-draft { border-style: solid; border-color: var(--accent); }
   .late-draft-why { color: var(--muted); font-size: calc(13px * var(--text-scale)); margin-bottom: 6px; }
   .late-draft-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-  .queue-head { display: flex; gap: 6px; align-items: center; padding: 4px 8px; }
+  .queue-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 8px; }
   .group-by { display: flex; gap: 6px; align-items: center; font-size: calc(12px * var(--text-scale)); color: var(--muted); white-space: nowrap; }
   .group-by select { font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
   /* How triage treated the card: a hollow dot when nothing checked it, filled when something did, red after a bypass. */
@@ -481,7 +481,6 @@
     .status-pill { order: 1; }
     .phone, .devices-open, .repo { order: 1; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
     .bar-inner::after { content: ""; order: 2; flex-basis: 100%; height: 0; }
-    .queue-head { flex-wrap: wrap; }
     .queue-head .search-field { order: 2; flex: 1 1 100%; margin: 4px 0; height: 36px; font-size: 16px; }
     .notify { order: 3; min-height: 40px; }
     .notify input { width: 20px; height: 20px; }

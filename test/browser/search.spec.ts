@@ -31,6 +31,18 @@ test('the queue has a quiet search field beside Group by, and the shortcut focus
   expect(Math.abs(field!.y - select!.y)).toBeLessThanOrEqual(8);
 });
 
+test('a narrow queue wraps the search field to its own line instead of overflowing', async ({ page }) => {
+  await inbox.open(page);
+  const field = search(page);
+  const queue = page.locator('.queue');
+  // The resizer sets this width, so a narrow queue at a desktop viewport is the case that used to overflow.
+  await page.locator('.layout').evaluate((el) => (el as HTMLElement).style.setProperty('--queue-w', '170px'));
+  await expect.poll(async () => {
+    const [f, q] = await Promise.all([field.boundingBox(), queue.boundingBox()]);
+    return f!.x + f!.width <= q!.x + q!.width + 1;
+  }).toBe(true);
+});
+
 test('a title match filters the queue and highlights the match', async ({ page }) => {
   await inbox.open(page);
   await search(page).fill('INVOICE');
