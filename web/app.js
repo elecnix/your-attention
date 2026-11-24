@@ -706,7 +706,8 @@ export function App() {
     } },
       h('div', { className: 'meta' },
         h('span', { className: `prio ${levelOf(current)}`, title: (levels.find((l) => l.id === levelOf(current)) || {}).definition }, label(levelOf(current))),
-        h('span', { className: `triage-dot ${triageTone}`, title: triageWhy, role: 'img', 'aria-label': triageWhy }),
+        // The tone is namespaced: a bare `done` picked up the app's own `.done` panel rule and its 24px padding.
+        h('span', { className: `triage-dot tone-${triageTone}`, title: triageWhy, role: 'img', 'aria-label': triageWhy }),
         current.status && h('span', { className: 'status' }, current.status),
         STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && !current.archivedAt && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
