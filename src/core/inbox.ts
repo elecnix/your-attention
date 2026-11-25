@@ -2473,9 +2473,13 @@ export class Inbox {
     const words = String(query ?? '').trim();
     // No words list every card, so an agent can ask for the open cards without inventing a word for them.
     const text = /^\*+$/.test(words) ? '' : words;
-    const cards = text
+    // A card's id names it exactly, so typing one finds that card whatever its words say, including cards stored before
+    // their id was indexed. The word search still runs, and a card both find appears once.
+    const named = text && /^[\w.:-]{1,80}$/.test(text) ? this.store.get<Card>('cards', text) : undefined;
+    const found = text
       ? this.store.search(text, Number.MAX_SAFE_INTEGER).map((h) => this.store.get<Card>('cards', h.card)).filter((c): c is Card => !!c)
       : this.store.list<Card>('cards').sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? 1 : -1));
+    const cards = named && !found.some((c) => c.id === named.id) ? [named, ...found] : found;
     return this.pageOf(cards, filters, 20);
   }
 

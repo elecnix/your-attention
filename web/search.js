@@ -21,6 +21,7 @@ function fieldsOf(summary, detail) {
   const questions = (card.questions || []).map((q) => [q.header, q.question, q.text, ...(q.options || []).map((x) => `${x.label} ${x.description || ''}`)].filter(Boolean).join(' ')).join(' · ');
   return [
     ['Title', summary.title],
+    ['Id', summary.id || ''],
     ['Tag', tags],
     ['Agent', [o.name, summary.from, summary.agent].filter(Boolean).join(' · ')],
     ['Status', summary.status || ''],

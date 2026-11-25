@@ -43,6 +43,15 @@ test('a narrow queue wraps the search field to its own line instead of overflowi
   }).toBe(true);
 });
 
+test('typing a card id finds that card in the queue', async ({ page }) => {
+  const id = (await inbox.state()).cards.find((c) => c.title === 'Rename the branch?')!.id;
+  await inbox.open(page);
+  await search(page).fill(id);
+  expect(await titles(page)).toEqual(['Rename the branch?']);
+  await search(page).fill(id.toUpperCase());
+  expect(await titles(page)).toEqual(['Rename the branch?']);
+});
+
 test('a title match filters the queue and highlights the match', async ({ page }) => {
   await inbox.open(page);
   await search(page).fill('INVOICE');
