@@ -45,4 +45,11 @@ describe('the Claude Code plugin manifest', () => {
     // Windows checks out without POSIX permission bits, so the mode carries no meaning there.
     if (process.platform !== 'win32') assert.ok(fs.statSync(runner).mode & 0o111, 'the runner is executable');
   });
+
+  it('records the turn end when a session stops', () => {
+    const stop = hooksJson.hooks.Stop;
+    assert.ok(stop, 'the manifest registers the Stop hook');
+    const commands = stop.flatMap((entry) => entry.hooks.map((hook) => hook.command));
+    assert.deepEqual(commands, ['node "${CLAUDE_PLUGIN_ROOT}/bin/claude-plugin-runner.js" claude-hook turn-end']);
+  });
 });
