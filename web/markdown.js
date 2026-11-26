@@ -9,6 +9,8 @@
 // A fenced block gets a Copy button, which web/copy.js handles.
 export const MERMAID_FENCE = /^```\s*mermaid(\s|$)/i;
 export const SESSION_LINK = /^https:\/\/herdr\.invalid\/v1\//;
+/** The targets a Markdown link draws as a link. A link to anything else shows only its label, as plain text. */
+export const LINK_TARGET = /^(https?:|mailto:)/i;
 const URL_TAIL = /[.,;:!?'"*_]+$/;
 const WORD_CHAR = /[\p{L}\p{N}]/u;
 
@@ -67,8 +69,14 @@ function inline(h, text, key, opts = {}) {
     else if (m[3]) out.push(h('em', { key: k }, inline(h, m[3].slice(1, -1), k, opts)));
     else if (m[4]) out.push(opts.cardLink ? opts.cardLink(m[4], k) : m[0]);
     else if (m[5]) {
+      // A file: address on this machine is a link when the renderer offers a fileLink, and its path as code when not.
       const path = filePath(m[6]);
-      out.push(path !== undefined ? file(path, m[5]) : /^(https?:|mailto:)/i.test(m[6]) ? a(m[6], m[5]) : m[5]);
+      if (path !== undefined) out.push(file(path, m[5]));
+      else if (LINK_TARGET.test(m[6])) out.push(a(m[6], m[5]));
+      else {
+        opts.unlinked?.(m[5], m[6]);
+        out.push(m[5]);
+      }
     } else if (m[8]) {
       const url = m[8].replace(URL_TAIL, '');
       const path = filePath(url);

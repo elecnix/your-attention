@@ -11,8 +11,12 @@ export interface MarkdownOptions<T> {
   diagram?: (source: string, key: string) => T;
   /** What a link to an http, https or mailto address becomes, or undefined or null for the default link. */
   link?: (href: string, label: unknown, key: string) => T | null | undefined;
+  /** Hears each Markdown link whose target is none of those, and which therefore shows only its label. */
+  unlinked?: (label: string, target: string) => void;
 }
 export const SESSION_LINK: RegExp;
+/** The targets a Markdown link draws as a link: an http, https or mailto address. */
+export const LINK_TARGET: RegExp;
 export const MERMAID_FENCE: RegExp;
 export function renderInline<T>(h: Hyperscript<T>, text: string | undefined, opts?: MarkdownOptions<T>): (T | string)[];
 /** The address of each link renderMarkdown draws in `src`, as its `link` option receives it. */

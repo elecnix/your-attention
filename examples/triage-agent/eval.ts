@@ -1,5 +1,5 @@
 // A dry run of the example triage agent over the cards already in your inbox. It reads them as the owner, runs the
-// three checks on each, and writes a Markdown report and the raw results as JSON. It sends no verdict, posts nothing
+// four checks on each, and writes a Markdown report and the raw results as JSON. It sends no verdict, posts nothing
 // and changes nothing in the inbox. Card text is private, so write the report outside any repository:
 //   node examples/triage-agent/eval.ts --out ~/triage-eval/today.md [--since 2026-11-17] [--before TIME] [--config FILE]
 // --before keeps the cards posted up to that time (a date alone is its local midnight), so a rerun can check the same cards as an earlier one.

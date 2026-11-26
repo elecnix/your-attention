@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, it } from 'node:test';
-import { BYPASS_TAG, CARD_PROMPT, CARD_QUESTION, cardProse, cardText, checkCard, DEFAULTS, loadConfig, runCommand, type ExampleConfig, type RunCommand } from '../../examples/triage-agent/checks.ts';
+import { BYPASS_TAG, CARD_PROMPT, CARD_QUESTION, cardProse, cardText, checkCard, DEFAULTS, linksCheck, loadConfig, runChecks, runCommand, type ExampleConfig, type RunCommand } from '../../examples/triage-agent/checks.ts';
 import { TriageState } from '../../examples/triage-agent/state.ts';
 import { runCardHook } from '../../src/extensions/card-hook.ts';
 import type { Card } from '../../src/core/types.ts';
@@ -308,9 +308,9 @@ describe('the example triage agent reads its local config', () => {
 
   it('reads the policy, and fills in the parts it leaves out', () => {
     const file = path.join(dir, 'policy.json');
-    fs.writeFileSync(file, JSON.stringify({ policy: { classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 }, maxReturns: 5 }));
+    fs.writeFileSync(file, JSON.stringify({ policy: { classifierMissingContext: 'advise', linksNotClickable: 'advise', prVerdictBlockBelow: 0.3 }, maxReturns: 5 }));
     const cfg = loadConfig(file);
-    assert.deepEqual(cfg.policy, { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'advise', prVerdictBlockBelow: 0.3 });
+    assert.deepEqual(cfg.policy, { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'advise', linksNotClickable: 'advise', prVerdictBlockBelow: 0.3 });
     assert.equal(cfg.maxReturns, 5);
   });
 
@@ -415,6 +415,75 @@ describe('the example triage agent follows the local policy', () => {
   it('leaves out a finding the policy ignores', async () => {
     const ruling = await checkCard(card, config({ classifier: missingContext(), policy: { ...DEFAULTS.policy, classifierMissingContext: 'ignore' } }), logger().log);
     assert.deepEqual([ruling.verdict, ruling.advice], ['pass', undefined]);
+  });
+});
+
+describe('the example triage agent checks that every reference renders as a link', () => {
+  const links = (over: Partial<Card>): string[] => linksCheck({ ...card, ...over }, config({})).sections.flatMap((s) => s.lines);
+  const pr = 'PrizmalAi/PrizmalSwitch#3750';
+
+  it('names a plain pull request with its field and the Markdown that links it', () => {
+    const lines = links({ text: `Merge ${pr} once CI passes.` });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? '', /^text: /);
+    assert.ok((lines[0] ?? '').includes(pr), lines[0]);
+    assert.match(lines[0] ?? '', /\[PrizmalAi\/PrizmalSwitch#3750\]\(https:\/\/github\.com\/PrizmalAi\/PrizmalSwitch\/pull\/3750\)/);
+  });
+
+  it('says that a title shows plain text, so its reference belongs in the card text as a link', () => {
+    const lines = links({ title: `Merge ${pr}` });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? '', /^title: /);
+    assert.match(lines[0] ?? '', /shows as plain text, in a field that draws no Markdown/);
+    assert.match(lines[0] ?? '', /card's text as \[PrizmalAi\/PrizmalSwitch#3750\]\(https:\/\/github\.com\/PrizmalAi\/PrizmalSwitch\/pull\/3750\)/);
+  });
+
+  it('flags a URL inside inline code, and leaves a fenced block alone', () => {
+    const inline = links({ text: 'Call `curl https://ci.test/hook` after the build.' });
+    assert.deepEqual(inline.length, 1);
+    assert.match(inline[0] ?? '', /^text: .*https:\/\/ci\.test\/hook/);
+    assert.deepEqual(links({ text: 'Call this:\n\n```\ncurl https://ci.test/hook\n```' }), []);
+  });
+
+  it('flags a Markdown link whose target is not an address the page links', () => {
+    const lines = links({ text: 'See [the run](/run/17) and [the pull request](acme/api#42).' });
+    assert.equal(lines.length, 2);
+    for (const line of lines) assert.match(line, /^text: .*is not a link/);
+    assert.match(lines[0] ?? '', /\/run\/17/);
+  });
+
+  it('leaves the pr tag alone, since it holds a pull-request reference by design', () => {
+    assert.deepEqual(links({ tags: { pr: 'acme/api#42' } }), []);
+  });
+
+  it('leaves a reference that is already a link, or inside a link, alone', () => {
+    const text = `See [${pr}](https://github.com/PrizmalAi/PrizmalSwitch/pull/3750), [the run](https://ci.test/each#12) and [[c9]].`;
+    assert.deepEqual(links({ text }), []);
+    assert.deepEqual(links({ text: 'A bare https://ci.test/run and [it](mailto:me@example.test).' }), []);
+  });
+
+  it('follows the policy: a card goes back for Links, then passes with the finding as advice, or ignores it', async () => {
+    const broken = { ...card, text: `Merge ${pr} once CI passes.` };
+    assert.equal((await checkCard(broken, config({}), logger().log)).verdict, 'return');
+    const advised = await checkCard(broken, config({ policy: { ...DEFAULTS.policy, linksNotClickable: 'advise' } }), logger().log);
+    assert.equal(advised.verdict, 'pass');
+    assert.match(advised.advice ?? '', /Links, advice:[\s\S]*PrizmalAi\/PrizmalSwitch#3750/);
+    const ignored = await checkCard(broken, config({ policy: { ...DEFAULTS.policy, linksNotClickable: 'ignore' } }), logger().log);
+    assert.deepEqual([ignored.verdict, ignored.advice], ['pass', undefined]);
+  });
+
+  it('collects every check, so one notice carries both the Links finding and a vale error', async () => {
+    const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 1], Check: 'Cards.FirstPerson', Message: 'Third person.', Severity: 'error', Match: 'I' }] }, 1));
+    const broken = { ...card, text: `Merge ${pr} once CI passes.` };
+    const ruling = await checkCard(broken, config({ vale: vale.argv }), logger().log);
+    assert.equal(ruling.verdict, 'return');
+    assert.match(ruling.reason, /Vale, must fix:[\s\S]*Links, must fix:[\s\S]*PrizmalAi\/PrizmalSwitch#3750/);
+  });
+
+  it('runs inside runChecks with the other checks, and passes a card whose references all render', async () => {
+    const reports = await runChecks({ ...card, text: `See [${pr}](https://github.com/PrizmalAi/PrizmalSwitch/pull/3750) and https://ci.test/run.` }, config({}), undefined);
+    assert.ok(reports.some((r) => r.check === 'Links'));
+    assert.deepEqual(reports.find((r) => r.check === 'Links')?.sections, []);
   });
 });
 
@@ -528,7 +597,7 @@ describe('the example triage agent logs every ruling as one JSON line', () => {
     assert.deepEqual(entry['returns'], { count: 1, max: 3 });
     assert.equal(typeof entry['ms'], 'number');
     const checks = entry['checks'] as Record<string, any>[];
-    assert.deepEqual(checks.map((c) => c['name']), ['Vale', 'Card classifier', 'PR verdict']);
+    assert.deepEqual(checks.map((c) => c['name']), ['Vale', 'Card classifier', 'PR verdict', 'Links']);
     const byName = Object.fromEntries(checks.map((c) => [c['name'], c]));
     assert.deepEqual(byName['Vale']['sections'], []);
     assert.deepEqual(byName['Vale']['detail'], { vale: [] });

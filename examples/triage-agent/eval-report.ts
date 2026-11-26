@@ -1,10 +1,10 @@
-// The dry run behind eval.ts: check cards with the same three checks the agent runs, and count what each check would
+// The dry run behind eval.ts: check cards with the same four checks the agent runs, and count what each check would
 // block or advise. It sends no verdict and keeps no state, so it never changes the inbox or the agent's return counts.
 import type { Card } from '../../src/core/types.ts';
 import { limiter } from '../../src/extensions/card-hook.ts';
 import { runChecks, runCommand, type CheckName, type CheckReport, type ExampleConfig, type RunCommand } from './checks.ts';
 
-const CHECKS: CheckName[] = ['Vale', 'Card classifier', 'PR verdict'];
+const CHECKS: CheckName[] = ['Vale', 'Card classifier', 'PR verdict', 'Links'];
 
 /** A time for --since or --before: a date alone means its midnight in local time, and anything else goes to Date. */
 export function parseWhen(value: string): Date | undefined {
