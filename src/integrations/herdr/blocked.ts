@@ -8,7 +8,7 @@
 // that changed or closed gets no key: a key sent to a working agent would
 // interrupt it.
 import { execFile } from 'node:child_process';
-import { Client, loadConfig } from '../../client.ts';
+import { Client, waitForConfig } from '../../client.ts';
 import { randomId } from '../../core/crypto.ts';
 import type { Answer, Card, CardState, NewCard } from '../../core/types.ts';
 import { parseDialog, type Dialog } from './dialog.ts';
@@ -210,8 +210,9 @@ export function createSidecar(inbox: Client, herdr: Herdr = runHerdr, settleMs =
 }
 
 export async function main(): Promise<void> {
-  const config = loadConfig();
-  if (!config) throw new Error('No inbox found. Start one with `your-attention serve`.');
+  // A daemon that starts before the inbox waits for it, so the machine that boots both needs no order between them.
+  const config = await waitForConfig();
+  if (!config) return;
   const sidecar = createSidecar(new Client(config));
   for (;;) {
     try { await sidecar.tick(); } catch (e) { log('tick failed:', (e as Error).message); }

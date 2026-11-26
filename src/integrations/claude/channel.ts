@@ -12,7 +12,7 @@ import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { runTool } from '../run-tool.ts';
@@ -26,12 +26,16 @@ import { herdrPlace } from '../herdr/place.ts';
 import { cardTools } from '../tools.ts';
 
 const log = (...a: unknown[]): void => console.error('[your-attention]', ...a);
-const config = loadConfig();
-if (!config) {
-  log('no inbox found: start one with `your-attention serve` or pair with `your-attention pair <url>`');
-  process.exit(1);
-}
-const inbox = new Client(config);
+// A session can resume while its inbox is stopped, and Claude Code never starts a channel that closed: it reports the
+// server as CONNECTION_CLOSED and the session spends the rest of its life without answers. So a channel that finds no
+// inbox completes the handshake anyway and waits for one, and its tools say the inbox is not running.
+const started = loadConfig();
+let inbox: Client | undefined = started ? new Client(started) : undefined;
+/** The inbox, for the calls that only make sense once one is known: the stream and the tools. */
+const need = (): Client => {
+  if (!inbox) throw new Error(NO_INBOX);
+  return inbox;
+};
 const session = process.env['CLAUDE_CODE_SESSION_ID'] ?? `pid-${process.ppid}`;
 const agent = `claude:${session}`;
 const pane = process.env['HERDR_PANE_ID'];
@@ -53,7 +57,7 @@ const mcp = new Server(
   {
     capabilities: { experimental: { 'claude/channel': {} }, tools: {} },
     instructions: [
-      `Events from this channel are answers the person saved on cards in their inbox at ${inbox.url}.`,
+      `Events from this channel are answers the person saved on cards in their inbox${inbox ? ` at ${inbox.url}` : ''}.`,
       'Post a card with card_post when you need a decision from the person and can keep working meanwhile. Give a goal, the options you weighed, and your recommendation.',
       'An AskUserQuestion you ask also becomes a card in that inbox, and triage may send a weak one back before the person sees it: state the goal, the options you weighed, and your recommendation, and ask again if it comes back.',
       'Search past answers with card_search before you post, so you never ask twice.',
@@ -92,7 +96,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const text = (t: unknown) => ({ content: [{ type: 'text' as const, text: typeof t === 'string' ? t : JSON.stringify(t, null, 2) }] });
   try {
     const place = async () => ({ ...origin, name: sessionName.read(), ...(await herdrPlace(pane)) });
-    return text(await runTool({ inbox, secrets, agent, origin: place, arrival: 'as a channel event' }, req.params.name, args));
+    return text(await runTool({ inbox: need(), secrets, agent, origin: place, arrival: 'as a channel event' }, req.params.name, args));
   } catch (e) {
     return { ...text(String((e as Error).message)), isError: true };
   }
@@ -161,7 +165,7 @@ function scanTranscript(): void {
         // The session wrote something and this receipt was not in it: it is at work, so the retry waits.
         if (!added.includes(receipt)) { push.at = Date.now(); continue; }
         pending.delete(receipt);
-        inbox.ack(push.card).then(() => { log('read', push.card); void clearNotSeen(push.card); }, (e: Error) => log('ack failed:', e.message));
+        need().ack(push.card).then(() => { log('read', push.card); void clearNotSeen(push.card); }, (e: Error) => log('ack failed:', e.message));
       }
     }
   } catch (e) {
@@ -192,7 +196,7 @@ async function fallback(receipt: string, push: Push): Promise<void> {
     try {
       await typeIntoOwnPane(pane, push.body);
       log('typed the answer into pane', pane, 'for', push.card);
-      void inbox.ack(push.card).then(() => { log('read', push.card); void clearNotSeen(push.card); }, (e: Error) => log('ack failed:', e.message));
+      void need().ack(push.card).then(() => { log('read', push.card); void clearNotSeen(push.card); }, (e: Error) => log('ack failed:', e.message));
       return;
     } catch (e) {
       log('no herdr send for', push.card, '-', (e as Error).message);
@@ -220,7 +224,7 @@ async function markNotSeen(card: string, reason: string): Promise<void> {
   const label = `Not seen by the agent: ${reason}`;
   notSeen.set(card, label);
   log('not seen:', card, reason);
-  try { await inbox.status(card, label); } catch (e) { log('status failed:', (e as Error).message); }
+  try { await need().status(card, label); } catch (e) { log('status failed:', (e as Error).message); }
 }
 
 /** Once the answer does arrive another way, such as a force-send, the card stops saying it was not seen. */
@@ -229,8 +233,8 @@ async function clearNotSeen(card: string): Promise<void> {
   if (label === undefined) return;
   notSeen.delete(card);
   try {
-    const { card: current } = await inbox.get(card);
-    if (current.status === label) await inbox.status(card, '');
+    const { card: current } = await need().get(card);
+    if (current.status === label) await need().status(card, '');
   } catch { /* the card is gone, or a revision owns its status now */ }
 }
 
@@ -240,8 +244,8 @@ const MINUTE_MS = minuteMs(process.env);
 const asks = new CardAsks({
   store: fileStore(session),
   // A value in the environment decides for the whole session, so the inbox's rule is not read at all.
-  rule: async () => envRequireCard(process.env) ?? ruleFromView(await inbox.requireCard(agent)),
-  hasOpenCard: async () => holdsCard((await inbox.list()).results, agent),
+  rule: async () => envRequireCard(process.env) ?? ruleFromView(await need().requireCard(agent)),
+  hasOpenCard: async () => holdsCard((await need().list()).results, agent),
   ask: () => notify(NO_CARD, { request: 'card' }),
   minuteMs: MINUTE_MS,
   log,
@@ -258,53 +262,70 @@ await mcp.connect(new StdioServerTransport());
 transcript = findTranscript();
 offset = transcriptSize();
 setInterval(scanTranscript, Math.min(500, Math.max(50, Math.floor(RETRY_MS / 4))));
-log('connected to', inbox.url, 'as', agent, channelOff ? '(channel off: the session started without the development-channels flag)' : '');
 // The hooks change the file from their own processes: a stat of it notices, at a fraction of a minute of the schedule.
 fs.watchFile(stretchFile(session), { interval: Math.min(1000, Math.max(20, Math.floor(MINUTE_MS / 10))), persistent: false }, () => asks.resync());
-asks.resync();
 
-void inbox.stream(agent, async (ev) => {
-  // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
-  if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
-  // A new rule may move the next ask, or turn the asks on or off.
-  if (ev.type === 'settings') return asks.resync();
-  if (ev.type === 'guidance') {
-    await notify(`The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`, { guidance: String(ev.guidance.version) });
-    return;
-  }
-  if (ev.type === 'returned') {
-    await notify(describeReturned(ev), { card_id: ev.card.id });
-    return;
-  }
-  if (ev.type === 'advice') {
-    await notify(describeAdvice(ev), { card_id: ev.card.id });
-    return;
-  }
-  if (ev.type === 'card') {
-    await notify(describeSentCard(ev), { card_id: ev.card.id });
-    return;
-  }
-  if (ev.type !== 'answer') return;
-  const { card, answer } = ev;
-  const dismissed = card.dialog ? await closeOwnDialog(card.origin?.herdrPane) : false;
-  const receipt = ev.id;
-  const head = card.dialog
-    ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
-    : `The person answered card "${card.title}":`;
-  const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
-  const sealed = await secrets.receive(card, answer);
-  const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(inbox, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
-  // A newer answer to the same card replaces the one the channel is still trying to deliver.
-  for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);
-  const push: Push = { card: card.id, body, meta: { card_id: card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
-  pending.set(receipt, push);
-  try {
-    await notify(body, push.meta);
-    push.at = Date.now();
-    log('pushed', card.id, receipt);
-  } catch (e) {
-    log('push failed:', (e as Error).message);
-  } finally {
-    push.pushing = false;
-  }
-}, stop.signal, 'auto', { channelOff, origin: () => ({ ...origin, name: sessionName.read() }) }).catch((e: Error) => log('stream stopped:', e.message));
+/** Follow the inbox for answers. The stream reconnects by itself after an inbox restart and across a new link. */
+function listen(client: Client): void {
+  log('connected to', client.url, 'as', agent, channelOff ? '(channel off: the session started without the development-channels flag)' : '');
+  asks.resync();
+  void client.stream(agent, async (ev) => {
+    // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
+    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
+    // A new rule may move the next ask, or turn the asks on or off.
+    if (ev.type === 'settings') return asks.resync();
+    if (ev.type === 'guidance') {
+      await notify(`The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`, { guidance: String(ev.guidance.version) });
+      return;
+    }
+    if (ev.type === 'returned') {
+      await notify(describeReturned(ev), { card_id: ev.card.id });
+      return;
+    }
+    if (ev.type === 'advice') {
+      await notify(describeAdvice(ev), { card_id: ev.card.id });
+      return;
+    }
+    if (ev.type === 'card') {
+      await notify(describeSentCard(ev), { card_id: ev.card.id });
+      return;
+    }
+    if (ev.type !== 'answer') return;
+    const { card, answer } = ev;
+    const dismissed = card.dialog ? await closeOwnDialog(card.origin?.herdrPane) : false;
+    const receipt = ev.id;
+    const head = card.dialog
+      ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
+      : `The person answered card "${card.title}":`;
+    const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
+    const sealed = await secrets.receive(card, answer);
+    const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
+    // A newer answer to the same card replaces the one the channel is still trying to deliver.
+    for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);
+    const push: Push = { card: card.id, body, meta: { card_id: card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
+    pending.set(receipt, push);
+    try {
+      await notify(body, push.meta);
+      push.at = Date.now();
+      log('pushed', card.id, receipt);
+    } catch (e) {
+      log('push failed:', (e as Error).message);
+    } finally {
+      push.pushing = false;
+    }
+  }, stop.signal, 'auto', { channelOff, origin: () => ({ ...origin, name: sessionName.read() }) }).catch((e: Error) => log('stream stopped:', e.message));
+}
+
+// A session that started while its inbox was stopped waits here, and connects when one starts, with no restart of the
+// session. A config that appears but cannot be used, such as a server.json written halfway, is read again.
+function waitForInbox(): void {
+  log('no inbox yet: this session connects when one starts');
+  void waitForConfig({ signal: stop.signal }).then((config) => {
+    if (!config || stop.signal.aborted) return;
+    inbox = new Client(config);
+    listen(inbox);
+  });
+}
+
+if (inbox) listen(inbox);
+else waitForInbox();

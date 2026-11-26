@@ -3,7 +3,7 @@
 // one. The answer is marked read when it reaches the model context.
 import os from 'node:os';
 import { Type } from 'typebox';
-import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import type { NewCard } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
@@ -80,57 +80,65 @@ export default function yourAttention(pi: PiApi): void {
   const prompts = createPromptCards(() => (inbox && origin ? { inbox, agent, origin: here() } : undefined));
 
   pi.on('session_start', async (_event, ctx) => {
-    const config = loadConfig();
-    if (!config) return;
-    inbox = new Client(config);
     const session = ctx.sessionManager.getSessionId();
     agent = `pi:${session}`;
     sessionName = () => ctx.sessionManager.getSessionName?.();
     origin = { harness: 'pi', session, name: sessionName(), host: os.hostname(), cwd: ctx.sessionManager.getCwd(), herdrPane: process.env['HERDR_PANE_ID'] };
     stop?.abort();
     stop = new AbortController();
-    const client = inbox;
-    // The launcher's --tags value gives every card this session posts its default tags. The inbox keeps them, so a
-    // compaction or a restart leaves them in place.
-    const launched = process.env['YOUR_ATTENTION_TAGS'];
-    // The write is awaited, so a card this session posts next finds the defaults already in the inbox.
-    if (launched) {
-      try {
-        const tags = parseTagsFlag(launched);
-        if (tags) await client.setDefaultTags(agent, { tags, from: 'YOUR_ATTENTION_TAGS' }).catch((e: Error) => log('could not set the default tags:', e.message));
-      } catch (e) {
-        log('ignoring YOUR_ATTENTION_TAGS:', (e as Error).message);
+    const mine = stop;
+    // A session that starts while its inbox is stopped waits for one rather than staying without answers for good.
+    const connect = async (client: Client): Promise<void> => {
+      inbox = client;
+      // The launcher's --tags value gives every card this session posts its default tags. The inbox keeps them, so a
+      // compaction or a restart leaves them in place.
+      const launched = process.env['YOUR_ATTENTION_TAGS'];
+      // The write is awaited, so a card this session posts next finds the defaults already in the inbox.
+      if (launched) {
+        try {
+          const tags = parseTagsFlag(launched);
+          if (tags) await client.setDefaultTags(agent, { tags, from: 'YOUR_ATTENTION_TAGS' }).catch((e: Error) => log('could not set the default tags:', e.message));
+        } catch (e) {
+          log('ignoring YOUR_ATTENTION_TAGS:', (e as Error).message);
+        }
       }
-    }
-    void client.stream(agent, async (ev) => {
-      // A new rule may move the next ask, or turn the asks on or off.
-      if (ev.type === 'settings') return asks.resync();
-      if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice') {
-        const note = ev.type === 'guidance'
-          ? `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`
-          : `[your-attention] ${ev.type === 'advice' ? describeAdvice(ev) : describeReturned(ev)}`;
-        if (ctx.isIdle()) pi.sendUserMessage(note);
-        else pi.sendUserMessage(note, { deliverAs: 'followUp' });
-        return;
-      }
-      if (ev.type === 'card') {
-        // A card the person sent this session from the inbox page: a message to act on, not a question to answer.
-        const note = `[your-attention] ${describeSentCard(ev)}`;
-        if (ctx.isIdle()) pi.sendUserMessage(note);
-        else pi.sendUserMessage(note, { deliverAs: 'followUp' });
-        return;
-      }
-      if (ev.type !== 'answer') return;
-      // An answer to a prompt card is typed into the pane, and the model hears nothing: the prompt already asked it.
-      if (prompts.owns(ev.card.id)) { await prompts.answered(ev.card, ev.answer); return; }
-      pending.set(ev.id, ev.card.id);
-      const sealed = await secrets.receive(ev.card, ev.answer);
-      const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}${sealed ? `\n${sealed}` : ''}`;
-      const text = `[your-attention answer ${ev.id}] ${what}`;
-      // Steer by default; start a new turn when the agent is idle.
-      if (ctx.isIdle()) pi.sendUserMessage(text);
-      else pi.sendUserMessage(text, { deliverAs: ev.answer.delivery === 'followUp' ? 'followUp' : 'steer' });
-    }, stop.signal, 'auto', { origin: here }).catch((e: Error) => log('stream stopped:', e.message));
+      void client.stream(agent, async (ev) => {
+        // A new rule may move the next ask, or turn the asks on or off.
+        if (ev.type === 'settings') return asks.resync();
+        if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice') {
+          const note = ev.type === 'guidance'
+            ? `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`
+            : `[your-attention] ${ev.type === 'advice' ? describeAdvice(ev) : describeReturned(ev)}`;
+          if (ctx.isIdle()) pi.sendUserMessage(note);
+          else pi.sendUserMessage(note, { deliverAs: 'followUp' });
+          return;
+        }
+        if (ev.type === 'card') {
+          // A card the person sent this session from the inbox page: a message to act on, not a question to answer.
+          const note = `[your-attention] ${describeSentCard(ev)}`;
+          if (ctx.isIdle()) pi.sendUserMessage(note);
+          else pi.sendUserMessage(note, { deliverAs: 'followUp' });
+          return;
+        }
+        if (ev.type !== 'answer') return;
+        // An answer to a prompt card is typed into the pane, and the model hears nothing: the prompt already asked it.
+        if (prompts.owns(ev.card.id)) { await prompts.answered(ev.card, ev.answer); return; }
+        pending.set(ev.id, ev.card.id);
+        const sealed = await secrets.receive(ev.card, ev.answer);
+        const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}${sealed ? `\n${sealed}` : ''}`;
+        const text = `[your-attention answer ${ev.id}] ${what}`;
+        // Steer by default; start a new turn when the agent is idle.
+        if (ctx.isIdle()) pi.sendUserMessage(text);
+        else pi.sendUserMessage(text, { deliverAs: ev.answer.delivery === 'followUp' ? 'followUp' : 'steer' });
+      }, mine.signal, 'auto', { origin: here }).catch((e: Error) => log('stream stopped:', e.message));
+    };
+    const config = loadConfig();
+    if (config) { await connect(new Client(config)); return; }
+    log('no inbox yet: this session connects when one starts');
+    void waitForConfig({ signal: mine.signal }).then(async (found) => {
+      if (!found || mine.signal.aborted) return;
+      await connect(new Client(found));
+    });
   });
 
   pi.on('session_shutdown', () => {
@@ -177,7 +185,7 @@ export default function yourAttention(pi: PiApi): void {
   });
 
   const need = (): Client => {
-    if (!inbox) throw new Error('No inbox found. Start one with `your-attention serve`, or pair with `your-attention pair <url>`.');
+    if (!inbox) throw new Error(NO_INBOX);
     return inbox;
   };
 

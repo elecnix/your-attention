@@ -5,7 +5,7 @@
 // OpenCode hands plugins its own Zod, as tool.schema from @opencode-ai/plugin, and wants tool arguments in it.
 // The plugin takes that Zod as an argument, so this package needs no Zod of its own.
 import os from 'node:os';
-import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import type { AgentEvent, Origin } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { runTool } from '../run-tool.ts';
@@ -83,9 +83,14 @@ const agentOf = (session: string): string => `opencode:${session}`;
 /** The plugin, given the Zod OpenCode hands plugins as tool.schema. */
 export function createPlugin(z: unknown) {
   return async ({ client, directory }: PluginInput): Promise<Hooks> => {
-    const config = loadConfig();
-    if (!config) return {};
-    const inbox = new Client(config);
+    // A session can start while its inbox is stopped: the plugin keeps its tools, says why a call cannot reach the
+    // inbox, and follows each session's answers once an inbox starts, so nobody has to restart OpenCode.
+    const started = loadConfig();
+    let inbox: Client | undefined = started ? new Client(started) : undefined;
+    const need = (): Client => {
+      if (!inbox) throw new Error(NO_INBOX);
+      return inbox;
+    };
     const secrets = new SecretRequests();
     // The sessions this process follows, each with its answer stream, and the answers sent but not yet read.
     const followed = new Map<string, AbortController>();
@@ -95,11 +100,13 @@ export function createPlugin(z: unknown) {
     const send = (session: string, text: string): Promise<unknown> =>
       client.session.promptAsync({ path: { id: session }, body: { parts: [{ type: 'text', text }] } });
 
-    const follow = (session: string): void => {
-      if (followed.has(session)) return;
-      const stop = new AbortController();
-      followed.set(session, stop);
-      void inbox.stream(agentOf(session), async (ev: AgentEvent) => {
+    /** Follow a session's answers on the inbox that is known now. A session followed while no inbox runs starts
+     * following when one does. */
+    const start = (session: string): void => {
+      const stop = followed.get(session);
+      const box = inbox;
+      if (!stop || !box) return;
+      void box.stream(agentOf(session), async (ev: AgentEvent) => {
         if (ev.type === 'guidance') { await send(session, `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`); return; }
         if (ev.type === 'returned') { await send(session, `[your-attention] ${describeReturned(ev)}`); return; }
         if (ev.type === 'advice') { await send(session, `[your-attention] ${describeAdvice(ev)}`); return; }
@@ -107,16 +114,22 @@ export function createPlugin(z: unknown) {
         if (ev.type !== 'answer') return;
         pending.set(ev.id, ev.card.id);
         const sealed = await secrets.receive(ev.card, ev.answer);
-        const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(inbox, agentOf(session), ev.answer))}${sealed ? `\n${sealed}` : ''}`;
+        const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(box, agentOf(session), ev.answer))}${sealed ? `\n${sealed}` : ''}`;
         await send(session, `[your-attention answer ${ev.id}] ${what}`);
       }, stop.signal, 'auto', { origin: { harness: 'opencode', session, host: os.hostname(), herdrPane: process.env['HERDR_PANE_ID'] } }).catch(() => {});
+    };
+    const follow = (session: string): void => {
+      if (followed.has(session)) return;
+      followed.set(session, new AbortController());
+      start(session);
     };
 
     // A session from before a restart, seen in an event, is followed when it has a card in the inbox.
     const maybeFollow = async (session: string): Promise<void> => {
-      if (followed.has(session) || checked.has(session)) return;
+      const box = inbox;
+      if (!box || followed.has(session) || checked.has(session)) return;
       checked.add(session);
-      const mine = (await inbox.list().catch(() => ({ results: [] }))).results.some(({ card, state }) => card.agent === agentOf(session) && state !== 'closed' && state !== 'read');
+      const mine = (await box.list().catch(() => ({ results: [] }))).results.some(({ card, state }) => card.agent === agentOf(session) && state !== 'closed' && state !== 'read');
       if (mine) follow(session);
     };
 
@@ -131,9 +144,18 @@ export function createPlugin(z: unknown) {
       args: toolArgs(z, t.schema),
       async execute(args, ctx) {
         follow(ctx.sessionID);
-        return runTool({ inbox, secrets, agent: agentOf(ctx.sessionID), origin: () => origin(ctx), arrival: 'as a new message in this session' }, t.name, args);
+        return runTool({ inbox: need(), secrets, agent: agentOf(ctx.sessionID), origin: () => origin(ctx), arrival: 'as a new message in this session' }, t.name, args);
       },
     }]));
+
+    // The sessions followed while the inbox was stopped start following it now, without a restart of OpenCode.
+    if (!inbox) {
+      void waitForConfig().then((config) => {
+        if (!config || inbox) return;
+        inbox = new Client(config);
+        for (const session of followed.keys()) start(session);
+      });
+    }
 
     return {
       tool,
@@ -142,7 +164,7 @@ export function createPlugin(z: unknown) {
         if (session && event.type.startsWith('session.')) await maybeFollow(session);
       },
       async 'chat.message'(_input, output) {
-        if (!pending.size) return;
+        if (!pending.size || !inbox) return;
         const text = output.parts.map((p) => p.text ?? '').join('\n');
         for (const [receipt, card] of pending) {
           if (!text.includes(receipt)) continue;

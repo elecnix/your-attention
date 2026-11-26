@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { Client, loadConfig, ownerConfig } from '../../src/client.ts';
+import { Client, loadConfig, ownerConfig, waitForConfig } from '../../src/client.ts';
 
 let home = '';
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-config-')); });
@@ -42,6 +42,23 @@ describe('the inbox a client uses', () => {
       assert.equal(withFile('client.json', text), undefined, `client.json holding ${JSON.stringify(text)}`);
     }
     assert.equal(withFile('server.json', '{'), undefined, 'a server.json that does not parse');
+  });
+});
+
+describe('waiting for an inbox', () => {
+  it('answers the config as soon as one is written, and keeps waiting while there is none', async () => {
+    const waiting = waitForConfig({ home, everyMs: 10 });
+    // The first read finds nothing, and the wait goes on until the inbox writes its files.
+    fs.writeFileSync(path.join(home, 'server.json'), '{"url":"http://local"}');
+    fs.writeFileSync(path.join(home, 'agent-token'), 'ta');
+    assert.deepEqual(await waiting, { url: 'http://local', token: 'ta' });
+  });
+
+  it('ends with nothing when its signal aborts, so a session that shuts down leaves no timer behind', async () => {
+    const ctl = new AbortController();
+    const waiting = waitForConfig({ home, everyMs: 10, signal: ctl.signal });
+    ctl.abort();
+    assert.equal(await waiting, undefined);
   });
 });
 

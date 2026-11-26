@@ -65,6 +65,23 @@ export function loadConfig(home = homeDir()): ClientConfig | undefined {
   return undefined;
 }
 
+/** Why a tool call cannot reach the inbox, for a session that starts while this machine knows of none. The session
+ * waits for an inbox instead of ending, so the error says that a start is all it takes. */
+export const NO_INBOX = 'The inbox is not running, and this machine is not paired with one. This session connects when an inbox starts, so start one with `your-attention serve`, or pair with `your-attention pair <url>`.';
+
+/** The config of this machine once an inbox is there: `loadConfig` reads again on an interval until it finds one, or
+ * `signal` aborts. An integration calls this at start rather than giving up, because a session that Claude Code saw
+ * close its channel never gets the channel back, and the inbox it waits for may start a moment later. */
+export async function waitForConfig(opts: { signal?: AbortSignal; everyMs?: number; home?: string } = {}): Promise<ClientConfig | undefined> {
+  for (;;) {
+    const config = loadConfig(opts.home);
+    if (config) return config;
+    if (opts.signal?.aborted) return undefined;
+    await new Promise<void>((resolve) => { setTimeout(resolve, opts.everyMs ?? 1000); });
+    if (opts.signal?.aborted) return undefined;
+  }
+}
+
 /** The inbox this machine paired with as owner, for the commands that act as the person: owner.json, written by
  * `your-attention pair --role owner`, or an owner pairing that an older version saved in client.json. */
 export function ownerPairing(home = homeDir()): (ClientConfig & { source: string }) | undefined {
