@@ -464,6 +464,21 @@ describe('the example triage agent checks that every reference renders as a link
     assert.doesNotMatch(lines[0] ?? '', /shows the label alone/);
   });
 
+  it('flags a URL inside inline code, and leaves a fenced block alone', () => {
+    const lines = links({ text: 'Call `curl https://ci.test/hook` after the build.' });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? '', /^text: https:\/\/ci\.test\/hook sits inside `backticks`/);
+    assert.ok((lines[0] ?? '').includes('[a label](https://ci.test/hook)'), lines[0]);
+    assert.deepEqual(links({ text: 'Call this:\n\n```\ncurl https://ci.test/hook\n```' }), []);
+  });
+
+  it('suggests the address a code span holds, without the punctuation the sentence put around it', () => {
+    const lines = links({ text: 'Restart after `curl https://ci.test/hook,` then check.' });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? '', /^text: https:\/\/ci\.test\/hook sits inside `backticks`/);
+    assert.ok((lines[0] ?? '').includes('[a label](https://ci.test/hook)'), lines[0]);
+  });
+
   it('flags a Markdown link whose target is not an address the page links', () => {
     const lines = links({ text: 'See [the run](/run/17) and [the pull request](acme/api#42).' });
     assert.equal(lines.length, 2);

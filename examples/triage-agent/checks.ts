@@ -477,7 +477,9 @@ function markdownLines(field: Field): string[] {
       lines.push(`${field.name}: ${ref} sits inside \`backticks\`, so it shows as code, not a link. Move it out of the code span and write it as ${asLink(ref)}.`);
     }
     for (const m of code.matchAll(CODE_URL)) {
-      lines.push(`${field.name}: ${m[0]} sits inside \`backticks\`, so it shows as code, not a link. Move it out of the code span, or write it as [a label](${m[0]}).`);
+      // The address the span holds, without the punctuation the sentence around the span put there.
+      const url = addressIn(m[0]);
+      lines.push(`${field.name}: ${url} sits inside \`backticks\`, so it shows as code, not a link. Move it out of the code span, or write it as [a label](${url}).`);
     }
   }
   for (const { label, target } of d.dead) {
