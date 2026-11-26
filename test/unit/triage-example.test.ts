@@ -464,19 +464,18 @@ describe('the example triage agent checks that every reference renders as a link
     assert.doesNotMatch(lines[0] ?? '', /shows the label alone/);
   });
 
-  it('flags a URL inside inline code, and leaves a fenced block alone', () => {
-    const lines = links({ text: 'Call `curl https://ci.test/hook` after the build.' });
-    assert.equal(lines.length, 1);
-    assert.match(lines[0] ?? '', /^text: https:\/\/ci\.test\/hook sits inside `backticks`/);
-    assert.ok((lines[0] ?? '').includes('[a label](https://ci.test/hook)'), lines[0]);
+  it('flags a URL inside inline code without the punctuation around it, and leaves a fenced block alone', () => {
+    const cases: [string, string][] = [
+      ['Call `curl https://ci.test/hook` after the build.', 'https://ci.test/hook'],
+      ['Restart after `curl https://ci.test/hook,` then check.', 'https://ci.test/hook'],
+    ];
+    for (const [text, url] of cases) {
+      const lines = links({ text });
+      assert.equal(lines.length, 1, text);
+      assert.match(lines[0] ?? '', new RegExp(`^text: ${url.replace(/\./g, '\\.')} sits inside \`backticks\``), text);
+      assert.ok((lines[0] ?? '').includes(`[a label](${url})`), text);
+    }
     assert.deepEqual(links({ text: 'Call this:\n\n```\ncurl https://ci.test/hook\n```' }), []);
-  });
-
-  it('suggests the address a code span holds, without the punctuation the sentence put around it', () => {
-    const lines = links({ text: 'Restart after `curl https://ci.test/hook,` then check.' });
-    assert.equal(lines.length, 1);
-    assert.match(lines[0] ?? '', /^text: https:\/\/ci\.test\/hook sits inside `backticks`/);
-    assert.ok((lines[0] ?? '').includes('[a label](https://ci.test/hook)'), lines[0]);
   });
 
   it('flags a Markdown link whose target is not an address the page links', () => {
