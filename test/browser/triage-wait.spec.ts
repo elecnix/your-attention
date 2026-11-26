@@ -39,9 +39,20 @@ test('a card under triage shows a dot that pulses while the extension checks it'
   const anim = await dot.evaluate((el) => getComputedStyle(el).animationName);
   expect(anim).not.toBe('none');
   // The reduced-motion sheet stops the pulse without the test emulating the media query.
-  const stopped = await page.evaluate(() => [...document.styleSheets].some((sheet) => [...sheet.cssRules].some((rule) => rule instanceof CSSMediaRule
-    && rule.media.mediaText.includes('prefers-reduced-motion: reduce')
-    && [...rule.cssRules].some((inner) => inner instanceof CSSStyleRule && /(^|,)\s*\.triage-dot\.tone-checking\s*$/.test(inner.selectorText) && inner.style.animationName === 'none'))));
-  expect(stopped).toBe(true);
+  const reduced = await page.evaluate(() => {
+    for (const sheet of document.styleSheets) for (const rule of sheet.cssRules) {
+      if (!(rule instanceof CSSMediaRule) || !rule.media.mediaText.includes('prefers-reduced-motion: reduce')) continue;
+      const inner = [...rule.cssRules].filter((r): r is CSSStyleRule => r instanceof CSSStyleRule);
+      const still = inner.find((r) => r.selectorText.trim() === '.triage-dot.tone-checking');
+      const centre = inner.find((r) => r.selectorText.trim() === '.triage-dot.tone-checking::before');
+      if (still && centre) return { animation: still.style.animationName, display: centre.style.display, opacity: centre.style.opacity };
+    }
+    return null;
+  });
+  expect(reduced?.animation).toBe('none');
+  // A still dot keeps a centre mark, so a card being checked still differs from a card nobody checked.
+  expect(reduced?.display).not.toBe('none');
+  expect(Number(reduced?.opacity)).toBeGreaterThan(0);
+  expect(Number(reduced?.opacity)).toBeLessThan(1);
   stop();
 });
