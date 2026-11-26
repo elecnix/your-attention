@@ -9,7 +9,8 @@
 // A fenced block gets a Copy button, which web/copy.js handles.
 export const MERMAID_FENCE = /^```\s*mermaid(\s|$)/i;
 export const SESSION_LINK = /^https:\/\/herdr\.invalid\/v1\//;
-/** The targets a Markdown link draws as a link. A link to anything else shows only its label, as plain text. */
+/** The targets a Markdown link draws as a link, once it has no file path on this machine: an http, https or mailto
+ * address. A link to any other target shows only its label, as plain text. */
 export const LINK_TARGET = /^(https?:|mailto:)/i;
 const URL_TAIL = /[.,;:!?'"*_]+$/;
 const WORD_CHAR = /[\p{L}\p{N}]/u;

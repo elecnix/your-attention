@@ -388,7 +388,7 @@ const prUrl = (ref: string): string => {
  * option's description and an approval's label show plain text, so a link belongs in the card's text there. Tags and
  * secret field names are left out, since a person reads them as labels, not as the card's words: the `pr` tag holds a
  * pull-request reference by design, and an approval's text draws as code. */
-function linkFields(card: Card): { name: string; text: string; markdown: boolean }[] {
+function linkFields(card: Card): Field[] {
   const fields: [string, string | undefined, boolean][] = [
     ['title', card.title, false],
     ['text', card.text, true],
@@ -448,27 +448,61 @@ function plainRefs(text: string): string[] {
 }
 
 const CODE_URL = /https?:\/\/[^\s`<>]+/g;
+/** A Markdown link as written, which a field that draws no Markdown shows as its source, brackets and all. */
+const LITERAL_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+const ANY_URL = /https?:\/\/[^\s`<>()\[\]]+/g;
 /** A card-id link, which the page draws through its own cardLink: `[[card-id]]`. */
-const CARD_ID_TARGET = /^\[\[[\w.:-]+\]\]$/;
+const CARD_ID = /^\[\[[\w.:-]+\]\]$/;
 
-/** The findings of one field, as lines of the notice. */
-function linkLines(field: { name: string; text: string; markdown: boolean }): string[] {
+type Field = { name: string; text: string; markdown: boolean };
+
+/** The findings of a field the page draws as Markdown. */
+function markdownLines(field: Field): string[] {
   const d = drawn(field.text);
   const lines: string[] = [];
   const asLink = (ref: string): string => `[${ref}](${prUrl(ref)})`;
   for (const run of d.plain) for (const ref of plainRefs(run)) {
-    lines.push(field.markdown
-      ? `${field.name}: ${ref} shows as plain text. Write it as ${asLink(ref)}.`
-      : `${field.name}: ${ref} shows as plain text, in a field that draws no Markdown. Write the link in the card's text as ${asLink(ref)}.`);
+    lines.push(`${field.name}: ${ref} shows as plain text. Write it as ${asLink(ref)}.`);
   }
-  for (const code of d.code) for (const m of code.matchAll(CODE_URL)) {
-    lines.push(`${field.name}: ${m[0]} sits inside \`backticks\`, so it shows as code, not a link. Move it out of the code span, or write it as [a label](${m[0]}).`);
+  // A reference or an address inside backticks draws as code, which is not a link either.
+  for (const code of d.code) {
+    for (const ref of plainRefs(code)) {
+      lines.push(`${field.name}: ${ref} sits inside \`backticks\`, so it shows as code, not a link. Move it out of the code span and write it as ${asLink(ref)}.`);
+    }
+    for (const m of code.matchAll(CODE_URL)) {
+      lines.push(`${field.name}: ${m[0]} sits inside \`backticks\`, so it shows as code, not a link. Move it out of the code span, or write it as [a label](${m[0]}).`);
+    }
   }
   for (const { label, target } of d.dead) {
-    if (CARD_ID_TARGET.test(target)) continue;
+    if (CARD_ID.test(target)) continue;
     lines.push(`${field.name}: [${label}](${target}) is not a link, since the page links only an http, https or mailto address, and shows the label alone. Point it at the address the person should open.`);
   }
   return lines;
+}
+
+/** The findings of a field that draws no Markdown, such as a title: the page shows every character, so a link there
+ * is dead text written out, and the card's text is where a link belongs. */
+function literalLines(field: Field): string[] {
+  const lines: string[] = [];
+  const asLink = (ref: string): string => `[${ref}](${prUrl(ref)})`;
+  // Each Markdown link leaves its label behind, which the scans below read as the plain text the page draws.
+  const written = field.text.replace(LITERAL_LINK, (source: string, label: string) => {
+    lines.push(`${field.name}: ${source} shows as written, because this field draws no Markdown. Write the link in the card's text instead.`);
+    return label;
+  });
+  for (const ref of plainRefs(written)) {
+    lines.push(`${field.name}: ${ref} shows as plain text, in a field that draws no Markdown. Write the link in the card's text as ${asLink(ref)}.`);
+  }
+  for (const m of written.matchAll(ANY_URL)) {
+    const url = m[0].replace(/[.,;:!?'"*_]+$/, '');
+    lines.push(`${field.name}: ${url} shows as plain text, in a field that draws no Markdown. Write the link in the card's text as [a label](${url}).`);
+  }
+  return lines;
+}
+
+/** The findings of one field, as lines of the notice. */
+function linkLines(field: Field): string[] {
+  return field.markdown ? markdownLines(field) : literalLines(field);
 }
 
 /** Every pull-request reference and every address on the card must draw as a link. Pure, with no command and no

@@ -15,7 +15,8 @@ export interface MarkdownOptions<T> {
   unlinked?: (label: string, target: string) => void;
 }
 export const SESSION_LINK: RegExp;
-/** The targets a Markdown link draws as a link: an http, https or mailto address. */
+/** The targets a Markdown link draws as a link, once it has no file path on this machine: an http, https or
+ * mailto address. */
 export const LINK_TARGET: RegExp;
 export const MERMAID_FENCE: RegExp;
 export function renderInline<T>(h: Hyperscript<T>, text: string | undefined, opts?: MarkdownOptions<T>): (T | string)[];

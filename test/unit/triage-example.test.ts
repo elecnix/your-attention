@@ -438,6 +438,28 @@ describe('the example triage agent checks that every reference renders as a link
     assert.match(lines[0] ?? '', /card's text as \[PrizmalAi\/PrizmalSwitch#3750\]\(https:\/\/github\.com\/PrizmalAi\/PrizmalSwitch\/pull\/3750\)/);
   });
 
+  it('flags a pull-request reference inside inline code, since code is not a link either', () => {
+    const lines = links({ text: 'Merge `acme/api#42` once CI passes.' });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? '', /^text: acme\/api#42 sits inside `backticks`, so it shows as code, not a link/);
+    assert.match(lines[0] ?? '', /\[acme\/api#42\]\(https:\/\/github\.com\/acme\/api\/pull\/42\)/);
+  });
+
+  it('reads a field that draws no Markdown as written, and names the text as where the link goes', () => {
+    const lines = links({ title: 'See [the run](https://ci.test/run)' });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? '', /^title: \[the run\]\(https:\/\/ci\.test\/run\) shows as written, because this field draws no Markdown/);
+    assert.match(lines[0] ?? '', /card's text/);
+    assert.doesNotMatch(lines[0] ?? '', /shows the label alone/);
+  });
+
+  it('flags an address in a field that draws no Markdown, since the page draws it as plain text too', () => {
+    const lines = links({ title: 'See https://ci.test/run before deciding' });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0] ?? '', /^title: https:\/\/ci\.test\/run shows as plain text, in a field that draws no Markdown/);
+    assert.match(lines[0] ?? '', /card's text as \[a label\]\(https:\/\/ci\.test\/run\)/);
+  });
+
   it('flags a URL inside inline code, and leaves a fenced block alone', () => {
     const inline = links({ text: 'Call `curl https://ci.test/hook` after the build.' });
     assert.deepEqual(inline.length, 1);
