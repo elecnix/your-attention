@@ -103,12 +103,41 @@ describe('the card.created hook', () => {
     clock.advance(5001);
     inbox.sweep();
     assert.equal(inbox.state().states['open'], 'open');
-    assert.match(inbox.getCard('open').triage?.reason ?? '', /slow did not answer in time, so the card went through/);
+    assert.match(inbox.getCard('open').triage?.reason ?? '', /slow did not answer within 5 s, so the card went through/);
     inbox.connectExtension(ext, { name: 'slow', hooks: ['card.created'], timeoutMs: 5000, policy: 'fail-closed' }, () => {});
     inbox.postCard(agent, { id: 'closed', agent: 's1', title: 'q' });
     clock.advance(5001);
     inbox.sweep();
     assert.equal(inbox.state().states['closed'], 'held');
+    assert.match(inbox.getCard('closed').triage?.reason ?? '', /slow did not answer within 5 s, and its policy holds the card/);
+  });
+
+  it('says how long the inbox waited, as the deadline it set, even after another extension answered', () => {
+    const { inbox, agent, calls, clock } = setup();
+    const a: Caller = { token: 'xa', role: 'extension' };
+    const b: Caller = { token: 'xb', role: 'extension' };
+    // A registration asks for 5 min 10 s, and the inbox sets the deadline from the longest one.
+    inbox.connectExtension(a, { name: 'triage-a', hooks: ['card.created'], timeoutMs: 310_000 }, () => {});
+    inbox.connectExtension(b, { name: 'triage-b', hooks: ['card.created'], timeoutMs: 310_000 }, (e) => calls.push(e as CardCall));
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
+    const start = inbox.getCard('c1').triage!.at;
+    assert.equal(calls[0]!.deadline - start, 310_000, 'the inbox sets the deadline from the longest timeout');
+    // One extension answers a minute later, and the other never does.
+    clock.advance(60_000);
+    inbox.hookVerdict(a, calls[0]!.id, 'pass', '');
+    clock.advance(250_001);
+    inbox.sweep();
+    // The notice names the wait the inbox set, not what was left after the first answer.
+    assert.match(inbox.getCard('c1').triage?.reason ?? '', /^triage-b did not answer within 5 min 10 s, so the card went through\.$/);
+  });
+
+  it('names the 30 s wait of a registration that asks for no timeout', () => {
+    const { inbox, agent, ext, clock } = setup();
+    inbox.connectExtension(ext, { name: 'triage-example', hooks: ['card.created'] }, () => {});
+    inbox.postCard(agent, { id: 'c1', agent: 's1', title: 'q' });
+    clock.advance(30_001);
+    inbox.sweep();
+    assert.match(inbox.getCard('c1').triage?.reason ?? '', /^triage-example did not answer within 30 s, so the card went through\.$/);
   });
 
   it('sends a missed call again when the extension reconnects', () => {

@@ -6,7 +6,7 @@ import { DEFAULT_CARD_DELAYS, delaysFromReminders, delaysProblem, describeDelays
 import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { readShortCode, shortCode } from './sign-in.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
-import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
+import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, waitText, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed, sealedFields, secretInputs, withoutSealed } from './sealed.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
@@ -997,9 +997,11 @@ export class Inbox {
     const { advice: waitingAdvice = [], ...rest } = card.triage;
     const kept = [...waitingAdvice, ...(tip ? [{ by: ext.reg.name, text: tip }] : [])];
     // A bypass belongs to the verdict that reported it, so a later pass over the same card clears it.
+    // A pass that leaves the card in triage keeps `at` at the moment the inbox called the extensions, so the
+    // notice for a verdict that never comes names the wait the inbox set, not the time since the last answer.
     const triage = verdict === 'hold'
       ? { ...rest, state: 'held' as const, by: ext.reg.name, reason: clean, waiting: [], bypass: undefined, at: now }
-      : { ...rest, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, ...(waiting.length && kept.length ? { advice: kept } : {}), bypass: bypass ? true : undefined, at: now };
+      : { ...rest, state: waiting.length ? 'pending' as const : 'passed' as const, waiting, reason: clean || card.triage.reason, ...(waiting.length && kept.length ? { advice: kept } : {}), bypass: bypass ? true : undefined, ...(waiting.length ? {} : { at: now }) };
     const shown = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? kept : []);
     this.emit({ type: 'change', card: card.id });
     if (shown.first) this.pushNew(shown.card);
@@ -2888,9 +2890,12 @@ export class Inbox {
       if (t?.state === 'pending' && t.deadline && t.deadline <= now) {
         const late = (t.waiting ?? []).join(', ') || 'triage';
         const { advice = [], ...rest } = t;
+        // The wait is the deadline the inbox set when it called the extensions, so the notice names the same
+        // duration the person would get by asking the extension for its timeout.
+        const within = waitText(t.deadline - t.at);
         const triage = t.policy === 'fail-closed'
-          ? { ...rest, state: 'held' as const, reason: `${late} did not answer in time, and its policy holds the card.`, waiting: [], at: now }
-          : { ...rest, state: 'passed' as const, reason: `${late} did not answer in time, so the card went through.`, waiting: [], at: now };
+          ? { ...rest, state: 'held' as const, reason: `${late} did not answer within ${within}, and its policy holds the card.`, waiting: [], at: now }
+          : { ...rest, state: 'passed' as const, reason: `${late} did not answer within ${within}, so the card went through.`, waiting: [], at: now };
         const shown = this.passWithAdvice({ ...card, triage }, triage.state === 'passed' ? advice : []);
         this.emit({ type: 'change', card: card.id });
         if (shown.first) this.pushNew(shown.card);

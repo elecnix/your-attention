@@ -173,6 +173,8 @@ export interface Triage {
   advice?: { by: string; text: string }[];
   /** On a pass whose extension ran no checks because the agent used a bypass code. */
   bypass?: boolean;
+  /** When this state began. While the inbox is still waiting, it is when the inbox called the extensions, so
+   * `deadline - at` is the wait the inbox set. */
   at: number;
 }
 

@@ -41,6 +41,15 @@ export function isHook(name: string): name is HookName {
   return Object.hasOwn(HOOKS, name);
 }
 
+/** How long the inbox waited for a verdict, in human units: `30 s`, `5 min 10 s`, `10 min`. */
+export function waitText(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s} s`;
+  const min = Math.floor(s / 60);
+  const rest = s % 60;
+  return rest ? `${min} min ${rest} s` : `${min} min`;
+}
+
 const hex = (bytes: ArrayBuffer): string => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 /** HMAC-SHA256 of the body with the webhook secret, as the x-your-attention-signature header carries it. */
