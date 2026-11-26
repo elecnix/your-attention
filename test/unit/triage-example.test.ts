@@ -513,6 +513,14 @@ describe('the example triage agent checks that every reference renders as a link
     assert.match(ruling.reason, /Vale, must fix:[\s\S]*Links, must fix:[\s\S]*PrizmalAi\/PrizmalSwitch#3750/);
   });
 
+  it('reports a Links check that throws as skipped, and keeps the other findings', async () => {
+    // A card the check cannot read makes it throw, and the guard around each check must hold that.
+    const vale = valeAlert({ Check: 'Cards.FirstPerson', Message: 'Third person.', Severity: 'error', Match: 'I' }, 1);
+    const reports = await runChecks({ ...card, approvals: {} as never }, config({ vale: vale.argv }), undefined);
+    assert.match(String(reports.find((r) => r.check === 'Links')?.skipped), /^Links failed \(/);
+    assert.deepEqual(reports.find((r) => r.check === 'Vale')?.sections.map((s) => s.level), ['block']);
+  });
+
   it('runs inside runChecks with the other checks, and passes a card whose references all render', async () => {
     const reports = await runChecks({ ...card, text: `See [${pr}](https://github.com/PrizmalAi/PrizmalSwitch/pull/3750) and https://ci.test/run.` }, config({}), undefined);
     assert.ok(reports.some((r) => r.check === 'Links'));
