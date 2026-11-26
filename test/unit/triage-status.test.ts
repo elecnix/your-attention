@@ -1,5 +1,5 @@
-// The triage status the card header shows: not triaged, triaged, or triaged without checks because the agent used a
-// bypass code. Each one carries the sentence the page puts in the badge's tooltip.
+// The triage status the card header shows: not triaged, being checked, triaged, or triaged without checks because the
+// agent used a bypass code. Each one carries the sentence the page puts in the badge's tooltip.
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { triageState } from '../../web/queue.js';
@@ -20,10 +20,10 @@ describe('the triage status of a card', () => {
     assert.match(why, /^Not triaged/);
   });
 
-  it('says not triaged, and that it is being checked, while an extension is still deciding', () => {
+  it('says checking, with the extension that is checking, while an extension is still deciding', () => {
     const [tone, why] = triageState(card({ state: 'pending', by: 'triage-example', at: 1 }) as never);
-    assert.equal(tone, 'none');
-    assert.match(why, /checking/);
+    assert.equal(tone, 'checking');
+    assert.equal(why, 'Not triaged yet: triage-example is checking this card');
   });
 
   it('says triaged when an extension passed the card, and names the extension', () => {

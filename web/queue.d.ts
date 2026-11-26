@@ -23,7 +23,7 @@ export const SECTION_ID: { system: string; outbox: string; sent: string };
 export function agentName(id: string, cards: Card[], presence?: Record<string, Presence>): string;
 export function presenceOf(card: Pick<Card, 'id' | 'agent' | 'deliver'>, state: InboxState): ['off' | 'busy' | 'on', string] | null;
 /** How triage treated a card, and the sentence the header badge shows as its tooltip. */
-export function triageState(card: { triage?: { state: string; by?: string; reason?: string; bypass?: boolean } }): ['none' | 'done' | 'bypass', string];
+export function triageState(card: { triage?: { state: string; by?: string; reason?: string; bypass?: boolean } }): ['none' | 'checking' | 'done' | 'bypass', string];
 export interface Queue {
   byId: Record<string, Card>;
   st(c: Card): ShownState;

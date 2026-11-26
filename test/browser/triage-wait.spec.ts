@@ -24,3 +24,24 @@ test('a card under triage stays out of the queue until a verdict lets it through
   await expect(page.locator('.queue .q', { hasText: 'Restart the worker pool?' })).toBeVisible();
   stop();
 });
+
+test('a card under triage shows a dot that pulses while the extension checks it', async ({ page }) => {
+  const core = inbox.server.inbox;
+  const calls: Extract<HookEvent, { hook: 'card.created' }>[] = [];
+  const ext = await core.createToken('pulse', 'extension');
+  const stop = core.connectExtension({ token: ext.token.id, role: 'extension' }, { name: 'pulse', hooks: ['card.created'] }, (e) => calls.push(e as never));
+  const { id } = await inbox.agent.post({ id: 'pulse', agent: 's-pulse', title: 'Rotate the signing key?', text: 'The old one expires in a week.' });
+  // The queue hides a card triage still checks, so the address opens it.
+  await page.goto(`${inbox.server.url}/#token=${inbox.server.ownerToken}&card=${id}`);
+  const dot = page.locator('.triage-dot');
+  await expect(dot).toHaveClass(/tone-checking/);
+  await expect(dot).toHaveAttribute('title', /^Not triaged yet: pulse is checking this card/);
+  const anim = await dot.evaluate((el) => getComputedStyle(el).animationName);
+  expect(anim).not.toBe('none');
+  // The reduced-motion sheet stops the pulse without the test emulating the media query.
+  const stopped = await page.evaluate(() => [...document.styleSheets].some((sheet) => [...sheet.cssRules].some((rule) => rule instanceof CSSMediaRule
+    && rule.media.mediaText.includes('prefers-reduced-motion: reduce')
+    && [...rule.cssRules].some((inner) => inner instanceof CSSStyleRule && /(^|,)\s*\.triage-dot\.tone-checking\s*$/.test(inner.selectorText) && inner.style.animationName === 'none'))));
+  expect(stopped).toBe(true);
+  stop();
+});
