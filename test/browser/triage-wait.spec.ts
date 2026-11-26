@@ -8,11 +8,17 @@ let inbox: TestInbox;
 test.beforeAll(async () => { inbox = await startInbox(); });
 test.afterAll(async () => { await inbox.close(); });
 
-test('a card under triage stays out of the queue until a verdict lets it through', async ({ page }) => {
+/** Connect an extension that checks each new card, so a posted card waits under triage, and keep the calls it gets. */
+async function checkingExtension(name: string) {
   const core = inbox.server.inbox;
   const calls: Extract<HookEvent, { hook: 'card.created' }>[] = [];
-  const ext = await core.createToken('triage', 'extension');
-  const stop = core.connectExtension({ token: ext.token.id, role: 'extension' }, { name: 'triage', hooks: ['card.created'] }, (e) => calls.push(e as never));
+  const ext = await core.createToken(name, 'extension');
+  const stop = core.connectExtension({ token: ext.token.id, role: 'extension' }, { name, hooks: ['card.created'] }, (e) => calls.push(e as never));
+  return { core, ext, calls, stop };
+}
+
+test('a card under triage stays out of the queue until a verdict lets it through', async ({ page }) => {
+  const { core, ext, calls, stop } = await checkingExtension('triage');
   await inbox.agent.post({ id: 'tw', agent: 's-tw', title: 'Restart the worker pool?', text: 'Every restart drops a request.' });
   await inbox.open(page);
   // While triage checks it, the card appears nowhere: not in the list, and under no heading of its own.
@@ -26,10 +32,7 @@ test('a card under triage stays out of the queue until a verdict lets it through
 });
 
 test('a card under triage shows a dot that pulses while the extension checks it', async ({ page }) => {
-  const core = inbox.server.inbox;
-  const calls: Extract<HookEvent, { hook: 'card.created' }>[] = [];
-  const ext = await core.createToken('pulse', 'extension');
-  const stop = core.connectExtension({ token: ext.token.id, role: 'extension' }, { name: 'pulse', hooks: ['card.created'] }, (e) => calls.push(e as never));
+  const { stop } = await checkingExtension('pulse');
   const { id } = await inbox.agent.post({ id: 'pulse', agent: 's-pulse', title: 'Rotate the signing key?', text: 'The old one expires in a week.' });
   // The queue hides a card triage still checks, so the address opens it.
   await page.goto(`${inbox.server.url}/#token=${inbox.server.ownerToken}&card=${id}`);
