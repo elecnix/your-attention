@@ -10,10 +10,14 @@ import { describe, it } from 'node:test';
 import { decryptWithIdentity, decryptWithPassphrase, runtimeDir } from '../../src/secrets/age.ts';
 
 const IS_DARWIN = process.platform === 'darwin';
+/** `script` and `mkfifo` are POSIX tools; the module reads age files through them. */
+const POSIX = process.platform !== 'win32';
 const has = (command: string): boolean => spawnSync('sh', ['-c', `command -v ${command}`], { stdio: 'ignore' }).status === 0;
-const HAVE_AGE = has('age') && has('age-keygen');
+const HAVE_AGE = POSIX && has('age') && has('age-keygen');
 /** The passphrase path needs a terminal somebody else provides, which `script` does on both platforms. */
-const HAVE_SCRIPT = has('script') && has('mkfifo');
+const HAVE_SCRIPT = POSIX && has('script') && has('mkfifo');
+const NO_AGE = !POSIX ? 'reading an age file needs a POSIX terminal' : HAVE_AGE ? false : 'age is not installed';
+const NO_SCRIPT = !POSIX ? 'reading an age file needs a POSIX terminal' : HAVE_SCRIPT ? false : 'script or mkfifo is missing';
 const PASS = 'correct horse battery staple';
 
 async function scratch(): Promise<string> {
@@ -50,7 +54,7 @@ function encryptWithPassphrase(source: string, out: string): Promise<void> {
   });
 }
 
-describe('reading an age file', { skip: !HAVE_AGE && 'age is not installed' }, () => {
+describe('reading an age file', { skip: NO_AGE }, () => {
   it('opens an identity-protected file with no terminal at all', async () => {
     const dir = await scratch();
     try {
@@ -80,7 +84,7 @@ describe('reading an age file', { skip: !HAVE_AGE && 'age is not installed' }, (
     }
   });
 
-  it('opens a passphrase-protected file through a terminal, and leaves no file behind', { skip: !HAVE_SCRIPT && 'script or mkfifo is missing' }, async () => {
+  it('opens a passphrase-protected file through a terminal, and leaves no file behind', { skip: NO_SCRIPT }, async () => {
     const dir = await scratch();
     const before = await leftovers();
     try {
@@ -95,7 +99,7 @@ describe('reading an age file', { skip: !HAVE_AGE && 'age is not installed' }, (
     }
   });
 
-  it('fails on a wrong passphrase rather than handing back an empty value', { skip: !HAVE_SCRIPT && 'script or mkfifo is missing' }, async () => {
+  it('fails on a wrong passphrase rather than handing back an empty value', { skip: NO_SCRIPT }, async () => {
     const dir = await scratch();
     try {
       const source = path.join(dir, 'value');
