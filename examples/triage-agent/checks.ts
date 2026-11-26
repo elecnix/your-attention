@@ -477,8 +477,6 @@ export function linksCheck(card: Card, cfg: ExampleConfig): CheckReport {
   return { check: 'Links', sections: section('Links', cfg.policy.linksNotClickable, linkFields(card).flatMap(linkLines)) };
 }
 
-/** Run all four checks at once.
-
 /** Run all four checks at once. A check that cannot run, or that throws, reports why and finds nothing, and the
  * others keep their findings. The Links check runs no command, so it always has its findings: one message lists
  * them beside what vale, the classifier and the PR-verdict command found. */
