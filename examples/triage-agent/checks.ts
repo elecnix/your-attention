@@ -530,7 +530,9 @@ export async function runChecks(card: Card, cfg: ExampleConfig, run: RunCommand 
     guard('Vale', valeCheck(card, cfg, run, signal)),
     guard('Card classifier', classifierCheck(card, cfg, run, signal)),
     guard('PR verdict', prVerdictCheck(card, cfg, run, signal)),
-    guard('Links', Promise.resolve(linksCheck(card, cfg))),
+    // The Links check runs no command, so it answers before the guard could see a promise: the thunk keeps a throw
+    // inside the guard, as it is for the checks above.
+    guard('Links', (async () => linksCheck(card, cfg))()),
   ]);
 }
 
