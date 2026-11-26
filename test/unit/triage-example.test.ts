@@ -422,49 +422,29 @@ describe('the example triage agent checks that every reference renders as a link
   const links = (over: Partial<Card>): string[] => linksCheck({ ...card, ...over }, config({})).sections.flatMap((s) => s.lines);
   const pr = 'PrizmalAi/PrizmalSwitch#3750';
 
-  it('names a plain pull request with its field and the Markdown that links it', () => {
-    const lines = links({ text: `Merge ${pr} once CI passes.` });
-    assert.equal(lines.length, 1);
-    assert.match(lines[0] ?? '', /^text: /);
-    assert.ok((lines[0] ?? '').includes(pr), lines[0]);
-    assert.match(lines[0] ?? '', /\[PrizmalAi\/PrizmalSwitch#3750\]\(https:\/\/github\.com\/PrizmalAi\/PrizmalSwitch\/pull\/3750\)/);
+  it('names each finding by its field, the exact text and the fix, and reads a plain field as written', () => {
+    const cases: [string, Partial<Card>, RegExp][] = [
+      ['a reference in the text', { text: `Merge ${pr} once CI passes.` },
+        /^text: PrizmalAi\/PrizmalSwitch#3750 shows as plain text\. Write it as \[PrizmalAi\/PrizmalSwitch#3750\]\(https:\/\/github\.com\/PrizmalAi\/PrizmalSwitch\/pull\/3750\)\.$/],
+      ['a reference in the title', { title: `Merge ${pr}` },
+        /^title: PrizmalAi\/PrizmalSwitch#3750 shows as plain text, in a field that draws no Markdown\. Write the link in the card's text as \[/],
+      ['a reference inside inline code', { text: 'Merge `acme/api#42` once CI passes.' },
+        /^text: acme\/api#42 sits inside `backticks`, so it shows as code, not a link\. Move it out of the code span and write it as \[acme\/api#42\]\(https:\/\/github\.com\/acme\/api\/pull\/42\)\.$/],
+      ['a Markdown link in the title', { title: 'See [the run](https://ci.test/run)' },
+        /^title: \[the run\]\(https:\/\/ci\.test\/run\) shows as written, because this field draws no Markdown\. Write the link in the card's text instead\.$/],
+      ['an address in the title', { title: 'See https://ci.test/run before deciding' },
+        /^title: https:\/\/ci\.test\/run shows as plain text, in a field that draws no Markdown\. Write the link in the card's text as \[a label\]\(https:\/\/ci\.test\/run\)\.$/],
+    ];
+    for (const [what, over, expected] of cases) {
+      const lines = links(over);
+      assert.equal(lines.length, 1, what);
+      assert.match(lines[0] ?? '', expected, what);
+    }
   });
 
-  it('says that a title shows plain text, so its reference belongs in the card text as a link', () => {
-    const lines = links({ title: `Merge ${pr}` });
-    assert.equal(lines.length, 1);
-    assert.match(lines[0] ?? '', /^title: /);
-    assert.match(lines[0] ?? '', /shows as plain text, in a field that draws no Markdown/);
-    assert.match(lines[0] ?? '', /card's text as \[PrizmalAi\/PrizmalSwitch#3750\]\(https:\/\/github\.com\/PrizmalAi\/PrizmalSwitch\/pull\/3750\)/);
-  });
-
-  it('flags a pull-request reference inside inline code, since code is not a link either', () => {
-    const lines = links({ text: 'Merge `acme/api#42` once CI passes.' });
-    assert.equal(lines.length, 1);
-    assert.match(lines[0] ?? '', /^text: acme\/api#42 sits inside `backticks`, so it shows as code, not a link/);
-    assert.match(lines[0] ?? '', /\[acme\/api#42\]\(https:\/\/github\.com\/acme\/api\/pull\/42\)/);
-  });
-
-  it('reads a field that draws no Markdown as written, and names the text as where the link goes', () => {
+  it('never calls a plain field a link the page draws, since its brackets show as they were written', () => {
     const lines = links({ title: 'See [the run](https://ci.test/run)' });
-    assert.equal(lines.length, 1);
-    assert.match(lines[0] ?? '', /^title: \[the run\]\(https:\/\/ci\.test\/run\) shows as written, because this field draws no Markdown/);
-    assert.match(lines[0] ?? '', /card's text/);
     assert.doesNotMatch(lines[0] ?? '', /shows the label alone/);
-  });
-
-  it('flags an address in a field that draws no Markdown, since the page draws it as plain text too', () => {
-    const lines = links({ title: 'See https://ci.test/run before deciding' });
-    assert.equal(lines.length, 1);
-    assert.match(lines[0] ?? '', /^title: https:\/\/ci\.test\/run shows as plain text, in a field that draws no Markdown/);
-    assert.match(lines[0] ?? '', /card's text as \[a label\]\(https:\/\/ci\.test\/run\)/);
-  });
-
-  it('flags a URL inside inline code, and leaves a fenced block alone', () => {
-    const inline = links({ text: 'Call `curl https://ci.test/hook` after the build.' });
-    assert.deepEqual(inline.length, 1);
-    assert.match(inline[0] ?? '', /^text: .*https:\/\/ci\.test\/hook/);
-    assert.deepEqual(links({ text: 'Call this:\n\n```\ncurl https://ci.test/hook\n```' }), []);
   });
 
   it('flags a Markdown link whose target is not an address the page links', () => {

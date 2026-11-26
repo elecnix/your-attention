@@ -151,21 +151,32 @@ export function hookTimeoutMs(cfg: ExampleConfig): number {
   return Math.min(Math.max(cfg.valeTimeoutMs, cfg.classifierTimeoutMs, cfg.prVerdict?.timeoutMs ?? 0) + 10_000, 600_000);
 }
 
+type Field = { name: string; text: string; markdown: boolean };
+
+/** The card's prose fields, in the order the page draws them: the title, the text, the recommendation, each option's
+ * label and description, and each question with its options. `markdown` says whether the page reads the field as
+ * Markdown, since it draws the title and an option's description as written. */
+function proseFields(card: Card): Field[] {
+  const fields: [string, string | undefined, boolean][] = [
+    ['title', card.title, false],
+    ['text', card.text, true],
+    ['recommendation', card.recommendation, true],
+  ];
+  card.options?.forEach((o, i) => fields.push([`option ${i + 1} label`, o.label, true], [`option ${i + 1} description`, o.description, false]));
+  card.questions?.forEach((q, i) => {
+    fields.push([`question ${i + 1} text`, q.question, true], [`question ${i + 1} context`, q.text, true]);
+    q.options?.forEach((o, j) => fields.push([`question ${i + 1} option ${j + 1} label`, o.label, true], [`question ${i + 1} option ${j + 1} description`, o.description, false]));
+  });
+  return fields.flatMap(([name, text, markdown]) => (text?.trim() ? [{ name, text, markdown }] : []));
+}
+
 /** The card's prose as Markdown for vale, one paragraph per field, and the field each line of it came from. */
 export function cardProse(card: Card): { doc: string; fieldAt: (line: number) => string } {
-  const fields: [string, string | undefined][] = [['title', card.title], ['text', card.text], ['recommendation', card.recommendation]];
-  card.options?.forEach((o, i) => fields.push([`option ${i + 1} label`, o.label], [`option ${i + 1} description`, o.description]));
-  card.questions?.forEach((q, i) => {
-    fields.push([`question ${i + 1} text`, q.question], [`question ${i + 1} context`, q.text]);
-    q.options?.forEach((o, j) => fields.push([`question ${i + 1} option ${j + 1} label`, o.label], [`question ${i + 1} option ${j + 1} description`, o.description]));
-  });
   const owner: string[] = [];
   const parts: string[] = [];
-  for (const [name, value] of fields) {
-    const text = value?.trim();
-    if (!text) continue;
+  for (const { name, text } of proseFields(card)) {
     if (parts.length) { parts.push(''); owner.push(''); }
-    for (const line of text.split('\n')) { parts.push(line); owner.push(name); }
+    for (const line of text.trim().split('\n')) { parts.push(line); owner.push(name); }
   }
   return { doc: `${parts.join('\n')}\n`, fieldAt: (line) => owner[line - 1] || 'card' };
 }
@@ -384,23 +395,12 @@ const prUrl = (ref: string): string => {
   return m ? `https://github.com/${m[1]}/${m[2]}/pull/${m[3]}` : ref;
 };
 
-/** The card's words, field by field, and whether the page draws that field's Markdown as Markdown: the title, an
- * option's description and an approval's label show plain text, so a link belongs in the card's text there. Tags and
- * secret field names are left out, since a person reads them as labels, not as the card's words: the `pr` tag holds a
- * pull-request reference by design, and an approval's text draws as code. */
+/** The fields the Links check reads: the card's prose, plus each approval's label, which draws as written.
+ * Tags and secret field names are left out, since a person reads them as labels, not as the card's words: the `pr`
+ * tag holds a pull-request reference by design, and an approval's text draws as code. */
 function linkFields(card: Card): Field[] {
-  const fields: [string, string | undefined, boolean][] = [
-    ['title', card.title, false],
-    ['text', card.text, true],
-    ['recommendation', card.recommendation, true],
-  ];
-  card.options?.forEach((o, i) => fields.push([`option ${i + 1} label`, o.label, true], [`option ${i + 1} description`, o.description, false]));
-  card.questions?.forEach((q, i) => {
-    fields.push([`question ${i + 1} text`, q.question, true], [`question ${i + 1} context`, q.text, true]);
-    q.options?.forEach((o, j) => fields.push([`question ${i + 1} option ${j + 1} label`, o.label, true], [`question ${i + 1} option ${j + 1} description`, o.description, false]));
-  });
-  card.approvals?.forEach((a, i) => fields.push([`approval ${i + 1} label`, a.label, false]));
-  return fields.flatMap(([name, text, markdown]) => (text?.trim() ? [{ name, text, markdown }] : []));
+  const approvals = (card.approvals ?? []).map((a, i) => ({ name: `approval ${i + 1} label`, text: a.label ?? '', markdown: false }));
+  return [...proseFields(card), ...approvals].filter((f) => f.text.trim() !== '');
 }
 
 /** What one field draws, as the page's renderer draws it: its plain text, its inline code spans, and each Markdown
@@ -453,8 +453,6 @@ const LITERAL_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 const ANY_URL = /https?:\/\/[^\s`<>()\[\]]+/g;
 /** A card-id link, which the page draws through its own cardLink: `[[card-id]]`. */
 const CARD_ID = /^\[\[[\w.:-]+\]\]$/;
-
-type Field = { name: string; text: string; markdown: boolean };
 
 /** The findings of a field the page draws as Markdown. */
 function markdownLines(field: Field): string[] {
