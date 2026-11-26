@@ -5,6 +5,7 @@
 import { PIN_ITERATIONS, pinKeyError } from '../core/pin.ts';
 import { inviteId } from '../core/telemetry.ts';
 import { InboxObject, RegistryObject } from './inbox-object.ts';
+import { newAddress, validAddress } from './address.ts';
 
 export interface Env {
   INBOX: DurableObjectNamespace;
@@ -37,10 +38,6 @@ export interface Env {
 const MIN_INVITE_LENGTH = 20;
 
 const json = (data: unknown, status = 200): Response => Response.json(data, { status, headers: { 'cache-control': 'no-store' } });
-
-function hex(bytes: number): string {
-  return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 const tooMany = (): Response => json({ error: 'too many requests, try again in a minute' }, 429);
 
@@ -85,26 +82,6 @@ async function toInbox(env: Env, name: string, req: Request, path: string, searc
   const scoped = new Response(res.body, res);
   scoped.headers.set('set-cookie', set.replace(/;\s*Path=\/(?=;|$)/i, `; Path=${prefix}`));
   return scoped;
-}
-
-/** Hosted inbox addresses are 20 random hex digits and 12 digits of an HMAC over them. */
-async function addressTag(secret: string, random: string): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(random)));
-  return [...mac.slice(0, 6)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-export async function newAddress(secret: string): Promise<string> {
-  const random = hex(10);
-  return random + (await addressTag(secret, random));
-}
-
-export async function validAddress(secret: string, id: string): Promise<boolean> {
-  if (!/^[0-9a-f]{32}$/.test(id)) return false;
-  const want = await addressTag(secret, id.slice(0, 20));
-  let diff = 0;
-  for (let i = 0; i < 12; i++) diff |= want.charCodeAt(i) ^ id.charCodeAt(20 + i);
-  return diff === 0;
 }
 
 /** The owner token this isolate has given its inbox, so single mode sends it once per isolate instead of once per request. */

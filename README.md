@@ -455,6 +455,8 @@ You need a Cloudflare account with R2 turned on once in the dashboard, a workers
    gh workflow run deploy-cloudflare -f mode=hosted
    ```
 
+   A hosted run ends by asking the site it deployed: it signs a fresh inbox address with the same secret the Worker checks, then requests that inbox's page and its `/v1/info`. Both have to answer 200 with the page title and a version, so a deploy that breaks the page turns red in seconds rather than being found by the first person who opens their inbox. The check reads the repository variable `WORKERS_SUBDOMAIN`, the part before `.workers.dev`.
+
 5. In single mode, open `https://app.<subdomain>.workers.dev/#token=<owner token>`. In hosted mode, add an invite code. Codes need 20 characters or more, and the last number is how many inboxes the code creates:
 
    ```sh
