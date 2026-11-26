@@ -144,3 +144,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           INBOX_ID_SECRET: ${{ secrets.INBOX_ID_SECRET }}
         run: printf %s "$INBOX_ID_SECRET" | npx wrangler secret put INBOX_ID_SECRET
+      - name: check the deployment answers
+        if: inputs.mode == 'hosted'
+        env:
+          INBOX_ID_SECRET: ${{ secrets.INBOX_ID_SECRET }}
+          WORKERS_SUBDOMAIN: ${{ vars.WORKERS_SUBDOMAIN }}
+        run: |
+          # The workflow uploads and reports success, so this is the only step that asks the site it deployed.
+          if [ -z "$WORKERS_SUBDOMAIN" ]; then echo "::error::the repository variable WORKERS_SUBDOMAIN is unset, so the deploy cannot be checked"; exit 1; fi
+          node scripts/deploy-smoke.ts "https://app.${WORKERS_SUBDOMAIN}.workers.dev"
