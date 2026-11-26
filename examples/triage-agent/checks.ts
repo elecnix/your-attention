@@ -1,8 +1,9 @@
-// The checks of the example triage agent. It runs all three on every card, at the same time, and gives every finding
+// The checks of the example triage agent. It runs all four on every card, at the same time, and gives every finding
 // in one notice, so an agent fixes everything in one more turn:
 //   1. vale, on the card's prose, with the rules in ./vale;
 //   2. pr-context-classifier, with the card prompt in ./card-prompt.md;
-//   3. an optional PR-verdict command, named only in your local config, on a card tagged pr: owner/repo#number.
+//   3. an optional PR-verdict command, named only in your local config, on a card tagged pr: owner/repo#number;
+//   4. links, on every field the person reads, so each pull-request reference and each address renders as a link.
 // The local policy says which findings block the card (it goes back to its agent) and which are advice (the card goes
 // to the person, and the agent gets the advice). After `maxReturns` returns of one card, the next attempt passes,
 // with its findings as advice. Every return notice carries a code that lets one card of that agent skip triage once.
@@ -14,6 +15,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ScreenMode } from '../../src/core/hooks.ts';
 import type { Card } from '../../src/core/types.ts';
+// The page's own Markdown renderer, so the Links check and the page cannot disagree about what draws as a link.
+import { renderMarkdown } from '../../web/markdown.js';
 import type { Ruling } from '../../src/extensions/card-hook.ts';
 import { logRuling, type LoggedCheck, type RulingLine } from './log.ts';
 import { TriageState } from './state.ts';
@@ -37,6 +40,8 @@ export interface Policy {
   valeErrors: Level;
   valeWarnings: Level;
   classifierMissingContext: Level;
+  /** A pull-request reference or an address the page draws as dead text blocks the card, by default. */
+  linksNotClickable: Level;
   /** A verdict the PR-verdict command does not accept blocks the card below this confidence, and is advice from it up. */
   prVerdictBlockBelow: number;
 }
@@ -62,7 +67,7 @@ export interface ExampleConfig {
 
 export const DEFAULTS: ExampleConfig = {
   vale: ['vale'], classifier: ['pr-context-classifier'], valeTimeoutMs: 30_000, classifierTimeoutMs: 150_000,
-  policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', prVerdictBlockBelow: 0.5 },
+  policy: { valeErrors: 'block', valeWarnings: 'advise', classifierMissingContext: 'block', linksNotClickable: 'block', prVerdictBlockBelow: 0.5 },
   maxReturns: 3,
   stateFile: path.join(os.homedir(), '.local', 'state', 'your-attention', 'triage-example.json'),
   screen: 'new',
@@ -102,7 +107,7 @@ export function loadConfig(file = defaultConfigPath(), log: (line: string) => vo
   if (raw['valeTimeoutMs'] !== undefined) cfg.valeTimeoutMs = ms('valeTimeoutMs', raw['valeTimeoutMs']);
   if (raw['classifierTimeoutMs'] !== undefined) cfg.classifierTimeoutMs = ms('classifierTimeoutMs', raw['classifierTimeoutMs']);
   const policy = (raw['policy'] ?? {}) as Record<string, unknown>;
-  for (const k of ['valeErrors', 'valeWarnings', 'classifierMissingContext'] as const) if (policy[k] !== undefined) cfg.policy[k] = level(`policy.${k}`, policy[k]);
+  for (const k of ['valeErrors', 'valeWarnings', 'classifierMissingContext', 'linksNotClickable'] as const) if (policy[k] !== undefined) cfg.policy[k] = level(`policy.${k}`, policy[k]);
   if (policy['prVerdictBlockBelow'] !== undefined) {
     const t = policy['prVerdictBlockBelow'];
     cfg.policy.prVerdictBlockBelow = typeof t === 'number' && t >= 0 && t <= 1 ? t : bad('policy.prVerdictBlockBelow must be a number from 0 to 1');
@@ -146,21 +151,32 @@ export function hookTimeoutMs(cfg: ExampleConfig): number {
   return Math.min(Math.max(cfg.valeTimeoutMs, cfg.classifierTimeoutMs, cfg.prVerdict?.timeoutMs ?? 0) + 10_000, 600_000);
 }
 
+type Field = { name: string; text: string; markdown: boolean };
+
+/** The card's prose fields, in the order the page draws them: the title, the text, the recommendation, each option's
+ * label and description, and each question with its options. `markdown` says whether the page reads the field as
+ * Markdown, since it draws the title and an option's description as written. */
+function proseFields(card: Card): Field[] {
+  const fields: [string, string | undefined, boolean][] = [
+    ['title', card.title, false],
+    ['text', card.text, true],
+    ['recommendation', card.recommendation, true],
+  ];
+  card.options?.forEach((o, i) => fields.push([`option ${i + 1} label`, o.label, true], [`option ${i + 1} description`, o.description, false]));
+  card.questions?.forEach((q, i) => {
+    fields.push([`question ${i + 1} text`, q.question, true], [`question ${i + 1} context`, q.text, true]);
+    q.options?.forEach((o, j) => fields.push([`question ${i + 1} option ${j + 1} label`, o.label, true], [`question ${i + 1} option ${j + 1} description`, o.description, false]));
+  });
+  return fields.flatMap(([name, text, markdown]) => (text?.trim() ? [{ name, text, markdown }] : []));
+}
+
 /** The card's prose as Markdown for vale, one paragraph per field, and the field each line of it came from. */
 export function cardProse(card: Card): { doc: string; fieldAt: (line: number) => string } {
-  const fields: [string, string | undefined][] = [['title', card.title], ['text', card.text], ['recommendation', card.recommendation]];
-  card.options?.forEach((o, i) => fields.push([`option ${i + 1} label`, o.label], [`option ${i + 1} description`, o.description]));
-  card.questions?.forEach((q, i) => {
-    fields.push([`question ${i + 1} text`, q.question], [`question ${i + 1} context`, q.text]);
-    q.options?.forEach((o, j) => fields.push([`question ${i + 1} option ${j + 1} label`, o.label], [`question ${i + 1} option ${j + 1} description`, o.description]));
-  });
   const owner: string[] = [];
   const parts: string[] = [];
-  for (const [name, value] of fields) {
-    const text = value?.trim();
-    if (!text) continue;
+  for (const { name, text } of proseFields(card)) {
     if (parts.length) { parts.push(''); owner.push(''); }
-    for (const line of text.split('\n')) { parts.push(line); owner.push(name); }
+    for (const line of text.trim().split('\n')) { parts.push(line); owner.push(name); }
   }
   return { doc: `${parts.join('\n')}\n`, fieldAt: (line) => owner[line - 1] || 'card' };
 }
@@ -266,7 +282,7 @@ async function ask<T>(label: string, argv: string[], input: string, timeoutMs: n
 
 const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === 'string');
 
-export type CheckName = 'Vale' | 'Card classifier' | 'PR verdict';
+export type CheckName = 'Vale' | 'Card classifier' | 'PR verdict' | 'Links';
 
 /** Findings of one check at one level, as lines of the notice. */
 export interface Section { check: CheckName; level: 'block' | 'advise'; lines: string[] }
@@ -370,8 +386,143 @@ export async function prVerdictCheck(card: Card, cfg: ExampleConfig, run: RunCom
   return { check: 'PR verdict', sections: section('PR verdict', level, lines), detail };
 }
 
-/** Run all three checks at once. A check that cannot run, or that throws, reports why and finds nothing, and the
- * other two keep their findings. */
+/** The pull request a reference names: `owner/repo#123`. The parts are bounded because GitHub's are, so a long run
+ * of text cannot make the scan backtrack over all of it. */
+const PR_REF = /[\w.-]{1,100}\/[\w.-]{1,100}#\d+/g;
+const PR_REF_PARTS = /^([\w.-]+)\/([\w.-]+)#(\d+)$/;
+const prUrl = (ref: string): string => {
+  const m = PR_REF_PARTS.exec(ref);
+  return m ? `https://github.com/${m[1]}/${m[2]}/pull/${m[3]}` : ref;
+};
+
+/** The fields the Links check reads: the card's prose, plus each approval's label, which draws as written.
+ * Tags and secret field names are left out, since a person reads them as labels, not as the card's words: the `pr`
+ * tag holds a pull-request reference by design, and an approval's text draws as code. */
+function linkFields(card: Card): Field[] {
+  const approvals = (card.approvals ?? []).map((a, i) => ({ name: `approval ${i + 1} label`, text: a.label ?? '', markdown: false }));
+  return [...proseFields(card), ...approvals].filter((f) => f.text.trim() !== '');
+}
+
+/** What one field draws, as the page's renderer draws it: its plain text, its inline code spans, and each Markdown
+ * link the page turns back into its label alone. A fenced block draws as code on purpose, so it is left out. */
+interface Drawn { plain: string[]; code: string[]; dead: { label: string; target: string }[] }
+type Node = { type: string; children: unknown[] };
+
+function drawn(text: string): Drawn {
+  const out: Drawn = { plain: [], code: [], dead: [] };
+  // The page's h takes a type, props and children and builds an element. The check records the tree instead.
+  const h = (type: string, _props: Record<string, unknown> | null, ...children: unknown[]): Node => ({ type, children });
+  const walk = (nodes: unknown[]): void => {
+    let run = '';
+    const flush = (): void => { if (run) out.plain.push(run); run = ''; };
+    for (const node of nodes) {
+      if (typeof node === 'string') { run += node; continue; }
+      // An inline run arrives as its own list of children, as React flattens it.
+      if (Array.isArray(node)) { flush(); walk(node); continue; }
+      if (!node || typeof node !== 'object') continue;
+      const { type, children } = node as Node;
+      flush();
+      if (type === 'pre') continue;
+      if (type === 'code') { out.code.push(children.filter((c): c is string => typeof c === 'string').join('')); continue; }
+      if (type === 'a') continue;
+      walk(children);
+    }
+    flush();
+  };
+  walk(renderMarkdown(h, text, { unlinked: (label, target) => out.dead.push({ label, target }) }));
+  return out;
+}
+
+/** Each pull-request reference in a run of plain text, once, with anything glued to it left out. */
+function plainRefs(text: string): string[] {
+  const refs: string[] = [];
+  // A run with no `#` holds no reference, and a long one costs nothing to skip.
+  if (!text.includes('#')) return refs;
+  for (const m of text.matchAll(PR_REF)) {
+    const at = m.index ?? 0;
+    // A reference inside a longer word or address, such as a URL's path, is not one of its own.
+    if (/[\w./-]/.test(text[at - 1] ?? '') || /\w/.test(text[at + m[0].length] ?? '')) continue;
+    if (!refs.includes(m[0])) refs.push(m[0]);
+  }
+  return refs;
+}
+
+const CODE_URL = /https?:\/\/[^\s`<>]+/g;
+/** A Markdown link as written, which a field that draws no Markdown shows as its source, brackets and all. */
+const LITERAL_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+// Parentheses stay in the match, so an address that wrote one keeps it, and the sentence's closing one comes off below.
+const ANY_URL = /https?:\/\/[^\s`<>\[\]]+/g;
+/** An address as the card wrote it: a parenthesis it opened stays, and the punctuation around it belongs to the
+ * sentence, not to the address. */
+function addressIn(text: string): string {
+  const strip = (u: string): string => u.replace(/[.,;:!?'"*_]+$/, '');
+  let url = strip(text);
+  while (url.endsWith(')') && url.split('(').length < url.split(')').length) url = strip(url.slice(0, -1));
+  return url;
+}
+/** A card-id link, which the page draws through its own cardLink: `[[card-id]]`. */
+const CARD_ID = /^\[\[[\w.:-]+\]\]$/;
+
+/** The findings of a field the page draws as Markdown. */
+function markdownLines(field: Field): string[] {
+  const d = drawn(field.text);
+  const lines: string[] = [];
+  const asLink = (ref: string): string => `[${ref}](${prUrl(ref)})`;
+  for (const run of d.plain) for (const ref of plainRefs(run)) {
+    lines.push(`${field.name}: ${ref} shows as plain text. Write it as ${asLink(ref)}.`);
+  }
+  // A reference or an address inside backticks draws as code, which is not a link either.
+  for (const code of d.code) {
+    for (const ref of plainRefs(code)) {
+      lines.push(`${field.name}: ${ref} sits inside \`backticks\`, so it shows as code, not a link. Move it out of the code span and write it as ${asLink(ref)}.`);
+    }
+    for (const m of code.matchAll(CODE_URL)) {
+      // The address the span holds, without the punctuation the sentence around the span put there.
+      const url = addressIn(m[0]);
+      lines.push(`${field.name}: ${url} sits inside \`backticks\`, so it shows as code, not a link. Move it out of the code span, or write it as [a label](${url}).`);
+    }
+  }
+  for (const { label, target } of d.dead) {
+    if (CARD_ID.test(target)) continue;
+    lines.push(`${field.name}: [${label}](${target}) is not a link, since the page links only an http, https or mailto address, and shows the label alone. Point it at the address the person should open.`);
+  }
+  return lines;
+}
+
+/** The findings of a field that draws no Markdown, such as a title: the page shows every character, so a link there
+ * is dead text written out, and the card's text is where a link belongs. */
+function literalLines(field: Field): string[] {
+  const lines: string[] = [];
+  const asLink = (ref: string): string => `[${ref}](${prUrl(ref)})`;
+  // Each Markdown link leaves its label behind, which the scans below read as the plain text the page draws.
+  const written = field.text.replace(LITERAL_LINK, (source: string, label: string) => {
+    lines.push(`${field.name}: ${source} shows as written, because this field draws no Markdown. Write the link in the card's text instead.`);
+    return label;
+  });
+  for (const ref of plainRefs(written)) {
+    lines.push(`${field.name}: ${ref} shows as plain text, in a field that draws no Markdown. Write the link in the card's text as ${asLink(ref)}.`);
+  }
+  for (const m of written.matchAll(ANY_URL)) {
+    const url = addressIn(m[0]);
+    lines.push(`${field.name}: ${url} shows as plain text, in a field that draws no Markdown. Write the link in the card's text as [a label](${url}).`);
+  }
+  return lines;
+}
+
+/** The findings of one field, as lines of the notice. */
+function linkLines(field: Field): string[] {
+  return field.markdown ? markdownLines(field) : literalLines(field);
+}
+
+/** Every pull-request reference and every address on the card must draw as a link. Pure, with no command and no
+ * config beyond the policy, because it reads the card with the same renderer the page draws it with. */
+export function linksCheck(card: Card, cfg: ExampleConfig): CheckReport {
+  return { check: 'Links', sections: section('Links', cfg.policy.linksNotClickable, linkFields(card).flatMap(linkLines)) };
+}
+
+/** Run all four checks at once. A check that cannot run, or that throws, reports why and finds nothing, and the
+ * others keep their findings. The Links check runs no command, so it always has its findings: one message lists
+ * them beside what vale, the classifier and the PR-verdict command found. */
 export async function runChecks(card: Card, cfg: ExampleConfig, run: RunCommand = runCommand, signal?: AbortSignal): Promise<CheckReport[]> {
   const guard = (check: CheckName, report: Promise<CheckReport>): Promise<CheckReport> =>
     report.catch((e: Error) => ({ check, sections: [], skipped: `${check} failed (${e.message})` }));
@@ -379,6 +530,7 @@ export async function runChecks(card: Card, cfg: ExampleConfig, run: RunCommand 
     guard('Vale', valeCheck(card, cfg, run, signal)),
     guard('Card classifier', classifierCheck(card, cfg, run, signal)),
     guard('PR verdict', prVerdictCheck(card, cfg, run, signal)),
+    guard('Links', Promise.resolve(linksCheck(card, cfg))),
   ]);
 }
 

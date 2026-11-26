@@ -22,10 +22,10 @@ function card(c: Partial<Card> & { id: string; title: string }): Card {
 /** The text a card view draws, one line of the terminal per line. */
 const plain = (doc: { lines: { spans: { text: string }[] }[] }): string => doc.lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
 
-function setup(c: Card) {
+function setup(c: Card, over: Partial<InboxState> = {}) {
   const acts: unknown[] = [];
   const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: (_v, a) => acts.push(a), fileText: () => undefined, now: () => 600_000 };
-  const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence: {}, states: { [c.id]: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }] };
+  const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence: {}, states: { [c.id]: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], ...over };
   const view = new CardView(c, host);
   const build = () => view.build(70, s, buildQueue(s, 'none'));
   build();
@@ -54,6 +54,17 @@ c3 = FormControl("Merge #13?", s1)
 s1 = Select("merge13", [SelectItem("yes", "Merge it"), SelectItem("no", "Wait")])
 flags = SwitchGroup("flags13", [SwitchItem("Deploy after merge", "", "deploy")])
 note = Input("ticket", "Ticket")`;
+
+describe('the card pane of a card whose agent has no connection', () => {
+  it('shows one notice, worded as the connection the inbox knows, and adds that another session can take an orphaned card', () => {
+    const c = card({ id: 'orph', title: 'Ship it?', text: 'A card.' });
+    const { text } = setup(c, { states: { orph: 'orphaned' } });
+    const drawn = text();
+    assert.equal(drawn.match(/Not connected/g)?.length, 1, drawn);
+    assert.match(drawn, /Not connected: the answer waits until this session reconnects, and\s+another session can take the card/);
+    assert.doesNotMatch(drawn, /its agent is gone|Agent offline/);
+  });
+});
 
 describe('the card pane', () => {
   it('draws a closed card as closed while the state has no summary of it yet', () => {

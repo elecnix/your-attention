@@ -2,7 +2,7 @@
 // answer move through. The page and the terminal client share this file, so both show the same queue.
 
 export const CLOSED_LABEL = { retracted: 'Retracted by agent', 'self-answered': 'Answered by agent', 'answered-in-terminal': 'Answered in the terminal', resolved: 'No longer waiting', expired: 'Expired', returned: 'Sent back to its agent', dismissed: 'Dismissed' };
-export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'its agent is gone', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed' };
+export const STATE_LABEL = { open: 'to answer', 'in-triage': 'being checked by triage', held: 'held by an extension', orphaned: 'not connected', answered: 'stored', delivered: 'delivered', read: 'read', closed: 'closed' };
 /** The ids of the sections that every Group by choice shows, so a collapsed one keeps its state across the choices. */
 export const SECTION_ID = { system: 'section: system', outbox: 'section: outbox', sent: 'section: sent' };
 
@@ -22,10 +22,18 @@ export function agentName(id, cards, presence = {}) {
   return best ? best.origin.name : id;
 }
 
+// The pill says what the inbox knows, which is whether the agent has a connection: it cannot know whether the
+// session itself still runs, so it never calls the agent gone or offline.
 export function presenceOf(card, state) {
   if (card.deliver === 'none') return null;
   const p = state.presence[card.agent];
-  if (!p || !p.online) return ['off', 'Agent offline: your answer waits until its session resumes'];
+  if (!p || !p.online) {
+    // An orphaned card says, in the same notice, that another session can take it. The card's state label says
+    // nothing more, so the person reads one notice for one fact.
+    return ['off', state.states[card.id] === 'orphaned'
+      ? 'Not connected: the answer waits until this session reconnects, and another session can take the card'
+      : 'Not connected: the answer waits until this session reconnects'];
+  }
   if (p.channelOff) return ['off', 'Channel off: this session started without the development-channels flag, so answers cannot reach it'];
   const unread = state.cards.some((c) => c.agent === card.agent && state.states[c.id] === 'delivered');
   return unread ? ['busy', 'Agent busy: it has an answer it has not read yet'] : ['on', 'Agent listening'];

@@ -1,4 +1,4 @@
-// The dry-run eval of the example triage agent: it checks cards with the same three checks, and counts what each would
+// The dry-run eval of the example triage agent: it checks cards with the same four checks, and counts what each would
 // block or advise, without sending a verdict or keeping any state.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

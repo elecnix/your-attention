@@ -1,10 +1,10 @@
 # Example triage agent
 
-This folder is a triage extension you can copy and change. Like `your-attention triage`, it connects to the inbox on the `card.created` hook, so it checks each new card before the person sees it. It runs three checks on every card in parallel, and gives the agent every finding in one notice, so one revision can fix them all. Unlike the built-in triage, it runs commands you install yourself. You can read each check in [checks.ts](checks.ts).
+This folder is a triage extension you can copy and change. Like `your-attention triage`, it connects to the inbox on the `card.created` hook, so it checks each new card before the person sees it. It runs four checks on every card in parallel, and gives the agent every finding in one notice, so one revision can fix them all. Unlike the built-in triage, it runs commands you install yourself. You can read each check in [checks.ts](checks.ts).
 
 ```mermaid
 flowchart LR
-  A["agent posts a card"] --> B["vale, the card classifier and the PR-verdict command, at once"]
+  A["agent posts a card"] --> B["vale, the card classifier, the PR-verdict command and links, at once"]
   B -- "a blocking finding, fewer than 3 returns" --> R["card returns to the agent with every finding and a bypass code"]
   B -- "advice only, or 3 returns already" --> V["card goes to the person, and the agent gets the advice"]
   B -- "no finding" --> P["card goes to the person"]
@@ -26,8 +26,9 @@ Each finding either blocks the card or is advice, by the policy in your local co
    | `Cards.Hedges` | warning | "maybe", "perhaps", "probably" |
 
 2. **The card classifier** runs `pr-context-classifier -p card-prompt.md -q <question> -` with the card as text on its standard input. With [card-prompt.md](card-prompt.md), the classifier checks that a person could decide from the card alone. The card's title and first two sentences need to say what happens today and what changes, in either order. A card with several questions only needs to state its topic there, if each question states its change. The card also needs to say why the change matters, and to give the options weighed, with evidence and a recommendation. Each option says what the agent does if the person picks it. A card doesn't have to explain its names, terms or acronyms, because the prompt tells the classifier that the reader is a software developer who knows common software, cloud, AI and developer-tool terms, and never to ask what a name means. The prompt follows the triage criteria in [SPEC.md](../../SPEC.md#the-triage-extension) and the card guidance agents read. The classifier writes one question per failed step, numbered after the step, such as `[3]` for an option that doesn't say what the agent does. By default `MISSING_CONTEXT` blocks the card, with the rationale and the questions.
-
 3. **The PR-verdict check** is optional, and only your local config turns it on. It runs on a card that has the tag `pr` set to `owner/repo#number`, such as `pr: acme/api#42`. It runs your command with the pull request's address and `--json` appended, as in `/path/to/your/pr-verdict-command https://github.com/acme/api/pull/42 --json`. The command prints JSON with a `verdict`, a `confidence_accept` between 0 and 1, and `items`, each with a `direction`, an `effect_label`, a `text` and an `action`. The command may exit 1 for a pushback, since the check reads its JSON whatever the exit code. A verdict in `acceptVerdicts` passes the card. Any other verdict gives the confidence as a number in 100, then the `action` of each item whose direction is `toward_pushback`, or its `text` when `action` is null, each followed by its `effect_label`. Below `policy.prVerdictBlockBelow` that blocks the card, and from it up it's advice. `acceptVerdicts` is a list so that a tool with a second passing verdict, such as a lean toward accept, doesn't need a code change. It defaults to `["ACCEPT"]`.
+
+4. **The Links check** is pure: it doesn't run a command, and it reads the card with the page's own Markdown renderer, [web/markdown.js](../../web/markdown.js), so the check and the page cannot disagree about what draws as a link. It reads the card's title and text, its recommendation, each option's label and description, and each question with its options. A pull-request reference such as `PrizmalAi/PrizmalSwitch#3750`, inside backticks as well, is not a link, and the finding gives its field, the exact text, and the `[PrizmalAi/PrizmalSwitch#3750](https://github.com/PrizmalAi/PrizmalSwitch/pull/3750)` that links it. An address inside an inline code span draws as code, so the fix moves it out of the span; the check skips fenced blocks, since a command with a URL belongs in code on purpose. A Markdown link whose target is not an `http`, `https` or `mailto` address shows only its label, so the fix is an address the person can open. The title, an option's description and an approval's label draw no Markdown, so the check reads them as written: a reference, a Markdown link or a URL there gets a finding that puts the link in the card's text. By default a finding blocks the card, and `policy.linksNotClickable` makes it `advise` or `ignore`.
 
 ## Returns, and the way out
 
@@ -71,6 +72,7 @@ You don't need a config file. With `--config FILE`, the agent reads FILE. Withou
 | `policy.valeErrors` | `block` | what a vale error does: `block`, `advise` or `ignore` |
 | `policy.valeWarnings` | `advise` | what a vale warning does |
 | `policy.classifierMissingContext` | `block` | what a `MISSING_CONTEXT` answer does |
+| `policy.linksNotClickable` | `block` | what a pull-request reference or an address the page draws as dead text does |
 | `policy.prVerdictBlockBelow` | `0.5` | the confidence, from 0 to 1, below which a verdict outside `acceptVerdicts` blocks the card |
 | `maxReturns` | `3` | how many times one card goes back before its next attempt passes with advice |
 | `stateFile` | `~/.local/state/your-attention/triage-example.json` | the return counts and the bypass codes |
@@ -110,7 +112,7 @@ To copy the example out of this repository, keep the folder together, and change
 
 ## An eval of the cards in your inbox
 
-`eval.ts` runs the three checks over the cards already in your inbox, and writes what each check would block or advise. It only reads, so the inbox and the return counts stay as they were. You need an owner login for it, with the inbox this machine runs or the one it paired with as owner. Card text appears in the report, so write it outside any repository:
+`eval.ts` runs the four checks over the cards already in your inbox, and writes what each check would block or advise. It only reads, so the inbox and the return counts stay as they were. You need an owner login for it, with the inbox this machine runs or the one it paired with as owner. Card text appears in the report, so write it outside any repository:
 
 ```sh
 node examples/triage-agent/eval.ts --out ~/triage-eval/today.md --since 2026-11-17
@@ -120,4 +122,4 @@ Its report counts the cards that would go back and what each check would block o
 
 ## Tests
 
-`test/unit/triage-example.test.ts` stands in a small Node script for vale, the classifier and the PR-verdict command. It covers a pass, a return with the findings of all three checks, each policy level, the PR-verdict threshold, the return limit across a restart, the bypass code, each way a command can fail, and the rulings log. For the log it checks the fields of a line, the modes of the file and its directory, the rotation past 5 MB, and that a write that fails leaves the ruling alone. One more test runs the vale rules in this folder with the vale on the machine. Without vale, the test runner skips it. `test/unit/triage-eval.test.ts` covers the eval's counts and report.
+`test/unit/triage-example.test.ts` stands in a small Node script for vale, the classifier and the PR-verdict command. It covers a pass, a return with the findings of every check, each policy level, the PR-verdict threshold, the return limit across a restart, the bypass code, each way a command can fail, and the rulings log. For the log it checks the fields of a line, the modes of the file and its directory, the rotation past 5 MB, and that a write that fails leaves the ruling alone. One more test runs the vale rules in this folder with the vale on the machine. Without vale, the test runner skips it. `test/unit/triage-eval.test.ts` covers the eval's counts and report.

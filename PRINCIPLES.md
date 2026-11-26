@@ -114,9 +114,9 @@ Each answer shows its delivery state: stored, delivered to the harness, or read 
 
 You need to know whether the model has your answer yet, and a way to push it through.
 
-### DP18: Each card shows if its agent is listening, busy or offline
+### DP18: Each card shows if its agent is listening, busy or not connected
 
-The card shows one of three states, updated in near real time: listening, busy (connected but working, with unread answers), or offline. You see the state before you start to write. For an offline agent, the card says what will happen to your answer: delivered when the session resumes, or kept in the dead-letter queue. A session that cannot receive channel notifications shows **Channel off** with the reason, in place of listening or busy, because an answer pushed there never reaches the model.
+The card shows one of three states, updated in near real time: listening, busy (connected but working, with unread answers), or not connected. You see the state before you start to write. The inbox knows whether the agent has a connection, and it cannot know whether the session itself still runs, so the card says **Not connected**, then what happens to your answer: it goes when the session reconnects, or it waits in the dead-letter queue. An orphaned card adds, in the same notice, that another session can take it. A session that cannot receive channel notifications shows **Channel off** with the reason, in place of listening or busy, because an answer pushed there never reaches the model.
 
 A fixed number of seconds cannot be guaranteed.
 

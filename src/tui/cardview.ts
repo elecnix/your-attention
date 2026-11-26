@@ -247,14 +247,16 @@ export class CardView {
     // The meta line: the level with its symbol, the agent's status, a warning state, presence, and the age at the right.
     const meta: Span[] = [{ text: `${g.waiting} ${sanitize(level?.label ?? q.label(sum ? q.levelOf(sum) : card.priority))}`, style: theme.level(level?.color) }];
     if (card.status) meta.push({ text: '  ' }, { text: `[${sanitize(card.status)}]`, style: st.dim });
-    if (['in-triage', 'held', 'orphaned'].includes(state)) meta.push({ text: '  ' }, { text: `Warning: ${STATE_LABEL[state]}`, style: st.warn });
+    if (['in-triage', 'held'].includes(state)) meta.push({ text: '  ' }, { text: `Warning: ${STATE_LABEL[state]}`, style: st.warn });
     const pres = presenceOf(sum ?? card, s);
-    if (pres) meta.push({ text: '  ' }, { text: `${pres[0] === 'on' ? g.read : pres[0] === 'busy' ? g.delivered : g.stored} ${sanitize(pres[1].split(':')[0] ?? '')}`, style: pres[0] === 'on' ? st.ok : st.dim });
+    // An orphaned card's one notice goes on its own line, since it says more than fits beside the level.
+    if (pres && state !== 'orphaned') meta.push({ text: '  ' }, { text: `${pres[0] === 'on' ? g.read : pres[0] === 'busy' ? g.delivered : g.stored} ${sanitize(pres[1].split(':')[0] ?? '')}`, style: pres[0] === 'on' ? st.ok : st.dim });
     const age = cardAge(this.host.now() - card.createdAt);
     const metaW = meta.reduce((w, x) => w + textWidth(x.text), 0);
     if (metaW + 2 + textWidth(age) <= width) meta.push({ text: ' '.repeat(width - metaW - textWidth(age)) }, { text: age, style: st.dim });
     else meta.push({ text: `  ${age}`, style: st.dim });
     doc.para(meta);
+    if (pres && state === 'orphaned') doc.para([{ text: sanitize(pres[1]), style: st.warn }]);
 
     const tr = card.triage;
     if (tr && tr.state === 'passed' && /did not answer|failed/.test(tr.reason ?? '')) doc.para([{ text: `Note: Triage did not check this card: ${sanitize(tr.reason ?? '')}`, style: st.dim }]);
@@ -337,7 +339,7 @@ export class CardView {
       doc.gap();
       const spans: Span[] = [
         { text: `${g.stored} Stored at ${time(a.savedAt)}`, style: st.ok },
-        { text: `  ${a.deliveredAt ? g.delivered : g.stored} ${a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline'}`, style: a.deliveredAt ? st.ok : st.dim },
+        { text: `  ${a.deliveredAt ? g.delivered : g.stored} ${a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: its session is not connected'}`, style: a.deliveredAt ? st.ok : st.dim },
         { text: `  ${a.readAt ? g.read : g.stored} ${a.readAt ? `Read by the agent at ${time(a.readAt)}` : 'Not read by the agent yet'}`, style: a.readAt ? st.ok : st.dim },
       ];
       if (!a.readAt) {

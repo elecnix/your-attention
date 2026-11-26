@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { renderMarkdown } from '../../web/markdown.js';
+import { LINK_TARGET, renderMarkdown } from '../../web/markdown.js';
 
 type Node = { type: string; children: unknown[] };
 const h = (type: string, _props: unknown, ...children: unknown[]): Node => ({ type, children: children.flat() });
@@ -219,5 +219,25 @@ describe('nested lists, by indentation as CommonMark reads them', () => {
       { text: 'Release checklist:', lists: [{ list: 'ul', items: [leaf('the changelog names the fix'), leaf('CI is green on main'), leaf('the tag matches package.json')] }] },
       leaf('Then I post the merge card.'),
     ] }]);
+  });
+});
+
+describe("the links the page draws, which the triage agent's Links check reads too", () => {
+  it('draws a link to an http, https or mailto address, and hears a link to anything else as a label alone', () => {
+    for (const target of ['https://ci.test/run', 'http://ci.test', 'mailto:me@example.test']) {
+      assert.equal(LINK_TARGET.test(target), true, target);
+      const heard: string[] = [];
+      const src = `See [the run](${target}).`;
+      renderMarkdown(h, src, { unlinked: (label, t) => heard.push(`${label} ${t}`) });
+      assert.deepEqual(heard, [], target);
+      assert.deepEqual(texts(src, 'a'), ['the run'], target);
+    }
+    for (const target of ['/run/17', 'acme/api#42', 'ci.test/run']) {
+      assert.equal(LINK_TARGET.test(target), false, target);
+      const heard: { label: string; target: string }[] = [];
+      renderMarkdown(h, `See [the run](${target}).`, { unlinked: (label, t) => heard.push({ label, target: t }) });
+      assert.deepEqual(heard, [{ label: 'the run', target }], target);
+      assert.deepEqual(texts(`See [the run](${target}).`, 'a'), [], target);
+    }
   });
 });
