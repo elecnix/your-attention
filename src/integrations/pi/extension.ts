@@ -138,7 +138,7 @@ export default function yourAttention(pi: PiApi): void {
     void waitForConfig({ signal: mine.signal }).then(async (found) => {
       if (!found || mine.signal.aborted) return;
       await connect(new Client(found));
-    });
+    }).catch((e: Error) => log('the wait for an inbox stopped:', e.message));
   });
 
   pi.on('session_shutdown', () => {

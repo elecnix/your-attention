@@ -19,23 +19,32 @@ const serveIn = (home: string): Promise<RunningServer> =>
   serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report', blocked: 'a test inbox sends nothing' } });
 const online = (server: RunningServer, agent: string): true | undefined => server.inbox.state().presence[agent]?.online || undefined;
 
-/** The home where one session starts before its inbox, and the way the test lets it go. */
+/** The home where one session starts before its inbox, and the way the test lets it go. An address exported in this
+ * shell would take every step to a live inbox, so it goes for the length of the block and comes back after. */
 function laterHome(): { open: (prefix: string) => string; close: (server: RunningServer | undefined, dispose?: () => unknown) => Promise<void> } {
   let home = '';
+  const saved = (['YOUR_ATTENTION_URL', 'YOUR_ATTENTION_TOKEN'] as const).map((name) => [name, process.env[name]] as const);
   return {
     open(prefix) {
       home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
       process.env['YOUR_ATTENTION_HOME'] = home;
+      for (const [name] of saved) delete process.env[name];
       return home;
     },
     async close(server, dispose) {
       await dispose?.();
       delete process.env['YOUR_ATTENTION_HOME'];
+      for (const [name, value] of saved) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
       await server?.close();
       fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
 }
+
+// An address exported in this shell would take every step to a live inbox. It is set for the whole file, so each
+// step runs against it, and laterHome() clears it while its block runs.
+process.env['YOUR_ATTENTION_URL'] = 'http://127.0.0.1:9';
+process.env['YOUR_ATTENTION_TOKEN'] = 'a-token-that-is-not-this-inbox';
 
 const savedPane = process.env['HERDR_PANE_ID'];
 delete process.env['HERDR_PANE_ID'];

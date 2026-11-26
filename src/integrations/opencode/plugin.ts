@@ -94,6 +94,8 @@ export function createPlugin(z: unknown) {
     const secrets = new SecretRequests();
     // The sessions this process follows, each with its answer stream, and the answers sent but not yet read.
     const followed = new Map<string, AbortController>();
+    /** This plugin's life: dispose aborts the wait for an inbox along with the streams, so a reload leaves no timer. */
+    const lifetime = new AbortController();
     const pending = new Map<string, string>();
     const checked = new Set<string>();
 
@@ -150,8 +152,8 @@ export function createPlugin(z: unknown) {
 
     // The sessions followed while the inbox was stopped start following it now, without a restart of OpenCode.
     if (!inbox) {
-      void waitForConfig().then((config) => {
-        if (!config || inbox) return;
+      void waitForConfig({ signal: lifetime.signal }).then((config) => {
+        if (!config || inbox || lifetime.signal.aborted) return;
         inbox = new Client(config);
         for (const session of followed.keys()) start(session);
       });
@@ -173,6 +175,7 @@ export function createPlugin(z: unknown) {
         }
       },
       async dispose() {
+        lifetime.abort();
         for (const stop of followed.values()) stop.abort();
         followed.clear();
       },

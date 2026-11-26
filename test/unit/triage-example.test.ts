@@ -445,6 +445,20 @@ describe('the example triage agent checks that every reference renders as a link
     }
   });
 
+  it('quotes an address in a plain field whole: a parenthesis the address opened stays, and the sentence\'s goes', () => {
+    const cases: [string, string][] = [
+      ['See https://ci.test/a_(b) before deciding', 'https://ci.test/a_(b)'],
+      ['(see https://ci.test/run)', 'https://ci.test/run'],
+      ['See https://ci.test/run. Done', 'https://ci.test/run'],
+    ];
+    for (const [title, url] of cases) {
+      const lines = links({ title });
+      assert.equal(lines.length, 1, title);
+      assert.match(lines[0] ?? '', new RegExp(`^title: ${url.replace(/[()._]/g, (c) => `\\${c}`)} shows as plain text`), title);
+      assert.ok((lines[0] ?? '').includes(`[a label](${url})`), `${title}: ${lines[0]}`);
+    }
+  });
+
   it('never calls a plain field a link the page draws, since its brackets show as they were written', () => {
     const lines = links({ title: 'See [the run](https://ci.test/run)' });
     assert.doesNotMatch(lines[0] ?? '', /shows the label alone/);

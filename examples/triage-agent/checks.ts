@@ -450,7 +450,16 @@ function plainRefs(text: string): string[] {
 const CODE_URL = /https?:\/\/[^\s`<>]+/g;
 /** A Markdown link as written, which a field that draws no Markdown shows as its source, brackets and all. */
 const LITERAL_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
-const ANY_URL = /https?:\/\/[^\s`<>()\[\]]+/g;
+// Parentheses stay in the match, so an address that wrote one keeps it, and the sentence's closing one comes off below.
+const ANY_URL = /https?:\/\/[^\s`<>\[\]]+/g;
+/** An address as the card wrote it: a parenthesis it opened stays, and the punctuation around it belongs to the
+ * sentence, not to the address. */
+function addressIn(text: string): string {
+  const strip = (u: string): string => u.replace(/[.,;:!?'"*_]+$/, '');
+  let url = strip(text);
+  while (url.endsWith(')') && url.split('(').length < url.split(')').length) url = strip(url.slice(0, -1));
+  return url;
+}
 /** A card-id link, which the page draws through its own cardLink: `[[card-id]]`. */
 const CARD_ID = /^\[\[[\w.:-]+\]\]$/;
 
@@ -492,7 +501,7 @@ function literalLines(field: Field): string[] {
     lines.push(`${field.name}: ${ref} shows as plain text, in a field that draws no Markdown. Write the link in the card's text as ${asLink(ref)}.`);
   }
   for (const m of written.matchAll(ANY_URL)) {
-    const url = m[0].replace(/[.,;:!?'"*_]+$/, '');
+    const url = addressIn(m[0]);
     lines.push(`${field.name}: ${url} shows as plain text, in a field that draws no Markdown. Write the link in the card's text as [a label](${url}).`);
   }
   return lines;
