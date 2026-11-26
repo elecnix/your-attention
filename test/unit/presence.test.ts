@@ -21,15 +21,12 @@ describe('the agent pill of a card', () => {
     assert.deepEqual(presenceOf(card, state({ 'claude:s1': { agent: 'claude:s1', online: true, lastSeen: 1 } })), ['on', 'Agent listening']);
   });
 
-  it('says the session is not connected, and never calls it offline or gone, since the inbox knows only its connection', () => {
+  it('says the session is not connected, never offline or gone, and adds that another session can take an orphaned card', () => {
     const pill = presenceOf(card, state(gone));
     assert.deepEqual(pill, ['off', 'Not connected: the answer waits until this session reconnects']);
     assert.doesNotMatch(pill?.[1] ?? '', /offline|gone/);
-  });
-
-  it('adds in the same pill that another session can take an orphaned card, so the card shows one notice', () => {
-    const pill = presenceOf(card, state(gone, { c1: 'orphaned' }));
-    assert.equal(pill?.[0], 'off');
-    assert.match(pill?.[1] ?? '', /^Not connected: the answer waits until this session reconnects, and another session can take the card$/);
+    const orphaned = presenceOf(card, state(gone, { c1: 'orphaned' }));
+    assert.equal(orphaned?.[0], 'off');
+    assert.match(orphaned?.[1] ?? '', /^Not connected: the answer waits until this session reconnects, and another session can take the card$/);
   });
 });

@@ -19,6 +19,24 @@ const serveIn = (home: string): Promise<RunningServer> =>
   serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report', blocked: 'a test inbox sends nothing' } });
 const online = (server: RunningServer, agent: string): true | undefined => server.inbox.state().presence[agent]?.online || undefined;
 
+/** The home where one session starts before its inbox, and the way the test lets it go. */
+function laterHome(): { open: (prefix: string) => string; close: (server: RunningServer | undefined, dispose?: () => unknown) => Promise<void> } {
+  let home = '';
+  return {
+    open(prefix) {
+      home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+      process.env['YOUR_ATTENTION_HOME'] = home;
+      return home;
+    },
+    async close(server, dispose) {
+      await dispose?.();
+      delete process.env['YOUR_ATTENTION_HOME'];
+      await server?.close();
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    },
+  };
+}
+
 const savedPane = process.env['HERDR_PANE_ID'];
 delete process.env['HERDR_PANE_ID'];
 after(() => { if (savedPane !== undefined) process.env['HERDR_PANE_ID'] = savedPane; });
@@ -27,8 +45,9 @@ describe('the Claude Code channel, started before its inbox', () => {
   let home = '';
   let mcp: McpClient;
   let server: RunningServer | undefined;
+  const later = laterHome();
   before(async () => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-later-'));
+    home = later.open('ya-later-');
     mcp = new McpClient({ name: 'test', version: '1' });
     await mcp.connect(new StdioClientTransport({
       command: process.execPath,
@@ -37,11 +56,7 @@ describe('the Claude Code channel, started before its inbox', () => {
       stderr: 'ignore',
     }));
   });
-  after(async () => {
-    await mcp.close();
-    await server?.close();
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
+  after(async () => { await later.close(server, () => mcp.close()); });
 
   it('completes the handshake and offers the card tools while no inbox runs', async () => {
     assert.equal(fs.existsSync(path.join(home, 'server.json')), false);
@@ -75,16 +90,9 @@ describe('the pi extension, started before its inbox', () => {
     registerTool: (t: { name: string; execute: (...a: unknown[]) => Promise<{ content: { text: string }[] }> }) => { tools.set(t.name, t); },
     sendUserMessage: () => {},
   };
-  before(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-later-pi-'));
-    process.env['YOUR_ATTENTION_HOME'] = home;
-  });
-  after(async () => {
-    await handlers.get('session_shutdown')?.({}, ctx);
-    delete process.env['YOUR_ATTENTION_HOME'];
-    await server?.close();
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
+  const later = laterHome();
+  before(() => { home = later.open('ya-later-pi-'); });
+  after(async () => { await later.close(server, () => handlers.get('session_shutdown')?.({}, ctx)); });
 
   it('starts the session, answers a tool call with why it cannot reach the inbox, and connects once the inbox starts', async () => {
     yourAttention(pi as never);
@@ -103,16 +111,9 @@ describe('the OpenCode plugin, started before its inbox', () => {
   let hooks: Awaited<ReturnType<ReturnType<typeof createPlugin>>> | undefined;
   const client = { session: { promptAsync: async () => ({}), get: async () => ({ data: { title: 'later' } }) } };
   const toolCtx = { sessionID: 'oc-later-1', directory: '/repo' };
-  before(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-later-oc-'));
-    process.env['YOUR_ATTENTION_HOME'] = home;
-  });
-  after(async () => {
-    await hooks?.dispose?.();
-    delete process.env['YOUR_ATTENTION_HOME'];
-    await server?.close();
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
+  const later = laterHome();
+  before(() => { home = later.open('ya-later-oc-'); });
+  after(async () => { await later.close(server, () => hooks?.dispose?.()); });
 
   it('gives OpenCode the card tools, answers a call with why it cannot reach the inbox, and posts once the inbox starts', async () => {
     hooks = await createPlugin(z)({ client, directory: '/repo' } as never);

@@ -43,6 +43,9 @@ function stub(name: string, body: string): { argv: string[]; calls: () => { argv
 const print = (value: unknown, code = 0): string => `process.stdout.write(${JSON.stringify(typeof value === 'string' ? value : JSON.stringify(value))}); process.exit(${code});`;
 
 const valeClean = (): ReturnType<typeof stub> => stub('vale', print({ 'stdin.md': [] }));
+/** A vale report with one alert: an error exits 1, a warning exits 0. */
+const valeAlert = (alert: { Check: string; Message: string; Severity: string; Match?: string }, code = 0): ReturnType<typeof stub> =>
+  stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 1], ...alert }] }, code));
 const complete = (): ReturnType<typeof stub> => stub('classifier', print({ verdict: 'COMPLETE', rationale: 'The card states the goal.', clarifyingQuestions: [] }));
 const missing = '/nonexistent/command-for-this-test';
 
@@ -126,7 +129,7 @@ describe('the example triage agent checks a card', () => {
   });
 
   it('passes a card with only vale warnings, and sends the warnings to the agent as advice', async () => {
-    const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 5], Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' }] }));
+    const vale = valeAlert({ Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' });
     const ruling = await checkCard(card, config({ vale: vale.argv }), logger().log);
     assert.equal(ruling.verdict, 'pass');
     assert.match(ruling.advice ?? '', /Vale, advice:\n- title, line 1: Cards\.Hedges: Hedge\./);
@@ -251,7 +254,7 @@ describe('the example triage agent asks a PR-verdict command about a pull reques
 
   it('runs every check, and puts the findings of all three in one notice', async () => {
     const verdict = stub('verdict', print(pushback));
-    const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 1], Check: 'Cards.FirstPerson', Message: 'Third person.', Severity: 'error', Match: 'I' }] }, 1));
+    const vale = valeAlert({ Check: 'Cards.FirstPerson', Message: 'Third person.', Severity: 'error', Match: 'I' }, 1);
     const classifier = stub('classifier', print({ verdict: 'MISSING_CONTEXT', rationale: 'No goal.', clarifyingQuestions: ['What is the goal?'] }));
     const ruling = await checkCard(pr, config({ ...withVerdict(verdict.argv), vale: vale.argv, classifier: classifier.argv }), logger().log);
     assert.equal(ruling.verdict, 'return');
@@ -475,7 +478,7 @@ describe('the example triage agent checks that every reference renders as a link
   });
 
   it('collects every check, so one notice carries both the Links finding and a vale error', async () => {
-    const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 1], Check: 'Cards.FirstPerson', Message: 'Third person.', Severity: 'error', Match: 'I' }] }, 1));
+    const vale = valeAlert({ Check: 'Cards.FirstPerson', Message: 'Third person.', Severity: 'error', Match: 'I' }, 1);
     const broken = { ...card, text: `Merge ${pr} once CI passes.` };
     const ruling = await checkCard(broken, config({ vale: vale.argv }), logger().log);
     assert.equal(ruling.verdict, 'return');
@@ -628,7 +631,7 @@ describe('the example triage agent logs every ruling as one JSON line', () => {
 
   it('logs the advice of a card that passed with findings', async () => {
     const file = logPath();
-    const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 5], Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' }] }));
+    const vale = valeAlert({ Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' });
     const ruling = await checkCard(card, config({ vale: vale.argv, logFile: file }), logger().log);
     assert.equal(ruling.verdict, 'pass');
     const [entry] = readLines(file) as [Record<string, any>];
@@ -685,7 +688,7 @@ describe('the example triage agent logs every ruling as one JSON line', () => {
     fs.mkdirSync(locked, { recursive: true });
     fs.chmodSync(locked, 0o500);
     try {
-      const vale = stub('vale', print({ 'stdin.md': [{ Line: 1, Span: [1, 5], Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' }] }));
+      const vale = valeAlert({ Check: 'Cards.Hedges', Message: 'Hedge.', Severity: 'warning', Match: 'maybe' });
       const { log, lines } = logger();
       const ruling = await checkCard(card, config({ vale: vale.argv, logFile: path.join(locked, 'triage.jsonl') }), log);
       assert.equal(ruling.verdict, 'pass');
