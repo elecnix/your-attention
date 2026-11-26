@@ -2,10 +2,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Presence } from '../../src/core/types.ts';
+import type { CardState } from '../../src/core/types.ts';
 import { presenceOf, type InboxState } from '../../web/queue.js';
 
-const state = (presence: Record<string, Presence>): InboxState => ({ cards: [], answers: {}, states: {}, presence });
-const card = { agent: 'claude:s1', deliver: 'stream' } as const;
+const state = (presence: Record<string, Presence>, states: Record<string, CardState> = {}): InboxState => ({ cards: [], answers: {}, states, presence });
+const card = { id: 'c1', agent: 'claude:s1', deliver: 'stream' } as const;
+const gone = { 'claude:s1': { agent: 'claude:s1', online: false, lastSeen: 1 } };
 
 describe('the agent pill of a card', () => {
   it('says Channel off when the session discards channel notifications', () => {
@@ -17,5 +19,17 @@ describe('the agent pill of a card', () => {
 
   it('says the agent is listening when its channel is on', () => {
     assert.deepEqual(presenceOf(card, state({ 'claude:s1': { agent: 'claude:s1', online: true, lastSeen: 1 } })), ['on', 'Agent listening']);
+  });
+
+  it('says the session is not connected, and never calls it offline or gone, since the inbox knows only its connection', () => {
+    const pill = presenceOf(card, state(gone));
+    assert.deepEqual(pill, ['off', 'Not connected: the answer waits until this session reconnects']);
+    assert.doesNotMatch(pill?.[1] ?? '', /offline|gone/);
+  });
+
+  it('adds in the same pill that another session can take an orphaned card, so the card shows one notice', () => {
+    const pill = presenceOf(card, state(gone, { c1: 'orphaned' }));
+    assert.equal(pill?.[0], 'off');
+    assert.match(pill?.[1] ?? '', /^Not connected: the answer waits until this session reconnects, and another session can take the card$/);
   });
 });

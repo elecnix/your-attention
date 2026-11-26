@@ -738,7 +738,9 @@ export function App() {
         // The tone is namespaced: a bare `done` picked up the app's own `.done` panel rule and its 24px padding.
         h('span', { className: `triage-dot tone-${triageTone}`, title: triageWhy, role: 'img', 'aria-label': triageWhy }),
         current.status && h('span', { className: 'status' }, current.status),
-        STATE_LABEL[s] && ['in-triage', 'held', 'orphaned'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
+        // An orphaned card's one notice is its presence pill, which says both that the session is not connected
+        // and that another session can take the card.
+        STATE_LABEL[s] && ['in-triage', 'held'].includes(s) && h('span', { className: 'status warn' }, STATE_LABEL[s]),
         pres && !current.archivedAt && h('span', { className: `pill small ${pres[0]}` }, pres[1]),
         h(CardAge, { card: current }),
         h(FocusToggle, { on: !!focusMode, arrived: arrived.length, onToggle: () => toggleFocusRef.current() })),
@@ -781,7 +783,7 @@ export function App() {
         : h(CardView, { key: `${current.id}:${a ? a.savedAt : 0}:${discarded[current.id] || 0}`, draftKey, card: current, recommendationText, onAction: (ev) => onAction(current, ev) }),
       a && h('div', { className: 'receipt' },
         h(Icon, { name: 'answered', cls: 's answered', tip: `Stored at ${time(a.savedAt)}` }),
-        h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: agent offline' }),
+        h(Icon, { name: 'delivered', cls: 's delivered', dim: !a.deliveredAt, tip: a.deliveredAt ? `Delivered at ${time(a.deliveredAt)}` : 'Not delivered yet: its session is not connected' }),
         h(Icon, { name: 'read', cls: 's read', dim: !a.readAt, tip: a.readAt ? `Read by the agent at ${time(a.readAt)}` : 'Not read by the agent yet' }),
         !a.readAt && h('button', { className: 'btn', onClick: () => api(`${BASE}v1/cards/${current.id}/force`, {}) }, a.forcedAt ? `Force-sent at ${time(a.forcedAt)}. Send again` : 'Force-send')),
       backlinks.length > 0 && h('div', { className: 'chain' }, 'Linked from ', backlinks.map((c, i) => h(React.Fragment, { key: c.id }, i ? ', ' : '', h('a', { onClick: () => open(c.id) }, c.title)))),

@@ -220,7 +220,7 @@ The page shows a panel of every agent known to the inbox, with one search field 
 
 `GET /v1/state` feeds the panel as well. Each card summary keeps `origin.cwd` beside `origin.name` and `origin.harness`, so the page reads a working directory in the state it already fetches. The newest card that reported one decides it, and when no card reported a directory, the panel leaves that line out.
 
-A new card goes to each open connection that reports that agent id, as a guidance event goes to its agents. The inbox sets `deliveredAt` then. While no connection reports the agent, the card waits, and the next session with that id receives it as it connects ([DP19](PRINCIPLES.md#dp19-an-answer-to-an-offline-agent-is-kept-and-agents-can-find-it)). The state of an agent never prevents addressing it ([DP18](PRINCIPLES.md#dp18-each-card-shows-if-its-agent-is-listening-busy-or-offline)). Each card goes once. The sweep deletes a sent card 30 days after it went, so a session that never returns leaves the inbox as it was, and `POST /v1/reset` removes those records too.
+A new card goes to each open connection that reports that agent id, as a guidance event goes to its agents. The inbox sets `deliveredAt` then. While no connection reports the agent, the card waits, and the next session with that id receives it as it connects ([DP19](PRINCIPLES.md#dp19-an-answer-to-an-offline-agent-is-kept-and-agents-can-find-it)). The state of an agent never prevents addressing it ([DP18](PRINCIPLES.md#dp18-each-card-shows-if-its-agent-is-listening-busy-or-not-connected)). Each card goes once. The sweep deletes a sent card 30 days after it went, so a session that never returns leaves the inbox as it was, and `POST /v1/reset` removes those records too.
 
 An agent stream receives the card as an event of its own:
 
@@ -586,7 +586,7 @@ A hosted inbox writes its own reports to the `TELEMETRY` binding at its next req
 | `closed` | The agent retracted the card or answered it itself, with `POST /v1/cards/<id>/close {kind, outcome}`, the person dismissed it with `POST /v1/cards/<id>/dismiss`, or the card expired. The inbox also closes its own system cards, a pairing request, a priority proposal or a guidance proposal, once it applies the person's answer. |
 | `in-triage` | An extension on the `card.created` hook is checking the card. |
 | `held` | A fail-closed hook timed out, or an extension stopped the card. The card shows which extension and why. |
-| `orphaned` | The card is open, and its agent has been offline for more than an hour. Another session can claim it. |
+| `orphaned` | The card is open, and its agent has been offline for more than an hour. Another session can claim it. The card shows this as **Not connected**, in the one notice that also says the answer waits for the session to reconnect. |
 
 An answer saved after a close moves the card out of `closed` and goes to the agent, marked late as [Late answers](#late-answers) describes. The card keeps its `closed`. A close with `ifUnanswered: true` fails with 409 when the person already answered. A guidance card reads `closed` as soon as the inbox applies the answer, and its answer still goes to the agent in `broadcast.from`, so the receipt on the card shows when that agent received and read it.
 
