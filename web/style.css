@@ -242,11 +242,17 @@
   .queue-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 8px; }
   .group-by { display: flex; gap: 6px; align-items: center; font-size: calc(12px * var(--text-scale)); color: var(--muted); white-space: nowrap; }
   .group-by select { font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
-  /* How triage treated the card: a hollow dot when nothing checked it, filled when something did, red after a bypass. */
+  /* How triage treated the card: a hollow dot when nothing checked it, one that breathes while an extension checks it,
+     filled when something did, red after a bypass. */
   .triage-dot { width: 17px; height: 17px; padding: 0; border-radius: 50%; box-sizing: border-box; border: 2px solid currentColor; display: inline-flex; align-items: center; justify-content: center; flex: none; cursor: help; }
   .triage-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
   .triage-dot.tone-none { color: var(--muted); }
   .triage-dot.tone-none::before { display: none; }
+  .triage-dot.tone-checking { color: var(--muted); animation: triage-pulse 1.5s ease-in-out infinite; }
+  .triage-dot.tone-checking::before { display: none; }
+  @keyframes triage-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+  /* Without the pulse, a centre mark carries the state on its own, so checking still differs from unchecked. */
+  @media (prefers-reduced-motion: reduce) { .triage-dot.tone-checking { animation: none; } .triage-dot.tone-checking::before { display: block; opacity: .45; } }
   .triage-dot.tone-done { color: var(--ok); }
   .triage-dot.tone-bypass { color: var(--bad); }
   .prio.small { font-size: calc(11px * var(--text-scale)); padding: 0 6px; margin-left: 6px; }
