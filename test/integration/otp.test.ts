@@ -12,7 +12,8 @@ import { base32Encode, totp, verifyTotp, type OtpApproval } from '../../src/core
 import type { AgentEvent } from '../../src/core/types.ts';
 import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
-import { filesHolding, runCli, runCliWithInput, serveForTest, until, type CliServer } from './harness.ts';
+import { filesHolding } from '../files-holding.ts';
+import { runCli, runCliWithInput, serveForTest, until, type CliServer } from './harness.ts';
 
 // The RFC 6238 test key for SHA-1, not anyone's authenticator key.
 const KEY = new TextEncoder().encode('12345678901234567890');

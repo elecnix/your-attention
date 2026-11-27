@@ -35,9 +35,9 @@ async function setup(runner: PrivilegedRunner | undefined = recording()) {
 }
 
 /** Seal a password as the page does: the command it showed and the password, as JSON, to the broker's key. */
-async function sealFor(inbox: Inbox, owner: Caller, command = COMMAND, password = PASSWORD) {
+async function sealFor(inbox: Inbox, owner: Caller, command = COMMAND, password = PASSWORD, machine = MACHINE) {
   const { publicKey } = await inbox.privilegedKey(owner);
-  return sealValue(publicKey, JSON.stringify({ command, password }));
+  return sealValue(publicKey, JSON.stringify({ command, machine, password }));
 }
 
 const rejects = (status: number, message: RegExp) => (e: unknown) => e instanceof InboxError && e.status === status && message.test(e.message);
@@ -116,6 +116,16 @@ describe('a privileged action runs inside the owner answer', () => {
     );
     assert.deepEqual((runner as ReturnType<typeof recording>).calls, []);
     assert.equal(inbox.cardDetail('p1', true).answer, undefined, 'a refused answer stores nothing');
+  });
+
+  it('refuses an approval sealed for another machine than the card names now, and runs nothing', async () => {
+    const { inbox, owner, runner } = await setup();
+    inbox.postCard(agent, { id: 'p1', agent: 's1', title: 'Run?', body: body() });
+    await assert.rejects(
+      inbox.answer('p1', { values: { run_it: await sealFor(inbox, owner, COMMAND, PASSWORD, 'web1') }, by: owner }),
+      rejects(409, /nothing ran, because the card now names the machine "test-machine", and the person approved the command on "web1"/),
+    );
+    assert.deepEqual((runner as ReturnType<typeof recording>).calls, []);
   });
 
   it('refuses a command the agent changed after the page sealed the password', async () => {
@@ -211,7 +221,7 @@ describe('the answer text of a privileged action', () => {
   it('says where the command ran, how it ended and what it printed, or that it did not run', async () => {
     const { inbox, owner } = await setup();
     const card = inbox.postCard(agent, { id: 'p1', agent: 's1', title: 'Create the marker?', body: body() });
-    assert.match(describeAnswer(card, await inbox.answer('p1', { values: {}, by: owner })), /run_it: not run, because the person sent no password/);
+    assert.match(describeAnswer(card, await inbox.answer('p1', { values: {}, by: owner })), /run_it: not run, because the person sent no password or approval/);
     const text = describeAnswer(card, await inbox.answer('p1', { values: { run_it: await sealFor(inbox, owner) }, by: owner }));
     assert.match(text, /run_it: ran on test-machine, exit code 0 \(audit \w+\)\. The command printed:\n```\nchecked \[password\]\nran touch/);
     assert.ok(!text.includes(PASSWORD));

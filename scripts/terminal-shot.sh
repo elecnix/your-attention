@@ -6,7 +6,18 @@
 # The command runs in a tmux session of the given size, so the capture is what a terminal of that size draws. ANSI
 # colours survive: tmux captures them, and the HTML the browser renders carries them.
 #
-# Needs: tmux, and google-chrome (or chromium) on PATH. Nothing is sent anywhere.
+# Needs: tmux and a Chrome or Chromium browser. Nothing is sent anywhere. The script takes the first browser it finds:
+#
+#   1. TERMINAL_SHOT_BROWSER, the path of a Chrome or Chromium executable. When that path is not an executable file,
+#      the script stops and names the variable.
+#   2. google-chrome, chromium or chromium-browser on PATH.
+#   3. /Applications/Google Chrome.app/Contents/MacOS/Google Chrome, then /Applications/Chromium.app/Contents/MacOS/Chromium.
+#      TERMINAL_SHOT_APPLICATIONS replaces /Applications, which is how the tests point it at a folder of their own.
+#   4. The Chromium that `npx playwright install chromium` downloads for this repository.
+#
+# On macOS Chrome is not on PATH, so set TERMINAL_SHOT_BROWSER to the Chrome executable, or rely on step 3. Never wrap,
+# link or replace a browser executable to make this script find it: a redirect onto a link writes through to the real
+# executable, and the browser no longer starts.
 set -euo pipefail
 
 cols=100
@@ -26,8 +37,35 @@ shift $((OPTIND - 1))
 [ "$1" = '--' ] && shift
 [ "$#" -gt 0 ] || { echo "usage: $0 -o shot.png -- command..." >&2; exit 2; }
 
-browser=$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)
-[ -n "$browser" ] || { echo "no chrome or chromium on PATH" >&2; exit 1; }
+here=${BASH_SOURCE[0]}
+case "$here" in */*) here=${here%/*} ;; *) here=. ;; esac
+apps=${TERMINAL_SHOT_APPLICATIONS:-/Applications}
+runnable() { [ -f "$1" ] && [ -x "$1" ]; }
+browser=${TERMINAL_SHOT_BROWSER:-}
+if [ -n "$browser" ]; then
+  runnable "$browser" || {
+    echo "terminal-shot: TERMINAL_SHOT_BROWSER is $browser, which is not an executable file." \
+      "Set it to the Chrome or Chromium executable itself." >&2
+    exit 1
+  }
+else
+  browser=$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)
+  for candidate in "$apps/Google Chrome.app/Contents/MacOS/Google Chrome" "$apps/Chromium.app/Contents/MacOS/Chromium"; do
+    if [ -z "$browser" ] && runnable "$candidate"; then browser=$candidate; fi
+  done
+  if [ -z "$browser" ] && command -v node >/dev/null 2>&1; then
+    candidate=$(cd "$here/.." && node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())' \
+      2>/dev/null || true)
+    if [ -n "$candidate" ] && runnable "$candidate"; then browser=$candidate; fi
+  fi
+fi
+[ -n "$browser" ] || {
+  echo "terminal-shot: found no Chrome or Chromium on PATH, in $apps or in Playwright's browser folder." \
+    "Set TERMINAL_SHOT_BROWSER to the path of a Chrome or Chromium executable, such as" \
+    "TERMINAL_SHOT_BROWSER='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'." \
+    "Never wrap, link or replace a browser executable to make it findable." >&2
+  exit 1
+}
 
 socket=$(mktemp -u /tmp/terminal-shot.XXXXXX)
 session=shot-$$

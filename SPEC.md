@@ -541,7 +541,7 @@ Reading a store needs a way in, and `src/secrets/age.ts` opens an age file in ei
 
 ## Privileged actions
 
-Some commands need the person's password, such as one that runs with `sudo`. For such a privileged action, an agent posts a card that shows the command. The person reads it and types the password, then the inbox runs that one command. What the command printed goes back to the agent, but not the password. A secret goes the other way. [Secret widget](#secret-widget) and [Secret sources](#secret-sources) hand a value to the agent's session. That is their purpose, and the opposite of what a password needs. [DP44](PRINCIPLES.md#dp44-a-password-goes-to-the-broker-never-to-the-agent) states the rule. This section describes your own inbox, which runs the command on the machine it runs on. [#197](https://github.com/elecnix/your-attention/issues/197) tracks the remote version.
+Some commands need the person's password, such as one that runs with `sudo`. For such a privileged action, an agent posts a card that shows the command. The person reads it and types the password, then the inbox runs that one command. What the command printed goes back to the agent, but not the password. A secret goes the other way. [Secret widget](#secret-widget) and [Secret sources](#secret-sources) hand a value to the agent's session. That is their purpose, and the opposite of what a password needs. [DP44](PRINCIPLES.md#dp44-a-password-goes-to-the-broker-never-to-the-agent) states the rule. Your own inbox runs the command on the machine it runs on, or over `ssh` on another machine that `machines.jsonl` lists, as [Another machine](#another-machine) describes.
 
 ### The privileged_action widget
 
@@ -551,23 +551,24 @@ An agent places the built-in widget `privileged_action`, version 1, in a card bo
 restart = widget privileged_action {"name": "restart_nginx", "command": "sudo -S -p '' systemctl restart nginx", "machine": "office-pc", "changes": "Restarts nginx, which drops open connections"}
 ```
 
-`name` is the answer field, a variable name such as `restart_nginx`. `command` is the exact text the shell runs. `machine` names where the inbox runs it, and `changes` is one sentence about what it changes. The widget places `PrivilegedAction(name, command, machine, changes)`, four string literals, inside a form. Unlike `secret`, the card has no key. `card_post` fills in nothing, and the agent's session has no key to open the password with.
+`name` is the answer field, a variable name such as `restart_nginx`. `command` is the exact text the shell runs. `machine` names where the inbox runs it: the inbox's own machine, or one of `machines.jsonl`. `changes` is one sentence about what it changes. The widget places `PrivilegedAction(name, command, machine, changes)`, four string literals, inside a form. Unlike `secret`, the card has no key. `card_post` fills in nothing, and the agent's session has no key to open the password with.
 
 On a post or a patch, the inbox reads each `PrivilegedAction` call and lists the field names in the card's `privileged`. It answers 400 in these cases:
 
 - The inbox has no broker, as on the hosted inbox.
-- `machine` isn't the machine of the inbox's broker.
+- `machine` is neither the inbox's own machine nor one of `machines.jsonl`. The message lists each machine this inbox serves, since the inbox doesn't hand a card to the runner of another machine.
+- `machine` is another machine, and its rule doesn't cover the command, as [Another machine](#another-machine) describes.
 - A call doesn't give four string literals.
 - A name repeats, or also names a secret.
 - The command is empty or longer than 4,000 characters.
 
-The page shows the machine, the command exactly as the card gives it in a code block, what it changes, and a password field. The terminal client shows the same text and sends the person to the page, since it can't seal a password yet.
+The page shows the machine, the command exactly as the card gives it in a code block, what it changes, and a password field. For a machine that takes an approval, it shows a **Run this command on** box in place of the password field. Until `GET /v1/privileged/key` says which of the two the machine takes, the field shows neither, so a password can't go to a machine that takes an approval. The terminal client shows the same text and sends the person to the page, since it can't seal a password yet.
 
 ### The broker key
 
-The inbox makes an RSA-OAEP key pair, the broker key, the first time it needs one, and keeps it in memory only. A restart makes a new pair. `GET /v1/privileged/key` answers `{publicKey, machine}` to the owner. An agent or an extension gets 403, and an inbox with no broker answers 404.
+The inbox makes an RSA-OAEP key pair, the broker key, the first time it needs one, and keeps it in memory only. A restart makes a new pair. `GET /v1/privileged/key` answers `{publicKey, machine, machines}` to the owner. `machine` is the inbox's own machine, and `machines` lists `{name, sudo}` for it and for each machine of `machines.jsonl`, where `sudo` is `password` or `approval`. An agent or an extension gets 403, and an inbox with no broker answers 404.
 
-When the person sends the answer, the page reads the broker key. It seals `{"command": <the command it showed>, "password": <the typed password>}` as JSON text, with the same sealing as the `secret` widget, and sends the sealed object as the field's value. An empty password sends nothing for the field, and nothing runs.
+When the person sends the answer, the page reads the broker key. It seals `{"command": <the command it showed>, "machine": <the machine it showed>, "password": <the typed password>}` as JSON text, with the same sealing as the `secret` widget, and sends the sealed object as the field's value. For a machine that takes an approval, it seals `{"command": <the command>, "machine": <the machine>, "password": "", "approve": true}` once the person checks the box. An empty password, or a clear box, sends nothing for the field, and nothing runs. The inbox answers 400 to a password sealed for a machine that takes an approval, rather than send it anywhere.
 
 ### The run
 
@@ -575,26 +576,94 @@ The inbox takes these steps for each privileged field, inside the owner's `POST 
 
 1. A value that isn't sealed gets 400, so storage never gets a plain password.
 2. The inbox opens the value with the broker's private key, in memory. A value sealed before a restart doesn't open: the answer is 409, and the person types the password again.
-3. The inbox compares the sealed command with the card's command, character by character. When they differ, the answer is 409 and nothing runs. The message gives the position of the first character that differs, with the text around it in both commands. The inbox checks again after it writes the answer's images, against the card as it is then.
+3. The inbox compares the sealed command with the card's command, character by character. When they differ, the answer is 409 and nothing runs. The message gives the position of the first character that differs, with the text around it in both commands. The inbox checks again after it writes the answer's images, against the card as it is then. The inbox also compares the sealed machine with the card's, so a revision that moves the card to another machine gets 409 rather than carrying the password there.
 4. The answer is 409 when the agent closed the card, or when this field already ran or is running. A command runs once, and a new run needs a new card. Of two answers sent at the same moment, one runs the command and the other gets 409.
-5. The inbox starts the command with the shell of its machine, as the user that runs the inbox. It writes the password and a newline to the command's standard input, then closes it. The password never goes in an environment variable, an argument list, a file or a log. A run that takes more than 2 minutes is stopped.
+5. On its own machine, the inbox starts the command with the shell of its machine, as the user that runs the inbox. On another machine, it opens an `ssh` connection, as [Another machine](#another-machine) describes. It writes the password and a newline to the standard input of the process it starts, then closes it. On another machine, it writes them only after the far side has printed its mark. The password never goes in an environment variable, an argument list, a file or a log. A run that takes more than 2 minutes is stopped.
 6. In what the command printed, the inbox replaces each occurrence of the password with `[password]`, and keeps the last 64 KB.
 
-In the stored answer, the field holds `{command, machine, exitCode, output, ended?, audit, ranAt}`, and never the sealed value. `exitCode` is null when the run stopped early, and `ended` says why. Only the owner answers, so an agent's answer to its own card gets 403. A later answer to the card keeps the stored run. This answer goes to the agent stream, to hooks and to webhooks, like any other answer. The answer text for the agent reads `restart_nginx: ran on office-pc, exit code 0 (audit 1a2b3c4d). The command printed:`, with the output in a fenced block after it. A field without a password reads `restart_nginx: not run, because the person sent no password`.
+In the stored answer, the field holds `{command, machine, exitCode, output, ended?, audit, ranAt}`, and never the sealed value. `exitCode` is null when the run stopped early, and `ended` says why. Only the owner answers, so an agent's answer to its own card gets 403. A later answer to the card keeps the stored run. This answer goes to the agent stream, to hooks and to webhooks, like any other answer. The answer text for the agent reads `restart_nginx: ran on office-pc, exit code 0 (audit 1a2b3c4d). The command printed:`, with the output in a fenced block after it. When `exitCode` is null, the text reads `restart_nginx: on web1, ` followed by `ended`, such as `nothing ran on web1 or on this machine, because ssh could not connect to web1 (web1.lan): …`. When the person left the field empty, it reads `restart_nginx: not run, because the person sent no password or approval`.
 
 The `serve` process keeps the password in memory from the moment it opens it until the run ends. JavaScript can't wipe a string. So the process drops each reference to it, and the garbage collector frees that memory.
 
 ### The audit
 
-Each run adds one entry to the audit, in the inbox's storage: `{id, card, field, agent, command, machine, approvedBy, at, exitCode, ended?}`. `approvedBy` is the name of the owner token that sent the answer. `GET /v1/privileged/audit` answers `{audit}`, oldest first, to the owner, and 403 to an agent or an extension. The inbox has no route to change or delete an entry. On the computer that runs your own inbox, the agent runs as the same user as the inbox. It could still edit the SQLite file on disk. The remote version keeps the audit on the machine that runs the command.
+Each run adds one entry to the audit, in the inbox's storage: `{id, card, field, agent, command, machine, approvedBy, at, exitCode, ended?}`. `approvedBy` is the name of the owner token that sent the answer. `GET /v1/privileged/audit` answers `{audit}`, oldest first, to the owner, and 403 to an agent or an extension. The inbox has no route to change or delete an entry. On the computer that runs your own inbox, the agent runs as the same user as the inbox, so it could still edit the SQLite file on disk. A run on another machine also writes its audit line to that machine's system log, as [Another machine](#another-machine) describes.
 
-### The remote version
+### Another machine
 
-The remote version uses the same widget, key and checks, and runs the command over an `ssh` connection to the machine on the card. The password then goes to that machine only, not to the agent's machine. A real privileged command also needs these:
+`~/.your-attention/machines.jsonl` lists the other machines, one JSON object per line. `serve` reads it when it starts:
 
-- `sudo -S` with an empty prompt, so the command reads the password on its standard input.
-- A `sudoers` rule that lists each command that the person may approve.
-- An audit line in the system log of that machine, which the agent's user can't write to.
+```
+{"name": "web1", "host": "web1.lan", "user": "deploy", "sudo": "password", "allow": ["/usr/bin/systemctl restart nginx"]}
+{"name": "nas", "user": "admin", "sudo": "approval", "allow": ["/usr/bin/systemctl restart smbd"]}
+```
+
+- `name` is the machine a card names.
+- `host` is the `ssh` destination, `name` by default, and `port` its port, which the broker passes as `-p`.
+- `user` is the account `ssh` logs in as, which the sudoers rule names.
+- `hostname` is the short name `uname -n` prints on that machine, up to its first dot. It defaults to `name` up to its first dot. `serve` refuses a line whose `hostname` is the inbox's own short name.
+- `sudo` is `password` for a machine whose `sudo` asks for the person's password, or `approval` for one whose sudoers rule needs none.
+- `allow` lists each command a person may approve there, as a card shows it. Each one starts with an absolute path made of letters, digits and `. _ / + -`, since sudoers reads a path as a pattern.
+
+`serve` logs each line it can't read and leaves that machine out, so a card for it gets 400. `serve` also refuses a line for the inbox's own machine, and a line that repeats the name of an earlier one. `your-attention machines` lists the machines, and `your-attention machines sudoers <name>` prints the sudoers rule for one of them.
+
+#### The words of a command
+
+The broker reads a command's words as `sh` would. Text in single quotes stays as it is. In double quotes, `\"` and `\\` become one character each. Outside quotes, a backslash keeps the next character. The broker doesn't run shell syntax, so it refuses a command with an unquoted shell character, one of ``| & ; < > ( ) $ ` * ? [ ] { } # ~ !``. It also refuses a `$` or a backquote inside double quotes, and a line break. The refusal gives the character and its position. Put text with those characters in single quotes.
+
+A command is covered when one command in `allow` has exactly its words, so `'a b'` and `a\ b` match, and `a b` does not. A card whose command isn't covered gets 400 when the agent posts it, and the runner checks again before it starts `ssh`. The message says the sudoers rule doesn't cover the command and lists the `allow` entries. It ends with the `your-attention machines sudoers` command. The broker refuses on its own, rather than leave `sudo` to refuse.
+
+#### The connection
+
+The broker starts one process on the inbox's machine, `ssh`, with these arguments:
+
+```
+ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o PermitLocalCommand=no -l deploy -- web1.lan '<line>'
+```
+
+`BatchMode` means `ssh` never prompts, so nothing reads the password meant for `sudo`. `StrictHostKeyChecking` refuses a host whose key isn't in `known_hosts`. The login shell on the far side, which must read POSIX `sh` syntax, runs this line:
+
+```
+h=$(uname -n); h=${h%%.*}; if [ "$h" != 'web1' ]; then echo "your-attention: this machine is $h, not "'web1'", so nothing ran" >&2; exit 97; fi; logger -t your-attention -p authpriv.notice -- 'audit <id>: <approvedBy> approved card <card> field <field> to run on web1: <command>' || { echo 'your-attention: the system log took no audit line, so nothing ran' >&2; exit 98; }; echo 'your-attention: audit <id> is in the system log of web1, and sudo starts now' >&2; exec sudo -k -S -p '' -- '/usr/bin/systemctl' 'restart' 'nginx'
+```
+
+Each word of the command is in single quotes, so the far shell gets the same words that the broker read. `sudo` then runs those words without a shell. For a machine that takes an approval, the line ends with `exec sudo -k -n --` and the broker writes nothing to standard input. `-k` makes `sudo` ignore a cached credential, so it reads the password each time, and `-n` makes it fail rather than ask.
+
+#### The path of the password
+
+The password goes from the page, sealed, to the inbox's memory. The broker holds it until the far side prints its mark, which it does only after it checked its own name and wrote the audit line. Then the broker writes it to the standard input of `ssh`. A far side that is another machine exits before the mark, so it doesn't receive any of the password. `ssh` sends it through its encrypted channel to the far `sshd`, which hands it to the login shell's standard input. By then the shell has only `exec sudo` left to run, so `sudo` reads the password through `-S`. No argument list, environment variable or file on either machine holds it. While the command runs, `ps` shows these processes:
+
+- On the inbox's machine, `ssh` with the arguments above. The line contains the command, the audit id, the card and the approver, but not the password.
+- On the far machine, `sshd: deploy@notty` and the shell that runs the line. Then `exec` turns the shell into `sudo -k -S -p  -- /usr/bin/systemctl restart nginx`, and its child is the command, running as root.
+
+`sudo -S` reads the password only when the sudoers rule requires one. When a broader rule on a `password` machine, such as `NOPASSWD: ALL`, also covers the command, `sudo` skips the read, and the password stays on the command's standard input. The broker masks it in what the command prints. List such a machine as `approval`.
+
+#### Refusals
+
+In each of these cases, the command doesn't run on either machine, and the broker doesn't fall back to its own machine. The runner of another machine starts only `ssh`, never a shell or the command. The run's `exitCode` is null, and `ended` starts with `nothing ran on web1 or on this machine, because`:
+
+- The connection fails. `ssh` exits with 255 before the far side printed its mark, and `ended` gives the last line `ssh` printed, such as `Connection refused`.
+- The far side is another machine. Its short `uname -n` differs from `hostname`, and it exits with 97 before it writes or runs anything.
+- The far system log takes no audit line. `logger` fails, and the far side exits with 98.
+
+The broker refuses a command that the rule doesn't cover before `ssh` starts. A connection that drops after the mark is not a refusal: `ended` says the command may have run in part, and that the far system log holds the audit id.
+
+#### The audit on the far machine
+
+Before `sudo` starts, the far side writes the audit line to its system log with `logger`, at `authpriv.notice`, tagged `your-attention`. The line contains the same audit id as the answer and the inbox's audit. A failed write stops the run. `sudo` then writes its own line, as root, with the user and the command. The agent's user on the inbox's machine can't change either line. The far user can add a line with `logger`, but can't remove one.
+
+#### The sudoers rule
+
+`your-attention machines sudoers web1` prints the rule for `/etc/sudoers.d/your-attention` on that machine. Install it with `sudo visudo -f /etc/sudoers.d/your-attention`, which checks it first:
+
+```
+Cmnd_Alias YOUR_ATTENTION_WEB1 = /usr/bin/systemctl restart nginx
+deploy ALL=(root) YOUR_ATTENTION_WEB1
+```
+
+An `approval` machine's rule reads `NOPASSWD: YOUR_ATTENTION_NAS`. The rule escapes each character that sudoers reads as syntax or as a wildcard. `sudo` compares the arguments as one string joined by spaces, so `'a b'` and `a b` would match the same rule. So `serve` refuses an `allow` entry with an empty argument or an argument that contains whitespace, since sudoers can't list either exactly.
+
+The `ssh` key the broker uses is the inbox user's, which an agent running as that user can also read. On a `password` machine, that key opens the far account, and `sudo` still asks for the password. On an `approval` machine, an agent that uses the key can run the allowed commands without a card. Give an `approval` machine a key that the agent's user can't read, or keep its allowed commands harmless.
 
 ## One-time codes
 

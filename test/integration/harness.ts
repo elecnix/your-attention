@@ -140,17 +140,6 @@ export function runCliWithInput(env: NodeJS.ProcessEnv, input: string, ...args: 
   });
 }
 
-/** Every file under `dir` whose bytes contain `text`, for a test that proves a secret reached no file. */
-export function filesHolding(dir: string, text: string): string[] {
-  const found: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true, recursive: true })) {
-    if (!entry.isFile()) continue;
-    const file = path.join(entry.parentPath, entry.name);
-    if (fs.readFileSync(file).includes(text)) found.push(file);
-  }
-  return found;
-}
-
 /** Start `your-attention serve` as its own process in a temporary home, which is what tests of the CLI itself need.
  * `setup` runs in that home before the inbox starts, for state the inbox reads once at start, such as its secret sources. */
 export async function serveForTest(prefix = 'ya-cli-', setup?: (env: NodeJS.ProcessEnv, yaHome: string) => Promise<void>, opts: { output?: string[] } = {}): Promise<CliServer> {

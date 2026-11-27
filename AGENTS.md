@@ -156,6 +156,13 @@ flowchart TB
   BROWSER -- "inside the owner's answer: the shown command and the password, sealed to the broker key" --> BK
   BK -- "the password on standard input, for one run" --> RUN
   RUN -- "what it printed, the password masked" --> INBOX
+  subgraph FAR["another machine of machines.jsonl, which the broker reaches with the inbox user's ssh key"]
+    FSUDO["sudo -S: the one command of the card, which the sudoers rule lists"]
+    FLOG[("system log: the audit line, then sudo's own line")]
+  end
+  BK -- "the password on the standard input of ssh, through its encrypted channel, for one run" --> FSUDO
+  FSUDO -- "what it printed, which the inbox masks" --> INBOX
+  FSUDO -. "the audit line first, then sudo's own" .- FLOG
   OJ -- "otp enroll, owner only: the key and a current code, once" --> INBOX
   INBOX -- "the key, at enrollment" --> OK
   OK -- "the key, inside one redemption, to compute one code" --> INBOX
@@ -173,6 +180,7 @@ flowchart TB
 - Your own inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. When the inbox has a PIN, the new tab opens the file only with a ticket that an unlocked tab asked for, which works once within 60 seconds. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
 - A secret source releases a value only inside the owner's `POST /v1/cards/<id>/answer`, and seals it to the public key on the card before the value leaves the source. Of the value, the inbox stores only that ciphertext. A lookup answers metadata only, and an agent or extension token gets 403 on the answer and on the revoke route. Hooks, webhooks and triage never see a grant.
 - A password for a privileged action is sealed to the broker key, never to a key on the card, so no agent session can open it. Your own inbox opens it in memory inside the owner's answer and refuses a command that differs from the card's. It then writes the password to the command's standard input, and stores only the output, with the password masked. The `serve` process keeps the broker key in memory and makes a new one at each start. The hosted inbox has no broker and refuses the card.
+- A privileged action on another machine runs over an `ssh` connection that the broker opens to the machine on the card, and to that one only. The password goes to the standard input of `ssh`, and from there to `sudo -S` on the far side. Argument lists, environment variables and files on either machine don't get it. When the connection fails, the run ends there, and the broker doesn't fall back to its own machine. The far side checks its own name, and writes the audit line to its system log before `sudo` starts. The broker uses the inbox user's `ssh` key. An agent that runs as that user can read the key too. On a machine whose sudoers rule doesn't ask for a password, an agent with that key can run the allowed commands.
 - A granted secret opens only in the memory of the session that posted the card, and each command gets it in its environment, never in argv or a file. In Claude Code the shell reads it from the channel's socket, mode 0600 in a folder of mode 0700, with a token that works once within 30 minutes. A revoke ends the grant before the next command.
 - A TOTP key is the one secret the inbox keeps whole, which is the exception to the first rule above. The inbox computes each code with an HMAC keyed by the key itself, and a hash of the key computes nothing. Your own inbox keeps the keys in `otp-keys.json`, mode 0600, beside `owner-token`, and stores only each key's label, allowlist and SHA-256 checksum in SQLite. The hosted inbox encrypts each key with AES-GCM under a key that HKDF derives from the Worker secret `OTP_KEY_SECRET` and the inbox's id. At enrollment, the owner gives the key to the inbox, once. After that, no route, page, terminal client or agent gets the key back. The inbox computes a code only when the session that posted an approved otp card redeems its ticket, and the code leaves the inbox sealed to that card's public key alone. The inbox records when it issued a code, never the code. [SPEC.md](SPEC.md#key-storage) holds the details.
 - An agent's answer webhook gets nothing until the person approves it on its system card. The inbox keeps the header values the agent gave, and sends them only to that webhook, never to a client or a page. The signing secret goes to the agent once.
@@ -245,7 +253,7 @@ A change a person can see needs a picture in the pull request body, because the 
 
 A change to the web interface needs a screenshot of the screen it changes, and of the screen before it when the layout moved. A diff of JavaScript says nothing about what the page draws.
 
-When a pull request changes what a terminal prints, put a terminal screenshot in the body. Take one with `scripts/terminal-shot.sh`, which runs the command in a tmux session of a fixed size and renders the capture to a PNG with the headless browser already on the machine. It needs tmux and a browser, and it doesn't call a service or a skill:
+When a pull request changes what a terminal prints, put a terminal screenshot in the body. Take one with `scripts/terminal-shot.sh`, which runs the command in a tmux session of a fixed size and renders the capture to a PNG with the headless browser already on the machine. It needs tmux and a browser, and it doesn't call a service or a skill. It takes the browser that `TERMINAL_SHOT_BROWSER` names, or else the first one it finds on `PATH`, in `/Applications` as Google Chrome or Chromium, or in Playwright's download folder. On macOS, Chrome is not on `PATH`, so when the script doesn't find a browser, set `TERMINAL_SHOT_BROWSER` to the Chrome executable. Never wrap, link or replace a browser executable to make the script find it, because a write through a link replaces the browser itself:
 
 ```sh
 scripts/terminal-shot.sh -W 132 -H 28 -o install.png -- your-attention install

@@ -16,7 +16,8 @@ import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { localRunner } from '../../src/node/privileged.ts';
 import { seal } from '../../web/sealed.js';
-import { filesHolding, ROOT, start, until, type Harness } from './harness.ts';
+import { filesHolding } from '../files-holding.ts';
+import { ROOT, start, until, type Harness } from './harness.ts';
 
 const PASSWORD = 'FIXTURE-PASSWORD-DO-NOT-USE';
 const MACHINE = 'test-machine';
@@ -42,7 +43,7 @@ const placement = (name: string, command: string) => `root = Card([run])\nrun = 
 async function sealAsPage(command: string): Promise<unknown> {
   const key = await (await h.owner('GET', '/v1/privileged/key')).json() as { publicKey: JsonWebKey; machine: string };
   assert.equal(key.machine, MACHINE);
-  return seal(key.publicKey, JSON.stringify({ command, password: PASSWORD }));
+  return seal(key.publicKey, JSON.stringify({ command, machine: MACHINE, password: PASSWORD }));
 }
 
 describe('a privileged action on the laptop server', () => {

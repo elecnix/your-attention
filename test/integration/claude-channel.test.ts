@@ -10,7 +10,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { DEFAULT_GUIDANCE, DEFAULT_GUIDANCE_VERSION } from '../../src/core/inbox.ts';
 import type { Card } from '../../src/core/types.ts';
 import { seal } from '../../web/sealed.js';
-import { filesHolding, ROOT, runHook, start, until, type Harness } from './harness.ts';
+import { ROOT, runHook, start, until, type Harness } from './harness.ts';
+import { filesHolding } from '../files-holding.ts';
 
 let h: Harness;
 let mcp: McpClient;
