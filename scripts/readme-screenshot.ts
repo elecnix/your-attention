@@ -1,34 +1,27 @@
-// Draws docs/screenshot.png, the README's picture of the inbox, from made-up cards on a fresh inbox.
+// Draws docs/screenshot.png, the README's picture of the inbox, from made-up cards on a fresh inbox. The open card asks
+// for a key through the secret widget, so the picture shows a sealed field as the person sees it.
 // Run it after a change to the page: node --disable-warning=ExperimentalWarning scripts/readme-screenshot.ts
+// It draws dark, as the README shows it. `scripts/readme-screenshot.ts light /tmp/light.png` draws another scheme to another
+// file, for a pull request that wants both.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import zlib from 'node:zlib';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import { Client } from '../src/client.ts';
+import { SecretRequests } from '../src/integrations/secrets.ts';
 import { serve } from '../src/node/server.ts';
 
-/** A one-color PNG, as a data: URL. */
-function swatch(rgb: [number, number, number], w = 172, h = 138): string {
-  const crc = (b: Buffer): number => {
-    let c = ~0;
-    for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); }
-    return ~c >>> 0;
-  };
-  const chunk = (type: string, data: Buffer): Buffer => {
-    const td = Buffer.concat([Buffer.from(type), data]);
-    const out = Buffer.alloc(12 + data.length);
-    out.writeUInt32BE(data.length, 0);
-    td.copy(out, 4);
-    out.writeUInt32BE(crc(td), 8 + data.length);
-    return out;
-  };
-  const head = Buffer.alloc(13);
-  head.writeUInt32BE(w, 0); head.writeUInt32BE(h, 4); head[8] = 8; head[9] = 2;
-  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: w }, () => rgb).flat())]);
-  const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', head), chunk('IDAT', zlib.deflateSync(Buffer.concat(Array.from({ length: h }, () => row)))), chunk('IEND', Buffer.alloc(0))]);
-  return `data:image/png;base64,${png.toString('base64')}`;
+// The README shows the dark picture, so only a dark run with no path writes docs/screenshot.png.
+const [scheme = 'dark', given] = process.argv.slice(2);
+if (scheme !== 'dark' && scheme !== 'light') {
+  console.error(`usage: readme-screenshot.ts [dark|light] [out.png]. "${scheme}" isn't a scheme, so nothing was drawn`);
+  process.exit(2);
 }
+if (scheme === 'light' && !given) {
+  console.error('usage: readme-screenshot.ts light out.png. A light picture needs its own path, because docs/screenshot.png is the dark one');
+  process.exit(2);
+}
+const out = given ?? path.join(import.meta.dirname, '..', 'docs', 'screenshot.png');
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-screenshot-'));
 const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report' } });
@@ -39,35 +32,55 @@ server.inbox.pin.setNeverAsk(true);
 const agent = new Client({ url: server.url, token: fs.readFileSync(path.join(home, 'agent-token'), 'utf8').trim() });
 const stop = new AbortController();
 try {
-  const measurements = '# Measurements\n\n| Layout | Titles shown | Time to answer |\n| --- | --- | --- |\n| A | 14 | 9.1 s |\n| B | 11 | 7.4 s |\n';
-  await agent.post({
-    id: 'queue-layout', agent: 'queue-layout', title: 'Which queue layout should ship?', priority: 'now',
-    origin: { name: 'queue-layout', harness: 'claude-code', host: 'laptop', cwd: '~/src/inbox' },
-    text: 'I measured both layouts on 100 cards. Layout A shows more titles, and layout B shows the priority of each. It also affects [[rollout]].',
-    recommendation: 'Layout B: the priority is what you scan for.',
-    attachments: [
-      { src: swatch([66, 90, 214]), name: 'layout-a.png', alt: 'Layout A' },
-      { src: swatch([214, 132, 52]), name: 'layout-b.png', alt: 'Layout B' },
-      { src: `data:text/markdown;base64,${Buffer.from(measurements).toString('base64')}`, name: 'measurements.md' },
-    ],
-    options: [{ id: 'a', label: 'Layout A', description: 'More titles on screen' }, { id: 'b', label: 'Layout B', description: 'Priority on every row' }],
+  // card_post fills the widget's public key the same way, so the page seals the value as it would for a real agent.
+  const secrets = new SecretRequests();
+  const sealing = await secrets.prepare([
+    'root = Card([key, scope])',
+    'key = widget secret {"name": "OLLAMA_API_KEY"}',
+    'scope = Form("scope", none, [which])',
+    'none = Buttons([])',
+    'which = FormControl("What should the run do with it?", RadioGroup("run", [RadioItem("Run tonight at 02:00", "", "tonight"), RadioItem("Run once now, then tonight", "", "now")]))',
+  ].join('\n'));
+  const posted = await agent.post({
+    id: 'eval-key', agent: 'nightly-eval', title: 'Give the nightly eval run an Ollama API key?', priority: 'now',
+    origin: { name: 'nightly-eval', harness: 'claude-code', host: 'laptop', cwd: '~/src/evals' },
+    text: [
+      'The nightly eval run scores 240 prompts against `glm-5.1:cloud` at 02:00. It failed the last two nights with `401 Unauthorized`, because the key in the runner\'s environment was revoked on Nov 25.',
+      '',
+      '```mermaid',
+      'flowchart LR',
+      '  A[Your answer] -- sealed in your browser --> V[(Sealed value)]',
+      '  V -- opened in this session --> G[Grant, 1 hour]',
+      '  G -- OLLAMA_API_KEY --> C[Environment of each command]',
+      '  G -. never .-> M[The model]',
+      '```',
+      '',
+      'Type a key below and your browser seals it to this session\'s public key before it leaves the page. Only this session can open it. Each command it runs gets the value as `$OLLAMA_API_KEY` for one hour, and the model, the inbox, the hooks and the transcript never see it.',
+    ].join('\n'),
+    recommendation: 'Create a key for this run alone at [ollama.com/settings/keys](https://ollama.com/settings/keys), so you can revoke it without breaking anything else.',
+    body: sealing.body,
   });
+  sealing.keep(posted.id);
   await agent.post({ id: 'rollout', agent: 'release', title: 'Approve the rollout plan?', priority: 'soon', text: 'The plan rolls out to 10% of users first.', options: [{ id: 'y', label: 'Approve' }, { id: 'n', label: 'Hold' }] });
   await agent.post({ id: 'retry-flag', agent: 'cleanup', title: 'Rename the retry flag before the release?', priority: 'later', text: '`--retries` reads better than `--retry-count`.', options: [{ id: 'y', label: 'Rename' }, { id: 'n', label: 'Keep' }] });
-  await agent.post({ id: 'api-tests', agent: 'api-tests', title: 'api-tests is waiting for you', priority: 'now', text: 'The test run needs a staging key.' });
   // The open card's agent listens, so the card shows it can take the answer now.
-  void agent.stream('queue-layout', () => {}, stop.signal);
+  void agent.stream('nightly-eval', () => {}, stop.signal);
 
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: 'dark' });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, colorScheme: scheme });
   await page.goto(`${server.url}/#token=${server.ownerToken}`);
   await page.locator('.bar .pill.on').waitFor();
-  await page.locator('.q', { hasText: 'Which queue layout should ship?' }).click();
-  await page.locator('.focus-card .recommendation').waitFor();
-  await page.locator('.focus-card img').last().waitFor();
+  await page.locator('.q', { hasText: 'Give the nightly eval run an Ollama API key?' }).click();
+  // The field shows the made-up value below as dots. It is no key, works nowhere, and says so, so a reader who
+  // recovers it from the picture finds nothing to use.
+  await page.getByLabel('OLLAMA_API_KEY', { exact: true }).fill('fixture-not-a-key-0000000000000000');
+  // A click that lands before the radio group is ready changes nothing, so the check repeats until it holds.
+  await expect(async () => { await page.getByLabel('Run tonight at 02:00').check({ timeout: 2000 }); }).toPass({ timeout: 15000 });
+  await page.locator('.focus-card svg[id^="diagram-"]').first().waitFor();
   await page.mouse.move(0, 0);
+  // The page grows with the diagram, so the picture takes its full height and cuts no part of the card.
+  await page.setViewportSize({ width: 1440, height: await page.evaluate(() => document.documentElement.scrollHeight) });
   await page.waitForTimeout(500);
-  const out = path.join(import.meta.dirname, '..', 'docs', 'screenshot.png');
   await page.screenshot({ path: out });
   await browser.close();
   console.log(`wrote ${out}`);
