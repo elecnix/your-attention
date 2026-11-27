@@ -15,7 +15,7 @@ import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { localRunner, sshRunner } from '../../src/node/privileged.ts';
 import { seal } from '../../web/sealed.js';
-import { ROOT, start, until, type Harness } from './harness.ts';
+import { filesHolding, ROOT, start, until, type Harness } from './harness.ts';
 
 const PASSWORD = 'FIXTURE-PASSWORD-DO-NOT-USE';
 const FAKE_SSH = path.join(ROOT, 'test', 'fixtures', 'fake-ssh.mjs');
@@ -52,20 +52,6 @@ async function sealAsPage(plain: Record<string, unknown>): Promise<unknown> {
 
 /** Each line of a record the fake ssh or a far stand-in wrote, or none. */
 const lines = (file: string): string[] => { try { return fs.readFileSync(path.join(dir, file), 'utf8').split('\n').filter(Boolean); } catch { return []; } };
-
-/** Every file under `root` whose bytes hold `needle`. */
-function filesHolding(root: string, needle: string): string[] {
-  const hits: string[] = [];
-  const walk = (d: string) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile() && fs.readFileSync(p).includes(needle)) hits.push(p);
-    }
-  };
-  walk(root);
-  return hits;
-}
 
 const agentCtx = (agent: string) => ({ inbox: new Client({ url: h.server.url, token: h.agentToken }), secrets: new SecretRequests(), agent, origin: async () => undefined, arrival: 'later' });
 

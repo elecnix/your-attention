@@ -434,14 +434,7 @@ function SecretInput({ props }) {
   if (!window.isSecureContext || !crypto.subtle) {
     return h('div', { className: 'note warn' }, 'This page cannot seal a secret over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.');
   }
-  const change = (next) => {
-    setValue(next);
-    if (sealFailures.get(card)?.delete(name)) secretsChanged();
-    const fields = typedSecrets.get(card) ?? new Map();
-    if (next) fields.set(name, { publicKey, value: next });
-    else fields.delete(name);
-    typedSecrets.set(card, fields);
-  };
+  const change = (next) => { setValue(next); rememberTyped(card, name, next && { publicKey, value: next }); };
   return h('span', { className: 'secret' },
     h('span', { className: 'secret-field' },
       h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
@@ -503,6 +496,16 @@ function SecretAccess({ props }) {
     failure && h('div', { className: 'note warn', role: 'alert' }, `${name} could not be sealed, so nothing was sent: ${failure}. Ask the agent to post the card again.`));
 }
 
+/** Keep what the person typed in a card's sealed field until Send answer seals it, or forget it when `entry` is empty.
+ * A change clears the field's last sealing failure. */
+function rememberTyped(card, name, entry) {
+  if (sealFailures.get(card)?.delete(name)) secretsChanged();
+  const fields = typedSecrets.get(card) ?? new Map();
+  if (entry) fields.set(name, entry);
+  else fields.delete(name);
+  typedSecrets.set(card, fields);
+}
+
 /** How each machine the broker serves takes a privileged action, "password" or "approval", as the inbox last said. */
 const machineSudo = new Map();
 
@@ -534,14 +537,7 @@ function PrivilegedAction({ props }) {
   React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.privileged = { ...typed.privileged, command }; }, [card, name, command]);
   const failure = sealFailures.get(card)?.get(name);
   const canSeal = !!(window.isSecureContext && crypto.subtle);
-  const change = (next) => {
-    setValue(next);
-    if (sealFailures.get(card)?.delete(name)) secretsChanged();
-    const fields = typedSecrets.get(card) ?? new Map();
-    if (next) fields.set(name, { privileged: { command, ...(approval ? { approve: true } : {}) }, value: next });
-    else fields.delete(name);
-    typedSecrets.set(card, fields);
-  };
+  const change = (next) => { setValue(next); rememberTyped(card, name, next && { privileged: { command, ...(approval ? { approve: true } : {}) }, value: next }); };
   if (approval) {
     return h('fieldset', { className: 'secret privileged' },
       h('legend', null, `Run on ${machine}`),

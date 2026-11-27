@@ -172,3 +172,17 @@ export async function serveForTest(prefix = 'ya-cli-', setup?: (env: NodeJS.Proc
     close: () => stopAndRemove(serve, home),
   };
 }
+
+/** Every file under `dir` whose bytes hold `needle`, such as a fixture password that must never reach the disk. */
+export function filesHolding(dir: string, needle: string): string[] {
+  const hits: string[] = [];
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile() && fs.readFileSync(p).includes(needle)) hits.push(p);
+    }
+  };
+  walk(dir);
+  return hits;
+}
