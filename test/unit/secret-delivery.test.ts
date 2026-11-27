@@ -1,0 +1,298 @@
+// The session side of a secret_access grant: receive opens the sealed value into the grant store, the harness takes
+// it for each command, and nothing reaches a file. SPEC.md#delivery-in-the-session holds the contract.
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, it } from 'node:test';
+import type { AccessGrant } from '../../src/core/secret-sources.ts';
+import { newSealKeys, sealValue } from '../../src/core/sealed.ts';
+import type { Answer, Card } from '../../src/core/types.ts';
+import { SecretRequests } from '../../src/integrations/secrets.ts';
+import { Redactor } from '../../src/secrets/redact.ts';
+import { Grants } from '../../src/secrets/grant.ts';
+import { installSecretBash, type PiTools } from '../../src/integrations/pi/secret-bash.ts';
+
+const T0 = Date.UTC(2026, 10, 27, 12, 0);
+const MIN = 60_000;
+const VALUE = 'postgres://demo:not-a-real-password@db.invalid/app';
+
+/** A session that posted card `id` asking for DATABASE_URL, and the access grant the inbox stores when the person grants it. */
+async function granted(secrets: SecretRequests, id: string, until: number, extra: Partial<AccessGrant> = {}): Promise<{ card: Card; answer: Answer }> {
+  const { publicKey, privateKey } = await newSealKeys();
+  secrets.remember(id, privateKey);
+  const card = { id, agent: 'pi:s1', title: 'Database?', secrets: ['DATABASE_URL'], createdAt: T0 } as unknown as Card;
+  const value: AccessGrant = { grant: 'db', source: 'age', instance: 'laptop', until, case: `case-${id}`, sealed: await sealValue(publicKey, VALUE), ...extra };
+  return { card, answer: { values: { DATABASE_URL: value }, answeredAt: T0 } as unknown as Answer };
+}
+
+/** A session at T0 that received a grant of DATABASE_URL on card `id`, and the line the model read about it. */
+async function received(id: string, until: number, extra: Partial<AccessGrant> = {}): Promise<{ secrets: SecretRequests; text: string }> {
+  const secrets = new SecretRequests(() => T0);
+  const { card, answer } = await granted(secrets, id, until, extra);
+  return { secrets, text: await secrets.receive(card, answer) };
+}
+
+describe('a secret_access grant in the session', () => {
+  it('tells the model the name, the case id and both deadlines, and never the value or a path', async () => {
+    const { text } = await received('c1', T0 + 60 * MIN);
+    assert.match(text, /DATABASE_URL is available to this session until 2026-11-27 13:00 UTC/);
+    assert.match(text, /after 15 min unused \(case case-c1\)/);
+    assert.match(text, /\$DATABASE_URL/);
+    assert.doesNotMatch(text, /not-a-real-password/);
+    assert.doesNotMatch(text, /\//, 'no path');
+  });
+
+  it('ends on the idle window when nothing uses it, and a use restarts that window', async () => {
+    let now = T0;
+    const secrets = new SecretRequests(() => now);
+    const { card, answer } = await granted(secrets, 'c2', T0 + 4 * 60 * MIN);
+    await secrets.receive(card, answer);
+    now += 14 * MIN;
+    assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE }, 'used at 14 minutes');
+    now += 14 * MIN;
+    assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE }, 'the use restarted the window');
+    now += 15 * MIN;
+    assert.deepEqual(secrets.env('pi:s1'), {}, '15 minutes unused');
+  });
+
+  it('ends at the ceiling from the card, however often it is used', async () => {
+    let now = T0;
+    const secrets = new SecretRequests(() => now);
+    const { card, answer } = await granted(secrets, 'c3', T0 + 30 * MIN);
+    await secrets.receive(card, answer);
+    for (let i = 0; i < 5; i++) {
+      now += 5 * MIN;
+      assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE });
+    }
+    now += 5 * MIN;
+    assert.equal(now, T0 + 30 * MIN);
+    assert.deepEqual(secrets.env('pi:s1'), {}, 'used a moment before, and dead at the ceiling all the same');
+    assert.equal(secrets.holds('pi:s1'), false);
+  });
+
+  it('ends on a revoke, at the next command rather than at the next expiry', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { card, answer } = await granted(secrets, 'c4', T0 + 60 * MIN);
+    await secrets.receive(card, answer);
+    assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE });
+    assert.equal(secrets.revoke('case-c4'), true);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+    assert.equal(secrets.revoke('case-c4'), false, 'a case id ends once');
+    assert.equal(secrets.mask(`url=${VALUE}`), 'url=[secret DATABASE_URL]', 'the value stays masked after the grant ends');
+  });
+
+  it('ignores a revoke for a grant this session does not hold, such as one the inbox kept across a restart', async () => {
+    const secrets = new SecretRequests(() => T0);
+    assert.equal(secrets.revoke('case-from-before'), false, 'a session with no grants');
+    const { card, answer } = await granted(secrets, 'c9', T0 + 60 * MIN);
+    await secrets.receive(card, answer);
+    assert.equal(secrets.revoke('case-of-another-session'), false);
+    assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE }, 'the live grant is untouched');
+  });
+
+  it('holds no grant for an answer that arrives after its ceiling, and says the grant ended', async () => {
+    const { secrets, text } = await received('c10', T0 - MIN);
+    assert.match(text, /DATABASE_URL on card c10 \(case case-c10\) ended at 2026-11-27 11:59 UTC/);
+    assert.doesNotMatch(text, /Every command you run gets it/);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+  });
+
+  it('ends an earlier grant of the same name when a later answer declines or revokes it', async () => {
+    for (const later of [{ decline: true }, 'revoked'] as const) {
+      const secrets = new SecretRequests(() => T0);
+      const first = await granted(secrets, 'c11', T0 + 60 * MIN);
+      await secrets.receive(first.card, first.answer);
+      const second = await granted(secrets, 'c12', T0 + 60 * MIN, { revokedAt: T0 });
+      const value = later === 'revoked' ? second.answer.values['DATABASE_URL'] : later;
+      const text = await secrets.receive(second.card, { ...second.answer, values: { DATABASE_URL: value } });
+      assert.match(text, /this session has no DATABASE_URL/);
+      assert.deepEqual(secrets.env('pi:s1'), {}, `the earlier grant ends on a later ${later === 'revoked' ? 'revoke' : 'decline'}`);
+    }
+  });
+
+  it('ends every grant that shares a case id on one revoke', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const one = await granted(secrets, 'c13', T0 + 60 * MIN, { case: 'shared' });
+    await secrets.receive(one.card, one.answer);
+    const two = await granted(secrets, 'c14', T0 + 60 * MIN, { case: 'shared' });
+    await secrets.receive({ ...two.card, secrets: ['OPENAI_KEY'] } as Card, { ...two.answer, values: { OPENAI_KEY: two.answer.values['DATABASE_URL'] } });
+    assert.deepEqual(Object.keys(secrets.env('pi:s1')).sort(), ['DATABASE_URL', 'OPENAI_KEY']);
+    assert.equal(secrets.revoke('shared'), true);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+  });
+
+  it('says which fields it granted, and that a value under four characters is not masked', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { publicKey, privateKey } = await newSealKeys();
+    secrets.remember('c15', privateKey);
+    const card = { id: 'c15', agent: 'pi:s1', title: 'Pins?', kind: 'question', secrets: ['PIN', 'NOTE'], createdAt: T0 } as unknown as Card;
+    const result = await secrets.receiveDetail(card, { values: { PIN: await sealValue(publicKey, 'abc'), NOTE: { decline: true } }, answeredAt: T0 } as unknown as Answer);
+    assert.deepEqual(result.granted, ['PIN']);
+    assert.match(result.text, /PIN is shorter than 4 characters, so output that shows it is not masked/);
+    assert.doesNotMatch(result.text, /Output that shows the value reads \[secret PIN\]/);
+    const plain = await secrets.receiveDetail({ ...card, id: 'c16', secrets: [] } as Card, { values: {}, answeredAt: T0 } as unknown as Answer);
+    assert.deepEqual(plain.granted, [], 'an answer with no secret grants nothing, even while an earlier grant lives');
+  });
+
+  it('leaves another card\'s live grant of the same name alone when a late answer arrives past its ceiling', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const live = await granted(secrets, 'c17', T0 + 60 * MIN);
+    await secrets.receive(live.card, live.answer);
+    const late = await granted(secrets, 'c18', T0 - MIN);
+    assert.match(await secrets.receive(late.card, late.answer), /ended at/);
+    assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE });
+  });
+
+  it('starts a typed value\'s hour when the person answered, so an answer delivered late gets no fresh hour', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { publicKey, privateKey } = await newSealKeys();
+    secrets.remember('c19', privateKey);
+    const card = { id: 'c19', agent: 'pi:s1', title: 'Key?', kind: 'question', secrets: ['TYPED'], createdAt: T0 } as unknown as Card;
+    const sealed = await sealValue(publicKey, 'typed-value-not-real');
+    const late = await secrets.receive(card, { values: { TYPED: sealed }, savedAt: T0 - 2 * 60 * MIN } as unknown as Answer);
+    assert.match(late, /TYPED on card c19 ended at 2026-11-27 11:00 UTC/);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+    const recent = await secrets.receive(card, { values: { TYPED: sealed }, savedAt: T0 - 10 * MIN } as unknown as Answer);
+    assert.match(recent, /until 2026-11-27 12:50 UTC/);
+  });
+
+  it('delivers a grant whose name is __proto__', () => {
+    const grants = new Grants(() => T0);
+    grants.hold({ name: '__proto__', agent: 'a', value: 'value-not-real', until: T0 + MIN });
+    assert.equal(Object.getOwnPropertyDescriptor(grants.env('a'), '__proto__')?.value, 'value-not-real');
+  });
+
+  it('holds no grant for a declined field, and says so', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const card = { id: 'c5', agent: 'pi:s1', title: 'Database?', secrets: ['DATABASE_URL'], createdAt: T0 } as unknown as Card;
+    const text = await secrets.receive(card, { values: { DATABASE_URL: { decline: true } }, answeredAt: T0 } as unknown as Answer);
+    assert.match(text, /declined access to DATABASE_URL on card c5/);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+    assert.equal(secrets.received, false);
+  });
+
+  it('holds no grant for a field the inbox already marked revoked', async () => {
+    const { secrets, text } = await received('c6', T0 + 60 * MIN, { revokedAt: T0 });
+    assert.match(text, /revoked DATABASE_URL on card c6 \(case case-c6\)/);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+  });
+
+  it('grants one field and not another on the same card', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { card, answer } = await granted(secrets, 'c7', T0 + 60 * MIN);
+    const both = { ...card, secrets: ['DATABASE_URL', 'OPENAI_KEY'] } as Card;
+    const text = await secrets.receive(both, { ...answer, values: { ...answer.values, OPENAI_KEY: { decline: true } } });
+    assert.match(text, /case case-c7/);
+    assert.match(text, /declined access to OPENAI_KEY/);
+    assert.deepEqual(Object.keys(secrets.env('pi:s1')), ['DATABASE_URL']);
+  });
+
+  it('leaves the home directory and the temp directory as they were after a command used the grant', async () => {
+    if (process.platform === 'win32') return;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-delivery-'));
+    const home = path.join(root, 'home');
+    const tmp = path.join(root, 'tmp');
+    fs.mkdirSync(path.join(home, '.your-attention'), { recursive: true });
+    fs.mkdirSync(tmp);
+    const saved = { HOME: process.env['HOME'], TMPDIR: process.env['TMPDIR'], YOUR_ATTENTION_HOME: process.env['YOUR_ATTENTION_HOME'] };
+    // The runner's own environment may export the same name, so the check compares against what it held before.
+    const runnerValue = process.env['DATABASE_URL'];
+    Object.assign(process.env, { HOME: home, TMPDIR: tmp, YOUR_ATTENTION_HOME: path.join(home, '.your-attention') });
+    try {
+      const before = snapshot(root);
+      const secrets = new SecretRequests(() => T0);
+      const { card, answer } = await granted(secrets, 'c8', T0 + 60 * MIN);
+      await secrets.receive(card, answer);
+      // A command started with the grant in its environment, as the harness starts it.
+      const out = execFileSync('/bin/sh', ['-c', 'printf %s "$DATABASE_URL" | wc -c'], { env: { ...process.env, ...secrets.env('pi:s1') }, cwd: home }).toString().trim();
+      assert.equal(Number(out), VALUE.length);
+      assert.equal(process.env['DATABASE_URL'], runnerValue, 'the value never enters this process environment');
+      assert.deepEqual(snapshot(root), before);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the bash tool of pi', () => {
+  it('says the grants did not reach bash, rather than throwing, when pi fails to build the tool', async () => {
+    const broken = { createLocalBashOperations: () => ({ exec: async () => ({ exitCode: 0 }) }), createBashTool: () => { throw new Error('no bash here'); } } as unknown as PiTools;
+    const logged: string[] = [];
+    const ok = await installSecretBash(async () => broken, '/repo', new SecretRequests(), () => 'pi:s1', () => { throw new Error('never registered'); }, (m) => logged.push(m));
+    assert.equal(ok, false);
+    assert.match(logged.join('\n'), /no bash here/);
+  });
+});
+
+describe('masking a value in output', () => {
+  it('masks a value split across any two chunks of a stream', () => {
+    const r = new Redactor();
+    r.add('TOKEN', 'abcdef123');
+    const text = 'start abcdef123 middle abcdef123 end';
+    for (let cut = 0; cut <= text.length; cut++) {
+      const s = r.stream();
+      assert.equal(s.push(text.slice(0, cut)) + s.push(text.slice(cut)) + s.end(), 'start [secret TOKEN] middle [secret TOKEN] end', `cut at ${cut}`);
+    }
+  });
+
+  it('masks a longer value whole when it contains a shorter one, and leaves a value under four characters alone', () => {
+    const r = new Redactor();
+    r.add('SHORT', 'secret1');
+    r.add('LONG', 'xx-secret1-yy');
+    r.add('TINY', 'abc');
+    assert.equal(r.mask('xx-secret1-yy secret1 abc'), '[secret LONG] [secret SHORT] abc');
+  });
+
+  it('never cuts a character made of two UTF-16 units in half', () => {
+    const r = new Redactor();
+    r.add('K', 'abcd');
+    const s = r.stream();
+    const first = s.push('😀😀');
+    assert.ok(!/[\uD800-\uDBFF]$/.test(first), 'no lone high surrogate at the end of a chunk');
+    assert.equal(first + s.end(), '😀😀');
+  });
+
+  it('keeps streaming a value that overlaps itself, such as a run of one letter', () => {
+    const r = new Redactor();
+    r.add('A', 'aaaa');
+    const s = r.stream();
+    let out = '';
+    let streamed = 0;
+    for (let i = 0; i < 100; i++) {
+      const piece = s.push('a'.repeat(10));
+      if (piece) streamed++;
+      out += piece;
+    }
+    out += s.end();
+    assert.ok(streamed > 90, `output streams as it comes, ${streamed} of 100 chunks`);
+    assert.equal(out, '[secret A]'.repeat(250));
+  });
+
+  it('masks every string of a tool result and keeps its shape', () => {
+    const r = new Redactor();
+    r.add('K', 'value-not-real');
+    assert.deepEqual(r.maskDeep({ stdout: 'k=value-not-real', n: 1, list: ['value-not-real'] }), { stdout: 'k=[secret K]', n: 1, list: ['[secret K]'] });
+    assert.deepEqual(r.maskDeep({ 'value-not-real': 'alice' }), { '[secret K]': 'alice' }, 'a key is masked too');
+    const digits = new Redactor();
+    digits.add('PIN', '1234567890');
+    assert.deepEqual(digits.maskDeep({ pin: 1234567890, other: 42 }), { pin: '[secret PIN]', other: 42 }, 'a number that shows the value is masked');
+  });
+});
+
+/** Every path under `dir` with its size and modification time. */
+function snapshot(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string): void => {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, entry.name);
+      const st = fs.lstatSync(p);
+      out.push(`${path.relative(dir, p)} ${st.size} ${st.mtimeMs}`);
+      if (entry.isDirectory()) walk(p);
+    }
+  };
+  walk(dir);
+  return out.sort();
+}

@@ -37,6 +37,8 @@ export interface HoldOptions {
   until: number;
   idleMs?: number;
   now?: number;
+  /** The case id the inbox gave this approval, which the person sees on the card. A new one when absent. */
+  caseId?: string;
 }
 
 const key = (agent: string, name: string): string => `${agent}\u0000${name}`;
@@ -63,7 +65,7 @@ export class Grants {
       until: Math.min(options.until, now + MAX_UNTIL_MS),
       idleMs: options.idleMs ?? DEFAULT_IDLE_MS,
       usedAt: now,
-      caseId: randomId(4),
+      caseId: options.caseId ?? randomId(4),
     };
     this.held.set(key(grant.agent, grant.name), grant);
     return grant;
@@ -98,14 +100,40 @@ export class Grants {
       .map((grant) => grant.name);
   }
 
+  /**
+   * Every live grant of this agent as `{name: value}`, for the environment of one command it is about to start. Each
+   * one counts as a use, so its idle window restarts, and a dead one is dropped as it is found.
+   */
+  env(agent: string, now = this.now()): Record<string, string> {
+    const entries: [string, string][] = [];
+    for (const name of this.names(agent, now)) {
+      const value = this.take(agent, name, now);
+      if (value !== undefined) entries.push([name, value]);
+    }
+    this.sweep(now);
+    // fromEntries defines each name as an own key, so a name such as __proto__ is an ordinary one.
+    return Object.fromEntries(entries);
+  }
+
+  /** Ends the grant of `name` for `agent`, whatever its case id, and says whether one was live. A later answer that
+   * declines the same name is the newer decision, so it ends the earlier grant as a new approval would replace it. */
+  end(agent: string, name: string, now = this.now()): boolean {
+    const grant = this.held.get(key(agent, name));
+    if (!grant) return false;
+    this.held.delete(key(agent, name));
+    return this.alive(grant, now);
+  }
+
   /** Kills the grant with this case id, and says whether one was found. Takes effect on the next `take`. */
   revoke(caseId: string): boolean {
+    // A case id from the inbox may name more than one grant, so every one that carries it ends.
+    let found = false;
     for (const [k, grant] of this.held) {
       if (grant.caseId !== caseId) continue;
       this.held.delete(k);
-      return true;
+      found = true;
     }
-    return false;
+    return found;
   }
 
   /** Drops every dead grant. Nothing depends on this: `take` checks both clocks itself. */

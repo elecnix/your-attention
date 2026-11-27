@@ -25,7 +25,7 @@ export const BUILTIN_WIDGETS: Template[] = [{
   versions: [{
     version: 1,
     source: 'root = Form({{name}}, buttons, [field])\nbuttons = Buttons([])\nfield = FormControl({{name}}, SecretInput({{name}}, {{publicKey}}))',
-    when: 'A value the person must not paste into the conversation, such as an API key. Place it in the card body of a card_post call, on a card of any kind: `key = widget secret {"name": "OLLAMA_API_KEY"}`. Give only `name`, a variable name: card_post fills `publicKey`, and the private key stays in your session. The person\'s browser seals the value, the answer names a file that holds it, and you never see the value. Use the file inside a command and never print it.',
+    when: 'A value the person must not paste into the conversation, such as an API key. Place it in the card body of a card_post call, on a card of any kind: `key = widget secret {"name": "OLLAMA_API_KEY"}`. Give only `name`, a variable name: card_post fills `publicKey`, and the private key stays in your session. The person\'s browser seals the value, and for the next hour each command you run gets it as $OLLAMA_API_KEY, with the name you gave. You never see the value: write "$OLLAMA_API_KEY" in a command and never print it.',
     at: 0,
   }],
 }];

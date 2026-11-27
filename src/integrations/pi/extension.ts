@@ -9,6 +9,7 @@ import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
 import { createPromptCards, type PromptEvent } from './prompt.ts';
 import { SecretRequests } from '../secrets.ts';
+import { installSecretBash, loadPiTools, type PiTools } from './secret-bash.ts';
 import { runTool } from '../run-tool.ts';
 import { parseTagsFlag } from '../tags.ts';
 import { CardAsks, memoryStore } from '../card-asks.ts';
@@ -52,6 +53,8 @@ interface PiApi {
   // A prompt that an extension drew in the terminal: the session waits until that prompt is answered.
   on(event: 'ui_prompt_start', handler: (event: PromptEvent, ctx: PiContext) => void | Promise<void>): void;
   on(event: 'ui_prompt_end', handler: (event: PromptEvent, ctx: PiContext) => void | Promise<void>): void;
+  // Each tool's result before the model reads it. A handler that returns content replaces it.
+  on(event: 'tool_result', handler: (event: ToolResultEvent, ctx: PiContext) => ToolResultChange | undefined | Promise<ToolResultChange | undefined>): void;
   registerTool(tool: {
     name: string;
     label: string;
@@ -62,9 +65,13 @@ interface PiApi {
   sendUserMessage(content: string, options?: { deliverAs?: 'steer' | 'followUp' }): void;
 }
 
+interface ToolResultEvent { toolName: string; content: unknown[]; structuredContent?: unknown; details?: unknown }
+interface ToolResultChange { content?: unknown[]; structuredContent?: unknown; details?: unknown }
+
 const result = (text: string): ToolResult => ({ content: [{ type: 'text', text }], details: undefined });
 
-export default function yourAttention(pi: PiApi): void {
+/** `tools` loads pi's tools module, which pi maps for its extensions. A test hands in its own. */
+export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | undefined> = loadPiTools): void {
   let inbox: Client | undefined;
   let agent = '';
   let origin: NewCard['origin'];
@@ -75,6 +82,14 @@ export default function yourAttention(pi: PiApi): void {
   // Receipt id -> card id, for answers sent but not yet in the model context.
   const pending = new Map<string, string>();
   const secrets = new SecretRequests();
+  /** Whether this session's bash tool adds the grants to each command, which it does from the first grant on. */
+  let secretBashOn: Promise<boolean> | undefined;
+  const deliverGrants = (cwd: string): Promise<boolean> => {
+    secretBashOn ??= installSecretBash(tools, cwd, secrets, () => agent, (bash) => {
+      pi.registerTool({ ...bash, execute: (id: string, params: unknown, signal?: AbortSignal, onUpdate?: unknown) => bash.execute(id, params, signal, onUpdate) } as unknown as Parameters<PiApi['registerTool']>[0]);
+    }, (message) => log(message));
+    return secretBashOn;
+  };
   // A session waiting on a prompt draws no output, so only pi's own lifecycle tells it apart from a session that
   // thinks. One card reports the span, and an answer on it is typed into this session's pane.
   const prompts = createPromptCards(() => (inbox && origin ? { inbox, agent, origin: here() } : undefined));
@@ -120,11 +135,23 @@ export default function yourAttention(pi: PiApi): void {
           else pi.sendUserMessage(note, { deliverAs: 'followUp' });
           return;
         }
+        if (ev.type === 'revoke') {
+          // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
+          if (!secrets.revoke(ev.case)) return;
+          const note = `[your-attention] The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`;
+          if (ctx.isIdle()) pi.sendUserMessage(note);
+          else pi.sendUserMessage(note, { deliverAs: 'followUp' });
+          return;
+        }
         if (ev.type !== 'answer') return;
         // An answer to a prompt card is typed into the pane, and the model hears nothing: the prompt already asked it.
         if (prompts.owns(ev.card.id)) { await prompts.answered(ev.card, ev.answer); return; }
         pending.set(ev.id, ev.card.id);
-        const sealed = await secrets.receive(ev.card, ev.answer);
+        const received = await secrets.receiveDetail(ev.card, ev.answer);
+        let sealed = received.text;
+        if (received.granted.length && !(await deliverGrants(ctx.sessionManager.getCwd()))) {
+          sealed += '\nThis pi has no bash tool the extension can rebuild, so its commands do not get these variables. Tell the person.';
+        }
         const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}${sealed ? `\n${sealed}` : ''}`;
         const text = `[your-attention answer ${ev.id}] ${what}`;
         // Steer by default; start a new turn when the agent is idle.
@@ -172,6 +199,17 @@ export default function yourAttention(pi: PiApi): void {
   pi.on('agent_settled', (_event, ctx) => {
     if (!inbox || !ctx.isIdle()) return;
     asks.ended();
+  });
+
+  // A value a command printed reaches the model as [secret NAME], whichever tool read it.
+  pi.on('tool_result', (event) => {
+    if (!secrets.received) return undefined;
+    const content = secrets.maskDeep(event.content);
+    const structuredContent = secrets.maskDeep(event.structuredContent);
+    const details = secrets.maskDeep(event.details);
+    const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+    if (same(content, event.content) && same(structuredContent, event.structuredContent) && same(details, event.details)) return undefined;
+    return { content, ...(event.structuredContent === undefined ? {} : { structuredContent }), details };
   });
 
   pi.on('context', (event) => {

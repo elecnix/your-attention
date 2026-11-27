@@ -15,6 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
+import { serveSecrets } from './secret-socket.ts';
 import { runTool } from '../run-tool.ts';
 import { SessionName } from './session-name.ts';
 import { CardAsks } from '../card-asks.ts';
@@ -252,7 +253,22 @@ const asks = new CardAsks({
 });
 
 const stop = new AbortController();
-const quit = (): void => { stop.abort(); asks.stop(); process.exit(0); };
+// The hooks read the session's grants from this socket. It opens with the first grant, so the plugin runner can skip
+// the hooks on every tool call of a session that never received one.
+let secretSocket: Awaited<ReturnType<typeof serveSecrets>> | undefined;
+let socketError = '';
+const openSecretSocket = async (): Promise<boolean> => {
+  if (secretSocket) return true;
+  try {
+    secretSocket = await serveSecrets(secrets, agent, session);
+    return true;
+  } catch (e) {
+    socketError = (e as Error).message;
+    log('no socket for secrets:', socketError);
+    return false;
+  }
+};
+const quit = (): void => { stop.abort(); asks.stop(); secretSocket?.close(); process.exit(0); };
 // Exit with the session: a leftover server would show the agent as listening.
 process.stdin.on('end', quit);
 process.stdin.on('close', quit);
@@ -290,6 +306,14 @@ function listen(client: Client): void {
       await notify(describeSentCard(ev), { card_id: ev.card.id });
       return;
     }
+    if (ev.type === 'revoke') {
+      // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
+      // Only a revoke that ends a grant pushes a turn, so only that one counts as activity.
+      if (!secrets.revoke(ev.case)) return;
+      asks.activity();
+      await notify(`The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`, { card_id: ev.card.id });
+      return;
+    }
     if (ev.type !== 'answer') return;
     const { card, answer } = ev;
     const dismissed = card.dialog ? await closeOwnDialog(card.origin?.herdrPane) : false;
@@ -298,7 +322,10 @@ function listen(client: Client): void {
       ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
       : `The person answered card "${card.title}":`;
     const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
-    const sealed = await secrets.receive(card, answer);
+    const received = await secrets.receiveDetail(card, answer);
+    let sealed = received.text;
+    // Without the socket, the Bash hooks have nothing to read, so the model hears that the variable won't come.
+    if (received.granted.length && !(await openSecretSocket())) sealed += `\nThis session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get these variables. Tell the person.`;
     const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
     // A newer answer to the same card replaces the one the channel is still trying to deliver.
     for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);

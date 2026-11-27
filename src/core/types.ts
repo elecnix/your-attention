@@ -588,7 +588,10 @@ export type AgentEvent =
   /** A triage extension passed this agent's card to the person, with advice for the agent. `by` names the extension. */
   | { type: 'advice'; id: string; card: Card; advice: string; by: string }
   /** A card the person sent to this agent, as the panel in the page sends it. */
-  | { type: 'card'; id: string; card: Card; sentAt: number };
+  | { type: 'card'; id: string; card: Card; sentAt: number }
+  /** The person revoked the grant of a secret_access field. `case` is the grant's case id. An inbox keeps a revoke for
+   * an agent with no open stream, and sends it first when one opens. */
+  | { type: 'revoke'; id: string; card: Card; field: string; case: string };
 
 /** What pages receive. They refetch state on "change". */
 export type PageEvent =

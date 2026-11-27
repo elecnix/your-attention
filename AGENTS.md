@@ -133,6 +133,12 @@ flowchart TB
   UT -- "POST /v1/cards/id/file-ticket" --> FT["folder ticket: one card's file, its folder for HTML, until the card is cleared or the unlock ends"]
   FT -- "new tab and its assets: GET /v1/files/ticket/path" --> LF
   LF -- "sandboxed" --> BROWSER
+  subgraph SESSION["agent session: memory only"]
+    GR["grants: each value with its idle window, ceiling and case id"]
+  end
+  CMD["the shell of one command"]
+  INBOX -- "agent stream: a value sealed to the card's key" --> GR
+  GR -- "pi: spawn environment. Claude Code: Unix socket 0600, one-time token. opencode: shell.env" --> CMD
 ```
 
 - The inbox stores a hash of each token, never the token. Only the machine or tab named in its box holds the secret.
@@ -143,6 +149,7 @@ flowchart TB
 - A token minted at `serve` or by pairing as owner skips the PIN. When the inbox has a PIN, a browser's owner token needs an unlock token as well, which the tab sends as `x-your-attention-unlock`. An unlock token ends after 12 hours without use.
 - The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. The new tab opens the file at the address of a folder ticket, and that address is the credential, since a sandboxed page loads its assets without the cookie. A ticket for an HTML file opens the files in its folder and below, except hidden ones, and never a symlink that leaves the folder. It ends when its card is cleared, and with a PIN, when the unlock of the tab that asked for it ends. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
 - The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. When the inbox has a PIN, the new tab opens the file only with a ticket that an unlocked tab asked for, which works once within 60 seconds. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
+- A granted secret opens only in the memory of the session that posted the card, and each command gets it in its environment, never in argv or a file. In Claude Code the shell reads it from the channel's socket, mode 0600 in a folder of mode 0700, with a token that works once within 30 minutes. A revoke ends the grant before the next command.
 - An agent's answer webhook gets nothing until the person approves it on its system card. The inbox keeps the header values the agent gave, and sends them only to that webhook, never to a client or a page. The signing secret goes to the agent once.
 - The inbox makes its own VAPID key pair for Web Push and keeps the private half in its storage, never in a route, a log or the repository. Each push device belongs to the owner token that saved it, and revoking the token removes it. A push contains only the card's title and id, encrypted for the device, so the service that relays it cannot read it.
 - An invite code is the operator's secret. The hosted inbox keeps only its invite id, the first 16 hex digits of the code's SHA-256, for usage counts.
