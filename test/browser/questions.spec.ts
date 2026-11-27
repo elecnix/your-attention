@@ -2,6 +2,7 @@
 // under its own question.
 import { expect, test } from '@playwright/test';
 import { describeAnswer } from '../../src/client.ts';
+import { cardFields } from '../../web/field-ids.js';
 import { startInbox, type TestInbox } from './inbox.ts';
 
 let inbox: TestInbox;
@@ -39,11 +40,13 @@ test('each question has its own section and comment field, and the agent reads e
   const ev = heard.events.find((e) => e.type === 'answer');
   if (ev?.type !== 'answer') throw new Error('no answer');
   expect(ev.answer.values).toEqual({ q0: 'Postgres', q0_comment: 'We run it already.', q1: ['eu-west'], q1_comment: 'Most users are there.' });
+  // The page answered the card's current version, so each line starts with the ID that version lists for its field.
+  const id = new Map(cardFields(ev.card).map((f) => [f.name, f.id]));
   expect(describeAnswer(ev.card, ev.answer)).toBe([
-    'Which database? Postgres',
-    '  Comment: We run it already.',
-    'Which regions? eu-west',
-    '  Comment: Most users are there.',
-    'What must the release note say? (no answer)',
+    `[${id.get('q0')}] Which database? Postgres`,
+    `  [${id.get('q0_comment')}] Comment: We run it already.`,
+    `[${id.get('q1')}] Which regions? eu-west`,
+    `  [${id.get('q1_comment')}] Comment: Most users are there.`,
+    `[${id.get('q2')}] What must the release note say? (no answer)`,
   ].join('\n'));
 });

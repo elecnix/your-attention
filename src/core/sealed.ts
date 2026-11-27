@@ -229,7 +229,7 @@ export interface PrivilegedField {
   changes: string;
 }
 
-const PRIVILEGED_LITERALS = 'PrivilegedAction takes four string literals: the field name, the command, the machine and what it changes. Place it with the privileged_action widget: restart = widget privileged_action {"name": "restart", "command": "systemctl restart nginx", "machine": "laptop", "changes": "Restarts nginx"}';
+const PRIVILEGED_LITERALS = 'PrivilegedAction takes four string literals: the field name, the command, the machine and what it changes. Place it with the privileged_action widget: restart = widget privileged_action {"name": "restart", "command": "systemctl restart nginx", "machine": "office-pc", "changes": "Restarts nginx"}';
 
 /** The PrivilegedAction calls in a body, in order, read with the OpenUI parser's strings, comments and fences, as
  * secretCalls reads its calls. Each call gives its arguments as string literals, so the inbox knows the exact command

@@ -1,7 +1,7 @@
 // Runs a card tool for any harness integration, so Claude Code and pi offer the same tools.
 import fs from 'node:fs';
 import path from 'node:path';
-import { describeAnswer, describeOpenCards, type Client } from '../client.ts';
+import { describeAnswer, describeCardFields, describeOpenCards, type Client } from '../client.ts';
 import { readsSomething, typeFromName, type SearchFilters } from '../core/inbox.ts';
 import type { Approval, AskQuestion, CloseKind, FeedbackFinding, FeedbackVerdict, NewAttachment, NewCard, Option, Origin, PullRequest } from '../core/types.ts';
 import type { SecretRequests } from './secrets.ts';
@@ -116,13 +116,14 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const inherited = posted.inheritedTags ?? [];
       const tags = inherited.length ? `It took the default tags ${inherited.join(', ')}.` : 'It took no default tags.';
       const open = describeOpenCards(posted.openCards);
-      if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. ${tags} Warning: ${posted.warning}${open}`;
+      const ids = describeCardFields(posted);
+      if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. ${tags} Warning: ${posted.warning}${ids}${open}`;
       const asks = sealing.count ? ` Once answered, each command you run gets each secret as a variable of its name, and you never see the value.` : '';
-      return `Posted card ${posted.id}. ${tags} The answer arrives ${ctx.arrival}; keep working meanwhile.${asks}${open}`;
+      return `Posted card ${posted.id}. ${tags} The answer arrives ${ctx.arrival}; keep working meanwhile.${asks}${ids}${open}`;
     }
     case 'card_patch': {
       const card = await inbox.patch(String(args['card_id']), args['edits'] as { old: string; new: string }[], str(args['field']), args['pullRequests'] as PullRequest | PullRequest[] | null | undefined);
-      return `Card ${card.id} is now version ${card.version}.${card.warning ? ` Warning: ${card.warning}` : ''}`;
+      return `Card ${card.id} is now version ${card.version}.${card.warning ? ` Warning: ${card.warning}` : ''}${describeCardFields(card)}`;
     }
     case 'card_read': {
       const [id] = [String(args['card_id'])];

@@ -365,11 +365,11 @@ describe('the code never leaves the session', () => {
 });
 
 describe('where the keys live', () => {
-  it('keeps the laptop keys in one file of mode 0600 beside owner-token, and refuses a key damaged on disk', async () => {
+  it('keeps the keys of your own inbox in one file of mode 0600 beside owner-token, and refuses a key damaged on disk', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-otp-'));
     try {
       const keys = fileOtpKeys(home, 'test-machine');
-      assert.match(keys.holder, /^the laptop inbox on test-machine, in .*otp-keys\.json, which only its user reads$/);
+      assert.match(keys.holder, /^your own inbox on test-machine, in .*otp-keys\.json, which only its user reads$/);
       const inbox = new Inbox(new MemoryStorage(), () => NOW, undefined, { otpKeys: keys });
       await inbox.otpEnroll(owner, 'npm', { key: KEY_TEXT, code: await totp(RFC_KEY, NOW), allow: [SESSION] });
       const file = path.join(home, OTP_KEYS_FILE);

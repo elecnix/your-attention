@@ -1,4 +1,4 @@
-// The laptop inbox's broker for privileged actions: it runs the approved command on this machine, as the user that runs
+// The broker of your own inbox for privileged actions: it runs the approved command on this machine, as the user that runs
 // the inbox, and writes the password to the command's standard input. The password is an argument of `run` and the
 // bytes written to the pipe, and nowhere else: never an environment variable, an argument list, a file or a log.
 import { spawn } from 'node:child_process';

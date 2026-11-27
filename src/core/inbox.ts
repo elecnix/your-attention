@@ -186,13 +186,13 @@ export interface InboxOptions {
   approvals?: ApprovalSender | undefined;
   /** How the inbox calls answer webhooks and push services. The default is the platform's fetch. */
   fetch?: typeof fetch | undefined;
-  /** The secret sources of this computer, which the laptop's serve runs. Without them, as on the hosted inbox, a lookup
+  /** The secret sources of this computer, which the serve process of your own inbox runs. Without them, as on the hosted inbox, a lookup
    * finds nothing and a grant fails with 502. */
   secretSources?: SecretSources | undefined;
   /** Runs the command of a privileged action the owner approved, with the password the page sealed to the broker's key.
    * Without it, as on the hosted inbox, the inbox takes no card with a privileged action. */
   privileged?: PrivilegedRunner | undefined;
-  /** Where this inbox keeps the TOTP keys the owner enrolled: a file on the laptop, encrypted storage on the hosted
+  /** Where this inbox keeps the TOTP keys the owner enrolled: a file on your own inbox's machine, encrypted storage on the hosted
    * inbox. Without it, the inbox takes no otp card and enrolls no key. */
   otpKeys?: OtpKeyStore | undefined;
   /** Whether a new card pushes to a device that collapsed these groups. The page's own rule, `notifies` in web/queue.js,
@@ -342,7 +342,7 @@ export const MAX_TAG_VALUES = 15;
 export const PAIRING_KEEP_MS = 24 * 60 * 60 * 1000;
 /** How long a cleared card, or a card nobody answered, stays after its last change before the purge deletes it. */
 export const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
-/** Where the purge keeps the files a delete could not remove, so a laptop retries them on its next pass. */
+/** Where the purge keeps the files a delete could not remove, so your own inbox retries them on its next pass. */
 const PENDING_FILE_DELETES = 'pending-file-deletes';
 /** The most cards one purge pass deletes, so no alarm does unbounded work. */
 export const PURGE_BATCH = 100;
@@ -552,7 +552,7 @@ export class Inbox {
     // A page that opened before the PIN changed must unlock again.
     this.pin.onChange(() => this.closeLockedPages());
     markDialogCards(this.store);
-    // On a laptop, connections do not survive a restart, so nobody is online at start.
+    // On your own inbox, connections do not survive a restart, so nobody is online at start.
     if (!opts.keepPresence) {
       for (const p of store.list<Presence>('presence')) {
         if (p.online) store.put('presence', p.agent, { ...p, online: false });
@@ -626,7 +626,7 @@ export class Inbox {
     for (const d of this.store.list<PushDevice>('pushes')) if (d.token === id) this.store.delete('pushes', d.id);
   }
 
-  /** Let an owner token act without the PIN, such as the laptop's owner-token file, which only this machine's user reads. */
+  /** Let an owner token act without the PIN, such as the owner-token file of your own inbox, which only this machine's user reads. */
   exemptFromPin(id: string): void {
     const t = this.store.get<Token>('tokens', id);
     if (t && t.role === 'owner' && !t.pinExempt) this.store.put<Token>('tokens', id, { ...t, pinExempt: true });
@@ -831,7 +831,7 @@ export class Inbox {
       });
     }
     const history: CardVersion[] = before
-      ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, recommendation: before.recommendation, body: before.body, html: before.html, at: before.updatedAt }].slice(-HISTORY_LIMIT)
+      ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, recommendation: before.recommendation, body: before.body, html: before.html, options: before.options, multiple: before.multiple, questions: before.questions, approvals: before.approvals, at: before.updatedAt }].slice(-HISTORY_LIMIT)
       : [];
     // Every card an agent posts inherits its default tags, under the card's own. The inbox's own system cards keep none.
     const mergedTags = caller.token === '' || kind === 'system' || opts.revise === true
@@ -964,7 +964,7 @@ export class Inbox {
   }
 
   /** The page could not draw a card it shows: a diagram that mermaid cannot parse, or a body the OpenUI parser reads in part.
-   * The card goes back to its agent with the errors, as a laptop inbox would have refused the post. Only the owner reports. */
+   * The card goes back to its agent with the errors, as your own inbox would have refused the post. Only the owner reports. */
   drawFault(caller: Caller, id: string, sent: { version?: unknown; renderer?: unknown; diagrams?: unknown; body?: unknown } | null): Card {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the page reports what it cannot draw');
     const report = sent && typeof sent === 'object' ? sent : {};
@@ -2350,6 +2350,9 @@ export class Inbox {
 
   async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number; images?: (NewAttachment & { field?: string })[]; by?: Caller }): Promise<Answer> {
     const posted = this.getCard(id);
+    // The version the person read decides the IDs the agent gets back with each value, so it must be one the card had.
+    const version = Number(input.version ?? posted.version);
+    if (!Number.isInteger(version) || version < 1 || version > posted.version) throw new InboxError(400, `version must be a version the card had, from 1 to ${posted.version}`);
     const delivery = input.delivery ?? 'default';
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
     const values = input.values && typeof input.values === 'object' ? { ...input.values } : {};
@@ -2443,7 +2446,7 @@ export class Inbox {
     }
     const answer: Answer = {
       card: id,
-      version: Number(input.version ?? card.version),
+      version,
       values,
       comment: String(input.comment ?? '').trim(),
       ...(images.length ? { images } : {}),
@@ -2486,7 +2489,7 @@ export class Inbox {
   /** The OneTimeCode fields of a body, checked against the keys this inbox holds and the posting session: their names. */
   private checkOtp(fields: OtpField[], agent: string, taken: string[]): string[] {
     if (!fields.length) return [];
-    if (!this.otpKeys) throw new InboxError(400, 'this inbox keeps no one-time code keys, so it cannot compute a code. The laptop inbox keeps them, and a hosted one does once its operator sets OTP_KEY_SECRET');
+    if (!this.otpKeys) throw new InboxError(400, 'this inbox keeps no one-time code keys, so it cannot compute a code. Your own inbox keeps them, and a hosted one does once its operator sets OTP_KEY_SECRET');
     for (const f of fields) {
       if (taken.includes(f.name)) throw new InboxError(400, `${f.name} names both a one-time code and another sealed field: give each its own name`);
       const record = this.store.get<OtpKeyRecord>('otpkeys', f.key);
@@ -2541,7 +2544,7 @@ export class Inbox {
 
   private ownerOnly(caller: Caller, what: string): OtpKeyStore {
     if (caller.role !== 'owner') throw new InboxError(403, `only the owner ${what}`);
-    if (!this.otpKeys) throw new InboxError(404, 'this inbox keeps no one-time code keys. The laptop inbox keeps them, and a hosted one does once its operator sets OTP_KEY_SECRET');
+    if (!this.otpKeys) throw new InboxError(404, 'this inbox keeps no one-time code keys. Your own inbox keeps them, and a hosted one does once its operator sets OTP_KEY_SECRET');
     return this.otpKeys;
   }
 
@@ -2643,7 +2646,7 @@ export class Inbox {
   private checkPrivileged(fields: PrivilegedField[], secrets: string[]): string[] {
     if (!fields.length) return [];
     const runner = this.privileged;
-    if (!runner) throw new InboxError(400, 'this inbox runs no privileged actions: only the laptop inbox runs a command on its own machine');
+    if (!runner) throw new InboxError(400, 'this inbox runs no privileged actions: only your own inbox runs a command, on the computer that runs it');
     for (const f of fields) {
       if (secrets.includes(f.name)) throw new InboxError(400, `${f.name} names both a secret and a privileged action: give each its own name`);
       if (f.command.length > MAX_COMMAND_CHARS) throw new InboxError(400, `privileged action ${f.name}: the command is ${f.command.length} characters, over the limit of ${MAX_COMMAND_CHARS}`);
@@ -3534,7 +3537,7 @@ export class Inbox {
     // Every record goes before the first await, so no request sees half a batch.
     if (removed) this.emit({ type: 'change', card: '' });
     // The records are gone already, so a failed delete must not stop the alarm that called this. R2 deletes the file
-    // 30 days after its upload anyway, and a laptop retries the delete on its next pass.
+    // 30 days after its upload anyway, and your own inbox retries the delete on its next pass.
     const retry = this.store.get<string[]>('meta', PENDING_FILE_DELETES) ?? [];
     const settled = await Promise.allSettled([...retry, ...files].map((f) => this.blobs.delete(f)));
     const failed = [...retry, ...files].filter((_, i) => settled[i]?.status === 'rejected').slice(0, PURGE_BATCH * 10);

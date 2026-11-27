@@ -16,7 +16,7 @@ async function pane() {
     'intro = TextContent("The automated review passed.")',
     `npm = widget otp ${JSON.stringify({ name: 'NPM_OTP', key: 'npm', purpose: 'npm stage approve your-attention@1.4.0', publicKey: JSON.stringify(keys.publicKey) })}`,
   ].join('\n'), () => widget).body;
-  const c: Card = { id: 'otp', agent: 'a1', kind: 'ask', title: 'Publish?', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], body, otp: ['NPM_OTP'], otpHolder: 'the laptop inbox on mbp, in ~/.your-attention/otp-keys.json, which only its user reads' };
+  const c: Card = { id: 'otp', agent: 'a1', kind: 'ask', title: 'Publish?', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], body, otp: ['NPM_OTP'], otpHolder: 'your own inbox on mbp, in ~/.your-attention/otp-keys.json, which only its user reads' };
   return setup(c, {}, 110);
 }
 
@@ -27,7 +27,7 @@ describe('an otp field in the terminal', () => {
     const t = (await pane()).text();
     assert.match(t, /One-time code from the key npm/);
     assert.match(t, /For: npm stage approve your-attention@1\.4\.0/);
-    assert.match(t, /Key kept by: the laptop inbox on mbp, in ~\/\.your-attention\/otp-keys\.json, which only its user reads/);
+    assert.match(t, /Key kept by: your own inbox on mbp, in ~\/\.your-attention\/otp-keys\.json, which only its user reads/);
     assert.match(t, /Approve one code from npm/);
     assert.match(t, /Decline/);
   });

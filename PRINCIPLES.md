@@ -84,7 +84,7 @@ A long list is hard to work through, and what counts as urgent differs by projec
 
 ### DP13: Past answers are searchable, so agents ask once
 
-The inbox keeps each card and its answer, and search over them returns in well under a second. An agent searches past answers before it posts, and triage sends back a card that an earlier answer already covers. Each inbox indexes its own cards in its own SQLite store with full-text search: one file on a laptop, and the SQLite storage of its Durable Object in the cloud. Thousands of cards stay a small index. Search by meaning can be added as an extension.
+The inbox keeps each card and its answer, and search over them returns in well under a second. An agent searches past answers before it posts, and triage sends back a card that an earlier answer already covers. Each inbox indexes its own cards in its own SQLite store with full-text search: one file on your own computer, and the SQLite storage of its Durable Object in the cloud. Thousands of cards stay a small index. Search by meaning can be added as an extension.
 
 The same question from ten sessions should cost you one answer, and a slow search would push agents to ask again.
 
@@ -168,7 +168,7 @@ A small core runs anywhere, and the front-end is one client of the protocol amon
 
 Each hook has one contract, whatever the deployment. The extension can be bundled into the build or run as a sidecar on localhost. It can also be an external service over HTTPS or WebSocket. Adding or moving an extension changes configuration, never the core. Each hook declares what a remote extension may do, which can be less than an in-process one. Extensions use their own message schema, separate from the messages agents and cards exchange.
 
-The triage filter may run in process on a laptop and as a separate service in the cloud. Remote code deserves fewer powers, and the extension contract should change without touching the agent protocol.
+The triage filter may run in process in your own inbox and as a separate service in the cloud. Remote code deserves fewer powers, and the extension contract should change without touching the agent protocol.
 
 ### DP27: Each hook declares its extension failure policy
 
@@ -178,9 +178,9 @@ A slow or broken triage model must not freeze your inbox, or pass poor cards to 
 
 ## Integration
 
-### DP28: Self-hosted by default, from a laptop to the edge
+### DP28: Self-hosted by default, from your own computer to the edge
 
-The inbox runs as one small process on a laptop, or as a Worker with Durable Objects. Card content stays in the deployment you choose. A public hosted service comes later, on the same code.
+The inbox runs as one small process on your own computer, or as a Worker with Durable Objects. Card content stays in the deployment you choose. A public hosted service comes later, on the same code.
 
 Cards contain code, plans and secrets from your sessions, and self-hosting comes before any public service.
 
@@ -194,7 +194,7 @@ No sign-up keeps onboarding to one step, and near-zero idle cost makes a free pu
 
 Once a day, an inbox can send counts of how much it was used. It counts new cards, answers, pairing requests and page opens, and how many agents, agent processes and tokens connected. Card text, answers, agent names, paths, host names and inbox addresses stay in the inbox.
 
-- A laptop inbox sends counts only after you turn them on. Its reports have a random install id, and nothing that says who you are.
+- Your own inbox sends counts only after you turn them on. Its reports have a random install id, and nothing that says who you are.
 - A hosted inbox always sends counts, with an id made from its invite code, and says so when you create it and when you first open it.
 
 The maintainers need to know the product is used, and the hosted service needs to spot a leaked invite code or token. On your own machine, the choice is yours.
@@ -203,21 +203,21 @@ The maintainers need to know the product is used, and the hosted service needs t
 
 ### DP31: The core uses web standards only
 
-The core uses fetch Request and Response, WebSocket, Web Crypto and JSON. The same core code runs on Node, Bun and Deno on a laptop, on Cloudflare Workers with Durable Objects, in a Chrome extension, and in a standalone web page. Web Crypto makes pairing tokens and signs each call that the core sends to an extension.
+The core uses fetch Request and Response, WebSocket, Web Crypto and JSON. The same core code runs on Node, Bun and Deno on your own computer, on Cloudflare Workers with Durable Objects, in a Chrome extension, and in a standalone web page. Web Crypto makes pairing tokens and signs each call that the core sends to an extension.
 
 Web standards are the API that all these hosts share. A browser page can host the inbox for agents that reach it through an extension or a relay, since a page cannot accept connections.
 
 ### DP32: All state is in storage, and memory is a cache
 
-The inbox writes every card, answer and connection to disk, or to Durable Object storage, before it reports success. It does not keep anything important only in memory. So when a laptop crashes or a Durable Object goes to sleep, the inbox resumes exactly where it was. Timeouts use the platform alarm, which a restart keeps, never a timer inside the process.
+The inbox writes every card, answer and connection to disk, or to Durable Object storage, before it reports success. It does not keep anything important only in memory. So when the computer that runs the inbox crashes or a Durable Object goes to sleep, the inbox resumes exactly where it was. Timeouts use the platform alarm, which a restart keeps, never a timer inside the process.
 
-A laptop process can crash and a Durable Object can hibernate. Both must resume with no lost card.
+The process of your own inbox can crash, and a Durable Object can hibernate. Both must resume with no lost card.
 
 ### DP33: Each inbox has one writer
 
-All changes to one inbox go through one place, one at a time. On a laptop that place is one process, and in the cloud it is one Durable Object. Answers saved at the same moment are applied in order, so they cannot overwrite each other, and the code does not need locks.
+All changes to one inbox go through one place, one at a time. On your own computer that place is one process, and in the cloud it is one Durable Object. Answers saved at the same moment are applied in order, so they cannot overwrite each other, and the code does not need locks.
 
-This is how Durable Objects work, and one process on a laptop works the same way. Code that assumes many writers would need locks on both.
+This is how Durable Objects work, and one process on your own computer works the same way. Code that assumes many writers would need locks on both.
 
 ### DP34: Presence comes from connections, and it survives hibernation
 
@@ -227,7 +227,7 @@ Hibernation clears memory while the sockets remain open. Presence must not depen
 
 ### DP35: Platform details sit behind small adapter interfaces
 
-Storage, sockets, alarms, discovery, identity and the Mermaid diagram check are adapters. A build too small to run a check, such as the hosted Worker with its 10 ms of CPU time a request, leaves it to the posting client and the page. The laptop build uses SQLite, a WebSocket server and mDNS. The Cloudflare build uses Durable Object storage, hibernatable WebSockets and alarms.
+Storage, sockets, alarms, discovery, identity and the Mermaid diagram check are adapters. A build too small to run a check, such as the hosted Worker with its 10 ms of CPU time a request, leaves it to the posting client and the page. The Node build, which runs your own inbox, uses SQLite, a WebSocket server and mDNS. The Cloudflare build uses Durable Object storage, hibernatable WebSockets and alarms.
 
 Adding a platform means writing adapters, and nobody changes the core.
 

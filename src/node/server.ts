@@ -1,4 +1,4 @@
-// The laptop build: the web-standard handler behind node:http, SQLite storage,
+// The Node build, which runs your own inbox: the web-standard handler behind node:http, SQLite storage,
 // mDNS discovery, and the built-in page.
 import fs from 'node:fs';
 import http from 'node:http';

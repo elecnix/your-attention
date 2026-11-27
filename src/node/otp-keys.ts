@@ -1,4 +1,4 @@
-// The laptop inbox's one-time code keys: one file, otp-keys.json, in the inbox's home folder beside owner-token, of mode
+// Your own inbox's one-time code keys: one file, otp-keys.json, in the inbox's home folder beside owner-token, of mode
 // 0600 in a folder of mode 0700. A TOTP key can't be stored as a hash, since the inbox computes each code with the key
 // itself, so the file's mode is what protects it: only the user that runs the inbox reads it. The inbox reads a key only
 // inside a redemption. SPEC.md#key-storage says why this is the exception to the rule that tokens are hashed.
@@ -24,7 +24,7 @@ export function fileOtpKeys(home: string, machine: string): OtpKeyStore {
     return keys as Record<string, string>;
   };
   return {
-    holder: `the laptop inbox on ${machine}, in ${shown}, which only its user reads`,
+    holder: `your own inbox on ${machine}, in ${shown}, which only its user reads`,
     save: async (label, key) => { writePrivate(file, `${JSON.stringify({ ...read(), [label]: base32Encode(key) }, null, 2)}\n`); },
     load: async (label) => {
       const keys = read();

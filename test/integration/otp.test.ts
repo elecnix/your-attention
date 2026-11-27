@@ -51,7 +51,7 @@ function filesHolding(dir: string, needle: string): string[] {
   return hits;
 }
 
-describe('a one-time code on the laptop server', () => {
+describe('a one-time code on your own inbox', () => {
   it('enrolls a key from a pipe, gives an approved session a fresh code in its commands, and the digits appear nowhere else', async () => {
     const cliOut: string[] = [];
     // A wrong code is refused, and nothing is stored.
@@ -95,7 +95,7 @@ describe('a one-time code on the laptop server', () => {
       await assert.rejects(runTool(ctx, 'card_otp', { ticket }), /was used at .* UTC: a ticket gives one code/);
 
       const list = await runCli(s.env, 'otp', 'list');
-      assert.match(list.stdout, /Keys kept by the laptop inbox on .*otp-keys\.json, which only its user reads:\n  npm: enrolled .* UTC, last code issued .* UTC\. Sessions that may ask for it: otp-it-session\./);
+      assert.match(list.stdout, /Keys kept by your own inbox on.*otp-keys\.json, which only its user reads:\n  npm: enrolled .* UTC, last code issued .* UTC\. Sessions that may ask for it: otp-it-session\./);
       cliOut.push(list.stdout, list.stderr);
       const state = await (await s.call(owner, 'GET', '/v1/state')).text();
       const asAgent = await (await s.call(s.read('agent-token'), 'GET', '/v1/cards/otp-card')).text();

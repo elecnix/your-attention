@@ -5,7 +5,7 @@ const unhex = (s) => new Uint8Array((s.match(/../g) || []).map((b) => parseInt(b
 
 /** `onProgress(fraction)` runs while a page without Web Crypto derives the key, which takes seconds on a phone. */
 export async function pinKey(pin, salt, iterations, onProgress) {
-  // A browser gives Web Crypto to secure origins only. A phone that opens a laptop inbox at http://laptop.local has none.
+  // A browser gives Web Crypto to secure origins only. A phone that opens your own inbox at http://my-computer.local has none.
   if (!globalThis.crypto || !globalThis.crypto.subtle) return pinKeyWithoutWebCrypto(pin, salt, iterations, onProgress);
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
   return hex(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: unhex(salt), iterations }, key, 256));

@@ -97,7 +97,7 @@ const otpBody = expandWidgets([
   'intro = TextContent("The automated review of your-attention 1.4.0 passed. Approving gives this agent one code for the publish.")',
   `npm = widget otp ${JSON.stringify({ name: 'NPM_OTP', key: 'npm', purpose: 'npm stage approve your-attention@1.4.0', publicKey: JSON.stringify({ kty: 'RSA', n: 'AQAB', e: 'AQAB' }) })}`,
 ].join('\n'), () => ({ name: 'otp', ...otpWidget })).body;
-export const OneTimeCode = { render: () => mount(view(card({ title: 'Approve the npm publish of your-attention 1.4.0?', body: otpBody, otp: ['NPM_OTP'], otpHolder: 'the laptop inbox on mbp, in ~/.your-attention/otp-keys.json, which only its user reads', origin: { harness: 'claude', name: 'release agent', host: 'mbp' } }))) };
+export const OneTimeCode = { render: () => mount(view(card({ title: 'Approve the npm publish of your-attention 1.4.0?', body: otpBody, otp: ['NPM_OTP'], otpHolder: 'your own inbox on mbp, in ~/.your-attention/otp-keys.json, which only its user reads', origin: { harness: 'claude', name: 'release agent', host: 'mbp' } }))) };
 
 export const HtmlAllowed = { render: () => mount(h(HtmlCard, { card: card({ html: '<p style="font:16px sans-serif">Pick one:</p><button onclick="yourAttention.answer({colour:\'blue\'})">Blue</button>' }), allowed: true, onAnswer: () => {} })) };
 

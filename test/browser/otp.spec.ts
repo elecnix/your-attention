@@ -34,7 +34,7 @@ test('the person approves a code on the card, never sees one, and the card says 
   await expect(field.locator('legend')).toHaveText('One-time code from the key npm');
   await expect(field.locator('.otp-purpose')).toHaveText('npm stage approve your-attention@1.4.0');
   await expect(field).toContainText('release agent on test-host');
-  await expect(field).toContainText(/the laptop inbox on .*otp-keys\.json, which only its user reads/);
+  await expect(field).toContainText(/your own inbox on .*otp-keys\.json, which only its user reads/);
   await field.getByLabel('Approve one code from npm').check();
   await page.getByRole('button', { name: 'Send answer' }).click();
 

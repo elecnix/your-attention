@@ -154,6 +154,11 @@ export interface CardVersion {
   recommendation?: string;
   body?: string;
   html?: string;
+  /** What that version asked, so a reader derives the IDs of its forms and fields: web/field-ids.js. */
+  options?: Option[];
+  multiple?: boolean;
+  questions?: AskQuestion[];
+  approvals?: Approval[];
   at: number;
 }
 
@@ -402,7 +407,7 @@ export interface Card {
   /** Set by the inbox in the page's state, never stored: what the page draws for a body stored before the inbox checked
    * bodies, when the page can't draw it whole. `body` draws the statements that parse, then the source from the broken one on. */
   bodyFallback?: { body: string; faults: string[] };
-  /** Set by the laptop inbox in GET /v1/cards/<id> for the owner, never stored: the card came from this machine, and the
+  /** Set by your own inbox in GET /v1/cards/<id> for the owner, never stored: the card came from this machine, and the
    * inbox serves the files its text and recommendation name with file: addresses. */
   localFiles?: boolean;
   priority: Priority;
@@ -510,7 +515,7 @@ export interface Token {
   name: string;
   role: Role;
   createdAt: number;
-  /** An owner token kept on a machine, such as the laptop's owner-token file or a paired client, which acts without the PIN. A token that can travel as a link or a cookie never has it. */
+  /** An owner token kept on a machine, such as the owner-token file of your own inbox or a paired client, which acts without the PIN. A token that can travel as a link or a cookie never has it. */
   pinExempt?: boolean;
 }
 

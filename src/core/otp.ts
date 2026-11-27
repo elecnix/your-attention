@@ -1,7 +1,7 @@
 // One-time codes: the inbox keeps a TOTP key, such as the authenticator key of an npm account, and computes a code
 // when an agent redeems the ticket that the person's approval of an `otp` card minted. The digits go to the agent's
 // session sealed to the card's public key, and nothing else ever holds them: not the answer, not a log, not a hook.
-// SPEC.md#one-time-codes holds the contract. Web Crypto only, so the laptop inbox and the hosted one share it.
+// SPEC.md#one-time-codes holds the contract. Web Crypto only, so your own inbox and the hosted one share it.
 import { InboxError } from './inbox.ts';
 
 /** RFC 6238 with the parameters every authenticator app and npm use: HMAC-SHA-1, six digits, 30-second steps. */
@@ -21,10 +21,10 @@ export const KEY_LABEL = /^[a-z0-9][a-z0-9._-]{0,39}$/;
 /** An agent id, as a session reports it on its stream. */
 export const AGENT_ID = /^\S{1,80}$/;
 
-/** Where an inbox keeps its keys. The laptop inbox writes a file of mode 0600 in its home folder; the hosted inbox
+/** Where an inbox keeps its keys. Your own inbox writes a file of mode 0600 in its home folder; the hosted inbox
  * encrypts each key under a Worker secret. The inbox reads a key only inside a redemption, to compute one code. */
 export interface OtpKeyStore {
-  /** Which inbox holds the keys, and how, in a phrase the card shows: "the laptop inbox on mbp, in a file only its
+  /** Which inbox holds the keys, and how, in a phrase the card shows: "your own inbox on mbp, in a file only its
    * user reads". */
   readonly holder: string;
   save(label: string, key: Uint8Array): Promise<void>;
