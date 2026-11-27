@@ -85,6 +85,28 @@ describe('a secret_access grant in the session', () => {
     assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE }, 'the live grant is untouched');
   });
 
+  it('holds no grant for an answer that arrives after its ceiling, and says the grant ended', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { card, answer } = await granted(secrets, 'c10', T0 - MIN);
+    const text = await secrets.receive(card, answer);
+    assert.match(text, /DATABASE_URL on card c10 \(case case-c10\) ended at 2026-11-27 11:59 UTC/);
+    assert.doesNotMatch(text, /Every command you run gets it/);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+  });
+
+  it('ends an earlier grant of the same name when a later answer declines or revokes it', async () => {
+    for (const later of [{ decline: true }, 'revoked'] as const) {
+      const secrets = new SecretRequests(() => T0);
+      const first = await granted(secrets, 'c11', T0 + 60 * MIN);
+      await secrets.receive(first.card, first.answer);
+      const second = await granted(secrets, 'c12', T0 + 60 * MIN, { revokedAt: T0 });
+      const value = later === 'revoked' ? second.answer.values['DATABASE_URL'] : later;
+      const text = await secrets.receive(second.card, { ...second.answer, values: { DATABASE_URL: value } });
+      assert.match(text, /this session has no DATABASE_URL/);
+      assert.deepEqual(secrets.env('pi:s1'), {}, `the earlier grant ends on a later ${later === 'revoked' ? 'revoke' : 'decline'}`);
+    }
+  });
+
   it('holds no grant for a declined field, and says so', async () => {
     const secrets = new SecretRequests(() => T0);
     const card = { id: 'c5', agent: 'pi:s1', title: 'Database?', secrets: ['DATABASE_URL'], createdAt: T0 } as unknown as Card;
@@ -154,6 +176,22 @@ describe('masking a value in output', () => {
     r.add('LONG', 'xx-secret1-yy');
     r.add('TINY', 'abc');
     assert.equal(r.mask('xx-secret1-yy secret1 abc'), '[secret LONG] [secret SHORT] abc');
+  });
+
+  it('keeps streaming a value that overlaps itself, such as a run of one letter', () => {
+    const r = new Redactor();
+    r.add('A', 'aaaa');
+    const s = r.stream();
+    let out = '';
+    let streamed = 0;
+    for (let i = 0; i < 100; i++) {
+      const piece = s.push('a'.repeat(10));
+      if (piece) streamed++;
+      out += piece;
+    }
+    out += s.end();
+    assert.ok(streamed > 90, `output streams as it comes, ${streamed} of 100 chunks`);
+    assert.equal(out, '[secret A]'.repeat(250));
   });
 
   it('masks every string of a tool result and keeps its shape', () => {

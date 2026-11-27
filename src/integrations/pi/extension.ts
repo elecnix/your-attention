@@ -208,8 +208,10 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
     if (!secrets.received) return undefined;
     const content = secrets.maskDeep(event.content);
     const structuredContent = secrets.maskDeep(event.structuredContent);
-    if (JSON.stringify(content) === JSON.stringify(event.content) && JSON.stringify(structuredContent) === JSON.stringify(event.structuredContent)) return undefined;
-    return { content, ...(event.structuredContent === undefined ? {} : { structuredContent }), details: secrets.maskDeep(event.details) };
+    const details = secrets.maskDeep(event.details);
+    const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+    if (same(content, event.content) && same(structuredContent, event.structuredContent) && same(details, event.details)) return undefined;
+    return { content, ...(event.structuredContent === undefined ? {} : { structuredContent }), details };
   });
 
   pi.on('context', (event) => {

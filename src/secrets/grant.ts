@@ -114,6 +114,15 @@ export class Grants {
     return out;
   }
 
+  /** Ends the grant of `name` for `agent`, whatever its case id, and says whether one was live. A later answer that
+   * declines the same name is the newer decision, so it ends the earlier grant as a new approval would replace it. */
+  end(agent: string, name: string, now = this.now()): boolean {
+    const grant = this.held.get(key(agent, name));
+    if (!grant) return false;
+    this.held.delete(key(agent, name));
+    return this.alive(grant, now);
+  }
+
   /** Kills the grant with this case id, and says whether one was found. Takes effect on the next `take`. */
   revoke(caseId: string): boolean {
     for (const [k, grant] of this.held) {

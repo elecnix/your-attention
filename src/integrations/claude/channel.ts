@@ -275,7 +275,7 @@ function listen(client: Client): void {
   asks.resync();
   void client.stream(agent, async (ev) => {
     // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
-    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
+    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer' || ev.type === 'revoke') asks.activity();
     // A new rule may move the next ask, or turn the asks on or off.
     if (ev.type === 'settings') return asks.resync();
     if (ev.type === 'guidance') {

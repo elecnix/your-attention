@@ -56,11 +56,12 @@ export class SecretRequests {
       // A secret card that an older inbox stored names its value in `secret` and seals it in `sealed`.
       const name = card.kind === 'secret' && card.secret ? card.secret.name : field;
       const value = answer.values[field];
-      if (isDecline(value)) { lines.push(`The person declined access to ${name} on card ${card.id}, so this session has no ${name}.`); continue; }
+      // A decline or a revoke is the newest decision about this name, so it ends a grant an earlier card gave.
+      if (isDecline(value)) { this.grants.end(card.agent, name); lines.push(`The person declined access to ${name} on card ${card.id}, so this session has no ${name}.`); continue; }
       const access = isAccessGrant(value) ? value : undefined;
       const sealed = access ? access.sealed : value;
       if (!isSealed(sealed)) { lines.push(`The person did not send ${name} on card ${card.id}.`); continue; }
-      if (access?.revokedAt !== undefined) { lines.push(`The person revoked ${name} on card ${card.id} (case ${access.case}), so this session has no ${name}.`); continue; }
+      if (access?.revokedAt !== undefined) { this.grants.end(card.agent, name); lines.push(`The person revoked ${name} on card ${card.id} (case ${access.case}), so this session has no ${name}.`); continue; }
       if (!ENV_NAME.test(name)) { lines.push(`The person sent ${name} on card ${card.id}, but a shell variable can't take that name. Ask again with a name of letters, digits and underscores.`); continue; }
       const plain = await this.open(card.id, sealed);
       if (plain === undefined) {
@@ -68,6 +69,13 @@ export class SecretRequests {
         continue;
       }
       const now = this.now();
+      // An answer can reach the session after the ceiling it carries, such as one queued while the session was away.
+      if (access && access.until <= now) {
+        this.grants.end(card.agent, name);
+        this.redactor.add(name, plain);
+        lines.push(`The grant of ${name} on card ${card.id} (case ${access.case}) ended at ${new Date(access.until).toISOString().slice(0, 16).replace('T', ' ')} UTC, before it reached this session, so this session has no ${name}. Ask again if you still need it.`);
+        continue;
+      }
       const grant = this.grants.hold({
         name,
         agent: card.agent,

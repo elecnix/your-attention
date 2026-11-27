@@ -46,7 +46,9 @@ export class Redactor {
       moved = false;
       for (const set of this.values.values()) {
         for (const v of set) {
-          for (let i = text.indexOf(v); i !== -1 && i < at; i = text.indexOf(v, i + 1)) {
+          // The occurrences `mask` replaces, left to right and never overlapping, so a value such as `aaaa` in a run of
+          // `a`s moves the cut back by less than its own length rather than to the start.
+          for (let i = text.indexOf(v); i !== -1 && i < at; i = text.indexOf(v, i + v.length)) {
             if (i + v.length > at) { at = i; moved = true; }
           }
         }

@@ -10,8 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import type { SecretRequests } from '../secrets.ts';
 
-/** How long a token waits for the command it was made for. The command starts right after the hook answers. */
-export const TOKEN_MS = 60_000;
+/** How long a token waits for the command it was made for. The command starts after the hook answers, and after the
+ * person answers a permission prompt when one shows, which can take a while. */
+export const TOKEN_MS = 30 * 60_000;
+/** The most tokens waiting at once. A command the person refuses leaves its token unused until it expires. */
+export const MAX_TOKENS = 256;
 
 /** The folder of this user's sockets: the runtime folder when the system has one, the temp folder otherwise. */
 export function socketDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -51,6 +54,8 @@ export async function serveSecrets(secrets: SecretRequests, agent: string, sessi
     if (req.op === 'token') {
       if (!secrets.holds(agent)) return {};
       const token = crypto.randomBytes(16).toString('hex');
+      // The oldest token goes first when too many wait: a Map keeps insertion order.
+      while (tokens.size >= MAX_TOKENS) tokens.delete(tokens.keys().next().value as string);
       tokens.set(token, now + TOKEN_MS);
       return { token };
     }
@@ -83,7 +88,19 @@ export async function serveSecrets(secrets: SecretRequests, agent: string, sessi
   }
   fs.chmodSync(file, 0o600);
   server.unref();
-  return { path: file, close: () => { server.close(); fs.rmSync(file, { force: true }); } };
+  // A later channel of the same session, such as a resume in another terminal, replaces this socket with its own, so
+  // close removes the file only while it is still the one this server made.
+  // The inode alone is not enough: a file system hands a freed inode number to the next file it makes.
+  const identity = (): string => { const st = fs.statSync(file, { bigint: true }); return `${st.ino}:${st.ctimeNs}`; };
+  const mine = identity();
+  // libuv removes the socket's path when the server closes, whichever socket the path holds by then. So once another
+  // channel's socket sits there, close leaves the server open: its handle ends with this process, which exits next.
+  const close = (): void => {
+    let ours = false;
+    try { ours = identity() === mine; } catch { /* already gone */ }
+    if (ours) server.close();
+  };
+  return { path: file, close };
 }
 
 /** Ask the channel at `file` one question. Undefined when no channel answers there. */
