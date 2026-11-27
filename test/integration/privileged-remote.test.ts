@@ -91,7 +91,8 @@ async function approve(id: string, command: string, on: string, plain: Record<st
   return (await res.json() as { values: Record<string, PrivilegedRun> }).values['run_it']!;
 }
 
-describe('a privileged action on another machine', () => {
+// The far side is POSIX: /bin/sh and the stand-ins on its PATH, which Windows lacks.
+describe('a privileged action on another machine', { skip: process.platform === 'win32' ? 'the far side runs /bin/sh' : false }, () => {
   it('runs on the far machine through sudo, and the password reaches nothing the agent reads', async () => {
     const client = new Client({ url: h.server.url, token: h.agentToken });
     const listener = h.listen(client, 'agent-r1');

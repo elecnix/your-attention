@@ -15,6 +15,8 @@ import { loadMachines, sshArgs } from '../../src/node/privileged.ts';
 
 const PASSWORD = 'FIXTURE-PASSWORD-DO-NOT-USE';
 const WEB1: RemoteMachine = { name: 'web1', host: 'web1.lan', user: 'deploy', hostname: 'web1', sudo: 'password', allow: ['/usr/bin/systemctl restart nginx', `/usr/bin/printf '%s|' "it's here" 'costs $5'`] };
+/** The far side's shell is POSIX sh, which Windows lacks, so the tests that compare with it skip there. */
+const NEEDS_SH = { skip: process.platform === 'win32' ? 'compares with /bin/sh' : false };
 const rejects = (status: number, message: RegExp) => (e: unknown) => e instanceof InboxError && e.status === status && message.test(e.message);
 
 /** The words /bin/sh reads from a line, as printf prints each one between NUL bytes. */
@@ -24,7 +26,7 @@ function shellWords(line: string): string[] {
 }
 
 describe('the words of a command', () => {
-  it('reads quotes and backslashes as sh does, so the words match what the person reads', () => {
+  it('reads quotes and backslashes as sh does, so the words match what the person reads', NEEDS_SH, () => {
     for (const command of [
       '/usr/bin/systemctl restart nginx',
       `/usr/bin/printf '%s|' "it's here" 'costs $5 or $HOME'`,
@@ -45,7 +47,7 @@ describe('the words of a command', () => {
     assert.throws(() => parseCommand('  '), /empty/);
   });
 
-  it('quotes each word so the far side reads it back unchanged', () => {
+  it('quotes each word so the far side reads it back unchanged', NEEDS_SH, () => {
     const words = ['/usr/bin/printf', '%s|', "it's here", 'costs $5 or $HOME', 'a "b" `c` \\d', '', ';|&'];
     assert.deepEqual(shellWords(words.map(shellQuote).join(' ')), words);
   });
