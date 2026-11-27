@@ -23,6 +23,12 @@ function fail(message: string): never {
 /** A path as the person wrote it in their home folder, with ~ in front. */
 const tilde = (p: string): string => (p === os.homedir() || p.startsWith(`${os.homedir()}${path.sep}`) ? `~${p.slice(os.homedir().length)}` : p);
 
+/** An origin as the list shows it: a folder of this computer as a path, with ~ for the home folder. */
+function shownOrigin(origin: string | undefined): string {
+  if (!origin) return '';
+  try { return tilde(originFolder(origin)); } catch { return origin; }
+}
+
 /** Rows in columns, two spaces apart, under an indent. */
 function table(rows: string[][]): string {
   const widths = rows[0]!.map((_, i) => Math.max(...rows.map((r) => (r[i] ?? '').length)));
@@ -38,7 +44,7 @@ async function listSources(home: string): Promise<void> {
     const rows = listed.map((s) => {
       const entry = entries.find((e) => e.name === s.name);
       const form = s.builtin ? 'built-in' : entry?.form ?? (entry ? 'node' : '');
-      const where = s.name === 'age' && s.builtin ? ageDirs(entry?.settings ?? {}).map(tilde).join(', ') : entry?.origin ?? '';
+      const where = s.builtin ? ageDirs(entry?.settings ?? {}).map(tilde).join(', ') : shownOrigin(entry?.origin);
       return [s.name, form, s.status, s.status === 'ready' ? where : s.reason ?? ''];
     });
     console.log(`Secret sources on ${instance}, from ${tilde(path.join(home, 'sources.jsonl'))}\n\n${table([['NAME', 'FORM', 'STATUS', 'FROM, OR WHY NOT'], ...rows])}`);

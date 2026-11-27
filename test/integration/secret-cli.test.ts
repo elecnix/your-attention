@@ -68,7 +68,8 @@ describe('your-attention secret source', () => {
     const listed = await runCli(env, 'secret', 'source', 'list');
     assert.equal(listed.code, 0, listed.stderr);
     assert.match(listed.stdout, /^ *age +built-in +(off|ready)/m);
-    assert.match(listed.stdout, /^ *example +stdio +ready +file:\/\//m);
+    const shown = EXAMPLE.startsWith(`${os.homedir()}${path.sep}`) ? `~${EXAMPLE.slice(os.homedir().length)}` : EXAMPLE;
+    assert.ok(listed.stdout.split('\n').some((l) => /^ *example +stdio +ready +/.test(l) && l.endsWith(shown)), listed.stdout);
 
     const removed = await runCli(env, 'secret', 'source', 'remove', 'example');
     assert.equal(removed.code, 0, removed.stderr);

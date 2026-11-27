@@ -51,7 +51,8 @@ describe('a stdio secret source', () => {
   });
 
   it('fails a call that takes longer than its timeout, and starts again on the next call', async () => {
-    const s = source({ timeoutMs: 200 });
+    // Long enough for a new Node process to start on a busy runner, so only the hanging call times out.
+    const s = source({ timeoutMs: 3000 });
     await assert.rejects(s.lookup({ name: 'HANG' }), /did not answer within/);
     assert.equal((await s.lookup({ name: 'WHO' })).length, 1);
   });
