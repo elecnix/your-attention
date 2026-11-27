@@ -20,7 +20,7 @@ import { MAX_PULL_REQUESTS, MAX_TAGS } from './types.ts';
 import type {
   AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, PullRequest, RequireCardInput, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
-  FeedbackFinding, FeedbackVerdict, LateAnswer, TriageFeedback, TriagePushback,
+  FeedbackFinding, FeedbackVerdict, LateAnswer, OpenCards, TriageFeedback, TriagePushback,
 } from './types.ts';
 
 /** A sign-in code as the inbox keeps it in `meta`. A code made before short codes has no `short`. */
@@ -258,6 +258,10 @@ export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_ANSWER_IMAGES = 10;
 /** How many card ids `unread` names before it only counts. A command line has a length. */
 export const UNREAD_ID_LIMIT = 20;
+/** How many open cards a post reply or an answer event lists. Past it, the count says how many more. */
+export const OPEN_CARDS_LIMIT = 10;
+/** The states of a card its agent still waits on: the person has not answered it, or the agent has not read the answer. */
+const WAITING_STATES = new Set<CardState>(['in-triage', 'held', 'open', 'orphaned', 'answered', 'delivered']);
 // The images of one answer share a byte budget, because the route reads a body of 16 MB and base64 costs four thirds:
 // ten images of 8 MB each would make a body no route accepts.
 export const MAX_ANSWER_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -2618,6 +2622,27 @@ export class Inbox {
     return { unread: mine.length, cards: mine.slice(0, UNREAD_ID_LIMIT) };
   }
 
+  /** The cards one agent of one token still waits on, oldest first, leaving out `except`: the card the reply or event
+   * is about. Another agent's cards stay out, even under the same token, since the list goes to one session. The
+   * inbox's own system cards stay out too, and so does a card the agent closed or whose answer it read. */
+  openCards(token: string, agent: string, except?: string): OpenCards {
+    const presence = this.store.get<Presence>('presence', agent);
+    const levels = this.priorities();
+    const waiting = this.store.list<Card>('cards')
+      .filter((c) => c.id !== except && c.agent === agent && (c.token ?? '') === token && c.kind !== 'system')
+      .map((card) => ({ card, answer: this.store.get<Answer>('answers', card.id) }))
+      .map(({ card, answer }) => ({ card, answer, state: this.shownState(card, presence, answer) }))
+      .filter(({ state }) => WAITING_STATES.has(state))
+      .sort((a, b) => a.card.createdAt - b.card.createdAt || (a.card.id < b.card.id ? -1 : 1));
+    return {
+      at: this.now(),
+      total: waiting.length,
+      cards: waiting.slice(0, OPEN_CARDS_LIMIT).map(({ card, answer, state }) => (
+        { id: card.id, title: card.title, state, priority: this.effectivePriority(card, levels, answer), createdAt: card.createdAt }
+      )),
+    };
+  }
+
   /** Cards that match the words and the filters, best match first, and newest change first when no words are given.
    * An empty query, or `*`, lists every card the filters match. `nextCursor` continues a longer list. */
   search(query: string, filters: SearchFilters = {}): SearchPage {
@@ -2926,7 +2951,7 @@ export class Inbox {
       if (!card || recipient(card, answer) !== agent || (card.token ?? '') !== token) continue;
       const next: Answer = { ...answer, deliveredTo: [...(answer.deliveredTo ?? []), instance] };
       this.store.put('answers', answer.card, next);
-      send({ type: 'answer', id: randomId(6), card: publicCard(card), answer: next });
+      send({ type: 'answer', id: randomId(6), card: publicCard(card), answer: next, openCards: this.openCards(token, agent, card.id) });
     }
   }
 
@@ -2941,7 +2966,7 @@ export class Inbox {
       const to = [...subs].map((f) => this.instances.get(f)).filter((x): x is string => !!x);
       const next: Answer = { ...answer, deliveredAt: this.now(), ...(to.length ? { deliveredTo: to } : {}) };
       this.store.put('answers', answer.card, next);
-      const ev: AgentEvent = { type: 'answer', id: randomId(6), card: publicCard(card), answer: next };
+      const ev: AgentEvent = { type: 'answer', id: randomId(6), card: publicCard(card), answer: next, openCards: this.openCards(card.token ?? '', agent, card.id) };
       for (const send of subs) send(ev);
       this.emit({ type: 'change', card: card.id });
     }

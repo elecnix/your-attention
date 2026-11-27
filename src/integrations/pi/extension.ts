@@ -3,7 +3,7 @@
 // one. The answer is marked read when it reaches the model context.
 import os from 'node:os';
 import { Type } from 'typebox';
-import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import type { NewCard } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
@@ -152,7 +152,7 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
         if (received.granted.length && !(await deliverGrants(ctx.sessionManager.getCwd()))) {
           sealed += '\nThis pi has no bash tool the extension can rebuild, so its commands do not get these variables. Tell the person.';
         }
-        const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}${sealed ? `\n${sealed}` : ''}`;
+        const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}${sealed ? `\n${sealed}` : ''}${describeOpenCards(ev.openCards)}`;
         const text = `[your-attention answer ${ev.id}] ${what}`;
         // Steer by default; start a new turn when the agent is idle.
         if (ctx.isIdle()) pi.sendUserMessage(text);
