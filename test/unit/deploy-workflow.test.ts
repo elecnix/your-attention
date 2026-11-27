@@ -3,10 +3,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-const WORKFLOW = fs.readFileSync(new URL('../../.github/workflows/deploy-cloudflare.yml', import.meta.url), 'utf8');
-const SCRIPT = new URL('../../scripts/check-deploy-mode.sh', import.meta.url).pathname;
+// A Windows checkout may turn the line ends into CRLF.
+const WORKFLOW = fs.readFileSync(new URL('../../.github/workflows/deploy-cloudflare.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const SCRIPT = fileURLToPath(new URL('../../scripts/check-deploy-mode.sh', import.meta.url));
+// The check runs on the Ubuntu runner of the deploy, so its cases run where bash is the shell.
+const NO_BASH = process.platform === 'win32' ? 'the deploy runs the check on Ubuntu, and Windows runs no bash script' : false;
 
 function check(mode: string | undefined, signed: boolean): { ok: boolean; out: string } {
   const env: NodeJS.ProcessEnv = { PATH: process.env['PATH'], INBOX_ID_SECRET_SET: String(signed) };
@@ -24,7 +28,7 @@ function jobs(): Map<string, string> {
 }
 
 describe('the mode of a deploy', () => {
-  it('refuses a run that names no mode', () => {
+  it('refuses a run that names no mode', { skip: NO_BASH }, () => {
     for (const mode of [undefined, '', 'choose', 'Hosted']) {
       const r = check(mode, true);
       assert.equal(r.ok, false, `mode ${mode}`);
@@ -32,14 +36,14 @@ describe('the mode of a deploy', () => {
     }
   });
 
-  it('refuses single in an environment that signs hosted inbox addresses, and hosted without the key', () => {
+  it('refuses single in an environment that signs hosted inbox addresses, and hosted without the key', { skip: NO_BASH }, () => {
     const single = check('single', true);
     assert.equal(single.ok, false);
     assert.match(single.out, /404 at every inbox address/);
     assert.equal(check('hosted', false).ok, false);
   });
 
-  it('lets an explicit mode through when the environment agrees', () => {
+  it('lets an explicit mode through when the environment agrees', { skip: NO_BASH }, () => {
     assert.equal(check('hosted', true).ok, true);
     assert.equal(check('single', false).ok, true);
   });
