@@ -43,3 +43,10 @@ describe('text the person copies', () => {
     assert.match(describeOf('card_post', ['properties', 'text']), /inline code or a fenced block.*copy it with a click/);
   });
 });
+
+describe('the response to an answer', () => {
+  it('asks the agent to post it as a new card that follows the answered card, so the thread stays in the inbox', () => {
+    assert.match(DEFAULT_GUIDANCE, /When the person answers a card, post this agent's response as a new card with `follows: "<answered card id>"`/);
+    assert.match(DEFAULT_GUIDANCE, /links the two cards both ways/);
+  });
+});

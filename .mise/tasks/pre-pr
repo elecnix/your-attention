@@ -87,25 +87,11 @@ skip() {
 	printf '\n\033[1m== %s\033[0m\n   skipped: %s\n' "$1" "$2"
 }
 
-# vale exits 0 when it reports warnings alone, and the pr-body job fails on a
-# warning just as it fails on an error, so this gate counts the alerts rather
-# than trusting the exit code.
+# The pr-body job fails on a warning as well as an error. The script copies
+# the body to pr-body.md first: .vale.ini gives rules to [*.md] alone, so a
+# body at a mktemp path with no extension would get none and report 0 alerts.
 strict_body_gate() {
-	local body=$1 alerts=0
-	printf '\n\033[1m== pr body (%s)\033[0m\n   $ vale --no-global --config .vale.ini %s\n' "$(basename "$body")" "$body"
-	vale --no-global --config "$repo_root/.vale.ini" "$body" || true
-	alerts=$(vale --no-global --config "$repo_root/.vale.ini" --output=JSON "$body" 2>/dev/null | grep -o '"Line":' | wc -l)
-	alerts=${alerts// /}
-	if ((alerts == 0)); then
-		record "pr body ($(basename "$body"))" pass "0 alerts"
-		printf '   \033[32mpass\033[0m: 0 alerts\n'
-	else
-		record "pr body ($(basename "$body"))" fail "$alerts alert(s)"
-		failed=$((failed + 1))
-		printf '   \033[31mFAIL\033[0m: %s alert(s); the pr-body job fails on a warning as well as an error\n' "$alerts"
-	fi
-	last_status=0
-	return 0
+	gate "pr body ($(basename "$1"))" scripts/check-pr-body-prose.sh "$1"
 }
 
 # 1. npm ci, only when the lock file moved since the merge base, or when the

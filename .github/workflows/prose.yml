@@ -24,3 +24,34 @@ jobs:
           # annotations, so CI reports errors only.
           min_alert_level: error
           filter_mode: nofilter
+
+  # The pre-pr task checks a pull request body with scripts/check-pr-body-prose.sh.
+  # A body named without .md once reported 0 alerts there because Vale gave it no
+  # rules, so this job fails when the same body gets different verdicts under
+  # different names.
+  pr-body-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VALE_VERSION: 3.20.0
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+      - name: install vale
+        # vale-action leaves its binary off PATH, so this job installs the same
+        # release and checks it against the release's checksums.
+        run: |
+          set -euo pipefail
+          base="https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}"
+          tarball="vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
+          dir="$RUNNER_TEMP/vale"
+          mkdir -p "$dir"
+          curl -fsSLo "$dir/$tarball" "$base/$tarball"
+          curl -fsSLo "$dir/checksums.txt" "$base/vale_${VALE_VERSION}_checksums.txt"
+          (cd "$dir" && grep " $tarball\$" checksums.txt | sha256sum -c -)
+          tar -xzf "$dir/$tarball" -C "$dir" vale
+          echo "$dir" >> "$GITHUB_PATH"
+      - run: vale sync
+      - name: the body check gives one verdict under any file name
+        run: scripts/test-check-pr-body-prose.sh

@@ -199,7 +199,7 @@ export const DEFAULT_PRIORITIES: PriorityLevel[] = [
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
 /** The version of `DEFAULT_GUIDANCE`. It moves whenever that text changes, so a client reads the words it has not seen. */
-export const DEFAULT_GUIDANCE_VERSION = 5;
+export const DEFAULT_GUIDANCE_VERSION = 6;
 export const DEFAULT_GUIDANCE = [
   'On a card, "you" is the person who reads it. Write about yourself in the third person, as "this agent" or the name in `from`, never "I" or "we", so the person always knows who acts.',
   'Write each card so the person can answer it without opening the session.',
@@ -215,7 +215,7 @@ export const DEFAULT_GUIDANCE = [
   'Put text the person should copy, such as a command or an approval sentence, in inline code or a fenced block, and the page lets the person copy it with a click.',
   'When an action needs the person\'s own words in a session, post the sentence as an approval on the card instead of asking the person to type it there.',
   'A card title is one line of plain text: no Markdown and no links. Name the thing there, as "PR #93 — an empty list no longer looks like a success". Put the link in `text`, or in a field label in the body: both read inline Markdown.',
-  'To follow up on a card, post a new card with `follows: "<card id>"`. The inbox links the two cards both ways, and there is no reply to a card.',
+  'When the person answers a card, post this agent\'s response as a new card with `follows: "<answered card id>"`, not only as a message in the session, and follow up on any card the same way. The inbox links the two cards both ways, so the person reads the response beside the answer. There is no reply to a card.',
   'Never ask for a secret, such as an API key, in a text field. Place the secret widget in the card body, `key = widget secret {"name": "API_KEY"}`, and card_post seals it for this session.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
