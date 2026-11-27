@@ -333,6 +333,13 @@ describe('revoking a grant', () => {
     assert.ok(!again.some((e) => e.type === 'revoke'));
   });
 
+  it('answers 409, not 500, to a revoke whose JSON body is null', async () => {
+    const { inbox } = await granted();
+    const res = await call(inbox, 'owner', 'POST', '/v1/cards/a1/revoke', null);
+    assert.equal(res.status, 409);
+    assert.match(((await res.json()) as { error: string }).error, /has no grant/);
+  });
+
   it('refuses a field with no grant', async () => {
     const { inbox } = await granted();
     assert.throws(() => inbox.revokeGrant(owner, 'a1', 'OTHER'), rejects(409, /no grant/));

@@ -735,7 +735,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         }
         case 'revoke':
           owner();
-          return json(inbox.revokeGrant(me, b, String(body['field'] ?? '')));
+          // A null JSON body names no field, and the inbox refuses it rather than failing on a property read.
+          return json(inbox.revokeGrant(me, b, String(body?.['field'] ?? '')));
         case 'close':
           return json(publicCard(inbox.close(me, b, body['kind'] as CloseKind, String(body['outcome'] ?? ''), body['ifUnanswered'] === true)));
         case 'dismiss':
