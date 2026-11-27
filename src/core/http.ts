@@ -684,7 +684,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
         }
         const card = await inbox.postCardWithFiles(me, input);
         // The reply names the tags the card took from the agent's defaults, so the agent knows what it inherited.
-        return json({ ...withWarning(publicCard(card)), inheritedTags: inbox.inheritedTags(me, input) }, 201);
+        // It also lists the agent's other open cards, so the agent sees what still waits without a search.
+        return json({ ...withWarning(publicCard(card)), inheritedTags: inbox.inheritedTags(me, input), openCards: inbox.openCards(me.token, card.agent, card.id) }, 201);
       }
       if (method === 'GET' && !b) {
         // ?ids= looks up the cards a text links to, cleared ones included, in one request.

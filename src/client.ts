@@ -8,9 +8,10 @@ import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagram
 import { InboxError, type SearchFilters, type SearchPage, type TriageFeedbackRecord } from './core/inbox.ts';
 import { isSealed, secretAccesses } from './core/sealed.ts';
 import type { AccessGrant, Candidate, SecretQuery, SourceInfo } from './core/secret-sources.ts';
-import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, Origin, PublicSubscription, PullRequest, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, OpenCards, Origin, PublicSubscription, PullRequest, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
+import { cardAge } from '../web/age.js';
 
 export interface ClientConfig {
   url: string;
@@ -202,9 +203,9 @@ export class Client {
     throw new Error(`no link answered (${(lastError as Error)?.message ?? 'none tried'})`);
   }
 
-  /** The posted card. A revision the person won't see carries `warning`, and `inheritedTags` names the keys the card
-   * took from the agent's default tags. */
-  async post(card: NewCard): Promise<Card & { warning?: string; inheritedTags?: string[] }> {
+  /** The posted card. A revision the person won't see carries `warning`, `inheritedTags` names the keys the card
+   * took from the agent's default tags, and `openCards` lists the agent's other open cards. */
+  async post(card: NewCard): Promise<Card & { warning?: string; inheritedTags?: string[]; openCards?: OpenCards }> {
     await this.checkFirst('POST /v1/cards', { card: { ...card, attachments: undefined } });
     return this.call('POST', '/v1/cards', card);
   }
@@ -592,6 +593,28 @@ const LATE_CLOSE: Record<CloseKind, string> = {
   returned: 'had it sent back by triage',
   dismissed: 'saw it dismissed',
 };
+
+/** How a line names the state of a card its agent still waits on. An answer the agent has not read comes first in its
+ * line, because it is what the agent most needs to act on. */
+const WAITING: Partial<Record<CardState, string>> = {
+  answered: 'ANSWERED, unread',
+  delivered: 'ANSWERED, unread',
+  'in-triage': 'in triage',
+  held: 'held by triage',
+  orphaned: 'open',
+  open: 'open',
+};
+
+/** The agent's other open cards, one line each, oldest first, after a blank line: what a card_post reply and an answer
+ * event end with. An inbox from before the list sends none, and then this says nothing. */
+export function describeOpenCards(open: OpenCards | undefined): string {
+  if (!open) return '';
+  if (open.total === 0) return '\n\nYou have no other open cards.';
+  const lines = open.cards.map((c) => `- ${c.id} "${c.title}": ${WAITING[c.state] ?? c.state}, priority ${c.priority}, posted ${cardAge(open.at - c.createdAt)}`);
+  const more = open.total - open.cards.length;
+  const head = `You have ${open.total} other open card${open.total === 1 ? '' : 's'}, oldest first:`;
+  return `\n\n${[head, ...lines, ...(more > 0 ? [`… and ${more} more`] : [])].join('\n')}`;
+}
 
 export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]): string {
   const lines: string[] = [];

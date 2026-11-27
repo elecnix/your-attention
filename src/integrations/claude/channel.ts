@@ -12,7 +12,7 @@ import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { serveSecrets } from './secret-socket.ts';
@@ -326,7 +326,7 @@ function listen(client: Client): void {
     let sealed = received.text;
     // Without the socket, the Bash hooks have nothing to read, so the model hears that the variable won't come.
     if (received.granted.length && !(await openSecretSocket())) sealed += `\nThis session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get these variables. Tell the person.`;
-    const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
+    const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}${describeOpenCards(ev.openCards)}`;
     // A newer answer to the same card replaces the one the channel is still trying to deliver.
     for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);
     const push: Push = { card: card.id, body, meta: { card_id: card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };

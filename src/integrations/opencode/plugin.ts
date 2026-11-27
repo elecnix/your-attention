@@ -5,7 +5,7 @@
 // OpenCode hands plugins its own Zod, as tool.schema from @opencode-ai/plugin, and wants tool arguments in it.
 // The plugin takes that Zod as an argument, so this package needs no Zod of its own.
 import os from 'node:os';
-import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import type { AgentEvent, Origin } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { runTool } from '../run-tool.ts';
@@ -126,7 +126,7 @@ export function createPlugin(z: unknown) {
         if (ev.type !== 'answer') return;
         pending.set(ev.id, ev.card.id);
         const sealed = await secrets.receive(ev.card, ev.answer);
-        const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(box, agentOf(session), ev.answer))}${sealed ? `\n${sealed}` : ''}`;
+        const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(box, agentOf(session), ev.answer))}${sealed ? `\n${sealed}` : ''}${describeOpenCards(ev.openCards)}`;
         await send(session, `[your-attention answer ${ev.id}] ${what}`);
       }, stop.signal, 'auto', { origin: { harness: 'opencode', session, host: os.hostname(), herdrPane: process.env['HERDR_PANE_ID'] } }).catch(() => {});
     };

@@ -160,6 +160,20 @@ An agent posts `POST /v1/cards` with these fields. Only `agent` and `title` are 
 
 Only the token that posted a card can change it or acknowledge its answer. The inbox posts a guidance card itself and gives it the token of the proposing agent, so that agent may acknowledge the answer and close the card, and an edit fails with 403 because only the inbox may post as `system`. The inbox never sends that token id to clients.
 
+### Open cards in a reply
+
+`POST /v1/cards` also replies with `openCards`, the other cards that the same agent of the same token still waits on, as `{at, total, cards}`. A card counts while its state is `in-triage`, `held`, `open`, `orphaned`, `answered` or `delivered`. An answer the agent hasn't read yet counts, because the agent still has to act on it. A `read` or `closed` card doesn't count, and neither do the inbox's own `system` cards or the card the reply is about. Another agent's cards stay out of the list, even under the same token, because the reply goes to one session. `cards` holds the oldest 10, oldest first, each as `{id, title, state, priority, createdAt}`, and `total` counts all of them. `at` is the inbox's clock, so a client reads each card's age without trusting its own clock. The inbox lists them in the request that stores the card, with no further round trip.
+
+`card_post` ends its reply with one line per card, and the pi, OpenCode and Claude Code integrations end each answer they relay with the same lines:
+
+```text
+You have 2 other open cards, oldest first:
+- c1 "Use SQLite?": ANSWERED, unread, priority soon, posted 2 h ago
+- c4 "Which name?": open, priority now, posted 15 min ago
+```
+
+Past 10 cards, a last line says `… and N more`. With none, the reply says `You have no other open cards.`
+
 ## Default tags
 
 An agent keeps default tags in the inbox, and every card it posts inherits them. `PUT /v1/tags` sets them:
@@ -782,7 +796,7 @@ An agent opens `GET /v1/stream?agent=<id>`, and the inbox reports the agent onli
 { "type": "answer", "id": "5f2a9c01d3e4", "card": { "id": "c1", "title": "Use SQLite?" }, "answer": { "values": { "choice": "o1" }, "comment": "yes" } }
 ```
 
-The event above is trimmed to the fields an agent reads. The `id` is a receipt: the Claude Code channel watches the session transcript for it before it sends the acknowledgment.
+The event above is trimmed to the fields an agent reads. It also carries `openCards`, the agent's other open cards as [Open cards in a reply](#open-cards-in-a-reply) describes, so the agent sees what remains after each answer. The `id` is a receipt: the Claude Code channel watches the session transcript for it before it sends the acknowledgment.
 
 The inbox also sends a `settings` event to every open agent stream when the require-a-card rule changes, whoever changed it, which is what spares a running session a restart:
 

@@ -14,7 +14,7 @@ export const removedTools: Record<string, string> = {
 export const cardTools: CardTool[] = [
   {
     name: 'card_post',
-    description: 'Ask the person for a decision on a card in their inbox. Returns at once: the answer arrives later, so keep working. State the goal, the options you weighed, the evidence, and your recommendation. Put each question next to the field that answers it, so the person answers while the question is in mind: never list questions in the text with the answers at the bottom. One question uses options. Two or more use questions, each with its own text and options. To follow up on an earlier card, post a new card with follows set to the id of the earlier card: there is no reply to a card.',
+    description: 'Ask the person for a decision on a card in their inbox. Returns at once: the answer arrives later, so keep working. The reply ends with your other open cards, one line each, and marks each answer you have not read. State the goal, the options you weighed, the evidence, and your recommendation. Put each question next to the field that answers it, so the person answers while the question is in mind: never list questions in the text with the answers at the bottom. One question uses options. Two or more use questions, each with its own text and options. To follow up on an earlier card, post a new card with follows set to the id of the earlier card: there is no reply to a card.',
     schema: {
       type: 'object',
       properties: {
