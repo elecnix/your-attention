@@ -83,13 +83,20 @@ export function isPassphraseFile(file: string): boolean {
 /** A name as a query and a file both write it, so DATABASE_URL finds database-url.age. */
 const normal = (name: string): string => name.toLowerCase().replace(/[-.\s]/g, '_');
 
+/** Whether the real path `file` is below the real path `folder`. A relative path compares the two, since a prefix test
+ * would look for `//` under the root folder. */
+export function isInside(folder: string, file: string): boolean {
+  const rel = path.relative(folder, file);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
 /** Where `file` really is, when that is a regular file inside the real path of `dir`; `leaves` when a symlink takes it
  * outside the folder; undefined when there is no such file. */
 function realInside(dir: string, file: string): string | 'leaves' | undefined {
   let real: string;
   let realDir: string;
   try { real = fs.realpathSync(file); realDir = fs.realpathSync(dir); } catch { return undefined; }
-  if (!real.startsWith(`${realDir}${path.sep}`)) return 'leaves';
+  if (!isInside(realDir, real)) return 'leaves';
   return fs.statSync(real, { throwIfNoEntry: false })?.isFile() ? real : undefined;
 }
 

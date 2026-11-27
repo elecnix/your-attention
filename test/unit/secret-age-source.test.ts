@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
-import { ageSource, envelopePath, ensureIdentity, identityPath, writeEnvelope } from '../../src/secrets/age-source.ts';
+import { ageSource, envelopePath, ensureIdentity, identityPath, isInside, writeEnvelope } from '../../src/secrets/age-source.ts';
 import { encryptTo, encryptWithPassphrase, has } from '../age-fixtures.ts';
 
 const POSIX = process.platform !== 'win32';
@@ -37,6 +37,21 @@ function snapshot(dir: string): Record<string, string> {
     return [f, `${createHash('sha256').update(fs.readFileSync(p)).digest('hex')} ${fs.statSync(p).mtimeMs}`];
   }));
 }
+
+describe('a real path inside a folder', () => {
+  it('counts a file below the folder, the root folder included, and nothing outside or the folder itself', () => {
+    const cases: [folder: string, file: string, inside: boolean][] = [
+      ['/vault', '/vault/x.age', true],
+      ['/vault', '/vault/sub/x.age', true],
+      ['/', '/x.age', true],
+      ['/vault', '/vault', false],
+      ['/vault', '/vault-other/x.age', false],
+      ['/vault', '/elsewhere/x.age', false],
+      ['/vault', '/vault/../elsewhere/x.age', false],
+    ];
+    for (const [folder, file, inside] of cases) assert.equal(isInside(folder, file), inside, `${file} in ${folder}`);
+  });
+});
 
 describe('the age source', { skip: NO_AGE }, () => {
   it('is off, and says why, until it has an identity and a folder', async () => {
