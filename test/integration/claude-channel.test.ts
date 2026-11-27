@@ -77,7 +77,7 @@ describe('the Claude Code channel', () => {
 
     await h.owner('POST', '/v1/cards/cc-1/answer', { values: { choice: 'o1' }, comment: 'agreed' });
     const note = await until(() => notes.find((n) => n.meta.card_id === 'cc-1'));
-    assert.match(note.content, /choice: Yes\nComment: agreed/);
+    assert.match(note.content, /\[[\w-]{4}\] choice: Yes\n\[[\w-]{4}\] Comment: agreed/);
     assert.equal((await state()).states['cc-1'], 'delivered');
 
     // Claude Code writes the event into the transcript when the model receives it.

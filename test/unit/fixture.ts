@@ -55,3 +55,6 @@ export async function httpInbox(inbox: Inbox = new Inbox(new MemoryStorage(), ()
 /** A POST to an inbox's HTTP handler with a bearer token, as a client sends one. */
 export const postAs = (handle: (req: Request) => Promise<Response>, path: string, token: string, body: unknown): Promise<Response> =>
   handle(new Request(`http://inbox.test${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) }));
+
+/** An answer as the agent reads it, without the field IDs that start its lines, for a test about the text around them. */
+export const withoutIds = (text: string): string => text.replace(/\[[A-Za-z0-9_-]{4}\] /g, '');

@@ -5,11 +5,15 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { SqliteStorage } from '../../src/adapters/sqlite.ts';
-import { describeAnswer } from '../../src/client.ts';
+import { describeAnswer as describeWithIds } from '../../src/client.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
 import { terminalOutcome } from '../../src/integrations/claude/ask-hook.ts';
 import { claudeSessionName } from '../../src/integrations/claude/session-name.ts';
 import { trimScreen } from '../../src/integrations/herdr/blocked.ts';
+import { withoutIds } from './fixture.ts';
+
+// The text around the field IDs, which test/unit/field-ids.test.ts covers.
+const describeAnswer = (...args: Parameters<typeof describeWithIds>): string => withoutIds(describeWithIds(...args));
 
 const card = (over: Partial<Card> = {}): Card => ({
   id: 'c1', agent: 's1', kind: 'ask', title: 'q', priority: 'soon', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, replies: [], ...over,

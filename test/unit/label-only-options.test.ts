@@ -5,8 +5,12 @@ import { describe, it } from 'node:test';
 import { Inbox } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
-import { answerValues, describe as summary, optionValue } from '../../web/answers.js';
+import { answerValues, describe as describeForPerson, optionValue } from '../../web/answers.js';
 import { agent, answered as answer } from './fixture.ts';
+
+// The pick the summary shows. A card revised after the answer starts its summary with the version answered, which
+// test/unit/field-ids.test.ts covers.
+const summary = (...args: Parameters<typeof describeForPerson>): string => describeForPerson(...args).split('\n').at(-1) ?? '';
 
 const labelOnly = { id: 'c1', kind: 'ask', title: 'Proceed?', options: [{ label: 'Leave it' }, { label: 'Go ahead', recommended: true }] } as unknown as Card;
 

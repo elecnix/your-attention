@@ -201,6 +201,8 @@ An owner client sends the answer with `POST /v1/cards/<id>/answer {values, comme
 - `steer` or `followUp`: the matching delivery in the harness.
 - `force`: set by `POST /v1/cards/<id>/force` for an answer the model has not read.
 
+The `version` field carries the card version that the person read. The inbox answers 400 unless it lies between 1 and the card's current version. Without it, the inbox uses the current version. `describeAnswer` puts each value beside its field's ID at that version, as [Field IDs](#field-ids) describes.
+
 A new answer replaces the old one and keeps it in `previous`. When an agent needs more after an answer, it posts a new card that follows the answered one, as [Follow-ups](#follow-ups) describes.
 
 An owner client may also dismiss a card, which sends the agent nothing.
@@ -210,6 +212,53 @@ An owner client may also dismiss a card, which sends the agent nothing.
 In the page, an image goes into the general comment box, a question's comment field or any text field of the card on screen by Command+V or by a drop from a window, and a thumbnail shows under that field. A × button removes it before the person sends, and a click on the thumbnail opens the full image in a new tab. An answered card shows its images the same way, as thumbnails that open the stored image. Text on the clipboard still pastes as text. The page takes any pasted or dropped file under 8 MB. An image shows a thumbnail. Anything else shows its name, and a click opens the file in a new tab. A file over 8 MB is refused with the reason under the field. It also refuses images that would take the answer past 10 MB in total. **Send answer** sends the images with the answer and clears them. A secret field doesn't take images.
 
 An integration saves each image of an answer into `~/.your-attention/images/<agent>/<card>/`, readable by this user only (mode 0600 in a 0700 folder), and the event gives the file's path: `Image pasted in comment: <path>`, or `Image: <path>` when the image has no field. Claude Code, pi and OpenCode all do so before they tell the model.
+
+## Field IDs
+
+Each form, field and option of a card has a short ID, which lets an agent tell which field of which version of its card a value answers. The inbox doesn't store IDs. Instead, readers derive the same ones with `cardFields` in `web/field-ids.js`, a module that the agent's client, the page and the terminal client all share.
+
+An ID's hash input joins the card id, the card's `version`, the form's position and the field name with a NUL character. For a form, the input is the position alone. An option adds the value it names in the answer. Hashing runs FNV-1a over the UTF-8 bytes, followed by the murmur3 finalizer. Its low 24 bits make 4 characters of the URL-safe alphabet `A-Z a-z 0-9 - _`.
+
+The page draws forms from `cardSource` in this order:
+
+- the body's own `Form` calls,
+- a form for each question,
+- the answer form, which holds the comment and each `approval_<i>`.
+
+The ID list calls the page's own forms `answer`, `q0`, `q1` and so on, so no entry repeats the card id. 24 bits give 16,777,216 values, so a card of n entries has a chance of about n² / 2²⁵ that two of them share a hash. At 50 entries, that is 1 in 13,000.
+
+Derivation removes that chance.
+
+If an earlier entry of the same version already took an entry's hash, that entry hashes again with a counter: 1, then 2, and so on. Every reader does the same in the same order, so IDs never collide within one version.
+
+Readers match an answer to an earlier version by its version first and by its IDs second, so 4 characters are enough.
+
+Each revision adds 1 to `version`, which changes every ID of the card, including the ID of a field the revision left alone. Renaming a field also gives it a new ID. The same version always gives the same IDs.
+
+`Client.post` and `Client.patch` return `fields`, a list of entries:
+
+- Form: `{id, name, kind: "form"}`.
+- Field: `{id, form, name, kind}`, where `form` is the form's ID.
+- Option: `{id, form, field, name, kind: "option"}`, where `field` is the field's ID.
+
+`kind` is one of `choice`, `text`, `number`, `date`, `secret`, `access`, `action`, `approval` and `comment`. Replies from `card_post` and `card_patch` list them as one line per form:
+
+```text
+IDs of version 1, which the answer repeats beside each value and the comment:
+Form c_7h answer: IRyT choice (choice: qWPa o1, vZmZ o2); A8UQ comment (comment)
+```
+
+`answerFields(card, answer)` returns `{version, fields, stale}` for an answer. The `fields` list holds an entry `{id, form, name, kind}` for each value and for the comment, taken from the answered version. `describeAnswer` starts each line the agent reads with that ID, as `[IRyT] choice: Ship it`.
+
+`stale` holds `{answered, current, unknown}` in two cases. One is when the person answered an earlier version than the card's. The other is when the answer includes an ID the card no longer lists. The agent still receives the answer, and its first line states both versions.
+
+Both the page and the terminal client start the answer on the card with "(to version 1, before the agent revised the card to version 2)".
+
+The inbox accepts such an answer rather than refusing it, because a refusal would throw away what the person typed against a card the agent changed under them.
+
+Only the agent knows whether the earlier question still stands.
+
+`history` keeps the body, HTML, options, questions and approvals of each earlier version, so the IDs of an answer to an earlier version name that version's fields. A version that `history` no longer holds, or one stored before it kept them, takes the current structure under its own version number. Its IDs still differ from the current ones.
 
 ## Dismissing a card
 
@@ -626,7 +675,7 @@ Replies that older inboxes stored stay on the card as `replies`, and the inbox k
 
 ## Editing cards
 
-`POST /v1/cards/<id>/patch {edits: [{old, new}], field, pullRequests}` edits one field, `text` by default or `body` when the card has one. Each `old` must occur exactly once, or the inbox refuses the whole patch with 409. `pullRequests` is its own parameter, separate from `edits`: one `{owner, repo, number}` object or an array of them replaces the card's pull requests, `[]` or `null` clears the field, and leaving it out keeps what the card has. A patch may change only the pull requests, with no `edits`. A revision, by patch or by posting the same id, adds 1 to `version` and keeps the version before it in `history`, up to 20 versions.
+`POST /v1/cards/<id>/patch {edits: [{old, new}], field, pullRequests}` edits one field, `text` by default or `body` when the card has one. Each `old` must occur exactly once, or the inbox refuses the whole patch with 409. `pullRequests` is its own parameter, separate from `edits`: one `{owner, repo, number}` object or an array of them replaces the card's pull requests, `[]` or `null` clears the field, and leaving it out keeps what the card has. A patch may change only the pull requests, with no `edits`. A revision, by patch or by posting the same id, adds 1 to `version` and keeps the version before it in `history`, up to 20 versions. Each entry keeps that version's title, text, recommendation, body, HTML, options, questions and approvals.
 
 An agent may also revise a card the person answered, or one that is closed. The inbox saves the revision, but the card stays in **Sent**, so the person isn't notified and won't answer it again. The reply to `POST /v1/cards` or to the patch then has a `warning` field. It says so, and suggests a new card with `follows` set to the old one. The card tools add the warning to their reply.
 
