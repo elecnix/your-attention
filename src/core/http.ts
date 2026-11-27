@@ -768,6 +768,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(publicCard(inbox.tagCard(me, b, body?.['tags'])));
         case 'claim':
           return json(publicCard(inbox.claim(me, b, String(body['agent'] ?? ''))));
+        case 'reassign':
+          return json(publicCard(inbox.reassign(me, b, body ?? {})));
         case 'draw-fault':
           return json(publicCard(inbox.drawFault(me, b, body)));
         case 'force':

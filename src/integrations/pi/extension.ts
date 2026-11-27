@@ -3,7 +3,7 @@
 // one. The answer is marked read when it reaches the model context.
 import os from 'node:os';
 import { Type } from 'typebox';
-import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReassigned, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import type { NewCard } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
@@ -128,9 +128,10 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
           else pi.sendUserMessage(note, { deliverAs: 'followUp' });
           return;
         }
-        if (ev.type === 'card') {
-          // A card the person sent this session from the inbox page: a message to act on, not a question to answer.
-          const note = `[your-attention] ${describeSentCard(ev)}`;
+        if (ev.type === 'card' || ev.type === 'reassigned') {
+          // A card the person sent this session from the inbox page, or one the inbox gave it because its agent retired:
+          // a message to act on, not a question to answer.
+          const note = `[your-attention] ${ev.type === 'card' ? describeSentCard(ev) : describeReassigned(ev)}`;
           if (ctx.isIdle()) pi.sendUserMessage(note);
           else pi.sendUserMessage(note, { deliverAs: 'followUp' });
           return;

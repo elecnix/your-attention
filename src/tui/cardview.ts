@@ -5,7 +5,7 @@
 // every card.
 import { accessValue, answerValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, questionRecommendations, recommendedOptions } from '../../web/answers.js';
 import { cardAge } from '../../web/age.js';
-import { CLOSED_LABEL, STATE_LABEL, agentName, presenceOf, type InboxState, type Queue } from '../../web/queue.js';
+import { CLOSED_LABEL, STATE_LABEL, agentName, presenceOf, reassignments, type InboxState, type Queue } from '../../web/queue.js';
 import type { CardSummary } from '../core/summary.ts';
 import type { Answer, Attachment, Card, Presence } from '../core/types.ts';
 import { BodyRenderer, FormStore, parse, type Action, type BodyContext, type Widget } from './body.ts';
@@ -268,6 +268,7 @@ export class CardView {
     else meta.push({ text: `  ${age}`, style: st.dim });
     doc.para(meta);
     if (pres && state === 'orphaned') doc.para([{ text: sanitize(pres[1]), style: st.warn }]);
+    for (const r of reassignments(card, s.cards, s.presence)) doc.para([{ text: sanitize(r.text), style: st.dim }]);
 
     const tr = card.triage;
     if (tr && tr.state === 'passed' && /did not answer|failed/.test(tr.reason ?? '')) doc.para([{ text: `Note: Triage did not check this card: ${sanitize(tr.reason ?? '')}`, style: st.dim }]);
