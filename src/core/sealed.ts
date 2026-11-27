@@ -202,6 +202,54 @@ function secretCalls(body: string): { name: string; publicKey: string; candidate
   return calls;
 }
 
+/** A field the privileged_action widget places: the command the card shows, the machine it runs on, and what it changes. */
+export interface PrivilegedField {
+  name: string;
+  command: string;
+  machine: string;
+  changes: string;
+}
+
+const PRIVILEGED_LITERALS = 'PrivilegedAction takes four string literals: the field name, the command, the machine and what it changes. Place it with the privileged_action widget: restart = widget privileged_action {"name": "restart", "command": "systemctl restart nginx", "machine": "laptop", "changes": "Restarts nginx"}';
+
+/** The PrivilegedAction calls in a body, in order, read with the OpenUI parser's strings, comments and fences, as
+ * secretCalls reads its calls. Each call gives its arguments as string literals, so the inbox knows the exact command
+ * each field approves. */
+export function privilegedActions(body: string): PrivilegedField[] {
+  const src = withoutComments(fencedCode(body.trim())).trim();
+  const out: PrivilegedField[] = [];
+  const space = (i: number) => { while (/\s/.test(src[i] ?? '')) i++; return i; };
+  let i = 0;
+  while (i < src.length) {
+    const str = stringAt(src, i);
+    if (str) { i = str.end; continue; }
+    const word = /^[A-Za-z_]\w*/.exec(src.slice(i, i + 64))?.[0];
+    if (!word) { i++; continue; }
+    i += word.length;
+    if (word !== 'PrivilegedAction' || src[space(i)] !== '(') continue;
+    const args: string[] = [];
+    let at = space(space(i) + 1);
+    for (;;) {
+      const arg = stringAt(src, at);
+      if (!arg) break;
+      args.push(arg.value);
+      at = space(arg.end);
+      if (args.length === 4 || src[at] !== ',') break;
+      at = space(at + 1);
+    }
+    if (args.length !== 4 || src[at] !== ')') throw new InboxError(400, PRIVILEGED_LITERALS);
+    i = at + 1;
+    const [name = '', command = '', machine = '', changes = ''] = args;
+    if (!FIELD_NAME.test(name)) throw new InboxError(400, `privileged action ${JSON.stringify(name)}: the name must be a field name, such as restart_nginx`);
+    if (out.some((c) => c.name === name)) throw new InboxError(400, `the card names the privileged action ${name} twice: give each one its own name`);
+    if (!command.trim()) throw new InboxError(400, `privileged action ${name} needs the command it runs`);
+    if (!machine.trim()) throw new InboxError(400, `privileged action ${name} needs the machine it runs on`);
+    if (!changes.trim()) throw new InboxError(400, `privileged action ${name} needs a sentence that says what it changes`);
+    out.push({ name, command, machine, changes });
+  }
+  return out;
+}
+
 /** The field names of the SecretInput and SecretAccess calls in a body, in order. Each one takes only a sealed value,
  * or for SecretAccess a grant or a decline. */
 export function secretInputs(body: string): string[] {

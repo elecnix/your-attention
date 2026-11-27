@@ -445,6 +445,63 @@ Each approval gets a case id, short enough to copy into a message or a log line.
 
 Reading a store needs a way in, and `src/secrets/age.ts` opens an age file in either layout `~/.secrets` uses. An identity file decrypts a file encrypted to a recipient without a terminal prompt, so a store's passphrase can sit inside an envelope only the integration reads. A file encrypted with a passphrase insists on a terminal, so the module provides one through `script` and takes the plaintext from a named pipe instead of a file, so the filesystem never stores it, which matters on macOS where no tmpfs exists. `age -d -o` aimed at a pipe doesn't write anything and exits 0, so the module reads stdout redirected into the pipe and treats an empty read as an error. On Darwin `script` has no `-c`, and `--` there is the command rather than a separator, exiting 0 when the command fails, so that form passes a shell explicitly and every call checks its status.
 
+## Privileged actions
+
+Some commands need the person's password, such as one that runs with `sudo`. For such a privileged action, an agent posts a card that shows the command. The person reads it and types the password, then the inbox runs that one command. What the command printed goes back to the agent, but not the password. A secret goes the other way. [Secret widget](#secret-widget) and [Secret sources](#secret-sources) hand a value to the agent's session. That is their purpose, and the opposite of what a password needs. [DP44](PRINCIPLES.md#dp44-a-password-goes-to-the-broker-never-to-the-agent) states the rule. This section describes the laptop inbox, which runs the command on its own machine. [#197](https://github.com/elecnix/your-attention/issues/197) tracks the remote version.
+
+### The privileged_action widget
+
+An agent places the built-in widget `privileged_action`, version 1, in a card body:
+
+```
+restart = widget privileged_action {"name": "restart_nginx", "command": "sudo -S -p '' systemctl restart nginx", "machine": "laptop", "changes": "Restarts nginx, which drops open connections"}
+```
+
+`name` is the answer field, a variable name such as `restart_nginx`. `command` is the exact text the shell runs. `machine` names where the inbox runs it, and `changes` is one sentence about what it changes. The widget places `PrivilegedAction(name, command, machine, changes)`, four string literals, inside a form. Unlike `secret`, the card has no key. `card_post` fills in nothing, and the agent's session has no key to open the password with.
+
+On a post or a patch, the inbox reads each `PrivilegedAction` call and lists the field names in the card's `privileged`. It answers 400 in these cases:
+
+- The inbox has no broker, as on the hosted inbox.
+- `machine` isn't the machine of the inbox's broker.
+- A call doesn't give four string literals.
+- A name repeats, or also names a secret.
+- The command is empty or longer than 4,000 characters.
+
+The page shows the machine, the command exactly as the card gives it in a code block, what it changes, and a password field. The terminal client shows the same text and sends the person to the page, since it can't seal a password yet.
+
+### The broker key
+
+The inbox makes an RSA-OAEP key pair, the broker key, the first time it needs one, and keeps it in memory only. A restart makes a new pair. `GET /v1/privileged/key` answers `{publicKey, machine}` to the owner. An agent or an extension gets 403, and an inbox with no broker answers 404.
+
+When the person sends the answer, the page reads the broker key. It seals `{"command": <the command it showed>, "password": <the typed password>}` as JSON text, with the same sealing as the `secret` widget, and sends the sealed object as the field's value. An empty password sends nothing for the field, and nothing runs.
+
+### The run
+
+The inbox takes these steps for each privileged field, inside the owner's `POST /v1/cards/<id>/answer`:
+
+1. A value that isn't sealed gets 400, so storage never gets a plain password.
+2. The inbox opens the value with the broker's private key, in memory. A value sealed before a restart doesn't open: the answer is 409, and the person types the password again.
+3. The inbox compares the sealed command with the card's command, character by character. When they differ, the answer is 409 and nothing runs. The message gives the position of the first character that differs, with the text around it in both commands. The inbox checks again after it writes the answer's images, against the card as it is then.
+4. The answer is 409 when the agent closed the card, or when this field already ran. A command runs once, and a new run needs a new card.
+5. The inbox starts the command with the shell of its machine, as the user that runs the inbox. It writes the password and a newline to the command's standard input, then closes it. The password never goes in an environment variable, an argument list, a file or a log. A run that takes more than 2 minutes is stopped.
+6. In what the command printed, the inbox replaces each occurrence of the password with `[password]`, and keeps the last 64 KB.
+
+In the stored answer, the field holds `{command, machine, exitCode, output, ended?, audit, ranAt}`, and never the sealed value. `exitCode` is null when the run stopped early, and `ended` says why. Only the owner answers, so an agent's answer to its own card gets 403. A later answer to the card keeps the stored run. This answer goes to the agent stream, to hooks and to webhooks, like any other answer. The answer text for the agent reads `restart_nginx: ran on laptop, exit code 0 (audit 1a2b3c4d). The command printed:`, with the output in a fenced block after it. A field without a password reads `restart_nginx: not run, because the person sent no password`.
+
+The `serve` process keeps the password in memory from the moment it opens it until the run ends. JavaScript can't wipe a string. So the process drops each reference to it, and the garbage collector frees that memory.
+
+### The audit
+
+Each run adds one entry to the audit, in the inbox's storage: `{id, card, field, agent, command, machine, approvedBy, at, exitCode, ended?}`. `approvedBy` is the name of the owner token that sent the answer. `GET /v1/privileged/audit` answers `{audit}`, oldest first, to the owner, and 403 to an agent or an extension. The inbox has no route to change or delete an entry. On the laptop, the agent runs as the same user as the inbox, so it could still edit the SQLite file on disk. The remote version keeps the audit on the machine that runs the command.
+
+### The remote version
+
+The remote version uses the same widget, key and checks, and runs the command over an `ssh` connection to the machine on the card. The password then goes to that machine only, not to the agent's machine. A real privileged command also needs these:
+
+- `sudo -S` with an empty prompt, so the command reads the password on its standard input.
+- A `sudoers` rule that lists each command that the person may approve.
+- An audit line in the system log of that machine, which the agent's user can't write to.
+
 ## Follow-ups
 
 An agent follows up on a card by posting a new card with `follows` set to the id of the earlier card. The card tools do this with `card_post` and `follows: "<card id>"`. The inbox sets `followedBy` on the earlier card, so the chain links both ways. The page shows **Followed by** on the earlier card. On the new card it shows a fold labeled **The card before this one, and your answer**.
@@ -567,7 +624,7 @@ A card draws [Mermaid](https://mermaid.js.org) diagrams in two places:
 - In `text` and `recommendation`, a fenced block whose first line is ```` ```mermaid ```` draws its lines as a diagram.
 - In `body`, the `Mermaid(source)` component draws one. Its source must be a string literal in double or single quotes, such as `flow = Mermaid("flowchart TD\n  A --> B")`, and the inbox refuses a reference to another statement. The inbox reads the body as OpenUI does, so it skips a call in a `//` or `#` comment. A `Card`, `SectionItem`, `TabItem`, `AccordionItem` or `Carousel` can hold it, as for a `CodeBlock`.
 
-Every inbox has three built-in widgets. `secret` asks for a sealed value, as [Secret widget](#secret-widget) describes. `secret_access` asks the person to grant a secret from a source, as [Secret sources](#secret-sources) describes. The widget `mermaid`, version 1, places `Mermaid` with its `source` value: `flow = widget mermaid {"source": "flowchart TD\n  A --> B"}`. `GET /v1/widgets` lists them first, with `builtin: true`, and the catalog in `GET /v1/guidance` lists them with the saved widgets. Saving a widget named `mermaid`, `secret` or `secret_access` answers 400.
+Every inbox has four built-in widgets. `secret` asks for a sealed value, as [Secret widget](#secret-widget) describes. `secret_access` asks the person to grant a secret from a source, as [Secret sources](#secret-sources) describes. `privileged_action` asks the person to run a command with their password, as [Privileged actions](#privileged-actions) describes. The widget `mermaid`, version 1, places `Mermaid` with its `source` value: `flow = widget mermaid {"source": "flowchart TD\n  A --> B"}`. `GET /v1/widgets` lists them first, with `builtin: true`, and the catalog in `GET /v1/guidance` lists them with the saved widgets. Saving a widget named `mermaid`, `secret`, `secret_access` or `privileged_action` answers 400.
 
 When an agent posts or patches a card, the laptop inbox parses each diagram with mermaid 11.17.2, after it fills a template and places widgets. That covers `POST /v1/cards`, `card_patch`, and a widget or template that expands into a diagram. The inbox refuses a diagram that does not parse with 400. Its message names where the diagram is and quotes mermaid's error. For a dotted link with text and a pipe label, mermaid's error reads:
 
@@ -751,7 +808,7 @@ A pi extension that asks the person something in the terminal draws that prompt 
 
 The extension posts one `blocked` card for a span, and closes it when the span ends. A span that ends while its card is still being posted closes that card as soon as the post returns, so no prompt leaves a card open. The card states the session, the prompt's kind and its title, and links the pane when the session has one. It shows the prompt rather than its choices, because those labels stay in the terminal. A prompt that flickers and comes back keeps its card, which gains a version instead of arriving twice. The handler for either event resolves, and a card that could not be posted or closed says why on stderr: pi ignores whatever the handler returns, so a rejection would end the process with nobody to read it.
 
-An answer on that card goes into the session's own herdr pane with `herdr agent send-keys`, and only after the extension reads the pane again and finds the same prompt still waiting. A prompt whose title the screen lost counts as changed. A prompt with no title, such as a custom screen, is recognised by the frame it draws, which closes the screen while that prompt waits: an agent that resumed writes its output below the frame it left behind, so a frame with anything under it is no prompt this extension types into. Every row of that frame has to match the one on the card, corners and height included, because pi folds a nested prompt into the same span and the inner frame can otherwise pass for the outer one. A second answer that arrives while the extension types the first is refused before it touches the pane, so the words land in the pane once and the card reports the answer it received. A session with no pane gets a card that says so, and an answer on that card closes it with the reason, while nothing is typed. The card closes as `answered-in-terminal` when the terminal answered the prompt, and as `resolved` when the extension typed the answer, with an Enter only while the prompt still shows on the screen. That close belongs to the span that the answer was typed for: when the span ended during the settle and a later prompt waits on the same card, that card stays open and takes no Enter.
+An answer on that card goes into the session's own herdr pane with `herdr agent send-keys`, and only after the extension reads the pane again and finds the same prompt still waiting. A prompt whose title the screen lost counts as changed. A prompt with no title, such as a custom screen, is recognised by the frame it draws, which closes the screen while that prompt waits: an agent that resumed writes its output below the frame it left behind, so a frame with anything under it is no prompt this extension types into. Every row of that frame has to match the one on the card, corners and height included, because pi folds a nested prompt into the same span and the inner frame can otherwise pass for the outer one. A second answer that arrives while the extension types the first is refused before it touches the pane, so the pane gets the words once and the card reports the answer it received. A session with no pane gets a card that says so, and an answer on that card closes it with the reason, while nothing is typed. The card closes as `answered-in-terminal` when the terminal answered the prompt, and as `resolved` when the extension typed the answer, with an Enter only while the prompt still shows on the screen. That close belongs to the span that the answer was typed for: when the span ended during the settle and a later prompt waits on the same card, that card stays open and takes no Enter.
 
 The extension keeps the id of every card it posted for a prompt, so an answer on an older prompt card is refused with the reason rather than read as a message for the model.
 

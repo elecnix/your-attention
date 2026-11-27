@@ -81,6 +81,15 @@ const secretBody = expandWidgets([
 ].join('\n'), () => ({ name: 'secret', ...secretWidget })).body;
 export const Secret = { render: () => mount(view(card({ title: 'Need the demo token', body: secretBody, secrets: ['DEMO_TOKEN'] }))) };
 
+// The privileged_action widget: the command exactly as the card gives it, the machine, what it changes, and the password.
+const privilegedWidget = BUILTIN_WIDGETS.find((w) => w.name === 'privileged_action').versions[0];
+const privilegedBody = expandWidgets([
+  'root = Card([intro, restart])',
+  'intro = TextContent("The new nginx configuration passed nginx -t. Restarting applies it.")',
+  `restart = widget privileged_action ${JSON.stringify({ name: 'restart_nginx', command: "sudo -S -p '' systemctl restart nginx", machine: 'laptop', changes: 'Restarts nginx, which drops the open connections for about a second' })}`,
+].join('\n'), () => ({ name: 'privileged_action', ...privilegedWidget })).body;
+export const PrivilegedAction = { render: () => mount(view(card({ title: 'Restart nginx on laptop?', body: privilegedBody, privileged: ['restart_nginx'] }))) };
+
 export const HtmlAllowed = { render: () => mount(h(HtmlCard, { card: card({ html: '<p style="font:16px sans-serif">Pick one:</p><button onclick="yourAttention.answer({colour:\'blue\'})">Blue</button>' }), allowed: true, onAnswer: () => {} })) };
 
 export const HtmlBlocked = { render: () => mount(h(HtmlCard, { card: card({ html: '<p>hidden</p>' }), allowed: false, onAnswer: () => {} })) };

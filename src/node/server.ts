@@ -14,6 +14,9 @@ import { randomId } from '../core/crypto.ts';
 import type { SecretSources } from '../core/secret-sources.ts';
 import { createHandler, originParam } from '../core/http.ts';
 import type { ApprovalSender, Caller } from '../core/inbox.ts';
+import type { PrivilegedRunner } from '../core/privileged.ts';
+import { instanceName } from '../secrets/registry.ts';
+import { localRunner } from './privileged.ts';
 import { agentSocket, pageSocket } from '../core/socket.ts';
 import { WebSocketServer } from 'ws';
 import { Inbox } from '../core/inbox.ts';
@@ -64,6 +67,9 @@ export interface ServeOptions {
   fetch?: typeof fetch;
   /** The secret sources this inbox runs. Tests pass a stand-in. */
   secretSources?: SecretSources;
+  /** Runs the privileged actions the owner approves. The default runs each one on this machine, as this user. Tests
+   * pass a dry runner, and `false` turns privileged actions off. */
+  privileged?: PrivilegedRunner | false;
 }
 
 export interface RunningServer {
@@ -110,7 +116,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, privileged: opts.privileged === false ? undefined : opts.privileged ?? localRunner(instanceName()), pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');
