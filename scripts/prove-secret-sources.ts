@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '../src/client.ts';
+import { filesHolding } from '../test/files-holding.ts';
 import type { Candidate, SourceInfo } from '../src/core/secret-sources.ts';
 import type { AgentEvent } from '../src/core/types.ts';
 import { SecretRequests } from '../src/integrations/secrets.ts';
@@ -142,21 +143,6 @@ export async function prove(input: ProofInput): Promise<ProofResult> {
     stop.abort();
     await client.close(card.id, 'resolved', 'The proof of secret sources finished.').catch(() => {});
   }
-}
-
-/** The files under `dir` whose bytes contain `value`. */
-function filesHolding(dir: string, value: string): string[] {
-  const needle = Buffer.from(value);
-  const out: string[] = [];
-  const walk = (d: string): void => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile() && fs.readFileSync(p).includes(needle)) out.push(p);
-    }
-  };
-  walk(dir);
-  return out;
 }
 
 /** Whether node runs this file as the command. Both sides resolve to a real path, because import.meta.url is

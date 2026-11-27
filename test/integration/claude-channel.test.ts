@@ -11,6 +11,7 @@ import { DEFAULT_GUIDANCE, DEFAULT_GUIDANCE_VERSION } from '../../src/core/inbox
 import type { Card } from '../../src/core/types.ts';
 import { seal } from '../../web/sealed.js';
 import { ROOT, runHook, start, until, type Harness } from './harness.ts';
+import { filesHolding } from '../files-holding.ts';
 
 let h: Harness;
 let mcp: McpClient;
@@ -20,17 +21,6 @@ const SESSION = 'test-session-1';
  * enough that a socket path under a folder made inside it passes the 104 bytes macOS allows, as XDG_RUNTIME_DIR would
  * not on a real machine. */
 const RUNTIME = fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'ya-rt-'));
-
-/** Every file under `dir` whose bytes contain `text`. */
-function filesHolding(dir: string, text: string): string[] {
-  const found: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true, recursive: true })) {
-    if (!entry.isFile()) continue;
-    const file = path.join(entry.parentPath, entry.name);
-    if (fs.readFileSync(file).includes(text)) found.push(file);
-  }
-  return found;
-}
 
 before(async () => {
   h = await start();

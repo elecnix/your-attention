@@ -16,7 +16,8 @@ import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { localRunner } from '../../src/node/privileged.ts';
 import { seal } from '../../web/sealed.js';
-import { filesHolding, ROOT, start, until, type Harness } from './harness.ts';
+import { filesHolding } from '../files-holding.ts';
+import { ROOT, start, until, type Harness } from './harness.ts';
 
 const PASSWORD = 'FIXTURE-PASSWORD-DO-NOT-USE';
 const MACHINE = 'test-machine';
