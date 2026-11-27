@@ -3,7 +3,7 @@
 // A recommendation that names an option shows inside that option instead.
 // Each interactive part is a Tab stop. Broadcast and HTML cards get forms in OpenUI Lang too, so one renderer draws
 // every card.
-import { answerValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, questionRecommendations, recommendedOptions } from '../../web/answers.js';
+import { accessValue, answerValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, questionRecommendations, recommendedOptions } from '../../web/answers.js';
 import { cardAge } from '../../web/age.js';
 import { CLOSED_LABEL, STATE_LABEL, agentName, presenceOf, type InboxState, type Queue } from '../../web/queue.js';
 import type { CardSummary } from '../core/summary.ts';
@@ -80,6 +80,8 @@ export class CardView {
   /** Every field this view ever drew as a secret. The store keeps what was typed there after a revision drops or
    * renames the field, and that plain text must never leave, sealed or not. */
   private readonly everSecret = new Set<string>();
+  /** Each secret_access field on the card, by field name, as the last draw found them. */
+  readonly access: BodyContext['access'] = new Map();
   focus: string | undefined;
   /** Where the focus goes at the first draw, when the card was entered before it had stops. */
   private pendingFocus: 'first' | 'last' | undefined;
@@ -106,6 +108,14 @@ export class CardView {
     for (const name of this.everSecret) {
       const typed = values[name];
       delete values[name];
+      // A secret_access field answers a grant or a decline, and seals only a value the person chose to type.
+      const access = this.access.get(name);
+      const choice = access?.choice();
+      if (access && choice?.pick !== 'type') {
+        const v = accessValue(choice, access.candidates, Date.now());
+        if (v) values[name] = v;
+        continue;
+      }
       const key = this.secrets.get(name);
       if (key !== undefined && typeof typed === 'string' && typed) {
         const { seal } = await import('../../web/sealed.js');
@@ -197,6 +207,7 @@ export class CardView {
     this.widgets = new Map();
     // A revision may drop or rename a secret field, so the draw finds the fields again.
     this.secrets.clear();
+    this.access.clear();
     // Each link with the line its paragraph starts on, so Tab scrolls to the link.
     const links: { t: string; line: number }[] = [];
     const md: MdContext = {
@@ -316,7 +327,7 @@ export class CardView {
       doc.gap();
     }
     const ctx: BodyContext = {
-      theme, md, store: this.store, ui: this.ui, errors: this.errors, focused: this.focus, widgets: this.widgets, secrets: this.secrets,
+      theme, md, store: this.store, ui: this.ui, errors: this.errors, focused: this.focus, widgets: this.widgets, secrets: this.secrets, access: this.access,
       address: this.host.address(card.id),
       onAction: (action) => this.host.act(this, action),
       recommended: {

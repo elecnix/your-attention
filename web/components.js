@@ -8,7 +8,7 @@ import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdow
 import { copyText, installCopy } from './copy.js';
 import { groupCode, readSignIn } from './sign-in.js';
 import { naturalSize, zoomSize, zoomedSvg } from './zoom.js';
-import { DISMISS, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, pushbackKey, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
+import { CEILINGS, DEFAULT_CEILING, clock, DISMISS, GRANT_IDLE_MS, accessCandidates, accessValue, candidateDetail, candidateGroups, candidateKey, revocableGrants, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, pushbackKey, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf, triageState } from './queue.js';
 import { agentList, pickedAgent, searchAgents } from './agents.js';
@@ -244,6 +244,7 @@ const library = extendLibrary(openuiChatLibrary, {
   CheckWithText,
   Mermaid: ({ props }) => h(Diagram, { source: String(props.source ?? '') }),
   SecretInput,
+  SecretAccess,
   FormControl: MarkdownFormControl,
   OptionCards: RecommendingOptionCards,
   Table: MarkdownTable,
@@ -448,6 +449,91 @@ function SecretInput({ props }) {
     h('span', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the agent gets a file path, never the value.'));
 }
 
+// SecretAccess(name, publicKey, candidates): a request for access to one secret, which the secret_access widget places.
+// The person grants one candidate for as long as the ceiling they pick, declines, or types a value instead. The choice
+// stays in this tab's memory with the typed secrets, and Send answer turns it into the field's value. An untouched
+// field sends nothing, which the inbox reads as declined.
+const minutes = (ms) => `${Math.round(ms / 60_000)} minutes`;
+function SecretAccess({ props }) {
+  const card = React.useContext(SecretScope);
+  const name = String(props.name ?? '');
+  const publicKey = String(props.publicKey ?? '');
+  const candidates = React.useMemo(() => accessCandidates(String(props.candidates ?? '')), [props.candidates]);
+  const [, redraw] = React.useState(0);
+  React.useEffect(() => { const f = () => redraw((n) => n + 1); secretWatchers.add(f); return () => { secretWatchers.delete(f); }; }, []);
+  const entry = typedSecrets.get(card)?.get(name);
+  const choice = entry?.access ?? {};
+  // A revision of the card brings a new key and may change the candidates: the choice follows them.
+  React.useEffect(() => { if (entry) { entry.publicKey = publicKey; entry.candidates = candidates; } }, [entry, publicKey, candidates]);
+  const failure = sealFailures.get(card)?.get(name);
+  const canSeal = !!(window.isSecureContext && crypto.subtle);
+  const change = (next) => {
+    if (sealFailures.get(card)?.delete(name)) secretsChanged();
+    const fields = typedSecrets.get(card) ?? new Map();
+    fields.set(name, { publicKey, candidates, access: { ceiling: DEFAULT_CEILING, ...choice, ...next } });
+    typedSecrets.set(card, fields);
+    secretsChanged();
+  };
+  const group = `access:${card}:${name}`;
+  const option = (value, text, detail, disabled = false) => h('label', { key: value, className: `access-option${disabled ? ' unavailable' : ''}${choice.pick === value ? ' picked' : ''}` },
+    h('input', { type: 'radio', name: group, value, checked: choice.pick === value, disabled, onChange: () => change({ pick: value }) }),
+    h('span', { className: 'access-text' }, h('span', { className: 'access-label' }, text), detail && h('span', { className: 'access-detail' }, detail)));
+  // A pick that a revision made unavailable keeps its radio checked but disabled, shows no ceiling, and sends nothing.
+  const picked = candidates.find((c) => c.ready && candidateKey(c) === choice.pick);
+  const until = Date.now() + (choice.ceiling ?? DEFAULT_CEILING);
+  return h('fieldset', { className: 'secret secret-access' },
+    h('legend', null, `Who may read ${name}`),
+    candidates.length === 0 && h('div', { className: 'note' }, `No source on the inbox's computers holds ${name}. Type its value, or decline.`),
+    candidateGroups(candidates).map((g) => h('div', { key: g.instance, role: 'group', 'aria-label': `${name} on ${g.instance}`, className: 'access-group' },
+      h('div', { className: 'access-instance' }, `On ${g.instance}`),
+      g.candidates.map((c) => option(candidateKey(c), c.label, c.ready ? candidateDetail(c) : `${candidateDetail(c)} · unavailable: ${c.reason || `its source is ${c.status}`}`, !c.ready)))),
+    h('div', { role: 'group', 'aria-label': `Other answers for ${name}`, className: 'access-group' },
+      option('decline', `Decline: the agent gets no access to ${name}`),
+      option('type', `Type a value for ${name} instead`, canSeal ? '' : 'This page cannot seal a value over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.', !canSeal)),
+    picked && h('div', { className: 'access-grant' },
+      h('label', { className: 'access-ceiling' }, `${name} access ends at most after `,
+        h('select', { value: String(choice.ceiling ?? DEFAULT_CEILING), onChange: (e) => change({ ceiling: Number(e.target.value) }) },
+          CEILINGS.map((c) => h('option', { key: c.ms, value: String(c.ms) }, c.label)))),
+      h('span', { className: 'hint' }, `That is ${clock(until)} if you send now. Access also ends after ${minutes(GRANT_IDLE_MS)} without use, and use never moves the end later.`)),
+    choice.pick === 'type' && canSeal && h('span', { className: 'secret-field' },
+      h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
+      h('input', { type: 'password', name, 'aria-label': `Value of ${name}`, autoComplete: 'off', spellCheck: false, value: choice.value ?? '', onChange: (e) => change({ value: e.target.value }) })),
+    choice.pick === 'type' && h('span', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext.'),
+    failure && h('div', { className: 'note warn', role: 'alert' }, `${name} could not be sealed, so nothing was sent: ${failure}. Ask the agent to post the card again.`));
+}
+
+/** The Revoke button of each granted field on an answered card, until its ceiling passes. The inbox records the
+ * revocation, and the agent stream tells the session, which ends the grant before its next command. */
+export function GrantRevoke({ card, answer }) {
+  const [, redraw] = React.useState(0);
+  const [errors, setErrors] = React.useState({});
+  const [busy, setBusy] = React.useState({});
+  const grants = revocableGrants(answer, Date.now());
+  // The button goes when the first ceiling passes.
+  const next = Math.min(...grants.map((g) => g.value.until));
+  React.useEffect(() => {
+    if (!Number.isFinite(next)) return undefined;
+    const t = setTimeout(() => redraw((n) => n + 1), Math.min(2 ** 31 - 1, Math.max(0, next - Date.now()) + 50));
+    return () => clearTimeout(t);
+  }, [next]);
+  if (!grants.length) return null;
+  const revoke = async (field) => {
+    setBusy((b) => ({ ...b, [field]: true }));
+    setErrors((e) => ({ ...e, [field]: null }));
+    let why = null;
+    try {
+      const res = await api(`${BASE}v1/cards/${card.id}/revoke`, { field });
+      if (!res.ok) why = (await res.json().catch(() => ({}))).error || `the inbox answered ${res.status}`;
+    } catch (e) { why = String(e.message || e); }
+    setBusy((b) => ({ ...b, [field]: false }));
+    setErrors((e) => ({ ...e, [field]: why }));
+  };
+  return h('div', { className: 'grants' }, grants.map(({ field, value }) => h('div', { key: field, className: 'grant-row' },
+    h('span', null, `${field}: granted ${value.grant} from ${value.source} on ${value.instance} until ${clock(value.until)}${value.case ? `, case ${value.case}` : ''}`),
+    h('button', { type: 'button', className: 'btn', disabled: !!busy[field], onClick: () => revoke(field) }, `Revoke ${field}`),
+    errors[field] && h('div', { className: 'note warn', role: 'alert' }, `${field} is not revoked: ${errors[field]}`))));
+}
+
 /** The secrets typed on a card, each sealed with the public key its field shows, by field name. `names` lists the
  * card's secret fields now: a value typed in a field that a revision dropped or renamed is forgotten, never sent. It
  * throws when a value cannot be sealed, and that field says why. */
@@ -457,11 +543,22 @@ export async function sealSecrets(card, names) {
   if (!typed.size) return {};
   const failed = new Map();
   const out = {};
+  // A grant or a decline needs no sealing. The ceiling counts from the moment Send answer is pressed.
+  const now = Date.now();
+  const toSeal = new Map();
+  for (const [name, f] of typed) {
+    if (!f.access) { toSeal.set(name, f.value); continue; }
+    if (f.access.pick === 'type') { if (f.access.value) toSeal.set(name, f.access.value); continue; }
+    const v = accessValue(f.access, f.candidates, now);
+    if (v) out[name] = v;
+  }
   let seal;
-  try { ({ seal } = await import(`${BASE}sealed.js`)); } catch (e) { for (const name of typed.keys()) failed.set(name, String(e.message || e)); }
+  if (toSeal.size) {
+    try { ({ seal } = await import(`${BASE}sealed.js`)); } catch (e) { for (const name of toSeal.keys()) failed.set(name, String(e.message || e)); }
+  }
   if (seal) {
-    for (const [name, f] of typed) {
-      try { out[name] = await seal(JSON.parse(f.publicKey), f.value); } catch (e) { failed.set(name, String(e.message || e)); }
+    for (const [name, value] of toSeal) {
+      try { out[name] = await seal(JSON.parse(typed.get(name).publicKey), value); } catch (e) { failed.set(name, String(e.message || e)); }
     }
   }
   sealFailures.set(card, failed);

@@ -1,11 +1,14 @@
-import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, TriagePushback } from '../components.js';
+import { Attachments, BroadcastForm, CardView, GrantRevoke, Changes, ClosedCard, HtmlCard, LinkedText, TriagePushback } from '../components.js';
 import { h } from '../env.js';
 import { installPaste } from '../paste-images.js';
 import { PNG, card, dataUrl, mount } from './render.js';
+import { DATABASE_URL, OPENAI_API_KEY, SEVERAL, accessCard } from './access.js';
 import { BUILTIN_WIDGETS, expandWidgets } from '../../src/core/widgets.ts';
 import PULL_REQUEST from '../../examples/widgets/pull-request.openui?raw';
 
 export default { title: 'Cards' };
+
+const { React } = window.__OpenUI;
 
 const view = (c) => h(CardView, { draftKey: `story:${c.id}`, card: c, onAction: () => {} });
 
@@ -156,5 +159,58 @@ export const WithPastedImages = {
     paste('layout-a.png');
     setTimeout(() => paste('layout-b.png'), 100);
     return root;
+  },
+};
+
+// The secret_access widget: one field per secret, each with the candidates the sources found.
+export const SecretAccessOneCandidate = {
+  render: () => mount(view(card({ id: 'access-one', title: 'Read the staging database', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL.slice(0, 1) }]) }))),
+};
+// Two age files of one name in two folders, told apart by their store.
+export const SecretAccessSameNameTwoFolders = {
+  render: () => mount(view(card({ id: 'access-folders', title: 'Read the staging database', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL }]) }))),
+};
+// One secret offered on two instances, and by a source that is off, which the person cannot pick.
+export const SecretAccessTwoInstances = {
+  render: () => mount(view(card({ id: 'access-two', title: 'Call the OpenAI API', ...accessCard([{ name: 'OPENAI_API_KEY', candidates: OPENAI_API_KEY }]) }))),
+};
+// Two secrets on one card: the person answers each field on its own.
+export const SecretAccessSeveral = {
+  render: () => mount(view(card({ id: 'access-several', title: 'Two secrets for the deploy', ...accessCard(SEVERAL) }))),
+};
+// No source holds the secret, so the person types its value, or declines.
+export const SecretAccessTyped = {
+  render: () => mount(view(card({ id: 'access-typed', title: 'Need the deploy token', ...accessCard([{ name: 'DEPLOY_TOKEN', candidates: [] }]) }))),
+};
+// A granted field on an answered card, with its Revoke button. A stand-in takes the revocation while the story is on
+// screen, and every other request goes to the fetch the story found.
+function RevokeStandIn({ children }) {
+  React.useLayoutEffect(() => {
+    const real = window.fetch;
+    window.fetch = (url, init) => (/\/revoke$/.test(String(url)) ? Promise.resolve(Response.json({ ok: true })) : real(url, init));
+    return () => { window.fetch = real; };
+  }, []);
+  return children;
+}
+export const SecretAccessGranted = {
+  render: () => {
+    const savedAt = Date.now() - 60000;
+    const sealed = { alg: 'RSA-OAEP-256+A256GCM', key: 'AAAA', iv: 'AAAA', data: 'AAAA' };
+    const answer = { values: { DATABASE_URL: { grant: '/home/me/work/.secrets/db-staging.age', source: 'age', instance: 'laptop', until: savedAt + 3600000, case: 'K7Q2', sealed } }, comment: '', savedAt };
+    return mount(h(RevokeStandIn, null, h(GrantRevoke, { card: card({ id: 'access-granted' }), answer })));
+  },
+};
+
+// A revision marks the picked candidate's source off: the pick loses its ceiling, and Send answer would send nothing.
+export const SecretAccessRevised = {
+  render: () => {
+    function Revised() {
+      const [off, setOff] = React.useState(false);
+      const candidates = DATABASE_URL.map((c) => (off ? { ...c, status: 'off', reason: 'the identity file is gone' } : c));
+      return h('div', null,
+        h('button', { type: 'button', className: 'btn', onClick: () => setOff(true) }, 'Mark the source off'),
+        view(card({ id: 'access-revised', version: off ? 2 : 1, title: 'Read the staging database', ...accessCard([{ name: 'DATABASE_URL', candidates }]) })));
+    }
+    return mount(h(Revised));
   },
 };
