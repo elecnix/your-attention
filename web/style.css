@@ -226,6 +226,21 @@
   .secret .secret-field { position: relative; display: block; }
   .secret .secret-field input { width: 100%; box-sizing: border-box; padding-left: 34px; }
   .secret .key-icon { position: absolute; left: 10px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+  .secret-access { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0; }
+  .secret-access legend { font-weight: 600; padding: 0 4px; }
+  .secret-access .access-group { display: grid; gap: 4px; }
+  .secret-access .access-instance { font-size: calc(13px * var(--text-scale)); color: var(--muted); margin-top: 4px; }
+  .secret-access .access-option { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+  .secret-access .access-option.picked { background: var(--bg); outline: 1px solid var(--line); }
+  .secret-access .access-option.unavailable { cursor: not-allowed; opacity: 0.6; }
+  .secret-access .access-option input { margin-top: 3px; }
+  .secret-access .access-option:focus-within { outline: 2px solid var(--accent); }
+  .secret-access .access-text { display: grid; }
+  .secret-access .access-detail { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
+  .secret-access .access-grant { display: grid; gap: 4px; }
+  .secret-access select { font: inherit; margin-left: 4px; }
+  .grants { display: grid; gap: 6px; margin: 6px 0; }
+  .grants .grant-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .secret .hint { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
   .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
   .btn.danger { background: var(--bad); color: var(--bg); border-color: var(--bad); }

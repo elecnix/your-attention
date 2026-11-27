@@ -1,7 +1,8 @@
-import { Attachments, BroadcastForm, CardView, Changes, ClosedCard, HtmlCard, LinkedText, TriagePushback } from '../components.js';
+import { Attachments, BroadcastForm, CardView, GrantRevoke, Changes, ClosedCard, HtmlCard, LinkedText, TriagePushback } from '../components.js';
 import { h } from '../env.js';
 import { installPaste } from '../paste-images.js';
 import { PNG, card, dataUrl, mount } from './render.js';
+import { DATABASE_URL, OPENAI_API_KEY, accessCard } from './access.js';
 import { BUILTIN_WIDGETS, expandWidgets } from '../../src/core/widgets.ts';
 import PULL_REQUEST from '../../examples/widgets/pull-request.openui?raw';
 
@@ -156,5 +157,32 @@ export const WithPastedImages = {
     paste('layout-a.png');
     setTimeout(() => paste('layout-b.png'), 100);
     return root;
+  },
+};
+
+// The secret_access widget: one field per secret, each with the candidates the sources found.
+export const SecretAccessOneCandidate = {
+  render: () => mount(view(card({ id: 'access-one', title: 'Read the staging database', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL }]) }))),
+};
+// One secret offered on two instances, and by a source that is off, which the person cannot pick.
+export const SecretAccessTwoInstances = {
+  render: () => mount(view(card({ id: 'access-two', title: 'Call the OpenAI API', ...accessCard([{ name: 'OPENAI_API_KEY', candidates: OPENAI_API_KEY }]) }))),
+};
+// Two secrets on one card: the person answers each field on its own.
+export const SecretAccessSeveral = {
+  render: () => mount(view(card({ id: 'access-several', title: 'Two secrets for the deploy', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL }, { name: 'OPENAI_API_KEY', candidates: OPENAI_API_KEY }]) }))),
+};
+// No source holds the secret, so the person types its value, or declines.
+export const SecretAccessTyped = {
+  render: () => mount(view(card({ id: 'access-typed', title: 'Need the deploy token', ...accessCard([{ name: 'DEPLOY_TOKEN', candidates: [] }]) }))),
+};
+// A granted field on an answered card, with its Revoke button. The stand-in inbox takes the revocation.
+export const SecretAccessGranted = {
+  render: () => {
+    window.fetch = async () => Response.json({ ok: true });
+    const savedAt = Date.now() - 60000;
+    const sealed = { alg: 'RSA-OAEP-256+A256GCM', key: 'AAAA', iv: 'AAAA', data: 'AAAA' };
+    const answer = { values: { DATABASE_URL: { grant: 'db-staging', source: 'age', instance: 'laptop', until: savedAt + 3600000, case: 'K7Q2', sealed } }, comment: '', savedAt };
+    return mount(h(GrantRevoke, { card: card({ id: 'access-granted' }), answer }));
   },
 };
