@@ -45,9 +45,13 @@ function standIn(values: Record<string, string> = { 'db-staging': 'postgres://de
 
 async function setup(values?: Record<string, string>) {
   const s = standIn(values);
-  const inbox = new Inbox(new MemoryStorage(), () => NOW, undefined, { secretSources: s.sources });
+  let t = NOW;
+  const inbox = new Inbox(new MemoryStorage(), () => t, undefined, { secretSources: s.sources });
   const keys = await newSealKeys();
-  return { inbox, keys, ...s };
+  // A card offers only candidates a lookup returned, as card_post's own lookup does.
+  await inbox.secretLookup(agent, { name: 'DATABASE_URL' });
+  s.queries.length = 0;
+  return { inbox, keys, ...s, clock: { advance: (ms: number) => { t += ms; } } };
 }
 
 /** A body that places secret_access as card_post fills it. */
@@ -123,6 +127,20 @@ describe('the secret_access widget', () => {
     assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Database?', body: `root = Card([db])\ndb = widget secret_access {"name": "DATABASE_URL", "candidates": "[]"}` }), /needs the public key.*card_post/);
   });
 
+  it('refuses a candidate no lookup of the last hour returned, and takes an empty list', async () => {
+    const { inbox, keys, clock } = await setup();
+    const relabeled = { ...DB, label: 'Production database' };
+    assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [relabeled]) }), rejects(400, /no lookup of the last hour found db-staging/));
+    assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [{ ...DB, instance: 'other' }]) }), rejects(400, /no lookup/));
+    assert.equal(inbox.postCard(agent, { agent: 's1', title: 'Typed only?', body: accessBody(keys.publicKey, []) }).secrets?.[0], 'DATABASE_URL');
+    inbox.postCard(agent, { id: 'a1', agent: 's1', title: 'Database?', body: accessBody(keys.publicKey) });
+    clock.advance(60 * 60_000 + 1);
+    assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey) }), rejects(400, /no lookup/));
+    // A revision keeps the candidates the card already offered.
+    const patched = inbox.patchCard(agent, 'a1', [{ old: 'To run the migration.', new: 'To run the second migration.' }], 'body');
+    assert.match(patched.body ?? '', /second migration/);
+  });
+
   it('keeps fields beyond the four it checks, such as a status the lookup gave', async () => {
     const { inbox, keys } = await setup();
     const extra = { ...DB, status: 'off', reason: 'no identity file' };
@@ -170,9 +188,12 @@ describe('granting a secret_access field', () => {
   });
 
   it('answers 502 on an inbox with no sources', async () => {
-    const inbox = new Inbox(new MemoryStorage(), () => NOW);
-    const keys = await newSealKeys();
-    inbox.postCard(agent, { id: 'a1', agent: 's1', title: 'Database?', body: accessBody(keys.publicKey) });
+    const { inbox: withSources, keys } = await setup();
+    const card = withSources.postCard(agent, { id: 'a1', agent: 's1', title: 'Database?', body: accessBody(keys.publicKey) });
+    // A card stored while the inbox had sources, such as before a restart without them.
+    const store = new MemoryStorage();
+    const inbox = new Inbox(store, () => NOW);
+    store.put('cards', 'a1', card);
     await assert.rejects(inbox.answer('a1', { values: { DATABASE_URL: grant() } }), rejects(502, /no secret sources/));
   });
 
@@ -216,6 +237,7 @@ describe('granting a secret_access field', () => {
     const s = standIn();
     const inbox = new Inbox(new MemoryStorage(), () => NOW, undefined, { secretSources: s.sources, fetch: fetcher });
     const keys = await newSealKeys();
+    await inbox.secretLookup(agent, { name: 'DATABASE_URL' });
     const hooks: { hook?: string; answer?: Answer }[] = [];
     inbox.connectExtension(extension, { name: 'watch', hooks: ['answer.saved'] }, (ev) => hooks.push(ev as never));
     const sub = inbox.subscribe(agent, { agent: 's1', kind: 'system', title: 'Subscribe', system: { type: 'subscribe', webhook: { url: 'https://example.com/hooks/abc', headers: {} }, events: ['answer'] } } as NewCard);
@@ -287,6 +309,25 @@ describe('revoking a grant', () => {
     assert.ok(!heard.some((e) => e.type === 'revoke'));
   });
 
+  it('keeps a revoke while the agent has no stream, and sends it first when one opens', async () => {
+    const { inbox } = await setup();
+    const keys = await newSealKeys();
+    inbox.postCard(agent, { id: 'a2', agent: 's2', title: 'Database?', body: accessBody(keys.publicKey) });
+    const answer = await inbox.answer('a2', { values: { DATABASE_URL: grant() } });
+    const g = answer.values['DATABASE_URL'] as AccessGrant;
+    inbox.revokeGrant(owner, 'a2', 'DATABASE_URL');
+    const heard: AgentEvent[] = [];
+    inbox.connect(agent, 's2', (ev) => heard.push(ev));
+    const types = heard.map((e) => e.type).filter((t) => t !== 'hello');
+    assert.equal(types[0], 'revoke');
+    const ev = heard.find((e) => e.type === 'revoke');
+    assert.ok(ev?.type === 'revoke' && ev.case === g.case && ev.card.id === 'a2');
+    // Sent once: a second stream doesn't hear it again.
+    const again: AgentEvent[] = [];
+    inbox.connect(agent, 's2', (e) => again.push(e));
+    assert.ok(!again.some((e) => e.type === 'revoke'));
+  });
+
   it('refuses a field with no grant', async () => {
     const { inbox } = await granted();
     assert.throws(() => inbox.revokeGrant(owner, 'a1', 'OTHER'), rejects(409, /no grant/));
@@ -302,7 +343,8 @@ describe('card_post fills secret_access', () => {
     } as unknown as Client;
     const secrets = new SecretRequests();
     const ctx = { inbox: client, secrets, agent: 's1', origin: async () => undefined, arrival: 'later' };
-    const kept = { ...DB, id: 'kept', label: 'Given by the agent' };
+    // Candidates the agent gives stay as given, and still must come from a lookup of the last hour.
+    const kept = { ...DB, status: 'ready' };
     const body = `root = Card([db, other])\ndb = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}\nother = widget secret_access ${JSON.stringify({ name: 'OTHER', candidates: [kept] })}`;
     await runTool(ctx, 'card_post', { id: 'a1', title: 'Database?', body });
     assert.deepEqual(queries, [{ name: 'DATABASE_URL' }]);

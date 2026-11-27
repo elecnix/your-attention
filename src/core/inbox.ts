@@ -111,6 +111,17 @@ export const MAX_APPROVALS = 5;
 export const MAX_APPROVAL_CHARS = 1000;
 const MAX_APPROVAL_LABEL_CHARS = 120;
 
+/** How long the inbox remembers what a lookup returned, for the cards that offer it. */
+export const LOOKUP_MEMORY_MS = 60 * 60_000;
+
+/** A grant as the inbox stores it, with when its revoke reached the agent's stream. */
+type KeptGrant = AccessGrant & { revokeSentAt?: number };
+
+/** A candidate by the four fields a card must repeat as a lookup gave them. */
+function candidateKey(c: Pick<Candidate, 'source' | 'instance' | 'id' | 'label'>): string {
+  return JSON.stringify([c.source, c.instance, c.id, c.label]);
+}
+
 /** A secret_access answer that declines. */
 function isDecline(v: unknown): v is { decline: true } {
   return !!v && typeof v === 'object' && (v as Record<string, unknown>)['decline'] === true;
@@ -439,6 +450,10 @@ export class Inbox {
   private readonly secretSources: SecretSources | undefined;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
+  /** Each candidate a lookup of the last hour returned, by its source, instance, id and label, with when that ends. A
+   * card offers only these, so an agent can't label one secret as another. Memory is enough: a restart forgets them,
+   * and card_post looks up again. */
+  private readonly lookedUp = new Map<string, number>();
   private readonly pages = new Set<PageSend>();
   /** The pages that need an unlock token, with the one they opened with and how to close them. */
   private readonly guarded = new Map<PageSend, { unlock: string | undefined; close: () => void }>();
@@ -734,6 +749,7 @@ export class Inbox {
     const bodyProblems = body === undefined || !this.checkBody || this.clientChecks ? [] : this.checkBody(String(body));
     if (bodyProblems.length) throw new InboxError(400, bodyProblemsMessage(bodyProblems));
     const secrets = body === undefined ? [] : secretInputs(String(body));
+    if (body !== undefined && secrets.length) this.checkCandidates(String(body), before?.body);
     let widgets = before?.widgets;
     let responses = before?.responses;
     if (expanded) {
@@ -2348,7 +2364,28 @@ export class Inbox {
       q[k] = v;
     }
     if (!this.secretSources) return { candidates: [], sources: [] };
-    return this.secretSources.lookup(q);
+    const found = await this.secretSources.lookup(q);
+    const until = this.now() + LOOKUP_MEMORY_MS;
+    for (const [k, end] of this.lookedUp) if (end <= this.now()) this.lookedUp.delete(k);
+    for (const c of found.candidates) this.lookedUp.set(candidateKey(c), until);
+    return found;
+  }
+
+  /** Answer 400 for a SecretAccess candidate that no lookup of the last hour returned, unless the version before this
+   * one already offered it. */
+  private checkCandidates(body: string, before: string | undefined): void {
+    const fields = secretAccesses(body);
+    if (!fields.length) return;
+    let kept: Set<string> | undefined;
+    for (const f of fields) {
+      for (const c of f.candidates) {
+        const key = candidateKey(c);
+        if ((this.lookedUp.get(key) ?? 0) > this.now()) continue;
+        kept ??= new Set(before === undefined ? [] : (() => { try { return secretAccesses(before).flatMap((x) => x.candidates.map(candidateKey)); } catch { return []; } })());
+        if (kept.has(key)) continue;
+        throw new InboxError(400, `secret ${f.name}: no lookup of the last hour found ${c.id} labeled ${JSON.stringify(c.label)} in ${c.source} on ${c.instance}. Leave out candidates, and card_post looks them up`);
+      }
+    }
   }
 
   /** The sources of this computer and their status, never their settings. */
@@ -2369,8 +2406,31 @@ export class Inbox {
     const next: Answer = { ...answer, values: { ...answer.values, [field]: { ...v, revokedAt: this.now() } } };
     this.store.put('answers', id, next);
     this.emit({ type: 'change', card: id });
-    this.tellAgent(card, { type: 'revoke', id: randomId(6), card: publicCard(card), field, case: v.case });
-    return next;
+    // With no stream open, the revoke waits, as an undelivered answer does, and goes first when one opens.
+    this.sendRevokes(card.token ?? '', card.agent);
+    return this.store.get<Answer>('answers', id) ?? next;
+  }
+
+  /** Send each revoke this agent's streams have not heard yet, and record that they did. */
+  private sendRevokes(token: string, agent: string): void {
+    const subs = this.agents.get(this.key(token, agent));
+    if (!subs?.size) return;
+    for (const answer of this.store.list<Answer>('answers')) {
+      const card = this.store.get<Card>('cards', answer.card);
+      if (!card || card.agent !== agent || (card.token ?? '') !== token) continue;
+      const waiting = Object.entries(answer.values).filter(([, v]) => {
+        const g = v as Partial<KeptGrant> | null;
+        return !!g && typeof g === 'object' && typeof g.grant === 'string' && typeof g.case === 'string' && g.revokedAt !== undefined && g.revokeSentAt === undefined;
+      });
+      if (!waiting.length) continue;
+      const values = { ...answer.values };
+      for (const [field] of waiting) values[field] = { ...(values[field] as object), revokeSentAt: this.now() };
+      this.store.put('answers', answer.card, { ...answer, values });
+      for (const [field, v] of waiting) {
+        const ev: AgentEvent = { type: 'revoke', id: randomId(6), card: publicCard(card), field, case: (v as KeptGrant).case };
+        for (const send of subs) send(ev);
+      }
+    }
   }
 
   /** Type each approval the owner turned on in the card's answer into its pane, once per card version, and record what
@@ -2799,6 +2859,8 @@ export class Inbox {
     if (caller.token) this.usage.saw('tokens', caller.token);
     this.setPresence(agent, true, opts.channelOff, opts.origin);
     if (!opts.resumed) send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
+    // A revoke the agent missed goes before anything else, so its session ends the grant before its next command.
+    this.sendRevokes(caller.token, agent);
     this.flush(agent);
     // A card the person sent while this agent was away goes out as soon as it connects, as a waiting answer does.
     this.deliverSent(agent);
