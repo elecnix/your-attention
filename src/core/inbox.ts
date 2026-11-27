@@ -19,7 +19,7 @@ import { Usage } from './telemetry.ts';
 import { generateVapid, sendPush, b64urlDecode, type Vapid } from './webpush.ts';
 import { MAX_PULL_REQUESTS, MAX_TAGS } from './types.ts';
 import type {
-  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
+  Reassignment, AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, PullRequest, RequireCardInput, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
   FeedbackFinding, FeedbackVerdict, LateAnswer, OpenCards, TriageFeedback, TriagePushback,
 } from './types.ts';
@@ -302,6 +302,8 @@ to 80, as a card's agent is. */
 export const MAX_PINS = 20;
 export const MAX_TAG_CHARS = 100;
 export const MAX_AGENT_CHARS = 80;
+/** The longest reason a reassignment keeps, such as `fix-login retired`. */
+export const MAX_REASSIGN_WHY = 200;
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
@@ -2272,6 +2274,51 @@ export class Inbox {
     return next;
   }
 
+  /** The owner hands a card whose agent retired to `to`, the nearest living ancestor of that agent, with the reason. With
+   * no `to`, no ancestor is alive: the card stays where it is and reads `orphaned`, so it waits on the person. The card
+   * keeps each change of hands, and the new agent's stream hears it once, now or when it next connects. */
+  reassign(caller: Caller, id: string, input: { to?: unknown; why?: unknown }): Card {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner reassigns a card');
+    const card = this.getCard(id);
+    const why = typeof input.why === 'string' ? input.why.trim() : '';
+    if (!why || why.length > MAX_REASSIGN_WHY || /[\r\n]/.test(why)) throw new InboxError(400, `why must be one line of 1 to ${MAX_REASSIGN_WHY} characters`);
+    if (input.to !== undefined && input.to !== null && typeof input.to !== 'string') throw new InboxError(400, 'to must be an agent id, or null when no ancestor is alive');
+    const to = typeof input.to === 'string' && input.to !== '' ? input.to : undefined;
+    if (to !== undefined && to.length > MAX_AGENT_CHARS) throw new InboxError(400, `to must be at most ${MAX_AGENT_CHARS} characters`);
+    if (card.kind === 'system' || card.deliver !== 'stream') throw new InboxError(409, 'only a card that waits for its agent changes hands');
+    const s = cardState(card, this.store.get<Answer>('answers', id));
+    if (!WAITING_STATES.has(s)) throw new InboxError(409, `the card is ${s}, and only a card its agent still waits on changes hands`);
+    if (to === card.agent) throw new InboxError(409, `the card is already with ${to}`);
+    // A second notice of the same retirement finds the card already waiting on the person, and changes nothing.
+    if (!to && leftWithoutAgent(card)) return card;
+    const at = this.now();
+    const entry: Reassignment = { from: card.agent, ...(to ? { to } : {}), at, why };
+    // A new holder gets the hour that an agent which never connected has before its card reads orphaned.
+    const next: Card = { ...card, ...(to ? { agent: to, updatedAt: at } : {}), reassignedFrom: [...(card.reassignedFrom ?? []), entry] };
+    this.store.put('cards', id, next);
+    this.emit({ type: 'change', card: id });
+    if (to) {
+      this.sendReassignments(card.token ?? '', to);
+      // An answer the retired agent never received goes to the new holder, as a claim sends it.
+      this.flush(to);
+    }
+    return this.store.get<Card>('cards', id) ?? next;
+  }
+
+  /** Tell this agent's streams about each card the inbox gave it that they have not heard of yet, and record that they did. */
+  private sendReassignments(token: string, agent: string): void {
+    const subs = this.agents.get(this.key(token, agent));
+    if (!subs?.size) return;
+    for (const card of this.store.list<Card>('cards')) {
+      const last = card.reassignedFrom?.at(-1);
+      if (card.agent !== agent || (card.token ?? '') !== token || !last || last.to !== agent || last.noticeSentAt !== undefined) continue;
+      const sent: Card = { ...card, reassignedFrom: [...card.reassignedFrom!.slice(0, -1), { ...last, noticeSentAt: this.now() }] };
+      this.store.put('cards', card.id, sent);
+      const ev: AgentEvent = { type: 'reassigned', id: randomId(6), card: publicCard(sent), from: last.from, why: last.why };
+      for (const send of subs) send(ev);
+    }
+  }
+
   // ---- answers ----
 
   async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number; images?: (NewAttachment & { field?: string })[]; by?: Caller }): Promise<Answer> {
@@ -3028,6 +3075,8 @@ export class Inbox {
     if (!opts.resumed) send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     // A revoke the agent missed goes before anything else, so its session ends the grant before its next command.
     this.sendRevokes(caller.token, agent);
+    // A card the inbox gave this agent while it was away, because the agent that asked retired.
+    this.sendReassignments(caller.token, agent);
     this.flush(agent);
     // A card the person sent while this agent was away goes out as soon as it connects, as a waiting answer does.
     this.deliverSent(agent);
@@ -3369,6 +3418,8 @@ export class Inbox {
    * and so does a card whose agent never connected, once the card itself is old enough. */
   private orphaned(c: Card | CardSummary, s: CardState, p: Presence | undefined, now: number): boolean {
     if (s !== 'open' || c.deliver !== 'stream') return false;
+    // The agent retired and no ancestor of it was alive to take the card, so no session will reconnect for it.
+    if (leftWithoutAgent(c)) return true;
     if (p) return !p.online && now - p.lastSeen > ORPHAN_MS;
     return now - (c.updatedAt ?? c.createdAt) > ORPHAN_MS;
   }
@@ -3745,6 +3796,13 @@ function webhookHeaders(headers: unknown): Record<string, string> {
 
 /** A card without what only the person reads: the id of the token that posted it, and the draft they left on a card
  * they dismissed. */
+/** The reassignment that left this card without an agent: its agent retired and no ancestor of it was alive. A claim
+ * gives the card another agent, and the card no longer reads orphaned for this reason. */
+export function leftWithoutAgent(c: { agent: string; reassignedFrom?: Reassignment[]; lastReassignment?: Reassignment }): Reassignment | undefined {
+  const last = c.lastReassignment ?? c.reassignedFrom?.at(-1);
+  return last && !last.to && last.from === c.agent ? last : undefined;
+}
+
 export function publicCard(card: Card): Card {
   const { token: _token, pushed: _pushed, ...rest } = card;
   if (!rest.closed?.draft) return rest;

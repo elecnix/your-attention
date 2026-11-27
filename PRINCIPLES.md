@@ -116,13 +116,13 @@ You need to know whether the model has your answer yet, and a way to push it thr
 
 ### DP18: Each card shows if its agent is listening, busy or not connected
 
-The card shows one of three states, updated in near real time: listening, busy (connected but working, with unread answers), or not connected. You see the state before you start to write. The inbox knows whether the agent has a connection, and it cannot know whether the session itself still runs, so the card says **Not connected**, then what happens to your answer: it goes when the session reconnects, or it waits in the dead-letter queue. An orphaned card adds, in the same notice, that another session can take it. A session that cannot receive channel notifications shows **Channel off** with the reason, in place of listening or busy, because an answer pushed there never reaches the model.
+The card shows one of three states, updated in near real time: listening, busy (connected but working, with unread answers), or not connected. You see the state before you start to write. The inbox knows whether the agent has a connection, and it cannot know whether the session itself still runs, so the card says **Not connected**, then what happens to your answer: it goes when the session reconnects, or it waits in the dead-letter queue. An orphaned card adds, in the same notice, that another session can take it. A retirement is the one thing that says a session ended for good, and only the tool that started the agent reports it: a card whose agent retired, with no living ancestor to take it, says **No agent left** and why. A session that cannot receive channel notifications shows **Channel off** with the reason, in place of listening or busy, because an answer pushed there never reaches the model.
 
 A fixed number of seconds cannot be guaranteed.
 
 ### DP19: An answer to an offline agent is kept, and agents can find it
 
-If the agent goes offline, the inbox stores your answer. It delivers the answer when the session resumes, or to a successor agent you pick. An unclaimed answer goes to a dead-letter queue, which agents can query and claim.
+If the agent goes offline, the inbox stores your answer. It delivers the answer when the session resumes, or to a successor agent you pick. When the agent retires, its card goes to its nearest living ancestor, which hears why, and the card shows who had it before. An unclaimed answer goes to a dead-letter queue, which agents can query and claim.
 
 Agents crash and sessions end. Your effort should outlast them, and a new session should be able to pick up what an old one missed.
 

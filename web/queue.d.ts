@@ -1,4 +1,4 @@
-import type { CardState, Guidance, Pin, Presence, PriorityLevel, Settings } from '../src/core/types.ts';
+import type { CardState, Guidance, Pin, Presence, PriorityLevel, Reassignment, Settings } from '../src/core/types.ts';
 import type { AnswerSummary, CardSummary } from '../src/core/summary.ts';
 
 type Card = CardSummary;
@@ -21,7 +21,9 @@ export const STATE_LABEL: Record<string, string>;
 /** The ids of the sections every Group by choice shows. */
 export const SECTION_ID: { system: string; outbox: string; sent: string };
 export function agentName(id: string, cards: Card[], presence?: Record<string, Presence>): string;
-export function presenceOf(card: Pick<Card, 'id' | 'agent' | 'deliver'>, state: InboxState): ['off' | 'busy' | 'on', string] | null;
+export function presenceOf(card: Pick<Card, 'id' | 'agent' | 'deliver'> & { lastReassignment?: Reassignment; reassignedFrom?: Reassignment[] }, state: InboxState): ['off' | 'busy' | 'on', string] | null;
+/** Each change of hands that found a living agent, oldest first, as a sentence for the person. */
+export function reassignments(card: { reassignedFrom?: Reassignment[]; origin?: { name?: string } }, cards: Card[], presence?: Record<string, Presence>): { at: number; text: string }[];
 /** How triage treated a card, and the sentence the header badge shows as its tooltip. */
 export function triageState(card: { triage?: { state: string; by?: string; reason?: string; bypass?: boolean } }): ['none' | 'checking' | 'done' | 'bypass', string];
 export interface Queue {

@@ -5,7 +5,7 @@
 // OpenCode hands plugins its own Zod, as tool.schema from @opencode-ai/plugin, and wants tool arguments in it.
 // The plugin takes that Zod as an argument, so this package needs no Zod of its own.
 import os from 'node:os';
-import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReassigned, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import type { AgentEvent, Origin } from '../../core/types.ts';
 import { herdrPlace } from '../herdr/place.ts';
 import { runTool } from '../run-tool.ts';
@@ -118,6 +118,7 @@ export function createPlugin(z: unknown) {
         if (ev.type === 'returned') { await send(session, `[your-attention] ${describeReturned(ev)}`); return; }
         if (ev.type === 'advice') { await send(session, `[your-attention] ${describeAdvice(ev)}`); return; }
         if (ev.type === 'card') { await send(session, `[your-attention] ${describeSentCard(ev)}`); return; }
+        if (ev.type === 'reassigned') { await send(session, `[your-attention] ${describeReassigned(ev)}`); return; }
         if (ev.type === 'revoke') {
           // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
           if (secrets.revoke(ev.case)) await send(session, `[your-attention] The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`);

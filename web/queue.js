@@ -22,10 +22,33 @@ export function agentName(id, cards, presence = {}) {
   return best ? best.origin.name : id;
 }
 
+// The change of hands that left a card with no agent: its agent retired, and no agent above it was alive to take it.
+// A full card carries every change, and a summary its last one.
+function leftWithoutAgent(card) {
+  const last = card.lastReassignment || (card.reassignedFrom || []).at(-1);
+  return last && !last.to && last.from === card.agent ? last : null;
+}
+
+// Each time a card changed hands because its agent retired, oldest first, worded for the person. A change that found no
+// living agent is not here: the card's presence notice says it, once.
+export function reassignments(card, cards, presence = {}) {
+  const all = card.reassignedFrom || [];
+  // The agent that posted the card may have no other card left to name it, and the card's origin still names it.
+  const poster = all.length ? all[0].from : null;
+  const name = (id) => {
+    const n = agentName(id, cards, presence);
+    return n === id && id === poster && card.origin && card.origin.name ? card.origin.name : n;
+  };
+  return all.filter((r) => r.to).map((r) => ({ at: r.at, text: `Reassigned from ${name(r.from)} to ${name(r.to)}, because ${r.why}` }));
+}
+
 // The pill says what the inbox knows, which is whether the agent has a connection: it cannot know whether the
-// session itself still runs, so it never calls the agent gone or offline.
+// session itself still runs, so it never calls the agent gone or offline. The one exception is a retirement, which
+// Bellwether reported: a card whose agent retired with no living agent above it waits on the person.
 export function presenceOf(card, state) {
   if (card.deliver === 'none') return null;
+  const left = leftWithoutAgent(card);
+  if (left) return ['off', `No agent left: ${left.why}, and no agent above it is alive. The answer waits until another session takes the card`];
   const p = state.presence[card.agent];
   if (!p || !p.online) {
     // An orphaned card says, in the same notice, that another session can take it. The card's state label says
