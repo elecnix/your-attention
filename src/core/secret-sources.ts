@@ -1,5 +1,5 @@
 // The inbox's side of secret sources: what a lookup answers and what a grant stores. The sources themselves run in a
-// platform process, the laptop's `serve`, which hands the inbox a SecretSources. SPEC.md#secret-sources holds the contract.
+// platform process, the `serve` of your own inbox, which hands the inbox a SecretSources. SPEC.md#secret-sources holds the contract.
 import type { Sealed } from './types.ts';
 
 /** What an agent may ask for. A query with no field matches nothing. */

@@ -1,6 +1,6 @@
 // What keeps the page from drawing all of a card body, and what it draws instead. Both read a body with the result of
 // the OpenUI parser, `{root, meta}`: the inbox gets it from @openuidev/lang-core (src/adapters/openui-body.ts), and the page
-// from its Renderer. So a laptop inbox and a page on the hosted inbox, which takes bodies unchecked, find the same faults.
+// from its Renderer. So your own inbox and a page on the hosted inbox, which takes bodies unchecked, find the same faults.
 // This module reads no browser globals, so Node can load it.
 
 /** What keeps the page from drawing all of a body, one sentence each. Empty when the page draws it whole. */

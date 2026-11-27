@@ -1,4 +1,4 @@
-// File bytes on disk for the laptop build: one file per attachment, plus its type.
+// File bytes on disk for the Node build: one file per attachment, plus its type.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { BlobStore } from '../core/storage.ts';
@@ -35,7 +35,7 @@ export class FileBlobs implements BlobStore {
   }
 }
 
-/** A file on this machine, by the decoded path of its file: address, for the laptop inbox's file links. A directory, a
+/** A file on this machine, by the decoded path of its file: address, for the file links of your own inbox. A directory, a
  * missing file or anything else that is not a regular file is undefined. With `folder`, so is a file whose real path, after
  * every symlink, is not inside the real path of that folder. The caller reads the bytes after it checks the size. */
 export async function localFile(name: string, folder?: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> } | undefined> {

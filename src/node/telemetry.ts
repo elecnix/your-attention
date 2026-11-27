@@ -1,4 +1,4 @@
-// Usage counts on a laptop: offer them once, send each finished day to the collector, and
+// Usage counts on your own inbox: offer them once, send each finished day to the collector, and
 // read the counts back for the operator. src/core/telemetry.ts counts; this file only sends.
 import readline from 'node:readline/promises';
 import { COUNTS, type Counts, type Usage } from '../core/telemetry.ts';
