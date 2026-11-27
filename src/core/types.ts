@@ -559,12 +559,32 @@ export interface Presence {
   origin?: PresenceOrigin;
 }
 
+/** One card its agent still waits on: the person has not answered it, or the agent has not read the answer. */
+export interface OpenCard {
+  id: string;
+  title: string;
+  state: CardState;
+  /** The priority level the card shows, by id. */
+  priority: string;
+  createdAt: number;
+}
+
+/** The cards one agent still waits on, oldest first, at most `OPEN_CARDS_LIMIT` of them. `total` counts every one,
+ * and `at` is the inbox's clock when it listed them, so a client reads each card's age without trusting its own clock. */
+export interface OpenCards {
+  at: number;
+  total: number;
+  cards: OpenCard[];
+}
+
 /** What an agent stream receives for each answer. */
 export interface AnswerEvent {
   type: 'answer';
   id: string;
   card: Card;
   answer: Answer;
+  /** The other cards of the same agent and token that it still waits on, so the agent sees what remains. */
+  openCards?: OpenCards;
 }
 
 /** A card the person sent to an agent, kept until a connection for that agent takes it. */
