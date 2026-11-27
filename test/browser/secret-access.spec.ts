@@ -116,13 +116,16 @@ test('the keyboard alone grants a candidate, changes the ceiling and sends', asy
 
 test('a granted field shows Revoke, which posts the field to the revoke route', async ({ page }) => {
   await story(page, 'cards--secret-access-granted');
+  await expect(page.getByText(/DATABASE_URL: granted \/home\/me\/work\/\.secrets\/db-staging\.age from age on laptop until .*, case K7Q2/)).toBeVisible();
+  // The page replaces window.fetch as it loads, and the story replaces it again in a layout effect when it mounts, which
+  // runs after goto returns. Record only once the granted row is on screen, when both have run, or the story's stand-in
+  // answers the revoke itself and the recorder never sees it.
   const calls: { url: string; body: unknown }[] = [];
   await page.exposeFunction('__record', (url: string, body: string) => { calls.push({ url, body: JSON.parse(body) }); });
   await page.evaluate(() => {
     const w = window as unknown as { __record: (u: string, b: string) => void };
     window.fetch = async (url, init) => { if (String(url).endsWith('/revoke')) w.__record(String(url), String(init?.body ?? 'null')); return Response.json({ ok: true }); };
   });
-  await expect(page.getByText(/DATABASE_URL: granted \/home\/me\/work\/\.secrets\/db-staging\.age from age on laptop until .*, case K7Q2/)).toBeVisible();
   await page.getByRole('button', { name: 'Revoke DATABASE_URL' }).click();
   await expect.poll(() => calls.length).toBe(1);
   expect(calls[0]!.url).toMatch(/v1\/cards\/access-granted\/revoke$/);
