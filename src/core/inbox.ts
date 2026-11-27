@@ -470,6 +470,9 @@ export class Inbox {
   /** The broker's key pair, made once and kept in memory only: a restart makes a new one, so a password sealed before
    * it no longer opens, and no file ever holds the private key. */
   private brokerKeys: Promise<{ publicKey: JsonWebKey; privateKey: CryptoKey }> | undefined;
+  /** Each card field whose command started, claimed before the run awaits, so two answers at the same moment run it
+   * once. A finished run stays claimed: its stored answer refuses the next one anyway. */
+  private readonly claimedRuns = new Set<string>();
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
   /** Each candidate a lookup of the last hour returned, keyed by every metadata field it carries, with when that ends.
@@ -2469,6 +2472,11 @@ export class Inbox {
       if (differs) throw new InboxError(409, `${r.field}: nothing ran, because ${differs}`);
       if ([before, ...(before?.previous ?? [])].some((a) => isRun(a?.values?.[r.field]))) throw new InboxError(409, `${r.field}: this command already ran once. Ask the agent for a new card to run it again`);
     }
+    // Claimed in the same synchronous step as the checks above, before the first await.
+    const keys = runs.map((r) => `${card.id}\n${r.field}`);
+    const busy = runs.find((_, i) => this.claimedRuns.has(keys[i]!));
+    if (busy) throw new InboxError(409, `${busy.field}: this command is already running or ran once. Ask the agent for a new card to run it again`);
+    for (const k of keys) this.claimedRuns.add(k);
     const approvedBy = (by && this.store.get<Token>('tokens', by.token)?.name) || 'the owner';
     for (const r of runs) {
       let result;

@@ -496,7 +496,7 @@ The inbox takes these steps for each privileged field, inside the owner's `POST 
 1. A value that isn't sealed gets 400, so storage never gets a plain password.
 2. The inbox opens the value with the broker's private key, in memory. A value sealed before a restart doesn't open: the answer is 409, and the person types the password again.
 3. The inbox compares the sealed command with the card's command, character by character. When they differ, the answer is 409 and nothing runs. The message gives the position of the first character that differs, with the text around it in both commands. The inbox checks again after it writes the answer's images, against the card as it is then.
-4. The answer is 409 when the agent closed the card, or when this field already ran. A command runs once, and a new run needs a new card.
+4. The answer is 409 when the agent closed the card, or when this field already ran or is running. A command runs once, and a new run needs a new card. Of two answers sent at the same moment, one runs the command and the other gets 409.
 5. The inbox starts the command with the shell of its machine, as the user that runs the inbox. It writes the password and a newline to the command's standard input, then closes it. The password never goes in an environment variable, an argument list, a file or a log. A run that takes more than 2 minutes is stopped.
 6. In what the command printed, the inbox replaces each occurrence of the password with `[password]`, and keeps the last 64 KB.
 

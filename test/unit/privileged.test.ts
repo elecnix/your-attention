@@ -146,6 +146,26 @@ describe('a privileged action runs inside the owner answer', () => {
     assert.equal((runner as ReturnType<typeof recording>).calls.length, 1);
   });
 
+  it('runs a command once when two answers arrive at the same moment', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const calls: string[] = [];
+    const slow: PrivilegedRunner = { machine: MACHINE, run: async (command) => { calls.push(command); await gate; return { exitCode: 0, output: 'done\n' }; } };
+    const { inbox, owner } = await setup(slow);
+    inbox.postCard(agent, { id: 'p1', agent: 's1', title: 'Create the marker?', body: body() });
+    const [a, b] = [await sealFor(inbox, owner), await sealFor(inbox, owner)];
+    // Either answer may claim the run first: the other gets 409, before its run starts.
+    const both = Promise.allSettled([inbox.answer('p1', { values: { run_it: a }, by: owner }), inbox.answer('p1', { values: { run_it: b }, by: owner })]);
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    const settled = await both;
+    assert.equal(settled.filter((x) => x.status === 'fulfilled').length, 1);
+    const refused = settled.find((x) => x.status === 'rejected') as PromiseRejectedResult;
+    assert.ok(rejects(409, /already running or ran once/)(refused.reason));
+    assert.equal(calls.length, 1);
+    assert.equal(inbox.privilegedAudit(owner).length, 1);
+  });
+
   it('runs nothing on a card its agent closed', async () => {
     const { inbox, owner, runner } = await setup();
     inbox.postCard(agent, { id: 'p1', agent: 's1', title: 'Create the marker?', body: body() });
