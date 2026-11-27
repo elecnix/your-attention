@@ -53,6 +53,26 @@ describe('your-attention secret source', () => {
     assert.deepEqual(readSourceEntries(home), []);
   });
 
+  it('says in a sentence that it cannot read a folder, for the age folder and its passphrase', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs a folder this user cannot search' : false }, async () => {
+    const { env, home } = scratch();
+    const file = path.join(home, 'a-file');
+    fs.writeFileSync(file, 'not a folder');
+    const locked = path.join(home, 'locked');
+    fs.mkdirSync(locked, { mode: 0o000 });
+    try {
+      for (const target of [path.join(file, 'inside'), path.join(locked, 'inside')]) {
+        for (const args of [['age', 'dir', 'add'], ['age', 'passphrase']]) {
+          const r = await withStdin(env, '', 'secret', ...args, target);
+          assert.equal(r.code, 1, r.stderr);
+          assert.match(r.stderr, /is not a folder this user can read/);
+          assert.doesNotMatch(r.stderr, /^\s+at /m);
+        }
+      }
+    } finally {
+      fs.chmodSync(locked, 0o700);
+    }
+  });
+
   it('adds the example as a stdio source, lists it ready, and removes it', async () => {
     const { env, home } = scratch();
     const origin = pathToFileURL(EXAMPLE).href;

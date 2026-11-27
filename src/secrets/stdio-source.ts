@@ -30,7 +30,8 @@ export const SETTINGS_ENV = 'YOUR_ATTENTION_SOURCE_SETTINGS';
 type Reply = Record<string, unknown>;
 /** A request without the version and the id, which each call adds. */
 type Call<R = SourceRequest> = R extends unknown ? Omit<R, 'v' | 'id'> : never;
-interface Pending { resolve(r: Reply): void; reject(e: Error): void; timer: ReturnType<typeof setTimeout> }
+/** A call waiting for its reply, from the process it went to. */
+interface Pending { running: ChildProcess; resolve(r: Reply): void; reject(e: Error): void; timer: ReturnType<typeof setTimeout> }
 
 /** A stdio source. It starts on the first call, and again on the call after a failure. `stop` ends the process. */
 export function stdioSource(options: StdioOptions): SecretSource & { stop(): void } {
@@ -42,20 +43,30 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
   let next = 0;
   const pending = new Map<string, Pending>();
 
+  const alive = (running: ChildProcess): boolean => running.exitCode === null && running.signalCode === null;
+
+  /** Take a process out of service, so the next call starts a new one. Calls it already owes still wait for it. */
+  function detach(running: ChildProcess): void {
+    if (child === running) child = undefined;
+  }
+
   /** End the process and fail every call it owes, so the next call starts it again. */
   function fault(running: ChildProcess, reason: string): void {
-    if (child !== running) return;
-    child = undefined;
-    running.kill();
-    // A source that traps SIGTERM would outlive its handle, and the next call would start a second copy beside it.
-    if (running.exitCode === null && running.signalCode === null) {
-      const force = setTimeout(() => { if (running.exitCode === null && running.signalCode === null) running.kill('SIGKILL'); }, killGraceMs);
+    detach(running);
+    if (alive(running) && !running.killed) {
+      running.kill();
+      // A source that traps SIGTERM would outlive its handle, and the next call would start a second copy beside it.
+      const force = setTimeout(() => { if (alive(running)) running.kill('SIGKILL'); }, killGraceMs);
       force.unref();
       running.once('exit', () => clearTimeout(force));
     }
     const error = new Error(`the source ${name} ${reason}`);
-    for (const p of pending.values()) { clearTimeout(p.timer); p.reject(error); }
-    pending.clear();
+    for (const [id, p] of pending) {
+      if (p.running !== running) continue;
+      pending.delete(id);
+      clearTimeout(p.timer);
+      p.reject(error);
+    }
   }
 
   function start(): ChildProcess {
@@ -66,7 +77,10 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
     delete env['YOUR_ATTENTION_TOKEN'];
     const running = spawn(executable, args, { cwd: folder, env, stdio: ['pipe', 'pipe', 'pipe'] });
     running.on('error', (e: NodeJS.ErrnoException) => fault(running, e.code === 'ENOENT' ? `could not start: ${first} was not found` : `could not start: ${e.message}`));
-    running.on('exit', (code, signal) => fault(running, `stopped (${signal ?? `exit ${code}`})`));
+    // At the exit, no new call goes to this process. Its calls fail only at 'close', which comes after stdout has
+    // ended, so a reply written just before the exit still reaches the handler below.
+    running.on('exit', () => detach(running));
+    running.on('close', (code, signal) => fault(running, `stopped (${signal ?? `exit ${code}`})`));
     running.stdin?.on('error', () => { /* the exit reports it */ });
     readline.createInterface({ input: running.stdout! }).on('line', (line) => {
       let reply: Reply;
@@ -74,7 +88,7 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
       if (!reply || typeof reply !== 'object' || reply['v'] !== SOURCE_PROTOCOL_VERSION) return fault(running, `answered with a version other than ${SOURCE_PROTOCOL_VERSION}`);
       const id = String(reply['id']);
       const p = pending.get(id);
-      if (!p) return;
+      if (!p || p.running !== running) return;
       pending.delete(id);
       clearTimeout(p.timer);
       p.resolve(reply);
@@ -92,7 +106,7 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
     const id = String(++next);
     return new Promise<Reply>((resolve, reject) => {
       const timer = setTimeout(() => fault(running, `did not answer within ${Math.round(timeoutMs / 1000) || timeoutMs / 1000} seconds`), timeoutMs);
-      pending.set(id, { resolve, reject, timer });
+      pending.set(id, { running, resolve, reject, timer });
       running.stdin?.write(`${JSON.stringify({ v: SOURCE_PROTOCOL_VERSION, id, ...request })}\n`);
     }).then((reply) => {
       if (typeof reply['error'] === 'string') throw new Error(reply['error']);

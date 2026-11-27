@@ -1,4 +1,5 @@
 // A stdio secret source that misbehaves on request, for the tests of the stdio form. The query's name picks the fault.
+import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
@@ -13,6 +14,13 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     // Ignores the polite signal, and hangs: only SIGKILL ends it.
     case 'STUBBORN': process.on('SIGTERM', () => {}); return;
     case 'CRASH': process.exit(3);
+    // Exits at once, and leaves its reply to a helper that shares its stdout and writes a moment later: the exit comes
+    // before the reply, and the reply must still count.
+    case 'LAST': {
+      const line = JSON.stringify({ v: 1, id: r.id, candidates: [{ id: 'last', label: 'the last word' }] });
+      spawn(process.execPath, ['-e', `setTimeout(() => process.stdout.write(${JSON.stringify(`${line}\n`)}), 300)`], { stdio: ['ignore', 'inherit', 'ignore'], detached: true }).unref();
+      process.exit(0);
+    }
     case 'SETTINGS': return reply({ candidates: [{ id: 'settings', label: process.env['YOUR_ATTENTION_SOURCE_SETTINGS'] ?? '' }] });
     default: return reply({ candidates: [{ id: 'pid', label: String(process.pid) }] });
   }

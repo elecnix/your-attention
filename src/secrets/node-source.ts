@@ -28,9 +28,14 @@ export function moduleFile(origin: string): string {
 export function loadNodeSource(origin: string, settings: Record<string, unknown>): SecretSource {
   const file = moduleFile(origin);
   let ready: Promise<SourceModule> | undefined;
+  let failures = 0;
   const mod = (): Promise<SourceModule> => {
     ready ??= (async () => {
-      const m = (await import(pathToFileURL(file).href)) as SourceModule;
+      // Node keeps a module that threw while it ran, and answers each later import of that address with the same error.
+      // After a failure, a new query makes a new address, so Node reads the fixed file.
+      const url = pathToFileURL(file);
+      if (failures > 0) url.search = `?attempt=${failures}`;
+      const m = (await import(url.href)) as SourceModule;
       for (const call of ['detect', 'lookup', 'release'] as const) {
         if (typeof m[call] !== 'function') throw new Error(`${file} does not export ${call}`);
       }
@@ -38,7 +43,7 @@ export function loadNodeSource(origin: string, settings: Record<string, unknown>
       return m;
     })();
     // A failed import is tried again on the next call, after the person fixes the module.
-    ready.catch(() => { ready = undefined; });
+    ready.catch(() => { ready = undefined; failures++; });
     return ready;
   };
   return {

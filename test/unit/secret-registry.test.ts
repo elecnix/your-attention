@@ -172,6 +172,21 @@ export async function release(id, publicKey) { return sealValue(publicKey, 'node
     assert.equal(await openSealed(keys.privateKey, await sources.release('team', 'token', keys.publicKey)), 'node value');
   });
 
+  it('reads a node module again after it failed to load, once the person fixes it', async () => {
+    const home = scratchHome();
+    const dir = scratch('ya-node-broken-');
+    const file = path.join(dir, 'index.mjs');
+    fs.writeFileSync(file, `throw new Error('a typo in the module');\n`);
+    writeSourceEntries(home, [{ kind: 'secret', name: 'fixed', form: 'node', origin: pathToFileURL(dir).href }]);
+    const sources = loadSecretSources({ home, instance: 'laptop', builtins: [] });
+    assert.deepEqual((await sources.list()).map((s) => [s.status, s.reason]), [['error', 'a typo in the module']]);
+    fs.writeFileSync(file, `export async function detect() { return { status: 'ready' }; }
+export async function lookup() { return []; }
+export async function release() { throw new Error('none'); }
+`);
+    assert.deepEqual((await sources.list()).map((s) => s.status), ['ready']);
+  });
+
   it('reads back the entries it wrote', () => {
     const home = scratchHome();
     const entries = [{ kind: 'secret' as const, name: 'dev', form: 'stdio' as const, origin: 'file:///made/up', command: ['bin/source'] }];

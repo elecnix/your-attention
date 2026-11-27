@@ -91,6 +91,10 @@ describe('a stdio secret source', () => {
     assert.equal((await s.lookup({ name: 'WHO' })).length, 1);
   });
 
+  it('keeps a reply the source wrote just before it exited', async () => {
+    assert.deepEqual(await source().lookup({ name: 'LAST' }), [{ id: 'last', label: 'the last word' }]);
+  });
+
   it('refuses a release that answers a plain value', async () => {
     const keys = await newSealKeys();
     await assert.rejects(source().release('x', keys.publicKey), /without a sealed value/);

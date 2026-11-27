@@ -124,10 +124,22 @@ function passphraseFiles(dir: string): string[] {
   }
 }
 
+/** Stop with a sentence unless `folder` is a folder this user can open. A stat refused with EACCES or ENOTDIR is that too. */
+function requireFolder(folder: string): void {
+  let isFolder = false;
+  try {
+    isFolder = fs.statSync(folder).isDirectory();
+    if (isFolder) fs.accessSync(folder, fs.constants.R_OK | fs.constants.X_OK);
+  } catch {
+    isFolder = false;
+  }
+  if (!isFolder) fail(`${folder} is not a folder this user can read.`);
+}
+
 async function addAgeDir(home: string, dir: string | undefined): Promise<void> {
   if (!dir) usageError(COMMAND, 'age dir add needs a folder');
   const folder = folderPath(dir);
-  if (!fs.statSync(folder, { throwIfNoEntry: false })?.isDirectory()) fail(`${folder} is not a folder.`);
+  requireFolder(folder);
   const recipient = await ensureIdentity(home);
   setAgeDirs(home, (dirs) => (dirs.includes(folder) ? dirs : [...dirs, folder]));
   const lines = [
@@ -163,7 +175,7 @@ async function readPassphrase(dir: string): Promise<string> {
 async function setPassphrase(home: string, dir: string | undefined): Promise<void> {
   if (!dir) usageError(COMMAND, 'age passphrase needs a folder');
   const folder = folderPath(dir);
-  if (!fs.statSync(folder, { throwIfNoEntry: false })?.isDirectory()) fail(`${folder} is not a folder.`);
+  requireFolder(folder);
   const passphrase = await readPassphrase(folder);
   if (!passphrase) fail('No passphrase came on stdin, so nothing changed.');
   // Try it on one file first, so a typo never lands in the envelope.
