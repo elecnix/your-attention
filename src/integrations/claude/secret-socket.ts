@@ -39,6 +39,8 @@ type Request = { op: 'token' } | { op: 'env'; token: string } | { op: 'mask'; va
 /** Serve the grants of `agent` on the socket of `session`, until `close`. */
 export async function serveSecrets(secrets: SecretRequests, agent: string, session: string, env: NodeJS.ProcessEnv = process.env): Promise<{ path: string; close: () => void }> {
   const file = socketPath(session, env);
+  // macOS refuses a socket path past 104 bytes with a bare EINVAL, so the reason is said here.
+  if (Buffer.byteLength(file) > 103) throw new Error(`the socket path ${file} is longer than the 103 bytes a socket path may take; set XDG_RUNTIME_DIR to a shorter folder`);
   privateDir(path.dirname(file));
   // A socket left by a channel of the same session that crashed: nothing answers on it any more.
   fs.rmSync(file, { force: true });

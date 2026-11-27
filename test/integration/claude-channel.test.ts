@@ -16,8 +16,10 @@ let h: Harness;
 let mcp: McpClient;
 const notes: { content: string; meta: { card_id: string; receipt: string } }[] = [];
 const SESSION = 'test-session-1';
-/** The runtime folder of the channel's socket, so the test leaves nothing in the system's. */
-const RUNTIME = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-runtime-'));
+/** The runtime folder of the channel's socket, so the test leaves nothing in the system's. macOS's temp folder is long
+ * enough that a socket path under a folder made inside it passes the 104 bytes macOS allows, as XDG_RUNTIME_DIR would
+ * not on a real machine. */
+const RUNTIME = fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'ya-rt-'));
 
 /** Every file under `dir` whose bytes contain `text`. */
 function filesHolding(dir: string, text: string): string[] {

@@ -254,7 +254,8 @@ const asks = new CardAsks({
 
 const stop = new AbortController();
 // The Bash hooks read the session's grants from this socket, so it opens before any answer can bring one.
-const secretSocket = await serveSecrets(secrets, agent, session).catch((e: Error) => { log('no socket for secrets:', e.message); return undefined; });
+let socketError = '';
+const secretSocket = await serveSecrets(secrets, agent, session).catch((e: Error) => { socketError = e.message; log('no socket for secrets:', e.message); return undefined; });
 const quit = (): void => { stop.abort(); asks.stop(); secretSocket?.close(); process.exit(0); };
 // Exit with the session: a leftover server would show the agent as listening.
 process.stdin.on('end', quit);
@@ -306,7 +307,9 @@ function listen(client: Client): void {
       ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
       : `The person answered card "${card.title}":`;
     const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
-    const sealed = await secrets.receive(card, answer);
+    let sealed = await secrets.receive(card, answer);
+    // Without the socket, the Bash hooks have nothing to read, so the model hears that the variable won't come.
+    if (!secretSocket && secrets.holds(agent)) sealed += `\nThis session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get these variables. Tell the person.`;
     const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
     // A newer answer to the same card replaces the one the channel is still trying to deliver.
     for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);
