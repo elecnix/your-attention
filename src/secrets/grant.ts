@@ -105,13 +105,14 @@ export class Grants {
    * one counts as a use, so its idle window restarts, and a dead one is dropped as it is found.
    */
   env(agent: string, now = this.now()): Record<string, string> {
-    const out: Record<string, string> = {};
+    const entries: [string, string][] = [];
     for (const name of this.names(agent, now)) {
       const value = this.take(agent, name, now);
-      if (value !== undefined) out[name] = value;
+      if (value !== undefined) entries.push([name, value]);
     }
     this.sweep(now);
-    return out;
+    // fromEntries defines each name as an own key, so a name such as __proto__ is an ordinary one.
+    return Object.fromEntries(entries);
   }
 
   /** Ends the grant of `name` for `agent`, whatever its case id, and says whether one was live. A later answer that
@@ -125,12 +126,14 @@ export class Grants {
 
   /** Kills the grant with this case id, and says whether one was found. Takes effect on the next `take`. */
   revoke(caseId: string): boolean {
+    // A case id from the inbox may name more than one grant, so every one that carries it ends.
+    let found = false;
     for (const [k, grant] of this.held) {
       if (grant.caseId !== caseId) continue;
       this.held.delete(k);
-      return true;
+      found = true;
     }
-    return false;
+    return found;
   }
 
   /** Drops every dead grant. Nothing depends on this: `take` checks both clocks itself. */

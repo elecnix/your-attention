@@ -94,6 +94,13 @@ describe('an answered secret_access field', () => {
     assert.doesNotMatch(text, /RSA-OAEP|"data"/);
   });
 
+  it('reads a check group with an item named decline as its checked boxes, not as a declined secret', () => {
+    const boxes = { ...card, secrets: [], body: 'root = Card([f])\nf = Form("f", b, [c])\nb = Buttons([])\nc = FormControl("Steps", CheckBoxGroup("steps", [CheckBoxItem("Decline the old key", "", "decline"), CheckBoxItem("Rotate", "", "rotate")]))' } as unknown as Card;
+    const text = describeAnswer(boxes, { values: { steps: { decline: true, rotate: true } }, comment: '', savedAt: at } as never);
+    assert.match(text, /Steps: Decline the old key, Rotate/);
+    assert.doesNotMatch(text, /Declined/);
+  });
+
   it('says when the person revoked it', () => {
     const text = describeAnswer(card, { values: { DATABASE_URL: { ...grant, revokedAt: at + 60_000 } }, comment: '', savedAt: at } as never);
     assert.match(text, /DATABASE_URL: Granted .*, revoked at/);

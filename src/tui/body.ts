@@ -597,7 +597,8 @@ export class BodyRenderer {
     const id = this.nextId('access', `${form}/${name}`);
     const hiKey = `${id}:hi`;
     const first = items.findIndex((it) => it.ready);
-    const hi = (): number => (ui.get(hiKey) as number | undefined) ?? Math.max(first, items.findIndex((it) => it.value === pick()));
+    // A revision may drop rows, so the stored highlight is clamped to the rows drawn now.
+    const hi = (): number => Math.min(items.length - 1, (ui.get(hiKey) as number | undefined) ?? Math.max(first, items.findIndex((it) => it.value === pick())));
     // The arrow keys skip a candidate the person cannot pick.
     const step = (from: number, dir: 1 | -1): number => { for (let i = from + dir; i >= 0 && i < items.length; i += dir) if (items[i]!.ready) return i; return -1; };
     const choose = (i: number) => { const it = items[i]; if (it?.ready) { ui.set(pickKey, it.value); ui.set(hiKey, i); } };

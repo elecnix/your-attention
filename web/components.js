@@ -8,7 +8,7 @@ import { SESSION_LINK, codeBlock, renderInline, renderMarkdown } from './markdow
 import { copyText, installCopy } from './copy.js';
 import { groupCode, readSignIn } from './sign-in.js';
 import { naturalSize, zoomSize, zoomedSvg } from './zoom.js';
-import { CEILINGS, DEFAULT_CEILING, DISMISS, GRANT_IDLE_MS, accessCandidates, accessValue, candidateDetail, candidateGroups, candidateKey, revocableGrants, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, pushbackKey, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
+import { CEILINGS, DEFAULT_CEILING, clock, DISMISS, GRANT_IDLE_MS, accessCandidates, accessValue, candidateDetail, candidateGroups, candidateKey, revocableGrants, answerValues, approvalPlace, secretFieldsOf, approvalResult, approvalValues, cardSource, changeSteps, describe, formValues, guidanceDiff, optionId, optionValue, ownCardId, parseSource, pushbackKey, questionRecommendations, recommendedOptions, wordDiff } from './answers.js';
 
 import { agentName, presenceOf, triageState } from './queue.js';
 import { agentList, pickedAgent, searchAgents } from './agents.js';
@@ -454,7 +454,6 @@ function SecretInput({ props }) {
 // stays in this tab's memory with the typed secrets, and Send answer turns it into the field's value. An untouched
 // field sends nothing, which the inbox reads as declined.
 const minutes = (ms) => `${Math.round(ms / 60_000)} minutes`;
-const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 function SecretAccess({ props }) {
   const card = React.useContext(SecretScope);
   const name = String(props.name ?? '');

@@ -136,12 +136,12 @@ claude() {
 } }
 ```
 
-**Secrets in Bash commands (optional).** When the person grants a secret on a card, the channel keeps it in memory, and these hooks give each Bash command the variable and mask the value in its output. Without them, a session that receives a grant can't use it.
+**Secrets in Bash commands (optional).** When the person grants a secret on a card, the channel keeps it in memory, and these hooks give each Bash command the variable and mask the value in the output of every tool. Without them, a session that receives a grant can't use it.
 
 ```json
 { "hooks": {
   "PreToolUse":  [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "your-attention claude-hook secret-pre", "timeout": 10 }] }],
-  "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "your-attention claude-hook secret-post", "timeout": 10 }] }]
+  "PostToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "your-attention claude-hook secret-post", "timeout": 10 }] }]
 } }
 ```
 

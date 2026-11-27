@@ -47,22 +47,29 @@ export async function serveSecrets(secrets: SecretRequests, agent: string, sessi
   privateDir(path.dirname(file));
   // A socket left by a channel of the same session that crashed: nothing answers on it any more.
   fs.rmSync(file, { force: true });
-  const tokens = new Map<string, number>();
+  // token -> when it expires, and the names the session held when the hook made it.
+  const tokens = new Map<string, { until: number; names: string[] }>();
   const answer = (req: Request): unknown => {
     const now = Date.now();
-    for (const [t, until] of tokens) if (until <= now) tokens.delete(t);
+    for (const [t, { until }] of tokens) if (until <= now) tokens.delete(t);
     if (req.op === 'token') {
       if (!secrets.holds(agent)) return {};
       const token = crypto.randomBytes(16).toString('hex');
       // The oldest token goes first when too many wait: a Map keeps insertion order.
       while (tokens.size >= MAX_TOKENS) tokens.delete(tokens.keys().next().value as string);
-      tokens.set(token, now + TOKEN_MS);
+      tokens.set(token, { until: now + TOKEN_MS, names: secrets.names(agent) });
       return { token };
     }
     if (req.op === 'env') {
       // A token works once: the shell of one command reads the variables, and nobody can read them again with it.
-      if (!tokens.delete(req.token)) return { error: 'this token is unknown, used or expired' };
-      return { env: secrets.env(agent) };
+      const made = tokens.get(req.token);
+      if (!made || !tokens.delete(req.token)) return { error: 'this token is unknown, used or expired' };
+      const env = secrets.env(agent);
+      // A grant that ended between the hook and the command fails the command, rather than run it with that variable
+      // empty while the others are set.
+      const gone = made.names.filter((n) => !Object.hasOwn(env, n));
+      if (gone.length) return { error: `the grant of ${gone.join(', ')} ended before the command started` };
+      return { env };
     }
     if (req.op === 'mask') return { value: secrets.maskDeep(req.value) };
     return { error: 'unknown request' };
@@ -125,14 +132,20 @@ const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** The lines the shell evaluates for the channel's reply to an `env` request: an `export` per variable, or a line
  * that fails with the reason, so the command does not run without its variables. */
-export function exportLines(reply: Record<string, unknown> | undefined): string {
+export function exportLines(reply: Record<string, unknown> | undefined, masker: string[]): string {
+  const fail = (why: string): string => `echo ${shellQuote(`your-attention: the secrets of this session did not reach the command: ${why}`)} >&2; false`;
   const env = reply?.['env'];
-  if (!env || typeof env !== 'object') {
-    const why = typeof reply?.['error'] === 'string' ? reply['error'] : 'the Claude Code channel did not answer';
-    return `echo ${shellQuote(`your-attention: the secrets of this session did not reach the command: ${why}`)} >&2; false`;
-  }
+  if (!env || typeof env !== 'object') return fail(typeof reply?.['error'] === 'string' ? reply['error'] : 'the Claude Code channel did not answer');
   const names = Object.keys(env).filter((n) => NAME.test(n));
-  return [...names.map((n) => `export ${n}=${shellQuote(String((env as Record<string, unknown>)[n]))}`), 'true'].join('\n');
+  // A grant can end between the hook and the command. Running the command with the variables empty would send, say,
+  // an Authorization header with no token, so the command fails with the reason instead.
+  if (!names.length) return fail('no grant of this session is live any more');
+  return [
+    ...names.map((n) => `export ${n}=${shellQuote(String((env as Record<string, unknown>)[n]))}`),
+    // Every byte the command writes passes through the masker, so even a shell that dies shows no value.
+    `exec > >(${[...masker, ...names].map(shellQuote).join(' ')}) 2>&1`,
+    'true',
+  ].join('\n');
 }
 
 /** The command the hook runs instead of `command`: read the variables once with `token`, export them, then run it.
@@ -140,7 +153,9 @@ export function exportLines(reply: Record<string, unknown> | undefined): string 
 export function rewrite(command: string, file: string, token: string, reader: string[]): string {
   // Claude Code runs only PostToolUse hooks on a command that exits 0, and a PostToolUseFailure hook can't change the
   // error text. So the command reports a failure as text and ends with status 0, which lets secret-post mask it.
-  return `${readerPrefix(reader)} ${shellQuote(file)} ${shellQuote(token)})" && {\n${command}\n}\n`
+  // A command that runs `exit` itself skips the tail, so an EXIT trap reports its status the same way, in bash and zsh.
+  const trap = `trap '__ya_status=$?; if [ "$__ya_status" -ne 0 ]; then printf "Exit code %s\\n" "$__ya_status" >&2; fi; exit 0' EXIT`;
+  return `${readerPrefix(reader)} ${shellQuote(file)} ${shellQuote(token)})" && {\n${trap}\n${command}\n}\n`
     + `__ya_status=$?; if [ "$__ya_status" -ne 0 ]; then printf 'Exit code %s\\n' "$__ya_status" >&2; fi; unset __ya_status; true`;
 }
 

@@ -11,6 +11,7 @@ import { newSealKeys, sealValue } from '../../src/core/sealed.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { Redactor } from '../../src/secrets/redact.ts';
+import { Grants } from '../../src/secrets/grant.ts';
 import { installSecretBash, type PiTools } from '../../src/integrations/pi/secret-bash.ts';
 
 const T0 = Date.UTC(2026, 10, 27, 12, 0);
@@ -111,6 +112,58 @@ describe('a secret_access grant in the session', () => {
     }
   });
 
+  it('ends every grant that shares a case id on one revoke', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const one = await granted(secrets, 'c13', T0 + 60 * MIN, { case: 'shared' });
+    await secrets.receive(one.card, one.answer);
+    const two = await granted(secrets, 'c14', T0 + 60 * MIN, { case: 'shared' });
+    await secrets.receive({ ...two.card, secrets: ['OPENAI_KEY'] } as Card, { ...two.answer, values: { OPENAI_KEY: two.answer.values['DATABASE_URL'] } });
+    assert.deepEqual(Object.keys(secrets.env('pi:s1')).sort(), ['DATABASE_URL', 'OPENAI_KEY']);
+    assert.equal(secrets.revoke('shared'), true);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+  });
+
+  it('says which fields it granted, and that a value under four characters is not masked', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { publicKey, privateKey } = await newSealKeys();
+    secrets.remember('c15', privateKey);
+    const card = { id: 'c15', agent: 'pi:s1', title: 'Pins?', kind: 'question', secrets: ['PIN', 'NOTE'], createdAt: T0 } as unknown as Card;
+    const result = await secrets.receiveDetail(card, { values: { PIN: await sealValue(publicKey, 'abc'), NOTE: { decline: true } }, answeredAt: T0 } as unknown as Answer);
+    assert.deepEqual(result.granted, ['PIN']);
+    assert.match(result.text, /PIN is shorter than 4 characters, so output that shows it is not masked/);
+    assert.doesNotMatch(result.text, /Output that shows the value reads \[secret PIN\]/);
+    const plain = await secrets.receiveDetail({ ...card, id: 'c16', secrets: [] } as Card, { values: {}, answeredAt: T0 } as unknown as Answer);
+    assert.deepEqual(plain.granted, [], 'an answer with no secret grants nothing, even while an earlier grant lives');
+  });
+
+  it('leaves another card\'s live grant of the same name alone when a late answer arrives past its ceiling', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const live = await granted(secrets, 'c17', T0 + 60 * MIN);
+    await secrets.receive(live.card, live.answer);
+    const late = await granted(secrets, 'c18', T0 - MIN);
+    assert.match(await secrets.receive(late.card, late.answer), /ended at/);
+    assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE });
+  });
+
+  it('starts a typed value\'s hour when the person answered, so an answer delivered late gets no fresh hour', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { publicKey, privateKey } = await newSealKeys();
+    secrets.remember('c19', privateKey);
+    const card = { id: 'c19', agent: 'pi:s1', title: 'Key?', kind: 'question', secrets: ['TYPED'], createdAt: T0 } as unknown as Card;
+    const sealed = await sealValue(publicKey, 'typed-value-not-real');
+    const late = await secrets.receive(card, { values: { TYPED: sealed }, savedAt: T0 - 2 * 60 * MIN } as unknown as Answer);
+    assert.match(late, /TYPED on card c19 ended at 2026-11-27 11:00 UTC/);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+    const recent = await secrets.receive(card, { values: { TYPED: sealed }, savedAt: T0 - 10 * MIN } as unknown as Answer);
+    assert.match(recent, /until 2026-11-27 12:50 UTC/);
+  });
+
+  it('delivers a grant whose name is __proto__', () => {
+    const grants = new Grants(() => T0);
+    grants.hold({ name: '__proto__', agent: 'a', value: 'value-not-real', until: T0 + MIN });
+    assert.equal(Object.getOwnPropertyDescriptor(grants.env('a'), '__proto__')?.value, 'value-not-real');
+  });
+
   it('holds no grant for a declined field, and says so', async () => {
     const secrets = new SecretRequests(() => T0);
     const card = { id: 'c5', agent: 'pi:s1', title: 'Database?', secrets: ['DATABASE_URL'], createdAt: T0 } as unknown as Card;
@@ -144,6 +197,8 @@ describe('a secret_access grant in the session', () => {
     fs.mkdirSync(path.join(home, '.your-attention'), { recursive: true });
     fs.mkdirSync(tmp);
     const saved = { HOME: process.env['HOME'], TMPDIR: process.env['TMPDIR'], YOUR_ATTENTION_HOME: process.env['YOUR_ATTENTION_HOME'] };
+    // The runner's own environment may export the same name, so the check compares against what it held before.
+    const runnerValue = process.env['DATABASE_URL'];
     Object.assign(process.env, { HOME: home, TMPDIR: tmp, YOUR_ATTENTION_HOME: path.join(home, '.your-attention') });
     try {
       const before = snapshot(root);
@@ -153,7 +208,7 @@ describe('a secret_access grant in the session', () => {
       // A command started with the grant in its environment, as the harness starts it.
       const out = execFileSync('/bin/sh', ['-c', 'printf %s "$DATABASE_URL" | wc -c'], { env: { ...process.env, ...secrets.env('pi:s1') }, cwd: home }).toString().trim();
       assert.equal(Number(out), VALUE.length);
-      assert.equal(process.env['DATABASE_URL'], undefined, 'the value never enters this process environment');
+      assert.equal(process.env['DATABASE_URL'], runnerValue, 'the value never enters this process environment');
       assert.deepEqual(snapshot(root), before);
     } finally {
       for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
@@ -191,6 +246,15 @@ describe('masking a value in output', () => {
     assert.equal(r.mask('xx-secret1-yy secret1 abc'), '[secret LONG] [secret SHORT] abc');
   });
 
+  it('never cuts a character made of two UTF-16 units in half', () => {
+    const r = new Redactor();
+    r.add('K', 'abcd');
+    const s = r.stream();
+    const first = s.push('😀😀');
+    assert.ok(!/[\uD800-\uDBFF]$/.test(first), 'no lone high surrogate at the end of a chunk');
+    assert.equal(first + s.end(), '😀😀');
+  });
+
   it('keeps streaming a value that overlaps itself, such as a run of one letter', () => {
     const r = new Redactor();
     r.add('A', 'aaaa');
@@ -211,6 +275,10 @@ describe('masking a value in output', () => {
     const r = new Redactor();
     r.add('K', 'value-not-real');
     assert.deepEqual(r.maskDeep({ stdout: 'k=value-not-real', n: 1, list: ['value-not-real'] }), { stdout: 'k=[secret K]', n: 1, list: ['[secret K]'] });
+    assert.deepEqual(r.maskDeep({ 'value-not-real': 'alice' }), { '[secret K]': 'alice' }, 'a key is masked too');
+    const digits = new Redactor();
+    digits.add('PIN', '1234567890');
+    assert.deepEqual(digits.maskDeep({ pin: 1234567890, other: 42 }), { pin: '[secret PIN]', other: 42 }, 'a number that shows the value is masked');
   });
 });
 

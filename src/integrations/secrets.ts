@@ -7,7 +7,7 @@ import { isSealed, newSealKeys, openSealed, sealedFields } from '../core/sealed.
 import type { Answer, Card } from '../core/types.ts';
 import { addToPlacements, placementValues } from '../core/widgets.ts';
 import { Grants } from '../secrets/grant.ts';
-import { Redactor, type StreamMask } from '../secrets/redact.ts';
+import { MIN_MASKED, Redactor, type StreamMask } from '../secrets/redact.ts';
 
 /** A name the shells read as a variable. */
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -66,7 +66,13 @@ export class SecretRequests {
    * the environment of the commands the harness starts. It never throws, since it runs inside the answer stream, and
    * a failure there would stop the stream. */
   async receive(card: Card, answer: Answer): Promise<string> {
+    return (await this.receiveDetail(card, answer)).text;
+  }
+
+  /** As `receive`, with the names this answer granted, so a harness can add a line about its commands only then. */
+  async receiveDetail(card: Card, answer: Answer): Promise<{ text: string; granted: string[] }> {
     const lines: string[] = [];
+    const granted: string[] = [];
     for (const field of sealedFields(card)) {
       // A secret card that an older inbox stored names its value in `secret` and seals it in `sealed`.
       const name = card.kind === 'secret' && card.secret ? card.secret.name : field;
@@ -84,33 +90,45 @@ export class SecretRequests {
         continue;
       }
       const now = this.now();
-      // An answer can reach the session after the ceiling it carries, such as one queued while the session was away.
-      if (access && access.until <= now) {
-        this.grants.end(card.agent, name);
+      // A value typed on the card lasts an hour from the person's answer, as a grant with the default ceiling does. A
+      // clock that runs behind the inbox's never makes the hour start later than now.
+      const until = access ? access.until : Math.min(answer.savedAt ?? now, now) + GRANT_DEFAULT_MS;
+      // An answer can reach the session after its ceiling, such as one queued while the session was away. An expired
+      // answer is no decision against the name, so a live grant another card gave for it stays.
+      if (until <= now) {
         this.redactor.add(name, plain);
-        lines.push(`The grant of ${name} on card ${card.id} (case ${access.case}) ended at ${new Date(access.until).toISOString().slice(0, 16).replace('T', ' ')} UTC, before it reached this session, so this session has no ${name}. Ask again if you still need it.`);
+        const which = access ? ` (case ${access.case})` : '';
+        lines.push(`The grant of ${name} on card ${card.id}${which} ended at ${new Date(until).toISOString().slice(0, 16).replace('T', ' ')} UTC, before it reached this session, so this session has no ${name}. Ask again if you still need it.`);
         continue;
       }
       const grant = this.grants.hold({
         name,
         agent: card.agent,
         value: plain,
-        // A value typed on the card lasts an hour, as a grant with the default ceiling does.
-        until: access ? access.until : now + GRANT_DEFAULT_MS,
+        until,
         idleMs: GRANT_IDLE_MS,
         now,
         ...(access ? { caseId: access.case } : {}),
       });
       this.redactor.add(name, plain);
-      lines.push(`${this.grants.describe(grant)} Every command you run gets it as $${name} in its environment: write "$${name}" in the command, and never print the value or write it to a file. Output that shows the value reads [secret ${name}].`);
+      granted.push(name);
+      const mask = plain.length < MIN_MASKED
+        ? `${name} is shorter than ${MIN_MASKED} characters, so output that shows it is not masked.`
+        : `Output that shows the value reads [secret ${name}].`;
+      lines.push(`${this.grants.describe(grant)} Every command you run gets it as $${name} in its environment: write "$${name}" in the command, and never print the value or write it to a file. ${mask}`);
     }
-    return lines.join('\n');
+    return { text: lines.join('\n'), granted };
   }
 
   /** The live grants of `agent` as `{NAME: value}`, for the environment of one command it is about to start. Each
    * counts as a use, so its idle window restarts. */
   env(agent: string): Record<string, string> {
     return this.grants.env(agent, this.now());
+  }
+
+  /** The names `agent` holds a live grant for now, without using one. */
+  names(agent: string): string[] {
+    return this.grants.names(agent, this.now());
   }
 
   /** Whether `agent` holds a live grant now, without using one. */

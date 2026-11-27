@@ -1,18 +1,17 @@
 // Reading age files with no terminal prompt and no plaintext file: an identity file for a store's passphrase
 // envelope, and a terminal that `script` provides for a passphrase-encrypted file.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { decryptWithIdentity, decryptWithPassphrase, runtimeDir } from '../../src/secrets/age.ts';
+import { encryptTo, encryptWithPassphrase as encryptWithPassphraseAs, has } from '../age-fixtures.ts';
 
-const IS_DARWIN = process.platform === 'darwin';
 /** `script` and `mkfifo` are POSIX tools; the module reads age files through them. */
 const POSIX = process.platform !== 'win32';
-const has = (command: string): boolean => spawnSync('sh', ['-c', `command -v ${command}`], { stdio: 'ignore' }).status === 0;
 const HAVE_AGE = POSIX && has('age') && has('age-keygen');
 /** The passphrase path needs a terminal somebody else provides, which `script` does on both platforms. */
 const HAVE_SCRIPT = POSIX && has('script') && has('mkfifo');
@@ -35,24 +34,7 @@ async function keyPair(dir: string): Promise<{ identity: string; recipient: stri
   return { identity, recipient };
 }
 
-/** Encrypt to a recipient: no terminal, so this is the shape an envelope has. */
-async function encryptTo(recipient: string, source: string, out: string): Promise<void> {
-  const made = spawnSync('age', ['-r', recipient, '-o', out, source], { encoding: 'utf8' });
-  assert.equal(made.status, 0, made.stderr);
-}
-
-/** Encrypt with a passphrase, which age only accepts on a terminal: the test drives one the way the vault does. */
-function encryptWithPassphrase(source: string, out: string): Promise<void> {
-  const command = `age -p -o ${JSON.stringify(out)} ${JSON.stringify(source)}`;
-  const argv = IS_DARWIN ? ['-q', '/dev/null', 'sh', '-c', command] : ['-qec', command, '/dev/null'];
-  return new Promise((resolve, reject) => {
-    const child = spawn('script', argv, { stdio: ['pipe', 'ignore', 'pipe'] });
-    const stderr: Buffer[] = [];
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(Buffer.concat(stderr).toString('utf8')))));
-    child.stdin.end(`${PASS}\n${PASS}\n`);
-  });
-}
+const encryptWithPassphrase = (source: string, out: string): Promise<void> => encryptWithPassphraseAs(source, out, PASS);
 
 describe('reading an age file', { skip: NO_AGE }, () => {
   it('opens an identity-protected file with no terminal at all', async () => {

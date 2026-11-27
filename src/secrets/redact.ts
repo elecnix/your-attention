@@ -66,9 +66,16 @@ export class Redactor {
   maskDeep<T>(value: T): T {
     if (this.empty) return value;
     if (typeof value === 'string') return this.mask(value) as T;
+    // A value made of digits can come back as a JSON number, which is masked as the text it prints as.
+    if (typeof value === 'number') {
+      const text = String(value);
+      const masked = this.mask(text);
+      return (masked === text ? value : masked) as T;
+    }
     if (Array.isArray(value)) return value.map((v) => this.maskDeep(v)) as T;
     if (value && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, this.maskDeep(v)])) as T;
+      // A value can be a key too, such as a map from a token to its user.
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [this.mask(k), this.maskDeep(v)])) as T;
     }
     return value;
   }
@@ -94,6 +101,9 @@ export class StreamMask {
     let cut = this.buf.length - hold;
     if (cut <= 0) return '';
     cut = this.redactor.safeCut(this.buf, cut);
+    // A character outside the Basic Multilingual Plane takes two UTF-16 units, and a chunk must not end between them.
+    const last = this.buf.charCodeAt(cut - 1);
+    if (cut > 0 && last >= 0xd800 && last <= 0xdbff) cut--;
     const out = this.redactor.mask(this.buf.slice(0, cut));
     this.buf = this.buf.slice(cut);
     return out;

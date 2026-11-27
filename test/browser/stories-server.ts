@@ -15,7 +15,9 @@ export async function serveStories(): Promise<{ base: string; close: () => void 
     // A stray percent escape, such as /%, is no file: answer 404 rather than throw out of the listener.
     try { url = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/'); } catch { return void res.writeHead(404).end(); }
     const file = path.join(STORIES_DIR, url === '/sealed.js' ? '/web/sealed.js' : url);
-    if (!file.startsWith(STORIES_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return void res.writeHead(404).end();
+    // A file outside the folder, such as one of a sibling folder whose name starts the same way, answers 404.
+    const rel = path.relative(STORIES_DIR, file);
+    if (rel.startsWith('..') || path.isAbsolute(rel) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return void res.writeHead(404).end();
     res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' });
     fs.createReadStream(file).pipe(res);
   });

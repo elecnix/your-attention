@@ -131,14 +131,15 @@ describe('the Claude Code channel', () => {
     assert.equal(rewritten.updatedInput.description, 'Print the key', 'updatedInput replaces the whole input, so the other fields go back');
     assert.doesNotMatch(rewritten.updatedInput.command, /demo-value-not-real/, 'the value is never in argv');
     const run = spawnSync('bash', ['-c', rewritten.updatedInput.command], { encoding: 'utf8' });
-    assert.equal(run.stdout, 'demo-value-not-real|19', run.stderr);
+    // The command saw the value, 19 characters, and its output passed through the masker before anyone read it.
+    assert.equal(run.stdout, '[secret DEMO_API_KEY]|19', run.stderr);
     const again = spawnSync('bash', ['-c', rewritten.updatedInput.command], { encoding: 'utf8' });
     assert.equal(again.stdout, '', 'a token works once, so the command never ran');
     // The rewritten command reports the failure as text and ends with status 0, so secret-post still runs on it.
     assert.equal(again.status, 0);
     assert.match(again.stderr, /did not reach the command: this token is unknown, used or expired\nExit code 1\n$/);
 
-    const post = await runHook(h, 'secret-post', { session_id: SESSION, tool_name: 'Bash', tool_input: rewritten.updatedInput, tool_response: { stdout: run.stdout, stderr: '', interrupted: false, isImage: false } }, { env });
+    const post = await runHook(h, 'secret-post', { session_id: SESSION, tool_name: 'Bash', tool_input: rewritten.updatedInput, tool_response: { stdout: 'demo-value-not-real|19', stderr: '', interrupted: false, isImage: false } }, { env });
     const masked = (JSON.parse(post.out) as { hookSpecificOutput: { hookEventName: string; updatedToolOutput: { stdout: string; isImage: boolean } } }).hookSpecificOutput;
     assert.equal(masked.hookEventName, 'PostToolUse');
     assert.deepEqual(masked.updatedToolOutput, { stdout: '[secret DEMO_API_KEY]|19', stderr: '', interrupted: false, isImage: false });

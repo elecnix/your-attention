@@ -1,14 +1,14 @@
 // The Claude Code hooks of secret delivery, on the Bash tool.
 // secret-pre:  PreToolUse. When the session's channel holds a live grant, it rewrites the command so that the shell
 //              first reads the variables from the channel's socket, once, with a one-time token, and then runs it.
-// secret-post: PostToolUse. It masks each value the session received in the command's output, as [secret NAME],
-//              before the model reads it. A rewritten command ends with status 0 and reports a failure as text,
+// secret-post: PostToolUse on every tool. It masks each value the session received in the tool's output, as
+//              [secret NAME], before the model reads it. A rewritten command ends with status 0 and reports a failure as text,
 //              because Claude Code runs PostToolUse only on success. When the channel can't mask, the hook withholds
 //              the output of a rewritten command.
 // A session whose channel has no socket, or holds no grant, gets no output from either hook, so Claude Code runs the
 // command as the model wrote it.
 import fs from 'node:fs';
-import path from 'node:path';
+import { READER_SCRIPT } from './secret-env-paths.ts';
 import { ask, readerPrefix, rewrite, socketPath } from './secret-socket.ts';
 
 interface HookInput {
@@ -19,13 +19,15 @@ interface HookInput {
 }
 
 /** The command that reads the variables: this Node, on the reader script beside this file. */
-export const READER = [process.execPath, path.join(import.meta.dirname, 'secret-env.ts')];
+export const READER = [process.execPath, READER_SCRIPT];
 
 /** What the hook prints for `input`, or undefined to leave the call as it is. */
 export async function handle(mode: 'secret-pre' | 'secret-post', input: HookInput, env: NodeJS.ProcessEnv = process.env): Promise<object | undefined> {
-  if (input.tool_name !== 'Bash' || !input.session_id) return undefined;
+  if (!input.session_id) return undefined;
   const file = socketPath(input.session_id, env);
+  // A value a command wrote to a file can come back through Read or another tool, so secret-post masks every tool.
   if (mode === 'secret-post') return post(file, input);
+  if (input.tool_name !== 'Bash') return undefined;
   if (!fs.existsSync(file)) return undefined;
   const command = input.tool_input?.['command'];
   if (typeof command !== 'string') return undefined;
@@ -45,7 +47,7 @@ export const WITHHELD = 'your-attention withheld this output: the channel that m
 async function post(file: string, input: HookInput): Promise<object | undefined> {
   if (input.tool_response === undefined) return undefined;
   const command = input.tool_input?.['command'];
-  const rewritten = typeof command === 'string' && command.startsWith(readerPrefix(READER));
+  const rewritten = input.tool_name === 'Bash' && typeof command === 'string' && command.startsWith(readerPrefix(READER));
   const reply = fs.existsSync(file) ? await ask(file, { op: 'mask', value: input.tool_response }) : undefined;
   const masked = reply && 'value' in reply ? reply['value'] : rewritten ? withhold(input.tool_response) : undefined;
   if (masked === undefined || JSON.stringify(masked) === JSON.stringify(input.tool_response)) return undefined;
@@ -63,6 +65,12 @@ export async function main(mode: string): Promise<void> {
   if (mode !== 'secret-pre' && mode !== 'secret-post') return;
   let input: HookInput;
   try { input = JSON.parse(fs.readFileSync(0, 'utf8')) as HookInput; } catch { return; }
-  const out = await handle(mode, input);
+  let out: object | undefined;
+  try {
+    out = await handle(mode, input);
+  } catch {
+    // A hook that fails must not let a rewritten command's output through unmasked.
+    out = mode === 'secret-post' ? await post('', input).catch(() => undefined) : undefined;
+  }
   if (out) process.stdout.write(`${JSON.stringify(out)}\n`);
 }

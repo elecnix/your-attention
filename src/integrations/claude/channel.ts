@@ -253,9 +253,21 @@ const asks = new CardAsks({
 });
 
 const stop = new AbortController();
-// The Bash hooks read the session's grants from this socket, so it opens before any answer can bring one.
+// The hooks read the session's grants from this socket. It opens with the first grant, so the plugin runner can skip
+// the hooks on every tool call of a session that never received one.
+let secretSocket: Awaited<ReturnType<typeof serveSecrets>> | undefined;
 let socketError = '';
-const secretSocket = await serveSecrets(secrets, agent, session).catch((e: Error) => { socketError = e.message; log('no socket for secrets:', e.message); return undefined; });
+const openSecretSocket = async (): Promise<boolean> => {
+  if (secretSocket) return true;
+  try {
+    secretSocket = await serveSecrets(secrets, agent, session);
+    return true;
+  } catch (e) {
+    socketError = (e as Error).message;
+    log('no socket for secrets:', socketError);
+    return false;
+  }
+};
 const quit = (): void => { stop.abort(); asks.stop(); secretSocket?.close(); process.exit(0); };
 // Exit with the session: a leftover server would show the agent as listening.
 process.stdin.on('end', quit);
@@ -275,7 +287,7 @@ function listen(client: Client): void {
   asks.resync();
   void client.stream(agent, async (ev) => {
     // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
-    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer' || ev.type === 'revoke') asks.activity();
+    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
     // A new rule may move the next ask, or turn the asks on or off.
     if (ev.type === 'settings') return asks.resync();
     if (ev.type === 'guidance') {
@@ -296,7 +308,10 @@ function listen(client: Client): void {
     }
     if (ev.type === 'revoke') {
       // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
-      if (secrets.revoke(ev.case)) await notify(`The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`, { card_id: ev.card.id });
+      // Only a revoke that ends a grant pushes a turn, so only that one counts as activity.
+      if (!secrets.revoke(ev.case)) return;
+      asks.activity();
+      await notify(`The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`, { card_id: ev.card.id });
       return;
     }
     if (ev.type !== 'answer') return;
@@ -307,9 +322,10 @@ function listen(client: Client): void {
       ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
       : `The person answered card "${card.title}":`;
     const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
-    let sealed = await secrets.receive(card, answer);
+    const received = await secrets.receiveDetail(card, answer);
+    let sealed = received.text;
     // Without the socket, the Bash hooks have nothing to read, so the model hears that the variable won't come.
-    if (!secretSocket && secrets.holds(agent)) sealed += `\nThis session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get these variables. Tell the person.`;
+    if (received.granted.length && !(await openSecretSocket())) sealed += `\nThis session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get these variables. Tell the person.`;
     const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
     // A newer answer to the same card replaces the one the channel is still trying to deliver.
     for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);

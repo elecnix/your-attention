@@ -29,7 +29,7 @@ export const HARNESSES: Harness[] = [
       'The registration covers every Claude Code session of this user.',
       'Start each session with the channel option, spelled in full: --dangerously-load-development-channels=server:your-attention',
       'Keep the = form: the option takes a list, and a space would make Claude Code read the next word as a second server.',
-      'A secret granted on a card reaches Bash commands through two hooks on the Bash tool, claude-hook secret-pre and secret-post.',
+      'A secret granted on a card reaches Bash commands through two hooks: claude-hook secret-pre on Bash, and secret-post on every tool.',
       'The plugin installs them: claude plugin install your-attention --marketplace elecnix/claude-plugins',
     ],
   },
