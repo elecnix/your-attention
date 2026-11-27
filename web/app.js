@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, AgentPin, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, PinMove, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetDrafts, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions, triageState } from './components.js';
+import { Approvals, AgentPin, GrantRevoke, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, PinMove, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetDrafts, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions, triageState } from './components.js';
 import { after, agentName, buildQueue, movePin, notifies, samePin, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
@@ -764,6 +764,8 @@ export function App() {
       current.replies.slice().reverse().map((r) => h('div', { className: 'reply-msg', key: r.at }, h('b', null, `Agent reply · ${time(r.at)}`), h(LinkedText, { ...links, text: r.text, diagrams: false }))),
       a && a.late && h('div', { className: 'note late' }, `You sent this answer after the agent took the card back (${CLOSED_LABEL[a.late.kind] || 'Closed'}: ${a.late.outcome}). It went to the agent marked as a late answer, with that outcome quoted.`),
       a && h('div', { className: 'note ok' }, `Your answer: ${describe(current, a)}`),
+      // A grant stays revocable on a card in the outbox or Sent until its ceiling passes.
+      a && h(GrantRevoke, { card: current, answer: a }),
       a && a.images && a.images.length > 0 && h(Attachments, { files: a.images }),
       h('h2', { className: 'card-title' }, current.title),
       !current.broadcast && current.text && h(LinkedText, { ...links, text: current.text, diagrams: current.kind !== 'system', files: current.localFiles ? current.id : undefined }),

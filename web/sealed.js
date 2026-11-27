@@ -1,7 +1,13 @@
 // Seals a secret for one agent: AES-256-GCM for the value, and the AES key
 // wrapped with the agent's RSA-OAEP public key. The inbox stores only the
 // result, and only the agent that asked holds the private key.
-const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+// Base64 in chunks, since spreading a large buffer into one call overflows the stack.
+function b64(buf) {
+  const all = new Uint8Array(buf);
+  let text = '';
+  for (let i = 0; i < all.length; i += 0x8000) text += String.fromCharCode(...all.subarray(i, i + 0x8000));
+  return btoa(text);
+}
 
 export async function seal(publicJwk, text) {
   const pub = await crypto.subtle.importKey('jwk', publicJwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['wrapKey']);

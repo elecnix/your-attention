@@ -8,7 +8,7 @@ export function extendLibrary(base, draw = {}) {
   const nothing = () => null;
   const mermaidProps = FormControl.props.pick({}).extend({ source: CodeBlock.props.shape.codeString });
   const secretInputProps = Input.props.pick({ name: true }).extend({ publicKey: Input.props.shape.name });
-  const secretAccessProps = Input.props.pick({ name: true }).extend({ publicKey: Input.props.shape.name, candidates: Input.props.shape.name });
+  const secretAccessProps = secretInputProps.extend({ candidates: Input.props.shape.name });
   const checkWithTextProps = FormControl.props.pick({ label: true }).extend({ check: FormControl.props.shape.input, content: AccordionItem.props.shape.content });
   return base.extend({ components: {
     add: [{
@@ -22,7 +22,7 @@ export function extendLibrary(base, draw = {}) {
       component: { name: 'SecretInput', props: secretInputProps, ref: secretInputProps, description: 'A secret field: the page seals the value with the public key, a JSON Web Key as text.', component: draw.SecretInput ?? nothing },
       slots: ['FormControl.input'],
     }, {
-      component: { name: 'SecretAccess', props: secretAccessProps, ref: secretAccessProps, description: 'A request for access to a secret a source keeps: the person grants one of the candidates, a JSON list as text, declines, or types a value the page seals with the public key.', component: draw.SecretAccess ?? nothing },
+      component: { name: 'SecretAccess', props: secretAccessProps, ref: secretAccessProps, description: 'Asks for access to a secret: the person grants one candidate, declines, or types a value the page seals with the public key. The candidates are a JSON list as text.', component: draw.SecretAccess ?? nothing },
       slots: ['FormControl.input'],
     }],
     override: [

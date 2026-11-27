@@ -350,6 +350,71 @@ export function formValues(formState) {
  * `sealed` on a secret card that an older inbox stored. */
 export const secretFieldsOf = (c) => c.secrets ?? (c.kind === 'secret' && c.secret ? ['sealed'] : []);
 
+// A secret_access field: SecretAccess(name, publicKey, candidates). The person grants one candidate, declines, or types
+// a value that the client seals. SPEC.md#the-secret_access-widget states the values.
+/** The idle window of a grant, which each use restarts, as src/core/secret-sources.ts states it. */
+export const GRANT_IDLE_MS = 15 * 60_000;
+const GRANT_DEFAULT_MS = 60 * 60_000;
+const GRANT_MAX_MS = 24 * 60 * 60_000;
+/** The ceilings a card offers: how long a grant lasts at most, whatever its use. */
+export const CEILINGS = [
+  { ms: 30 * 60_000, label: '30 minutes' },
+  { ms: GRANT_DEFAULT_MS, label: '1 hour' },
+  { ms: 4 * 3600_000, label: '4 hours' },
+  { ms: 8 * 3600_000, label: '8 hours' },
+  { ms: GRANT_MAX_MS, label: '24 hours' },
+];
+export const DEFAULT_CEILING = GRANT_DEFAULT_MS;
+
+/** The candidates a SecretAccess call gives as JSON text. A candidate without a status is ready. Text that is not a list
+ * of candidates gives none, since the inbox refuses such a card. */
+export function accessCandidates(json) {
+  let list;
+  try { list = JSON.parse(json); } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  const str = (v) => typeof v === 'string' && v !== '';
+  return list.filter((c) => c && typeof c === 'object' && ['id', 'source', 'instance', 'label'].every((k) => str(c[k])))
+    .map((c) => ({ ...c, status: c.status || 'ready', ready: !c.status || c.status === 'ready' }));
+}
+
+/** One candidate's key on the card: an id is unique only within its source, and two instances may run the same source. */
+export const candidateKey = (c) => `${c.instance}/${c.source}/${c.id}`;
+
+/** The candidates by instance, in the order the inbox listed them, so the safest one stays first. */
+export function candidateGroups(candidates) {
+  const groups = [];
+  for (const c of candidates) {
+    const g = groups.find((x) => x.instance === c.instance);
+    if (g) g.candidates.push(c);
+    else groups.push({ instance: c.instance, candidates: [c] });
+  }
+  return groups;
+}
+
+/** What one candidate shows under its label: its source and instance, then its store, type and host when it has them.
+ * The store tells apart two candidates with one label, such as two age files of one name in two folders. */
+export const candidateDetail = (c) => [`${c.source} on ${c.instance}`, c.store, c.type, c.host].filter(Boolean).join(' · ');
+
+/** The value of a SecretAccess field for what the person chose: a grant until `now` plus the ceiling, capped at 24 hours,
+ * or a decline. Nothing for an untouched field, for a candidate that is not ready, or for a typed value, which the
+ * client seals itself. */
+export function accessValue(choice, candidates, now) {
+  if (!choice || !choice.pick) return undefined;
+  if (choice.pick === 'decline') return { decline: true };
+  const c = candidates.find((x) => candidateKey(x) === choice.pick);
+  if (!c || !c.ready) return undefined;
+  const ceiling = Math.min(Math.max(0, Number(choice.ceiling) || GRANT_DEFAULT_MS), GRANT_MAX_MS);
+  return { grant: c.id, source: c.source, instance: c.instance, until: now + ceiling };
+}
+
+const isGrantValue = (v) => !!v && typeof v === 'object' && typeof v.grant === 'string' && typeof v.until === 'number';
+const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** The granted fields of an answer that the person can still revoke: not revoked, and before their ceiling. */
+export function revocableGrants(answer, now) {
+  return Object.entries((answer && answer.values) || {}).filter(([, v]) => isGrantValue(v) && !v.revokedAt && v.until > now).map(([field, value]) => ({ field, value }));
+}
+
 /** Whether an answer value is a secret the page sealed. */
 const isSealedValue = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.alg === 'string' && typeof v.data === 'string';
 
@@ -365,6 +430,9 @@ export function describe(card, a) {
     if (ai && card.approvals) { const ap = card.approvals[Number(ai[1])]; return v === true && ap ? `Approved: ${ap.label || ap.text}` : ''; }
     if (asked.length && QUESTION_FIELD.test(k)) return '';
     const f = (fields ??= fieldLabels(card.body))[k];
+    // A grant shows what it let the agent read, and until when, never the ciphertext it stores.
+    if (isGrantValue(v)) return `${(f && f.label) || k}: Granted ${v.grant} from ${v.source} on ${v.instance} until ${clock(v.until)}${v.case ? `, case ${v.case}` : ''}${v.revokedAt ? `, revoked at ${clock(v.revokedAt)}` : ''}`;
+    if (v && typeof v === 'object' && v.decline === true) return `${(f && f.label) || k}: Declined`;
     // A sealed secret shows that it went, never its ciphertext.
     if (isSealedValue(v)) return `${(f && f.label) || (card.secret && k === 'sealed' ? card.secret.name : k)}: Sent sealed`;
     // A check box or switch group answers with each item on or off: the summary lists the ones turned on.
