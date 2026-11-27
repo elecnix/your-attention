@@ -806,7 +806,7 @@ export class Inbox {
       });
     }
     const history: CardVersion[] = before
-      ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, recommendation: before.recommendation, body: before.body, html: before.html, at: before.updatedAt }].slice(-HISTORY_LIMIT)
+      ? [...(before.history ?? []), { version: before.version, title: before.title, text: before.text, recommendation: before.recommendation, body: before.body, html: before.html, options: before.options, multiple: before.multiple, questions: before.questions, approvals: before.approvals, at: before.updatedAt }].slice(-HISTORY_LIMIT)
       : [];
     // Every card an agent posts inherits its default tags, under the card's own. The inbox's own system cards keep none.
     const mergedTags = caller.token === '' || kind === 'system' || opts.revise === true
@@ -2323,6 +2323,9 @@ export class Inbox {
 
   async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number; images?: (NewAttachment & { field?: string })[]; by?: Caller }): Promise<Answer> {
     const posted = this.getCard(id);
+    // The version the person read decides the IDs the agent gets back with each value, so it must be one the card had.
+    const version = Number(input.version ?? posted.version);
+    if (!Number.isInteger(version) || version < 1 || version > posted.version) throw new InboxError(400, `version must be a version the card had, from 1 to ${posted.version}`);
     const delivery = input.delivery ?? 'default';
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
     const values = input.values && typeof input.values === 'object' ? { ...input.values } : {};
@@ -2405,7 +2408,7 @@ export class Inbox {
     }
     const answer: Answer = {
       card: id,
-      version: Number(input.version ?? card.version),
+      version,
       values,
       comment: String(input.comment ?? '').trim(),
       ...(images.length ? { images } : {}),

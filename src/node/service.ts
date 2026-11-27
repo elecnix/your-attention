@@ -1,5 +1,6 @@
 // Runs the inbox or an extension as a service that starts at login and
 // restarts after a crash: a launchd agent on macOS, a systemd user unit on Linux.
+import fs from 'node:fs';
 import os from 'node:os';
 import nodePath from 'node:path';
 
@@ -16,11 +17,38 @@ export interface ServiceFile {
   running: string;
 }
 
-export function serviceFile(name: string, args: string[], platform: NodeJS.Platform = process.platform, bin = process.argv[1] ?? 'your-attention', env: NodeJS.ProcessEnv = process.env): ServiceFile {
+/** The node a unit names, and whether that path names one version of node, so the unit breaks when it changes. */
+export interface UnitNode {
+  path: string;
+  versioned: boolean;
+}
+
+/** The node to name in a unit. Node reports its own path with every link resolved, so a Homebrew node reads as
+ * `<prefix>/Cellar/<formula>/<version>/bin/node`, which `brew upgrade` deletes. Homebrew keeps `<prefix>/opt/<formula>`
+ * pointing at the installed version, so the unit names that link when it exists. A version manager's node, such as
+ * nvm's, has no such link, and the unit names its versioned path and says so. */
+export function stableNode(execPath: string, exists: (p: string) => boolean = fs.existsSync): UnitNode {
+  const brew = /^(.*)\/Cellar\/([^/]+)\/[^/]+\/bin\/node$/.exec(execPath);
+  if (brew) {
+    const opt = `${brew[1]}/opt/${brew[2]}/bin/node`;
+    return exists(opt) ? { path: opt, versioned: false } : { path: execPath, versioned: true };
+  }
+  return { path: execPath, versioned: /\/(\.nvm|\.volta|\.fnm|\.asdf|\.local\/share\/mise)\//.test(execPath) || /\/v?\d+\.\d+\.\d+\//.test(execPath) };
+}
+
+/** One line for the unit that says why it names this node. */
+function nodeNote(node: UnitNode, name: string): string {
+  return node.versioned
+    ? `This path names one node version: after you change node, run \`your-attention service ${name} --write\` again.`
+    : 'This unit names node by a link that follows upgrades, such as Homebrew\'s opt link, because a brew upgrade deletes a versioned path.';
+}
+
+export function serviceFile(name: string, args: string[], platform: NodeJS.Platform = process.platform, bin = process.argv[1] ?? 'your-attention', node: UnitNode = stableNode(process.execPath), env: NodeJS.ProcessEnv = process.env): ServiceFile {
   const label = `dev.your-attention.${name}`;
   const home = os.homedir();
   const log = path.join(home, '.your-attention', `${name}.log`);
-  const exec = [process.execPath, '--disable-warning=ExperimentalWarning', bin, ...args];
+  const exec = [node.path, '--disable-warning=ExperimentalWarning', bin, ...args];
+  const note = nodeNote(node, name);
   // A service manager gives its unit a PATH of its own: launchd's is /usr/bin:/bin:/usr/sbin:/sbin, which finds
   // neither herdr nor the tools a secret source runs. The unit carries the PATH and the home of the shell that
   // wrote it, so the inbox under the service manager behaves as it does in that shell.
@@ -44,6 +72,7 @@ ${carried.map(([key, value]) => `    <key>${esc(key)}</key><string>${esc(value)}
       content: `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
+<!-- ${esc(note).replace(/--/g, '- -')} -->
 <dict>
   <key>Label</key><string>${label}</string>
   <key>ProgramArguments</key>
@@ -66,7 +95,7 @@ ${environment}  <key>RunAtLoad</key><true/>
     const lit = s.replace(/%/g, '%%').replace(/\$/g, '$$$$');
     return /[\s"\\]/.test(lit) ? `"${lit.replace(/(["\\])/g, '\\$1')}"` : lit;
   };
-  // systemd expands %-specifiers in Environment= as it does in ExecStart, so a % is doubled there too.
+  // systemd expands %-specifiers in Environment= too, so a % is doubled there as well.
   const environment = carried
     .map(([key, value]) => `Environment="${key}=${value.replace(/%/g, '%%').replace(/(["\\])/g, '\\$1')}"`)
     .join('\n');
@@ -75,7 +104,8 @@ ${environment}  <key>RunAtLoad</key><true/>
     start: `systemctl --user daemon-reload && systemctl --user enable --now your-attention-${name}`,
     stop: `systemctl --user stop your-attention-${name}`,
     running: `systemctl --user is-active --quiet your-attention-${name}`,
-    content: `[Unit]
+    content: `# ${note}
+[Unit]
 Description=your-attention ${name}
 
 [Service]

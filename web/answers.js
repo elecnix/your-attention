@@ -270,9 +270,11 @@ export function questionAnswers(card, values) {
   });
 }
 
-/** The answer text for a card's questions, one line per question and an indented line per comment. The page and the agent read the same lines. */
-export function questionLines(card, values) {
-  return questionAnswers(card, values).flatMap((a) => [`${a.question} ${a.answer}`, ...(a.comment ? [`  Comment: ${a.comment}`] : [])]);
+/** The answer text for a card's questions, one line per question and an indented line per comment. The page and the
+ * agent read the same lines, and the agent's lines start with each field's ID when `ids` maps field names to them. */
+export function questionLines(card, values, ids = {}) {
+  const tag = (name) => (ids[name] ? `[${ids[name]}] ` : '');
+  return questionAnswers(card, values).flatMap((a, i) => [`${tag(`q${i}`)}${a.question} ${a.answer}`, ...(a.comment ? [`  ${tag(`q${i}_comment`)}Comment: ${a.comment}`] : [])]);
 }
 
 /** The options each question recommends, by field name: {q0: ['SQLite']}. The page and the terminal client tag them. */
@@ -453,7 +455,10 @@ export function describe(card, a) {
   });
   // A secret card an older inbox stored, answered without a value, declined the request.
   if (card.kind === 'secret' && card.secret && !isSealedValue(values.sealed)) picks.unshift(`${card.secret.name}: Declined`);
-  return [...asked, ...picks, a.comment && (asked.length ? `Comment: ${a.comment}` : a.comment)].filter(Boolean).join('\n') || 'Empty answer';
+  // An answer to a version the card has since left says so first, on the card, where the person reads the answer.
+  const earlier = typeof a.version === 'number' && a.version < card.version ? `(to version ${a.version}, before the agent revised the card to version ${card.version})` : '';
+  const text = [...asked, ...picks, a.comment && (asked.length ? `Comment: ${a.comment}` : a.comment)].filter(Boolean).join('\n') || 'Empty answer';
+  return earlier ? `${earlier}\n${text}` : text;
 }
 
 // What changed since the version before, line by line.
