@@ -3,13 +3,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
-import { describeAnswer } from '../../src/client.ts';
+import { describeAnswer as describeWithIds } from '../../src/client.ts';
 import { Inbox, InboxError } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import type { Card, NewCard } from '../../src/core/types.ts';
 import { runTool } from '../../src/integrations/run-tool.ts';
 import { answerValues, cardSource, describe as summary, questionRecommendations } from '../../web/answers.js';
-import { agent, answered as answer } from './fixture.ts';
+import { agent, answered as answer, withoutIds } from './fixture.ts';
+
+// The text around the field IDs, which test/unit/field-ids.test.ts covers.
+const describeAnswer = (...args: Parameters<typeof describeWithIds>): string => withoutIds(describeWithIds(...args));
 
 const THREE = [
   { question: 'Which database?', header: 'Database', text: 'The service stores **one table** of jobs.', options: [{ label: 'SQLite', description: 'One file next to the binary.', recommended: true }, { label: 'Postgres' }] },

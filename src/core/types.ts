@@ -154,6 +154,11 @@ export interface CardVersion {
   recommendation?: string;
   body?: string;
   html?: string;
+  /** What that version asked, so a reader derives the IDs of its forms and fields: web/field-ids.js. */
+  options?: Option[];
+  multiple?: boolean;
+  questions?: AskQuestion[];
+  approvals?: Approval[];
   at: number;
 }
 

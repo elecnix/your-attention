@@ -4,14 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import type { Answer, Card } from '../../src/core/types.ts';
-import { describeAnswer } from '../../src/client.ts';
+import { describeAnswer as describeWithIds } from '../../src/client.ts';
 import { createHandler } from '../../src/core/http.ts';
 import { Inbox } from '../../src/core/inbox.ts';
 import { MemoryBlobs, MemoryStorage } from '../../src/core/storage.ts';
 import { imagesDir, saveAnswerImages } from '../../src/integrations/images.ts';
 
 import { checkImage, draftProblem, imageFiles, IMAGE_LIMIT_BYTES } from '../../web/paste-images.js';
-import { agent, owner, oneCardInbox } from './fixture.ts';
+import { agent, owner, oneCardInbox, withoutIds } from './fixture.ts';
+
+// The text around the field IDs, which test/unit/field-ids.test.ts covers.
+const describeAnswer = (...args: Parameters<typeof describeWithIds>): string => withoutIds(describeWithIds(...args));
 
 // A 1x1 PNG.
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';

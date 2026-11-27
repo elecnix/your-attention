@@ -77,7 +77,7 @@ describe('the laptop server', () => {
     await until(async () => (await state()).presence['cli-1']?.online);
     await h.owner('POST', `/v1/cards/${id}/answer`, { values: { choice: 'o2' }, comment: 'after lunch' });
     await new Promise((r) => child.on('exit', r));
-    assert.match(out, /choice: No\nComment: after lunch/);
+    assert.match(out, /\[[\w-]{4}\] choice: No\n\[[\w-]{4}\] Comment: after lunch/);
     assert.equal((await state()).states[id], 'read');
   });
 

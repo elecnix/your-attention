@@ -6,13 +6,17 @@ import { describe, it } from 'node:test';
 import { Inbox, type Caller } from '../../src/core/inbox.ts';
 import { isSealed, newSealKeys, openSealed, secretInputs } from '../../src/core/sealed.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
-import { describeAnswer } from '../../src/client.ts';
+import { describeAnswer as describeWithIds } from '../../src/client.ts';
 import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { cardTools } from '../../src/integrations/tools.ts';
 import type { Client } from '../../src/client.ts';
 import type { Card, NewCard } from '../../src/core/types.ts';
 import { seal } from '../../web/sealed.js';
+import { withoutIds } from './fixture.ts';
+
+// The text around the field IDs, which test/unit/field-ids.test.ts covers.
+const describeAnswer = (...args: Parameters<typeof describeWithIds>): string => withoutIds(describeWithIds(...args));
 
 const agent: Caller = { token: 'ta', role: 'agent' };
 const owner: Caller = { token: 'to', role: 'owner' };
