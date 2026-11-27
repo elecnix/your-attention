@@ -71,16 +71,19 @@ describe('reading an age file', { skip: NO_AGE }, () => {
 
   it('refuses an identity that opens nothing instead of returning an empty secret', async () => {
     const dir = await scratch();
+    const cleanup = [dir];
     try {
       const { recipient } = await keyPair(dir);
-      const other = await keyPair(await scratch());
+      const otherDir = await scratch();
+      cleanup.push(otherDir);
+      const other = await keyPair(otherDir);
       const source = path.join(dir, 'value');
       await fs.writeFile(source, 'not for that key');
       const encrypted = path.join(dir, 'value.age');
       await encryptTo(recipient, source, encrypted);
       await assert.rejects(() => decryptWithIdentity(encrypted, other.identity), /could not decrypt/);
     } finally {
-      await fs.rm(dir, { recursive: true, force: true });
+      for (const d of cleanup) await fs.rm(d, { recursive: true, force: true });
     }
   });
 
@@ -121,6 +124,26 @@ describe('reading an age file', { skip: NO_AGE }, () => {
       const encrypted = path.join(dir, 'value.age');
       await encryptTo(recipient, source, encrypted);
       await assert.rejects(() => decryptWithIdentity(encrypted, identity, { age: 'age-not-here' }), /not installed/);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('where the pipe lives', () => {
+  it('takes the temp directory when the runtime directory is set but empty', () => {
+    assert.equal(runtimeDir({ XDG_RUNTIME_DIR: '' }), os.tmpdir());
+    assert.equal(runtimeDir({ XDG_RUNTIME_DIR: '/run/user/1' }), '/run/user/1');
+  });
+
+  it('rejects, rather than crashing the process, when script is not on the PATH', { skip: POSIX ? false : 'mkfifo is POSIX' }, async () => {
+    const dir = await scratch();
+    try {
+      const source = path.join(dir, 'value.age');
+      await fs.writeFile(source, 'x');
+      // mkfifo runs with this process's PATH, and script with `env`, whose PATH holds no script.
+      const env = { PATH: dir, XDG_RUNTIME_DIR: dir };
+      await assert.rejects(() => decryptWithPassphrase(source, PASS, { env, timeoutMs: 2000 }));
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

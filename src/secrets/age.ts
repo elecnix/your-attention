@@ -13,7 +13,7 @@
 //     so the Darwin form passes a shell explicitly and the exit status is always checked.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { constants, createReadStream } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -24,7 +24,8 @@ const IS_DARWIN = process.platform === 'darwin';
 
 /** Where a pipe may live: the runtime directory when there is one (tmpfs on Linux), the temp directory otherwise. */
 export function runtimeDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env['XDG_RUNTIME_DIR'] ?? os.tmpdir();
+  // An empty value counts as unset, or the pipe's directory would land in the current directory.
+  return env['XDG_RUNTIME_DIR'] || os.tmpdir();
 }
 
 export interface AgeOptions {
@@ -70,12 +71,18 @@ export async function decryptWithPassphrase(source: string, passphrase: string, 
     child = spawn('script', argv, { stdio: ['pipe', 'ignore', 'pipe'], env: options.env ?? process.env });
     const stderr: Buffer[] = [];
     child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
-    const exited = new Promise<number>((resolve) => child?.once('exit', (code, signal) => resolve(code ?? (signal ? -1 : 0))));
+    // A host without `script` emits 'error' instead of 'exit'. Without a listener Node throws it and the process dies.
+    const exited = new Promise<number>((resolve) => {
+      child?.once('error', (e) => { stderr.push(Buffer.from(e.message)); resolve(-1); });
+      child?.once('exit', (code, signal) => resolve(code ?? (signal ? -1 : 0)));
+    });
     // The passphrase goes in and the stream closes, so age reads one line and finds no more.
     child.stdin?.on('error', () => {}); // script may exit before the write lands; the exit status says whether it worked
     child.stdin?.end(`${passphrase}\n`);
     const reading = readPipe(pipe, timeoutMs);
-    const [text, code] = await Promise.all([reading, exited]);
+    // A child that dies before age opens the pipe leaves the reader blocked in open(), on a thread Node cannot cancel,
+    // and the process never exits. Opening the write end and closing it gives that reader an end of file.
+    const [text, code] = await Promise.all([reading, exited.then(async (c) => { if (c !== 0) await release(pipe); return c; })]);
     if (code !== 0) throw new Error(`age could not decrypt ${source}: ${firstLine(Buffer.concat(stderr).toString('utf8')) || `exit ${code}`}`);
     if (text === '') throw new Error(`${source} decrypted to nothing; the passphrase may be wrong`);
     return text;
@@ -91,6 +98,7 @@ function readPipe(pipe: string, timeoutMs: number): Promise<string> {
     const chunks: Buffer[] = [];
     const stream = createReadStream(pipe);
     const timer = setTimeout(() => {
+      void release(pipe);
       stream.destroy();
       reject(new Error(`nothing came out of the pipe within ${timeoutMs} ms`));
     }, timeoutMs);
@@ -98,6 +106,12 @@ function readPipe(pipe: string, timeoutMs: number): Promise<string> {
     stream.on('error', (e) => { clearTimeout(timer); reject(e); });
     stream.on('end', () => { clearTimeout(timer); resolve(Buffer.concat(chunks).toString('utf8')); });
   });
+}
+
+/** Open the write end of `pipe` and close it at once, so a reader blocked opening it gets an end of file. The open
+ * does not block: with no reader left it fails with ENXIO, which means nothing waits on the pipe. */
+async function release(pipe: string): Promise<void> {
+  try { await (await fs.open(pipe, constants.O_WRONLY | constants.O_NONBLOCK)).close(); } catch { /* no reader, or no pipe */ }
 }
 
 interface RunResult { code: number; stdout: string; stderr: string }
