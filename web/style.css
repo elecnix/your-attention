@@ -240,6 +240,10 @@
   .secret-access .access-option:focus-within { outline: 2px solid var(--accent); }
   .secret-access .access-text { display: grid; }
   .secret-access .access-detail { font-size: calc(13px * var(--text-scale)); color: var(--muted); }
+  .otp .otp-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 8px; }
+  .otp .otp-facts dt { color: var(--muted); }
+  .otp .otp-facts dd { margin: 0; overflow-wrap: anywhere; }
+  .otp .otp-purpose { font-family: var(--mono, ui-monospace, monospace); }
   .secret-access .access-grant { display: grid; gap: 4px; }
   .secret-access select { font: inherit; margin-left: 4px; }
   .grants { display: grid; gap: 6px; margin: 6px 0; }

@@ -246,6 +246,7 @@ const library = extendLibrary(openuiChatLibrary, {
   SecretInput,
   SecretAccess,
   PrivilegedAction,
+  OneTimeCode,
   FormControl: MarkdownFormControl,
   OptionCards: RecommendingOptionCards,
   Table: MarkdownTable,
@@ -289,8 +290,10 @@ export function CardView({ draftKey, card, onAction, recommendationText }) {
   const values = (card.options || []).filter((o) => ids.includes(optionId(o))).map(optionValue);
   const rec = Object.fromEntries(Object.entries(questionRecommendations(card)).map(([name, labels]) => [name, { values: labels, note: null }]));
   if (values.length) rec.choice = { values, note: text && recommendationText ? recommendationText(text) : null };
-  return h(React.Fragment, null, checker, h(SecretScope.Provider, { value: card.id }, h(Recommended.Provider, { value: rec },
-    h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction }))));
+  // A one-time code field shows who asks and which inbox holds the key, which the inbox sets and the agent cannot.
+  const otp = { holder: card.otpHolder || '', asker: agentName(card.agent, [card]), host: card.origin?.host || '' };
+  return h(React.Fragment, null, checker, h(SecretScope.Provider, { value: card.id }, h(OtpScope.Provider, { value: otp }, h(Recommended.Provider, { value: rec },
+    h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction })))));
 }
 
 function CardBody({ draftKey, response, broken, onAction }) {
@@ -541,6 +544,42 @@ function PrivilegedAction({ props }) {
     h('span', { className: 'hint' }, `Send answer runs this command once on ${machine}, with your password on its input. Your browser seals the password for the inbox, never for the agent, and the agent gets only what the command prints. Leave the password empty to send your answer without running it.`));
 }
 
+// OneTimeCode(name, key, purpose, publicKey): a request for one code from a key the person enrolled, which the otp widget
+// places. The person approves or declines, and never reads a code: the inbox mints a ticket on approval, and the agent's
+// session redeems it for a code sealed to its own key. The choice stays in this tab's memory with the typed secrets, and
+// an untouched field sends nothing, which mints nothing.
+const OtpScope = React.createContext({ holder: '', asker: '', host: '' });
+function OneTimeCode({ props }) {
+  const card = React.useContext(SecretScope);
+  const { holder, asker, host } = React.useContext(OtpScope);
+  const name = String(props.name ?? '');
+  const key = String(props.key ?? '');
+  const purpose = String(props.purpose ?? '');
+  const [, redraw] = React.useState(0);
+  React.useEffect(() => { const f = () => redraw((n) => n + 1); secretWatchers.add(f); return () => { secretWatchers.delete(f); }; }, []);
+  const pick = typedSecrets.get(card)?.get(name)?.otp;
+  const choose = (value) => {
+    const fields = typedSecrets.get(card) ?? new Map();
+    fields.set(name, { otp: value });
+    typedSecrets.set(card, fields);
+    secretsChanged();
+  };
+  const group = `otp:${card}:${name}`;
+  const option = (value, text, detail) => h('label', { key: value, className: `access-option${pick === value ? ' picked' : ''}` },
+    h('input', { type: 'radio', name: group, value, checked: pick === value, onChange: () => choose(value) }),
+    h('span', { className: 'access-text' }, h('span', { className: 'access-label' }, text), h('span', { className: 'access-detail' }, detail)));
+  return h('fieldset', { className: 'secret secret-access otp' },
+    h('legend', null, `One-time code from the key ${key}`),
+    h('dl', { className: 'otp-facts' },
+      h('dt', null, 'For'), h('dd', { className: 'otp-purpose' }, purpose),
+      h('dt', null, 'Asked by'), h('dd', null, host ? `${asker} on ${host}` : asker),
+      h('dt', null, 'Key kept by'), h('dd', null, holder || 'this inbox')),
+    h('div', { role: 'group', 'aria-label': `Approve or decline the code from ${key}`, className: 'access-group' },
+      option('approve', `Approve one code from ${key}`, 'The agent gets a ticket that gives it one fresh code within 10 minutes. You never see the code.'),
+      option('decline', 'Decline', 'The agent gets no ticket and no code.')),
+    h('span', { className: 'hint' }, 'The code goes to the asking session only, sealed to its key. The inbox records when it issued a code, never which one.'));
+}
+
 /** The Revoke button of each granted field on an answered card, until its ceiling passes. The inbox records the
  * revocation, and the agent stream tells the session, which ends the grant before its next command. */
 export function GrantRevoke({ card, answer }) {
@@ -587,6 +626,8 @@ export async function sealSecrets(card, names) {
   const toSeal = new Map();
   const privileged = new Map();
   for (const [name, f] of typed) {
+    // A one-time code is a decision, not a value: the inbox mints the ticket, and nothing here is sealed.
+    if (f.otp) { out[name] = f.otp; continue; }
     if (f.privileged) { privileged.set(name, JSON.stringify({ command: f.privileged.command, password: f.value })); continue; }
     if (!f.access) { toSeal.set(name, f.value); continue; }
     if (f.access.pick === 'type') { if (f.access.value) toSeal.set(name, f.access.value); continue; }

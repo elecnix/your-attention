@@ -86,6 +86,8 @@ export interface BodyContext {
   onAction(action: Action, form: string | undefined): void;
   /** The address of this card on the page, for what the terminal cannot draw. */
   address: string;
+  /** Which inbox holds the keys of the card's one-time codes, as the inbox set it on the card. */
+  otpHolder?: string | undefined;
   /** The values of the options the card recommends, by field name: its `choice` field with the recommendation to show inside the one it recommends, and each question's field. */
   recommended?: Record<string, { values: string[]; text?: string | undefined }>;
 }
@@ -318,6 +320,20 @@ export class BodyRenderer {
         doc.para([{ text: `What it changes: ${str(p['changes'])}` }], { first: this.pad() });
         doc.para([{ text: 'Open this card on the page to type the password and run the command.', style: s.dim }], { first: this.pad() });
         return;
+      case 'OneTimeCode': {
+        // An approval is a decision, not a value to seal, so the terminal answers it as the page does, with no digits.
+        const name = str(p['name']);
+        const key = str(p['key']);
+        doc.para([{ text: `One-time code from the key ${key}`, style: s.bold }], { first: this.pad() });
+        doc.para([{ text: 'For: ', style: s.dim }, { text: str(p['purpose']) }], { first: this.pad() });
+        doc.para([{ text: 'Key kept by: ', style: s.dim }, { text: this.ctx.otpHolder || 'this inbox' }], { first: this.pad() });
+        const item = (label: string, description: string, value: string) => ({ type: 'element', typeName: 'RadioItem', props: { label, description, value } });
+        this.choices({ type: 'element', typeName: 'RadioGroup', props: { name, items: [
+          item(`Approve one code from ${key}`, 'The agent gets a ticket that gives it one fresh code within 10 minutes. You never see the code.', 'approve'),
+          item('Decline', 'The agent gets no ticket and no code.', 'decline'),
+        ] } } as unknown as ElementNode, form ?? '');
+        return;
+      }
       case 'DatePicker':
         if (str(p['mode']) === 'range') { this.fallback('DatePicker'); return; }
         this.textField(n, form ?? '', false, 'date');

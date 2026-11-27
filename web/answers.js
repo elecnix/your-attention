@@ -348,7 +348,10 @@ export function formValues(formState) {
 
 /** The fields of a card that take only a sealed value, as the inbox's sealedFields reads them: the card's `secrets`, or
  * `sealed` on a secret card that an older inbox stored. */
-export const secretFieldsOf = (c) => [...(c.secrets ?? (c.kind === 'secret' && c.secret ? ['sealed'] : [])), ...(c.privileged ?? [])];
+export const secretFieldsOf = (c) => [...(c.secrets ?? (c.kind === 'secret' && c.secret ? ['sealed'] : [])), ...(c.privileged ?? []), ...(c.otp ?? [])];
+
+/** Whether an answer value is the approval of a one-time code: the ticket the inbox minted, never a code. */
+export const isOtpValue = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.ticket === 'string' && typeof v.key === 'string';
 
 /** Whether an answer value is a privileged action that ran: the command, the machine, and what it printed. */
 export const isRunValue = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.audit === 'string' && typeof v.command === 'string';
@@ -438,6 +441,8 @@ export function describe(card, a) {
     // Only a secret field answers a grant or a decline: a check group with an item named `decline` lists its boxes.
     const secret = secretFieldsOf(card).includes(k);
     // A privileged action shows that its command ran, where, and how it ended, never a password.
+    // A one-time code shows the approval and when the inbox issued the code, never which code.
+    if (secret && isOtpValue(v)) return `${(f && f.label) || k}: Approved one code from ${v.key}, ${v.issuedAt ? `issued at ${clock(v.issuedAt)}` : `not issued yet; the ticket ends at ${clock(v.expiresAt)}`}`;
     if (secret && isRunValue(v)) return `${(f && f.label) || k}: Ran on ${v.machine}, ${v.exitCode === null ? (v.ended || 'stopped') : `exit code ${v.exitCode}`}`;
     if (secret && isGrantValue(v)) return `${(f && f.label) || k}: Granted ${v.grant} from ${v.source} on ${v.instance} until ${clock(v.until)}${v.case ? `, case ${v.case}` : ''}${v.revokedAt ? `, revoked at ${clock(v.revokedAt)}` : ''}`;
     if (secret && v && typeof v === 'object' && v.decline === true) return `${(f && f.label) || k}: Declined`;
