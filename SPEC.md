@@ -426,6 +426,14 @@ The integration opens the sealed value in memory and keeps it in the session's g
 
 The `secret` widget delivers the same way: its sealed value becomes a grant of one hour, and no integration writes `~/.your-attention/secrets/` any more.
 
+## Secret grants
+
+The integration that posted the card keeps an approved value in memory, for as long as the approval lasts, so later commands of the same session reuse it without another card or another prompt. A grant ends at the first of its deadlines. One is an idle window of 15 minutes that each use restarts, so an active session is never asked again in the middle of its work. The other is the deadline chosen when approving, and no use moves it: there the grant is dead even if something used it a moment before. Pinentry keeps that contract too, and without such a ceiling "until 18:30" would mean "18:30 as long as something keeps touching it". Anything later than 24 hours is cut to 24 hours, whatever the card asked for.
+
+Each approval gets a case id, short enough to copy into a message or a log line. The answer text includes the case id and both deadlines, and never the value. Revoking a case id takes effect on the next use rather than at the next expiry, because a window nobody can close early is a window that a leaked value occupies for the rest of its length. Approving the same name again replaces the earlier grant, so the earlier case id stops matching anything, since a second approval is a new decision. An approval nobody uses ends on its idle window, which keeps a forgotten decision from lasting the whole session.
+
+Reading a store needs a way in, and `src/secrets/age.ts` opens an age file in either layout `~/.secrets` uses. An identity file decrypts a file encrypted to a recipient without a terminal prompt, so a store's passphrase can sit inside an envelope only the integration reads. A file encrypted with a passphrase insists on a terminal, so the module provides one through `script` and takes the plaintext from a named pipe instead of a file, so the filesystem never stores it, which matters on macOS where no tmpfs exists. `age -d -o` aimed at a pipe doesn't write anything and exits 0, so the module reads stdout redirected into the pipe and treats an empty read as an error. On Darwin `script` has no `-c`, and `--` there is the command rather than a separator, exiting 0 when the command fails, so that form passes a shell explicitly and every call checks its status.
+
 ## Follow-ups
 
 An agent follows up on a card by posting a new card with `follows` set to the id of the earlier card. The card tools do this with `card_post` and `follows: "<card id>"`. The inbox sets `followedBy` on the earlier card, so the chain links both ways. The page shows **Followed by** on the earlier card. On the new card it shows a fold labeled **The card before this one, and your answer**.
