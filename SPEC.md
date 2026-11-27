@@ -767,7 +767,7 @@ Step 3's 409 reads `ticket <id> was used at 14:03:12 UTC: a ticket gives one cod
 
 Next, the inbox reads the key and checks the SHA-256 of its bytes against the checksum taken at enrollment.
 
-Then it computes the code for the current moment and checks it with the verifier, which accepts the current step and one step on each side. The checksum is the check that catches a damaged key. The verifier reads the same key, so it guards the generator alone: with the generator as it is, it never refuses a code, and a unit test drives it with a broken generator to prove it would.
+Then it computes the code for the current moment and checks it with the verifier, which accepts the current step and one step on each side. The checksum is the check that catches a damaged key. The verifier reads the same key, so it guards the generator alone. With the generator as it is, it never refuses a code. A unit test feeds it a broken generator to prove that it would.
 
 Should the inbox be unable to use the key, the answer is 500. That covers a key whose bytes changed, a hosted key that no longer decrypts, and a code the verifier refuses. In that case the inbox doesn't send a code:
 
