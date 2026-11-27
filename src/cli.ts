@@ -799,6 +799,11 @@ switch (command) {
     if (sub === 'reset-id') { console.log(`New install id: ${(await telemetry({ resetId: true })).installId}`); break; }
     usageError(command, `unknown subcommand ${sub}`);
   }
+  case 'secret': {
+    const { secretCommand } = await import('./secrets/cli.ts');
+    await secretCommand(rest, homeDir());
+    break;
+  }
   default: {
     if (command === undefined || command === '--help' || command === '-h') { console.log(HELP); break; }
     if (command === 'help') {

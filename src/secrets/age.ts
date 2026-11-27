@@ -116,15 +116,18 @@ async function release(pipe: string): Promise<void> {
 
 interface RunResult { code: number; stdout: string; stderr: string }
 
-/** Run a command to completion, collecting both streams, and kill it rather than hang a caller. */
-function run(command: string, argv: string[], options: { timeoutMs: number; env: NodeJS.ProcessEnv }): Promise<RunResult> {
+/** Run a command to completion, collecting both streams, and kill it rather than hang a caller. `input`, when given,
+ * goes to its stdin, so a passphrase never reaches argv. A command that is not installed rejects with a sentence. */
+export function run(command: string, argv: string[], options: { timeoutMs?: number; env?: NodeJS.ProcessEnv; input?: string } = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, argv, { env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const { input } = options;
+    const child = spawn(command, argv, { env: options.env ?? process.env, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    if (input !== undefined) { child.stdin?.on('error', () => { /* the exit status says whether it worked */ }); child.stdin?.end(input); }
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
-    const timer = setTimeout(() => child.kill(), options.timeoutMs);
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
+    const timer = setTimeout(() => child.kill(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
+    child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
     child.on('error', (e: NodeJS.ErrnoException) => {
       clearTimeout(timer);
       reject(e.code === 'ENOENT' ? new Error(`${command} is not installed, or not on the PATH`) : e);
@@ -149,4 +152,4 @@ function runDetached(command: string, argv: string[]): Promise<void> {
   });
 }
 
-const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';
+export const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';
