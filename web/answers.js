@@ -432,8 +432,10 @@ export function describe(card, a) {
     if (asked.length && QUESTION_FIELD.test(k)) return '';
     const f = (fields ??= fieldLabels(card.body))[k];
     // A grant shows what it let the agent read, and until when, never the ciphertext it stores.
-    if (isGrantValue(v)) return `${(f && f.label) || k}: Granted ${v.grant} from ${v.source} on ${v.instance} until ${clock(v.until)}${v.case ? `, case ${v.case}` : ''}${v.revokedAt ? `, revoked at ${clock(v.revokedAt)}` : ''}`;
-    if (v && typeof v === 'object' && v.decline === true) return `${(f && f.label) || k}: Declined`;
+    // Only a secret field answers a grant or a decline: a check group with an item named `decline` lists its boxes.
+    const secret = secretFieldsOf(card).includes(k);
+    if (secret && isGrantValue(v)) return `${(f && f.label) || k}: Granted ${v.grant} from ${v.source} on ${v.instance} until ${clock(v.until)}${v.case ? `, case ${v.case}` : ''}${v.revokedAt ? `, revoked at ${clock(v.revokedAt)}` : ''}`;
+    if (secret && v && typeof v === 'object' && v.decline === true) return `${(f && f.label) || k}: Declined`;
     // A sealed secret shows that it went, never its ciphertext.
     if (isSealedValue(v)) return `${(f && f.label) || (card.secret && k === 'sealed' ? card.secret.name : k)}: Sent sealed`;
     // A check box or switch group answers with each item on or off: the summary lists the ones turned on.

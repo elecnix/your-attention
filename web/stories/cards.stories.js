@@ -182,14 +182,22 @@ export const SecretAccessSeveral = {
 export const SecretAccessTyped = {
   render: () => mount(view(card({ id: 'access-typed', title: 'Need the deploy token', ...accessCard([{ name: 'DEPLOY_TOKEN', candidates: [] }]) }))),
 };
-// A granted field on an answered card, with its Revoke button. The stand-in inbox takes the revocation.
+// A granted field on an answered card, with its Revoke button. A stand-in takes the revocation while the story is on
+// screen, and every other request goes to the fetch the story found.
+function RevokeStandIn({ children }) {
+  React.useLayoutEffect(() => {
+    const real = window.fetch;
+    window.fetch = (url, init) => (/\/revoke$/.test(String(url)) ? Promise.resolve(Response.json({ ok: true })) : real(url, init));
+    return () => { window.fetch = real; };
+  }, []);
+  return children;
+}
 export const SecretAccessGranted = {
   render: () => {
-    window.fetch = async () => Response.json({ ok: true });
     const savedAt = Date.now() - 60000;
     const sealed = { alg: 'RSA-OAEP-256+A256GCM', key: 'AAAA', iv: 'AAAA', data: 'AAAA' };
     const answer = { values: { DATABASE_URL: { grant: '/home/me/work/.secrets/db-staging.age', source: 'age', instance: 'laptop', until: savedAt + 3600000, case: 'K7Q2', sealed } }, comment: '', savedAt };
-    return mount(h(GrantRevoke, { card: card({ id: 'access-granted' }), answer }));
+    return mount(h(RevokeStandIn, null, h(GrantRevoke, { card: card({ id: 'access-granted' }), answer })));
   },
 };
 

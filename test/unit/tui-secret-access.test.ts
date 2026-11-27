@@ -74,6 +74,18 @@ describe('a secret_access field in the terminal', () => {
     assert.equal(view.draft().values['DEPLOY_TOKEN'], undefined);
   });
 
+  it('keeps the keyboard working after a revision drops the candidate it highlighted', async () => {
+    const { view, focus, key, text } = await twoFields();
+    focus('access:OPENAI_API_KEY/OPENAI_API_KEY');
+    key('down'); key('down'); key('down'); // to Type a value, the last row
+    const fewer = await pane([{ name: 'OPENAI_API_KEY', candidates: [] }, { name: 'DEPLOY_TOKEN', candidates: [] }]);
+    view.card = { ...view.card, version: 2, body: fewer.view.card.body };
+    focus('access:OPENAI_API_KEY/OPENAI_API_KEY');
+    key('up');
+    key('space');
+    assert.match(text(), /▶ \(•\) Decline: the agent gets no access to OPENAI_API_KEY/);
+  });
+
   it('draws a field name and an instance without their escape sequences', async () => {
     const { focus, key, text } = await pane([{ name: 'BAD\u001b]0;owned\u0007', candidates: [{ id: 'x', label: 'X', source: 'age', instance: 'lap\u001b[2Jtop' }] }]);
     focus('access:');
