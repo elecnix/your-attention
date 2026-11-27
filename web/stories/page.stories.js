@@ -2,7 +2,7 @@
 import { App } from '../app.js';
 import { h } from '../env.js';
 import { PNG, card } from './render.js';
-import { DATABASE_URL, OPENAI_API_KEY, accessCard } from './access.js';
+import { SEVERAL, accessCard } from './access.js';
 
 export default { title: 'Page' };
 
@@ -61,5 +61,5 @@ export const NothingWaiting = { render: () => page([]) };
 
 // A card that asks for two secrets, on the whole page: Send answer posts each field's value to the stand-in inbox.
 export const SecretAccessCard = {
-  render: () => page([card({ id: 'access', title: 'Two secrets for the deploy', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL }, { name: 'OPENAI_API_KEY', candidates: OPENAI_API_KEY }, { name: 'DEPLOY_TOKEN', candidates: [] }]) })]),
+  render: () => page([card({ id: 'access', title: 'Two secrets for the deploy', ...accessCard([...SEVERAL, { name: 'DEPLOY_TOKEN', candidates: [] }]) })]),
 };

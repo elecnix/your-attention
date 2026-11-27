@@ -2,7 +2,7 @@ import { Attachments, BroadcastForm, CardView, GrantRevoke, Changes, ClosedCard,
 import { h } from '../env.js';
 import { installPaste } from '../paste-images.js';
 import { PNG, card, dataUrl, mount } from './render.js';
-import { DATABASE_URL, OPENAI_API_KEY, accessCard } from './access.js';
+import { DATABASE_URL, OPENAI_API_KEY, SEVERAL, accessCard } from './access.js';
 import { BUILTIN_WIDGETS, expandWidgets } from '../../src/core/widgets.ts';
 import PULL_REQUEST from '../../examples/widgets/pull-request.openui?raw';
 
@@ -176,7 +176,7 @@ export const SecretAccessTwoInstances = {
 };
 // Two secrets on one card: the person answers each field on its own.
 export const SecretAccessSeveral = {
-  render: () => mount(view(card({ id: 'access-several', title: 'Two secrets for the deploy', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL }, { name: 'OPENAI_API_KEY', candidates: OPENAI_API_KEY }]) }))),
+  render: () => mount(view(card({ id: 'access-several', title: 'Two secrets for the deploy', ...accessCard(SEVERAL) }))),
 };
 // No source holds the secret, so the person types its value, or declines.
 export const SecretAccessTyped = {

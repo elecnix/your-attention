@@ -15,15 +15,19 @@ export const OPENAI_API_KEY = [
   { id: 'openai', label: 'OpenAI key, personal', source: 'age', instance: 'desktop', type: 'api-key', host: 'api.openai.com' },
 ];
 
-/** A body with one SecretAccess field per entry of `fields`, each in a form of its own, as the widget places them. */
-export function accessBody(fields, intro = 'This agent deploys the preview and needs these secrets for its commands.') {
+/** The fields of a card that asks for two secrets. */
+export const SEVERAL = [{ name: 'DATABASE_URL', candidates: DATABASE_URL }, { name: 'OPENAI_API_KEY', candidates: OPENAI_API_KEY }];
+
+/** A body with one SecretAccess field per entry of `fields`, each in a form of its own, as the widget places them, sealed
+ * to `publicKey`. */
+export function accessBody(fields, intro = 'This agent deploys the preview and needs these secrets for its commands.', publicKey = TEST_PUBLIC_KEY) {
   return [
     `root = Card([intro, ${fields.map((_, i) => `a${i}`).join(', ')}])`,
     `intro = TextContent(${J(intro)})`,
     ...fields.flatMap(({ name, candidates }, i) => [
       `a${i} = Form(${J(name)}, a${i}b, [a${i}f])`,
       `a${i}b = Buttons([])`,
-      `a${i}f = FormControl(${J(name)}, SecretAccess(${J(name)}, ${J(J(TEST_PUBLIC_KEY))}, ${J(J(candidates))}))`,
+      `a${i}f = FormControl(${J(name)}, SecretAccess(${J(name)}, ${J(J(publicKey))}, ${J(J(candidates))}))`,
     ]),
   ].join('\n');
 }

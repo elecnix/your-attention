@@ -11,7 +11,9 @@ const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javas
 export async function serveStories(): Promise<{ base: string; close: () => void }> {
   if (!fs.existsSync(path.join(STORIES_DIR, 'index.json'))) throw new Error('Build the stories first: npm run storybook:build');
   const server = http.createServer((req, res) => {
-    const url = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/');
+    let url: string;
+    // A stray percent escape, such as /%, is no file: answer 404 rather than throw out of the listener.
+    try { url = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/'); } catch { return void res.writeHead(404).end(); }
     const file = path.join(STORIES_DIR, url === '/sealed.js' ? '/web/sealed.js' : url);
     if (!file.startsWith(STORIES_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return void res.writeHead(404).end();
     res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' });

@@ -4,9 +4,9 @@ import { before, describe, it } from 'node:test';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
 import type { Card, Sealed } from '../../src/core/types.ts';
 import { loadParser } from '../../src/tui/body.ts';
+import { accessBody } from '../../web/stories/access.js';
 import { setup } from './tui-pane.ts';
 
-const J = JSON.stringify;
 
 const CANDIDATES = [
   { id: 'openai', label: 'OpenAI key, personal', source: 'age', instance: 'laptop', type: 'api-key', host: 'api.openai.com' },
@@ -17,13 +17,7 @@ const CANDIDATES = [
 /** A card with one SecretAccess field per entry, each in a form of its own, and the pane that draws it. */
 async function pane(fields: { name: string; candidates: unknown[] }[]) {
   const keys = await newSealKeys();
-  const body = [
-    `root = Card([${fields.map((_, i) => `a${i}`).join(', ')}])`,
-    ...fields.flatMap(({ name, candidates }, i) => [
-      `a${i} = Form(${J(name)}, a${i}b, [a${i}f])`, `a${i}b = Buttons([])`,
-      `a${i}f = FormControl("Field ${i}", SecretAccess(${J(name)}, ${J(J(keys.publicKey))}, ${J(J(candidates))}))`,
-    ]),
-  ].join('\n');
+  const body = accessBody(fields, 'A card that asks for secrets.', keys.publicKey);
   const c: Card = { id: 'acc', agent: 'a1', kind: 'ask', title: 'Secrets', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], body, secrets: fields.map((f) => f.name) };
   return { keys, ...setup(c, {}, 90) };
 }

@@ -142,3 +142,7 @@ test('two age files of one name in two folders draw as two rows, each with its s
   await expect(db.getByRole('radio', { name: /^db-staging age on laptop · ~\/\.secrets · file$/ })).toBeVisible();
   await expect(db.getByRole('radio', { name: /^db-staging age on laptop · ~\/work\/\.secrets · file$/ })).toBeVisible();
 });
+
+test('the story server answers 404 to a path with a stray percent escape', async ({ request }) => {
+  expect((await request.get(`${base}/%`)).status()).toBe(404);
+});
