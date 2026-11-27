@@ -147,8 +147,9 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
         // An answer to a prompt card is typed into the pane, and the model hears nothing: the prompt already asked it.
         if (prompts.owns(ev.card.id)) { await prompts.answered(ev.card, ev.answer); return; }
         pending.set(ev.id, ev.card.id);
-        let sealed = await secrets.receive(ev.card, ev.answer);
-        if (secrets.holds(agent) && !(await deliverGrants(ctx.sessionManager.getCwd()))) {
+        const received = await secrets.receiveDetail(ev.card, ev.answer);
+        let sealed = received.text;
+        if (received.granted.length && !(await deliverGrants(ctx.sessionManager.getCwd()))) {
           sealed += '\nThis pi has no bash tool the extension can rebuild, so its commands do not get these variables. Tell the person.';
         }
         const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(client, agent, ev.answer))}${sealed ? `\n${sealed}` : ''}`;

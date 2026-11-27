@@ -8,7 +8,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { secretsDir } from './secrets-dir.js';
+
 const args = process.argv.slice(2);
+
+// The secret hooks run on every tool call, and they have nothing to do unless a channel of this user holds a grant,
+// which is when it opens its socket. Checking the folder costs far less than starting the CLI.
+if (args[0] === 'claude-hook' && (args[1] === 'secret-pre' || args[1] === 'secret-post')) {
+  let sockets = [];
+  try { sockets = fs.readdirSync(secretsDir()).filter((f) => f.endsWith('.sock')); } catch { /* no folder yet */ }
+  if (!sockets.length) process.exit(0);
+}
 
 const onPath = spawnSync('your-attention', args, { stdio: 'inherit' });
 if (!onPath.error) process.exit(onPath.status ?? 1);

@@ -122,6 +122,19 @@ describe('a secret_access grant in the session', () => {
     assert.deepEqual(secrets.env('pi:s1'), {});
   });
 
+  it('says which fields it granted, and that a value under four characters is not masked', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { publicKey, privateKey } = await newSealKeys();
+    secrets.remember('c15', privateKey);
+    const card = { id: 'c15', agent: 'pi:s1', title: 'Pins?', kind: 'question', secrets: ['PIN', 'NOTE'], createdAt: T0 } as unknown as Card;
+    const result = await secrets.receiveDetail(card, { values: { PIN: await sealValue(publicKey, 'abc'), NOTE: { decline: true } }, answeredAt: T0 } as unknown as Answer);
+    assert.deepEqual(result.granted, ['PIN']);
+    assert.match(result.text, /PIN is shorter than 4 characters, so output that shows it is not masked/);
+    assert.doesNotMatch(result.text, /Output that shows the value reads \[secret PIN\]/);
+    const plain = await secrets.receiveDetail({ ...card, id: 'c16', secrets: [] } as Card, { values: {}, answeredAt: T0 } as unknown as Answer);
+    assert.deepEqual(plain.granted, [], 'an answer with no secret grants nothing, even while an earlier grant lives');
+  });
+
   it('holds no grant for a declined field, and says so', async () => {
     const secrets = new SecretRequests(() => T0);
     const card = { id: 'c5', agent: 'pi:s1', title: 'Database?', secrets: ['DATABASE_URL'], createdAt: T0 } as unknown as Card;

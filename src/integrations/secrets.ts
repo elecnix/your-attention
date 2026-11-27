@@ -7,7 +7,7 @@ import { isSealed, newSealKeys, openSealed, sealedFields } from '../core/sealed.
 import type { Answer, Card } from '../core/types.ts';
 import { addToPlacements } from '../core/widgets.ts';
 import { Grants } from '../secrets/grant.ts';
-import { Redactor, type StreamMask } from '../secrets/redact.ts';
+import { MIN_MASKED, Redactor, type StreamMask } from '../secrets/redact.ts';
 
 /** A name the shells read as a variable. */
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -51,7 +51,13 @@ export class SecretRequests {
    * the environment of the commands the harness starts. It never throws, since it runs inside the answer stream, and
    * a failure there would stop the stream. */
   async receive(card: Card, answer: Answer): Promise<string> {
+    return (await this.receiveDetail(card, answer)).text;
+  }
+
+  /** As `receive`, with the names this answer granted, so a harness can add a line about its commands only then. */
+  async receiveDetail(card: Card, answer: Answer): Promise<{ text: string; granted: string[] }> {
     const lines: string[] = [];
+    const granted: string[] = [];
     for (const field of sealedFields(card)) {
       // A secret card that an older inbox stored names its value in `secret` and seals it in `sealed`.
       const name = card.kind === 'secret' && card.secret ? card.secret.name : field;
@@ -87,9 +93,13 @@ export class SecretRequests {
         ...(access ? { caseId: access.case } : {}),
       });
       this.redactor.add(name, plain);
-      lines.push(`${this.grants.describe(grant)} Every command you run gets it as $${name} in its environment: write "$${name}" in the command, and never print the value or write it to a file. Output that shows the value reads [secret ${name}].`);
+      granted.push(name);
+      const mask = plain.length < MIN_MASKED
+        ? `${name} is shorter than ${MIN_MASKED} characters, so output that shows it is not masked.`
+        : `Output that shows the value reads [secret ${name}].`;
+      lines.push(`${this.grants.describe(grant)} Every command you run gets it as $${name} in its environment: write "$${name}" in the command, and never print the value or write it to a file. ${mask}`);
     }
-    return lines.join('\n');
+    return { text: lines.join('\n'), granted };
   }
 
   /** The live grants of `agent` as `{NAME: value}`, for the environment of one command it is about to start. Each

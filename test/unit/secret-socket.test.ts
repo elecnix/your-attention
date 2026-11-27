@@ -6,11 +6,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { ask, exportLines, rewrite, serveSecrets, socketPath } from '../../src/integrations/claude/secret-socket.ts';
+import { ask, exportLines, rewrite, serveSecrets, socketDir, socketPath } from '../../src/integrations/claude/secret-socket.ts';
 import { handle, READER } from '../../src/integrations/claude/secret-hook.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { newSealKeys, sealValue } from '../../src/core/sealed.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
+
+const socketDirOf = (runtimeDir: string): string => socketDir({ XDG_RUNTIME_DIR: runtimeDir });
 
 /** A runtime folder short enough for a socket path on macOS. */
 const runtime = (): string => fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'ya-sk-'));
@@ -79,7 +81,7 @@ describe('the secrets socket of the Claude Code channel', { skip: process.platfo
     assert.equal(ok.stderr, '', 'a command that succeeds reports nothing');
   });
 
-  it('leaves a background command as written, since the model reads its output through a tool the hook does not see', async () => {
+  it('gives a background command the variables too, since secret-post masks the tool that reads its output', async () => {
     const dir = runtime();
     const env = { XDG_RUNTIME_DIR: dir };
     const secrets = new SecretRequests();
@@ -91,9 +93,42 @@ describe('the secrets socket of the Claude Code channel', { skip: process.platfo
       await secrets.receive(card, { values: { K: await sealValue(publicKey, 'value-not-real') }, answeredAt: Date.now() } as unknown as Answer);
       const input = (background: boolean) => ({ session_id: 's4', tool_name: 'Bash', tool_input: { command: 'printf "%s" "$K"', run_in_background: background } });
       assert.ok(await handle('secret-pre', input(false), env), 'a foreground command gets the variables');
-      assert.equal(await handle('secret-pre', input(true), env), undefined);
+      assert.ok(await handle('secret-pre', input(true), env), 'and so does a background one');
     } finally {
       served.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('masks the output of any tool, such as Read on a file a command wrote, while the session holds a grant', async () => {
+    const dir = runtime();
+    const env = { XDG_RUNTIME_DIR: dir };
+    const secrets = new SecretRequests();
+    const served = await serveSecrets(secrets, 'claude:s5', 's5', env);
+    try {
+      const { publicKey, privateKey } = await newSealKeys();
+      secrets.remember('k5', privateKey);
+      const card = { id: 'k5', agent: 'claude:s5', title: 'Key?', kind: 'question', secrets: ['K'], createdAt: Date.now() } as unknown as Card;
+      await secrets.receive(card, { values: { K: await sealValue(publicKey, 'value-not-real') }, answeredAt: Date.now() } as unknown as Answer);
+      const read = { type: 'text', file: { filePath: '/tmp/x', content: 'K=value-not-real\n', numLines: 1 } };
+      const out = await handle('secret-post', { session_id: 's5', tool_name: 'Read', tool_input: { file_path: '/tmp/x' }, tool_response: read }, env) as { hookSpecificOutput: { updatedToolOutput: typeof read } };
+      assert.deepEqual(out.hookSpecificOutput.updatedToolOutput, { type: 'text', file: { filePath: '/tmp/x', content: 'K=[secret K]\n', numLines: 1 } });
+    } finally {
+      served.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('lets the plugin runner skip the CLI when this user has no secrets socket, in the folder socketDir names', () => {
+    const dir = runtime();
+    try {
+      const runner = path.join(import.meta.dirname, '..', '..', 'bin', 'claude-plugin-runner.js');
+      // With an empty PATH, the runner fails if it tries to start the CLI, so status 0 means it never did.
+      const run = spawnSync(process.execPath, [runner, 'claude-hook', 'secret-post'], { env: { XDG_RUNTIME_DIR: dir, PATH: '' }, input: '{}', encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const named = spawnSync(process.execPath, ['--input-type=module', '-e', `import { secretsDir } from ${JSON.stringify(runner.replace('claude-plugin-runner.js', 'secrets-dir.js'))}; process.stdout.write(secretsDir(process.env))`], { env: { XDG_RUNTIME_DIR: dir }, encoding: 'utf8' });
+      assert.equal(named.stdout, socketDirOf(dir));
+    } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

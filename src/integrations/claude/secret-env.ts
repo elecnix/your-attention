@@ -5,4 +5,10 @@
 import { ask, exportLines } from './secret-socket.ts';
 
 const [file, token] = process.argv.slice(2);
-process.stdout.write(`${exportLines(file && token ? await ask(file, { op: 'env', token }) : { error: 'no socket or token' })}\n`);
+let reply: Record<string, unknown> | undefined;
+try {
+  reply = file && token ? await ask(file, { op: 'env', token }) : { error: 'no socket or token' };
+} catch (e) {
+  reply = { error: (e as Error).message };
+}
+process.stdout.write(`${exportLines(reply)}\n`);
