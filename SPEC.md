@@ -302,6 +302,123 @@ Some cards stored before the check have a body the page can't draw whole. For su
 
 The fold under a card that follows another one shows the earlier card's text as Markdown, as the card itself does.
 
+## Secret sources
+
+A secret source reads secrets from one store, such as a folder of `age` files or a password manager. With `POST /v1/secrets/lookup`, an agent sends a name or a type, and the inbox returns candidates: metadata, never a value. The agent then posts a card that places the `secret_access` widget with those candidates. When the person grants one, the source releases the value sealed to the card's public key. That ciphertext goes to the posting session over the agent stream. Nobody copies or pastes the value, and no file ever holds it. This section describes version 1 of [#153](https://github.com/elecnix/your-attention/issues/153).
+
+### What version 1 covers
+
+The laptop inbox runs the secret sources of its own computer, in the `serve` process. A source takes one of two forms: a Node module that the process imports, or an executable that it starts and talks to over stdio. Both forms use the same messages, version 1, so a source can later move to a WebSocket or an SSE connection without changing what it says. The hosted inbox has no sources in version 1. A lookup there returns an empty list, and the hosted inbox still accepts a `secret_access` card and draws it.
+
+Version 1 leaves out these parts of the issue:
+
+- the WebSocket and SSE forms
+- sources linked with OAuth
+- sources that a paired machine announces over the network
+- installs from GitHub or an https address
+- the audit log
+
+### The source interface
+
+`src/secrets/source.ts` declares it. A source has a `name`, unique on its instance, and three calls:
+
+- `detect()` answers `{status: "ready"}`, or `{status: "off", reason}` with a sentence that says what the source did not find, such as `no identity file at ~/.your-attention/age/identity.txt`.
+- `lookup(query)` takes `{name?, type?, host?}` and answers a list of candidates. Each one holds an `id`, unique within its source, a `label`, and optionally the `store`, `type`, `host` and `changedAt`, in milliseconds. A source answers only what matches the query, never its whole store. A query without any field doesn't match a candidate.
+- `release(id, publicKey)` answers a value sealed to `publicKey`, in the format of [Secret widget](#secret-widget), or throws with a sentence for the person. A source never returns a plain value. `sealValue(publicKey, text)` in `src/core/sealed.ts` uses the page's sealing format.
+
+The inbox adds `source` and `instance` to each candidate. `instance` names the computer, as `server.json` records it.
+
+In the Node form, the module exports `detect`, `lookup` and `release` with these signatures. In the stdio form, the executable reads one JSON message per line on stdin and answers one per line on stdout. Its logs go to stderr. Each request contains `v: 1`, an `id` the reply repeats, and a `call`:
+
+```json
+{"v": 1, "id": "1", "call": "detect"}
+{"v": 1, "id": "2", "call": "lookup", "query": {"type": "api-key", "host": "api.openai.com"}}
+{"v": 1, "id": "3", "call": "release", "candidate": "openai", "publicKey": {"kty": "RSA", "n": "...", "e": "AQAB"}}
+```
+
+```json
+{"v": 1, "id": "1", "status": "ready"}
+{"v": 1, "id": "2", "candidates": [{"id": "openai", "label": "OpenAI key, personal", "type": "api-key", "host": "api.openai.com"}]}
+{"v": 1, "id": "3", "sealed": {"alg": "RSA-OAEP-256+A256GCM", "key": "...", "iv": "...", "data": "..."}}
+{"v": 1, "id": "3", "error": "the item is gone from the vault"}
+```
+
+A reply that isn't valid JSON or gives another version fails that call, and so does a wait of more than 30 seconds. The next call then starts the source again.
+
+### Configuring sources
+
+`~/.your-attention/sources.jsonl` stores one entry per line. Each entry is local to its instance: the inbox never receives its settings.
+
+```json
+{"kind": "secret", "name": "dev", "form": "stdio", "origin": "file:///home/me/your-attention-secret-dev", "command": ["bin/source"]}
+{"kind": "secret", "name": "team", "form": "node", "origin": "file:///home/me/your-attention-secret-team", "settings": {"vault": "Team"}}
+```
+
+The built-in `age` source doesn't need an entry, and turns on when it detects its identity file. Its entry, when present, holds its settings: `{"kind": "secret", "name": "age", "builtin": true, "settings": {"dirs": ["~/.secrets"]}}`.
+
+```sh
+your-attention secret source list
+your-attention secret source add file:///home/me/your-attention-secret-dev --name dev [--form stdio --command bin/source]
+your-attention secret source remove dev
+your-attention secret age dir add ~/.secrets
+your-attention secret age passphrase ~/.secrets   # reads the folder's passphrase on stdin, and stores it in an envelope
+```
+
+### The age source
+
+It reads every `*.age` file of the folders in its `dirs` setting, and each file's name without `.age` is a candidate's `id` and `label`. Its type is `file`. A file encrypted to the instance's identity, `~/.your-attention/age/identity.txt`, opens with that identity. A file encrypted with a passphrase opens with the passphrase from the folder's envelope, `~/.your-attention/age/envelopes/<sha256 of the folder path>.age`, which age encrypts to the same identity. So no prompt appears at release, and the source leaves the files in the folder as they are. `src/secrets/age.ts` decrypts both kinds without writing the plaintext to a file.
+
+### Lookup
+
+`POST /v1/secrets/lookup` takes `{name?, type?, host?}`. An agent or the owner may call it. It sends the query to every source that is `ready`, and answers `{candidates, sources}`. The inbox merges `candidates` in source order, and `sources` lists each source with its `instance`, `name`, `builtin`, `status` and `reason`. A source that fails or times out appears with `status: "error"` and its reason, and the others still answer. `GET /v1/secrets/sources` answers the same `sources` list.
+
+### The secret_access widget
+
+A card places one per secret it asks for:
+
+```
+db = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}
+ai = widget secret_access {"name": "OPENAI_API_KEY", "query": {"type": "api-key", "host": "api.openai.com"}}
+```
+
+Before `card_post` posts the card, it runs the lookup for each placement's `query`. It then sets `candidates` to the result as JSON text, and `publicKey` to the public half of the key pair it keeps for the card. A placement may give `candidates` itself, and then `card_post` keeps them. The widget places one field:
+
+```
+db = Form("DATABASE_URL", db_buttons, [db_field])
+db_buttons = Buttons([])
+db_field = FormControl("DATABASE_URL", SecretAccess("DATABASE_URL", "<public key JWK>", "<candidates JSON>"))
+```
+
+The inbox reads each `SecretAccess(name, publicKey, candidates)` call as it reads `SecretInput`, with the same 400s, and adds the names to the card's `secrets`. The inbox answers 400 unless the candidates are a JSON list of objects with `id`, `source`, `instance` and `label` each.
+
+The page shows each candidate with its label, its source and its instance, and the type and host when present. A candidate whose source isn't `ready` shows as unavailable, and the person can't pick it. The person picks one candidate, declines, or types a value instead, which the page seals as the `secret` widget does. For a grant, the person also sets how long it lasts. The idle window is 15 minutes, and each use restarts it. The ceiling defaults to one hour and goes up to 24 hours. Use doesn't push it later. A card with several `secret_access` fields takes a choice for each, so the person can grant one and decline another.
+
+### Granting
+
+For each `secret_access` field, the page sends one of these values:
+
+```json
+{"grant": "<candidate id>", "source": "age", "instance": "laptop", "until": 1767225600000}
+{"decline": true}
+{"alg": "RSA-OAEP-256+A256GCM", "key": "...", "iv": "...", "data": "..."}
+```
+
+Only the owner may answer: `POST /v1/cards/<id>/answer` answers 403 to an agent or an extension token. For each grant, the inbox first checks that the card lists the candidate. Its source then releases the value sealed to the field's public key, and the inbox stores `{grant, source, instance, until, case, sealed}` as the field's value. `case` is a short id for the grant, the card id and the field name, which the person can copy from the card and the agent quotes. The inbox caps `until` at 24 hours after the answer. When a source refuses, the whole answer fails with 502 and the source's sentence, so the person sees why and the inbox doesn't keep a partial grant. For a decline, the inbox stores `{decline: true}`, and the answer text says that the person declined. The release happens only inside the owner's answer: no route releases a value on its own.
+
+Hooks, answer webhooks and triage get the answer without these fields, as for the `secret` widget. The agent stream gets all of it.
+
+`POST /v1/cards/<id>/revoke` takes `{field}` and revokes that field's grant. Only the owner may call it, and an agent or extension token gets 403. The inbox records the revocation on the answer value as `revokedAt`, and sends the agent stream `{type: "revoke", id, card, field, case}`. The page shows a **Revoke** button on each granted field of a card in the outbox or in Sent, until its `until` passes.
+
+### Delivery in the session
+
+The integration opens the sealed value in memory and keeps it in the session's grant store, `src/secrets/grant.ts`, with the idle window and the ceiling. It never writes the value to a file. The model reads a line with the secret's name, the case id and both deadlines, and says that every command it runs gets `$NAME`. The harness then adds the variable to the environment of each command it starts, while the grant lives. A `revoke` event ends the grant before the next command. When a value appears in a command's output, the integration masks it as `[secret NAME]` before the model reads it.
+
+- **pi** adds the variables to the environment of each bash command it spawns.
+- **Claude Code** rewrites each Bash command in a `PreToolUse` hook so that it first reads the variables from a socket of the channel process, once, with a one-time token, and then runs the command. The channel masks the values in the output.
+- **opencode** adds them in its shell environment hook.
+
+The `secret` widget delivers the same way: its sealed value becomes a grant of one hour, and no integration writes `~/.your-attention/secrets/` any more.
+
 ## Follow-ups
 
 An agent follows up on a card by posting a new card with `follows` set to the id of the earlier card. The card tools do this with `card_post` and `follows: "<card id>"`. The inbox sets `followedBy` on the earlier card, so the chain links both ways. The page shows **Followed by** on the earlier card. On the new card it shows a fold labeled **The card before this one, and your answer**.
