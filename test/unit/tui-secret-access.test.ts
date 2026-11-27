@@ -95,3 +95,24 @@ describe('a secret_access field in the terminal', () => {
     assert.equal(view.draft().values['DEPLOY_TOKEN'], undefined);
   });
 });
+
+describe('a secret_access field with control characters', () => {
+  it('draws the field name and the instance without their escape sequences', async () => {
+    const keys = await newSealKeys();
+    const name = 'BAD\u001b]0;owned\u0007';
+    const cands = [{ id: 'x', label: 'X', source: 'age', instance: 'lap\u001b[2Jtop' }];
+    const body = ['root = Card([a])', `a = Form("f", ab, [af])`, 'ab = Buttons([])', `af = FormControl("F", SecretAccess(${J(name)}, ${J(J(keys.publicKey))}, ${J(J(cands))}))`].join('\n');
+    const c: Card = { id: 'esc', agent: 'a1', kind: 'ask', title: 'Escapes', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], body };
+    const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 600_000 };
+    const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence: {}, states: { [c.id]: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }] };
+    const view = new CardView(c, host);
+    const build = () => view.build(90, s, buildQueue(s, 'none'));
+    build();
+    view.focus = view.stops().find((x) => x.startsWith('access:'));
+    build();
+    view.key({ type: 'key', name: 'space', ctrl: false, alt: false, shift: false });
+    const t = plain(build());
+    assert.match(t, /access ends at most after/);
+    assert.doesNotMatch(t, /\u001b|\u0007/);
+  });
+});

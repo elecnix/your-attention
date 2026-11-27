@@ -8,6 +8,8 @@ import PULL_REQUEST from '../../examples/widgets/pull-request.openui?raw';
 
 export default { title: 'Cards' };
 
+const { React } = window.__OpenUI;
+
 const view = (c) => h(CardView, { draftKey: `story:${c.id}`, card: c, onAction: () => {} });
 
 export const Choice = { render: () => mount(view(card({ options: [{ id: 'o1', label: 'SQLite', description: 'One file, FTS5 search' }, { id: 'o2', label: 'Postgres', description: 'A server to run' }] }))) };
@@ -184,5 +186,19 @@ export const SecretAccessGranted = {
     const sealed = { alg: 'RSA-OAEP-256+A256GCM', key: 'AAAA', iv: 'AAAA', data: 'AAAA' };
     const answer = { values: { DATABASE_URL: { grant: 'db-staging', source: 'age', instance: 'laptop', until: savedAt + 3600000, case: 'K7Q2', sealed } }, comment: '', savedAt };
     return mount(h(GrantRevoke, { card: card({ id: 'access-granted' }), answer }));
+  },
+};
+
+// A revision marks the picked candidate's source off: the pick loses its ceiling, and Send answer would send nothing.
+export const SecretAccessRevised = {
+  render: () => {
+    function Revised() {
+      const [off, setOff] = React.useState(false);
+      const candidates = DATABASE_URL.map((c) => (off ? { ...c, status: 'off', reason: 'the identity file is gone' } : c));
+      return h('div', null,
+        h('button', { type: 'button', className: 'btn', onClick: () => setOff(true) }, 'Mark the source off'),
+        view(card({ id: 'access-revised', version: off ? 2 : 1, title: 'Read the staging database', ...accessCard([{ name: 'DATABASE_URL', candidates }]) })));
+    }
+    return mount(h(Revised));
   },
 };

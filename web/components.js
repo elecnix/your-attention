@@ -479,7 +479,8 @@ function SecretAccess({ props }) {
   const option = (value, text, detail, disabled = false) => h('label', { key: value, className: `access-option${disabled ? ' unavailable' : ''}${choice.pick === value ? ' picked' : ''}` },
     h('input', { type: 'radio', name: group, value, checked: choice.pick === value, disabled, onChange: () => change({ pick: value }) }),
     h('span', { className: 'access-text' }, h('span', { className: 'access-label' }, text), detail && h('span', { className: 'access-detail' }, detail)));
-  const picked = candidates.find((c) => candidateKey(c) === choice.pick);
+  // A pick that a revision made unavailable keeps its radio checked but disabled, shows no ceiling, and sends nothing.
+  const picked = candidates.find((c) => c.ready && candidateKey(c) === choice.pick);
   const until = Date.now() + (choice.ceiling ?? DEFAULT_CEILING);
   return h('fieldset', { className: 'secret secret-access' },
     h('legend', null, `Who may read ${name}`),

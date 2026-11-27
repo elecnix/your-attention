@@ -138,3 +138,13 @@ test('a granted field shows Revoke, which posts the field to the revoke route', 
   expect(calls[0]!.url).toMatch(/v1\/cards\/access-granted\/revoke$/);
   expect(calls[0]!.body).toEqual({ field: 'DATABASE_URL' });
 });
+
+test('a pick that a revision makes unavailable loses its grant controls and sends nothing', async ({ page }) => {
+  await story(page, 'cards--secret-access-revised');
+  const db = field(page, 'DATABASE_URL');
+  await db.getByLabel(/Staging database URL/).check();
+  await expect(db.getByLabel('DATABASE_URL access ends at most after')).toBeVisible();
+  await page.getByRole('button', { name: 'Mark the source off' }).click();
+  await expect(db.getByLabel(/Staging database URL/)).toBeDisabled();
+  await expect(db.getByLabel('DATABASE_URL access ends at most after')).toHaveCount(0);
+});

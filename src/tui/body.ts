@@ -620,7 +620,7 @@ export class BodyRenderer {
     const doc = this.doc;
     doc.begin(id);
     items.forEach((it, i) => {
-      if (it.head) doc.para([{ text: it.head, style: s.dim }], { first: this.pad() });
+      if (it.head) doc.para([{ text: sanitize(it.head), style: s.dim }], { first: this.pad() });
       const on = pick() === it.value;
       const mark = on ? g.radioOn : g.radioOff;
       const target = `${id}#${i}`;
@@ -632,7 +632,8 @@ export class BodyRenderer {
       if (it.detail) doc.para([{ text: sanitize(it.detail), style: s.dim, target }], { first: hang, rest: hang });
     });
     doc.end(id);
-    if (candidates.some((c) => candidateKey(c) === pick())) {
+    // A pick that a revision made unavailable shows no ceiling, and accessValue sends nothing for it.
+    if (candidates.some((c) => c.ready && candidateKey(c) === pick())) {
       const cid = this.nextId('ceiling', name);
       const at = Math.max(0, CEILINGS.findIndex((c) => c.ms === ceiling()));
       const move = (dir: number, wrap: boolean): boolean => {
@@ -655,7 +656,7 @@ export class BodyRenderer {
       const cf = this.ctx.focused === cid;
       doc.begin(cid);
       doc.para([
-        { text: `${name} access ends at most after `, target: cid },
+        { text: `${sanitize(name)} access ends at most after `, target: cid },
         { text: `< ${CEILINGS[at]!.label} >`, style: { ...s.bold, ...(cf ? { inverse: true } : {}) }, target: cid },
       ], { first: [...this.pad(), { text: cf ? `${g.marker} ` : '  ', style: s.focus, target: cid }] });
       doc.end(cid);
