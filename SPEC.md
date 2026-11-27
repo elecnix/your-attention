@@ -345,6 +345,8 @@ In the Node form, the module exports `detect`, `lookup` and `release` with these
 
 A reply that isn't valid JSON or gives another version fails that call, and so does a wait of more than 30 seconds. The next call then starts the source again.
 
+A Node module may also export `setup(settings)`, which the inbox calls once with the entry's `settings` before the first call. When the module fails to load, the next call imports it again, so a fix to the module's own file takes effect without a restart. Node keeps the modules it imports for the life of the process, so a fix to a file the module imports needs a restart of `serve`. A stdio source reads the same settings as JSON from the `YOUR_ATTENTION_SOURCE_SETTINGS` variable. The inbox starts a stdio command in the origin's folder. When the first word has a slash, it is a path inside that folder, and `node` is the Node that runs the inbox. Each line the source writes to stderr goes to the inbox's stderr, after the source's name in brackets. `examples/secret-source-stdio` is a stdio source with made-up values.
+
 ### Configuring sources
 
 `~/.your-attention/sources.jsonl` stores one entry per line. Each entry is local to its instance: the inbox never receives its settings.
@@ -354,19 +356,20 @@ A reply that isn't valid JSON or gives another version fails that call, and so d
 {"kind": "secret", "name": "team", "form": "node", "origin": "file:///home/me/your-attention-secret-team", "settings": {"vault": "Team"}}
 ```
 
-The built-in `age` source doesn't need an entry, and turns on when it detects its identity file. Its entry, when present, holds its settings: `{"kind": "secret", "name": "age", "builtin": true, "settings": {"dirs": ["~/.secrets"]}}`.
+The built-in sources answer first, then the entries in the order of the file. An entry that can't load, such as one with an `https:` origin or without a `command` for the stdio form, appears in the list with `status: "error"` and the reason. The built-in `age` source doesn't need an entry, and turns on when it detects its identity file. Its entry, when present, holds its settings: `{"kind": "secret", "name": "age", "builtin": true, "settings": {"dirs": ["~/.secrets"]}}`.
 
 ```sh
 your-attention secret source list
 your-attention secret source add file:///home/me/your-attention-secret-dev --name dev [--form stdio --command bin/source]
 your-attention secret source remove dev
 your-attention secret age dir add ~/.secrets
+your-attention secret age dir remove ~/.secrets
 your-attention secret age passphrase ~/.secrets   # reads the folder's passphrase on stdin, and stores it in an envelope
 ```
 
 ### The age source
 
-It reads every `*.age` file of the folders in its `dirs` setting. A candidate's `id` is the file's absolute path, so two folders with a file of the same name give two candidates. Its `label` is the file's name without `.age`, its `store` is the folder, and its type is `file`. A file encrypted to the instance's identity, `~/.your-attention/age/identity.txt`, opens with that identity. A file encrypted with a passphrase opens with the passphrase from the folder's envelope, `~/.your-attention/age/envelopes/<sha256 of the folder path>.age`, which age encrypts to the same identity. So no prompt appears at release, and the source leaves the files in the folder as they are. `src/secrets/age.ts` decrypts both kinds without writing the plaintext to a file.
+It reads every `*.age` file of the folders in its `dirs` setting. A candidate's `id` is the file's absolute path, so two folders with a file of the same name give two candidates. Its `label` is the file's name without `.age`, its `store` is the folder, and its type is `file`. A file encrypted to the instance's identity, `~/.your-attention/age/identity.txt`, opens with that identity. A file encrypted with a passphrase opens with the passphrase from the folder's envelope, `~/.your-attention/age/envelopes/<sha256 of the folder path>.age`, which age encrypts to the same identity. So no prompt appears at release, and the source leaves the files in the folder as they are. `src/secrets/age.ts` decrypts both kinds without writing the plaintext to a file. A release takes only the path of a file in one of its folders. The source finds a file only by name, so a query with a `host`, or with a type other than `file`, matches none. A name matches without regard to case, and `-`, `.` and `_` count as the same, so `DATABASE_URL` finds `database-url.age`. The value loses one final line break, which `echo` adds and no variable means to hold. `your-attention secret age dir add` makes the identity with `age-keygen` the first time. `your-attention secret age passphrase` tries the passphrase on one file of the folder before it keeps it, so the envelope never stores a typo.
 
 ### Lookup
 
