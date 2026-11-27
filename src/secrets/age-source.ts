@@ -101,14 +101,14 @@ export function isPassphraseFile(file: string): boolean {
 /** A name as a query and a file both write it, so DATABASE_URL finds database-url.age. */
 const normal = (name: string): string => name.toLowerCase().replace(/[-.\s]/g, '_');
 
-/** The file a candidate names, in the first folder that has it. */
+/** The file a candidate's id names, when it is an *.age file directly inside one of the folders, and nowhere else. */
 function findFile(dirs: string[], id: string): { dir: string; file: string } | undefined {
-  for (const dir of dirs) {
-    let names: string[];
-    try { names = fs.readdirSync(dir); } catch { continue; }
-    if (names.includes(`${id}.age`)) return { dir, file: path.join(dir, `${id}.age`) };
-  }
-  return undefined;
+  if (!path.isAbsolute(id)) return undefined;
+  const file = path.resolve(id);
+  const dir = path.dirname(file);
+  const name = path.basename(file);
+  if (file !== id || !dirs.includes(dir) || !name.endsWith('.age') || name.startsWith('.')) return undefined;
+  return fs.statSync(file, { throwIfNoEntry: false })?.isFile() ? { dir, file } : undefined;
 }
 
 export function ageSource(options: AgeSourceOptions): SecretSource {
@@ -131,26 +131,27 @@ export function ageSource(options: AgeSourceOptions): SecretSource {
       // An age file says nothing of a type or a host, so only a name finds one.
       if (!query.name || query.host || (query.type && query.type !== 'file')) return [];
       const wanted = normal(query.name);
-      const seen = new Set<string>();
       const found: SourceCandidate[] = [];
-      for (const dir of dirs) {
+      // Each file is its own candidate, so two folders that hold openai.age give two, each named by its path.
+      for (const dir of new Set(dirs)) {
         let names: string[];
         try { names = fs.readdirSync(dir).sort(); } catch { continue; }
         for (const f of names) {
           if (!f.endsWith('.age') || f.startsWith('.')) continue;
-          const id = f.slice(0, -'.age'.length);
-          if (seen.has(id) || normal(id) !== wanted) continue;
-          seen.add(id);
-          const changedAt = fs.statSync(path.join(dir, f)).mtimeMs;
-          found.push({ id, label: id, type: 'file', store: dir, changedAt: Math.round(changedAt) });
+          const label = f.slice(0, -'.age'.length);
+          if (normal(label) !== wanted) continue;
+          const file = path.join(dir, f);
+          const stat = fs.statSync(file, { throwIfNoEntry: false });
+          if (!stat?.isFile()) continue;
+          found.push({ id: file, label, type: 'file', store: dir, changedAt: Math.round(stat.mtimeMs) });
         }
       }
       return found;
     },
 
     async release(id, publicKey) {
-      const hit = /^[^/\\]+$/.test(id) && !id.startsWith('.') ? findFile(dirs, id) : undefined;
-      if (!hit) throw new Error(`The age source has no age file named ${id} in its folders.`);
+      const hit = findFile(dirs, id);
+      if (!hit) throw new Error(`The age source has no age file at ${id} in its folders.`);
       let value: string;
       if (isPassphraseFile(hit.file)) {
         const envelope = envelopePath(home, hit.dir);

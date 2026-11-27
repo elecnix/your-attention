@@ -76,11 +76,30 @@ describe('the age source', { skip: NO_AGE }, () => {
     const source = ageSource({ home, settings: { dirs: [dir] } });
     const found = await source.lookup({ name: 'github-token' });
     assert.equal(found.length, 1);
-    assert.deepEqual({ ...found[0], changedAt: undefined }, { id: 'GITHUB_TOKEN', label: 'GITHUB_TOKEN', type: 'file', store: dir, changedAt: undefined });
+    const file = path.join(dir, 'GITHUB_TOKEN.age');
+    assert.deepEqual({ ...found[0], changedAt: undefined }, { id: file, label: 'GITHUB_TOKEN', type: 'file', store: dir, changedAt: undefined });
     assert.deepEqual(await source.lookup({ name: 'README' }), []);
     assert.deepEqual(await source.lookup({ type: 'api-key', host: 'api.example.com' }), []);
     const keys = await newSealKeys();
-    assert.equal(await openSealed(keys.privateKey, await source.release('GITHUB_TOKEN', keys.publicKey)), 'made-up-token');
+    assert.equal(await openSealed(keys.privateKey, await source.release(file, keys.publicKey)), 'made-up-token');
+  });
+
+  it('gives two candidates when two folders hold a file of the same name, and releases each from its own folder', async () => {
+    const home = scratch('ya-age-home-');
+    const personal = scratch('ya-age-personal-');
+    const work = scratch('ya-age-work-');
+    const recipient = await ensureIdentity(home);
+    encryptTo(recipient, 'made-up-personal', path.join(personal, 'openai.age'));
+    encryptTo(recipient, 'made-up-work', path.join(work, 'openai.age'));
+    const source = ageSource({ home, settings: { dirs: [personal, work] } });
+    const found = await source.lookup({ name: 'OPENAI' });
+    assert.deepEqual(found.map((c) => [c.id, c.label, c.store]), [
+      [path.join(personal, 'openai.age'), 'openai', personal],
+      [path.join(work, 'openai.age'), 'openai', work],
+    ]);
+    const keys = await newSealKeys();
+    assert.equal(await openSealed(keys.privateKey, await source.release(path.join(work, 'openai.age'), keys.publicKey)), 'made-up-work');
+    assert.equal(await openSealed(keys.privateKey, await source.release(path.join(personal, 'openai.age'), keys.publicKey)), 'made-up-personal');
   });
 
   it('opens a passphrase file through its folder envelope, and leaves the folder byte for byte as it was', async () => {
@@ -91,11 +110,12 @@ describe('the age source', { skip: NO_AGE }, () => {
     const before = snapshot(dir);
     const source = ageSource({ home, settings: { dirs: [dir] } });
     const keys = await newSealKeys();
-    await assert.rejects(source.release('DB_PASSWORD', keys.publicKey), new RegExp(`no passphrase for ${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    const file = path.join(dir, 'DB_PASSWORD.age');
+    await assert.rejects(source.release(file, keys.publicKey), new RegExp(`no passphrase for ${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     await writeEnvelope(home, dir, PASS);
     assert.ok(fs.existsSync(envelopePath(home, dir)));
     assert.ok(!fs.readFileSync(envelopePath(home, dir)).includes(PASS), 'the envelope holds the passphrase encrypted');
-    assert.equal(await openSealed(keys.privateKey, await source.release('DB_PASSWORD', keys.publicKey)), 'made-up-password');
+    assert.equal(await openSealed(keys.privateKey, await source.release(file, keys.publicKey)), 'made-up-password');
     assert.deepEqual(snapshot(dir), before);
   });
 
@@ -104,6 +124,9 @@ describe('the age source', { skip: NO_AGE }, () => {
     const dir = scratch('ya-age-dir-');
     await ensureIdentity(home);
     const keys = await newSealKeys();
-    await assert.rejects(ageSource({ home, settings: { dirs: [dir] } }).release('../identity', keys.publicKey), /no age file named/);
+    const source = ageSource({ home, settings: { dirs: [dir] } });
+    for (const id of ['../identity', identityPath(home), path.join(dir, '..', path.basename(home), 'age', 'identity.txt'), path.join(dir, 'missing.age'), path.join(dir, 'sub', 'nested.age')]) {
+      await assert.rejects(source.release(id, keys.publicKey), /no age file at/, id);
+    }
   });
 });

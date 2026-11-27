@@ -111,9 +111,10 @@ describe('your-attention secret age', { skip: NO_AGE }, () => {
 
     const sources = loadSecretSources({ home, instance: 'laptop' });
     const { candidates } = await sources.lookup({ name: 'TOKEN' });
-    assert.deepEqual(candidates.map((c) => [c.source, c.id]), [['age', 'TOKEN']]);
+    const file = path.join(dir, 'TOKEN.age');
+    assert.deepEqual(candidates.map((c) => [c.source, c.id, c.label]), [['age', file, 'TOKEN']]);
     const keys = await newSealKeys();
-    assert.equal(await openSealed(keys.privateKey, await sources.release('age', 'TOKEN', keys.publicKey)), 'made-up-value');
+    assert.equal(await openSealed(keys.privateKey, await sources.release('age', file, keys.publicKey)), 'made-up-value');
 
     const removed = await runCli(env, 'secret', 'age', 'dir', 'remove', dir);
     assert.equal(removed.code, 0, removed.stderr);
