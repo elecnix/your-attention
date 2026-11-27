@@ -8,7 +8,7 @@ import { readShortCode, shortCode } from './sign-in.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, waitText, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed, newSealKeys, openSealed, privilegedActions, sealedFields, secretAccesses, secretInputs, withoutSealed, type PrivilegedField } from './sealed.ts';
-import { commandDifference, maskPassword, MAX_COMMAND_CHARS, MAX_OUTPUT_CHARS, readSeal, type AuditEntry, type BrokerKey, type PrivilegedRun, type PrivilegedRunner } from './privileged.ts';
+import { commandDifference, machineDifference, maskPassword, MAX_COMMAND_CHARS, MAX_OUTPUT_CHARS, readSeal, type AuditEntry, type BrokerKey, type PrivilegedRun, type PrivilegedRunner } from './privileged.ts';
 import { GRANT_MAX_MS, type AccessGrant, type SecretQuery, type SecretSources, type SourceInfo, type Candidate } from './secret-sources.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
@@ -173,9 +173,10 @@ export interface InboxOptions {
   /** The secret sources of this computer, which the serve process of your own inbox runs. Without them, as on the hosted inbox, a lookup
    * finds nothing and a grant fails with 502. */
   secretSources?: SecretSources | undefined;
-  /** Runs the command of a privileged action the owner approved, with the password the page sealed to the broker's key.
-   * Without it, as on the hosted inbox, the inbox takes no card with a privileged action. */
-  privileged?: PrivilegedRunner | undefined;
+  /** Run the command of a privileged action the owner approved, with the password the page sealed to the broker's key,
+   * each on the one machine it names. Without one, as on the hosted inbox, the inbox takes no card with a privileged
+   * action. Two runners may not serve the same machine name. */
+  privileged?: PrivilegedRunner | PrivilegedRunner[] | undefined;
   /** Whether a new card pushes to a device that collapsed these groups. The page's own rule, `notifies` in web/queue.js,
    * which an adapter passes in because the core imports only the core. Without it, every new card pushes to every device. */
   pushRule?: ((state: ReturnType<Inbox['summaryState']>, card: CardSummary, collapsed: ReadonlySet<string>) => boolean) | undefined;
@@ -468,7 +469,8 @@ export class Inbox {
   private readonly now: () => number;
   private readonly approvalSender: ApprovalSender | undefined;
   private readonly secretSources: SecretSources | undefined;
-  private readonly privileged: PrivilegedRunner | undefined;
+  /** The runners of privileged actions by the machine each one serves, the inbox's own machine first. */
+  private readonly runners: Map<string, PrivilegedRunner>;
   /** The broker's key pair, made once and kept in memory only: a restart makes a new one, so a password sealed before
    * it no longer opens, and no file ever holds the private key. */
   private brokerKeys: Promise<{ publicKey: JsonWebKey; privateKey: CryptoKey }> | undefined;
@@ -518,7 +520,11 @@ export class Inbox {
     this.shownCardLimit = opts.shownCardLimit;
     this.approvalSender = opts.approvals;
     this.secretSources = opts.secretSources;
-    this.privileged = opts.privileged;
+    this.runners = new Map();
+    for (const r of [opts.privileged ?? []].flat()) {
+      if (this.runners.has(r.machine)) throw new Error(`two runners of privileged actions serve the machine ${r.machine}: give each machine one`);
+      this.runners.set(r.machine, r);
+    }
     // Workers refuse a fetch called as a method of another object, so the default calls it bare.
     this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
     this.pushRule = opts.pushRule;
@@ -2450,14 +2456,23 @@ export class Inbox {
   /** The PrivilegedAction fields of a body, checked against the runner this inbox has: their names. */
   private checkPrivileged(fields: PrivilegedField[], secrets: string[]): string[] {
     if (!fields.length) return [];
-    const runner = this.privileged;
-    if (!runner) throw new InboxError(400, 'this inbox runs no privileged actions: only your own inbox runs a command, on the computer that runs it');
+    if (!this.runners.size) throw new InboxError(400, 'this inbox runs no privileged actions: only your own inbox runs a command, on the computer that runs it or on a machine of machines.jsonl');
     for (const f of fields) {
       if (secrets.includes(f.name)) throw new InboxError(400, `${f.name} names both a secret and a privileged action: give each its own name`);
       if (f.command.length > MAX_COMMAND_CHARS) throw new InboxError(400, `privileged action ${f.name}: the command is ${f.command.length} characters, over the limit of ${MAX_COMMAND_CHARS}`);
-      if (f.machine !== runner.machine) throw new InboxError(400, `privileged action ${f.name}: this inbox runs commands on ${runner.machine} only, not on ${f.machine}. Name ${runner.machine} as the machine`);
+      this.runnerFor(f.name, f.machine, f.command);
     }
     return fields.map((f) => f.name);
+  }
+
+  /** The runner of the one machine a card names, after it accepts the command. A card for a machine no runner serves is
+   * refused, never handed to another runner: a command meant for one machine never runs on another. */
+  private runnerFor(field: string, machine: string, command: string): PrivilegedRunner {
+    const runner = this.runners.get(machine);
+    if (!runner) throw new InboxError(400, `privileged action ${field}: this inbox runs commands on ${[...this.runners.keys()].join(', ')} only, not on ${machine}. Name one of those machines, or add ${machine} to machines.jsonl`);
+    const refused = runner.refuse?.(command);
+    if (refused) throw new InboxError(400, `privileged action ${field}: nothing ran, because ${refused}`);
+    return runner;
   }
 
   private keys(): Promise<{ publicKey: JsonWebKey; privateKey: CryptoKey }> {
@@ -2469,8 +2484,9 @@ export class Inbox {
    * reads it, since only the owner's answer carries a password. */
   async privilegedKey(caller: Caller): Promise<BrokerKey> {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the owner seals a password for a privileged action');
-    if (!this.privileged) throw new InboxError(404, 'this inbox runs no privileged actions');
-    return { publicKey: (await this.keys()).publicKey, machine: this.privileged.machine };
+    const runners = [...this.runners.values()];
+    if (!runners.length) throw new InboxError(404, 'this inbox runs no privileged actions');
+    return { publicKey: (await this.keys()).publicKey, machine: runners[0]!.machine, machines: runners.map((r) => ({ name: r.machine, sudo: r.sudo ?? 'password' })) };
   }
 
   /** The audit of privileged actions, oldest first. Only the owner reads it, and no route changes it. */
@@ -2481,11 +2497,11 @@ export class Inbox {
 
   /** Open each password the answer carries for a privileged action, and check its command against the card's. It
    * changes `values` so the answer stores no field of a privileged action until the command ran. */
-  private async openPrivileged(card: Card, values: Record<string, unknown>, images: { field?: string }[] | undefined): Promise<{ field: string; command: string; password: string }[]> {
+  private async openPrivileged(card: Card, values: Record<string, unknown>, images: { field?: string }[] | undefined): Promise<{ field: string; command: string; machine: string; password: string }[]> {
     const names = card.privileged ?? [];
     if (!names.length) return [];
     const fields = new Map(privilegedActions(String(card.body ?? '')).map((f) => [f.name, f]));
-    const out: { field: string; command: string; password: string }[] = [];
+    const out: { field: string; command: string; machine: string; password: string }[] = [];
     for (const field of names) {
       const v = Object.hasOwn(values, field) ? values[field] : undefined;
       delete values[field];
@@ -2500,45 +2516,52 @@ export class Inbox {
       }
       const seal = readSeal(plain);
       if (!seal) throw new InboxError(400, `${field}: the sealed value must be the command and the password as JSON`);
-      if (!seal.password) continue;
+      const runner = this.runners.get(fields.get(field)?.machine ?? '');
+      if (runner?.sudo === 'approval') {
+        if (seal.password) throw new InboxError(400, `${field}: ${runner.machine} takes an approval, not a password, so the inbox refuses one rather than send it anywhere`);
+        if (!seal.approve) continue;
+      } else if (!seal.password) continue;
       const shown = fields.get(field)?.command ?? '';
       const differs = commandDifference(shown, seal.command);
       if (differs) throw new InboxError(409, `${field}: nothing ran, because ${differs}`);
-      out.push({ field, command: seal.command, password: seal.password });
+      const elsewhere = machineDifference(fields.get(field)?.machine ?? '', seal.machine);
+      if (elsewhere) throw new InboxError(409, `${field}: nothing ran, because ${elsewhere}`);
+      out.push({ field, command: seal.command, machine: seal.machine, password: seal.password });
     }
     return out;
   }
 
   /** Run each approved command on the card as it is now, and put only what it printed in `values`, with the password
    * masked. Each run adds a line to the audit. */
-  private async runPrivileged(card: Card, before: Answer | undefined, runs: { field: string; command: string; password: string }[], values: Record<string, unknown>, late: LateAnswer | undefined, by: Caller | undefined): Promise<void> {
-    const runner = this.privileged;
-    if (!runner) throw new InboxError(502, 'this inbox runs no privileged actions');
+  private async runPrivileged(card: Card, before: Answer | undefined, runs: { field: string; command: string; machine: string; password: string }[], values: Record<string, unknown>, late: LateAnswer | undefined, by: Caller | undefined): Promise<void> {
     if (late) throw new InboxError(409, `nothing ran: the agent closed this card, so its commands are no longer asked for`);
     const fields = new Map(privilegedActions(String(card.body ?? '')).map((f) => [f.name, f]));
     for (const r of runs) {
       // The card may have changed while the answer's files were written.
-      const differs = commandDifference(fields.get(r.field)?.command ?? '', r.command);
+      const differs = commandDifference(fields.get(r.field)?.command ?? '', r.command) ?? machineDifference(fields.get(r.field)?.machine ?? '', r.machine);
       if (differs) throw new InboxError(409, `${r.field}: nothing ran, because ${differs}`);
       if ([before, ...(before?.previous ?? [])].some((a) => isRun(a?.values?.[r.field]))) throw new InboxError(409, `${r.field}: this command already ran once. Ask the agent for a new card to run it again`);
     }
+    // The card names each field's machine, and only that machine's runner takes it.
+    const chosen = runs.map((r) => this.runnerFor(r.field, fields.get(r.field)?.machine ?? '', r.command));
     // Claimed in the same synchronous step as the checks above, before the first await.
     const keys = runs.map((r) => `${card.id}\n${r.field}`);
     const busy = runs.find((_, i) => this.claimedRuns.has(keys[i]!));
     if (busy) throw new InboxError(409, `${busy.field}: this command is already running or ran once. Ask the agent for a new card to run it again`);
     for (const k of keys) this.claimedRuns.add(k);
     const approvedBy = (by && this.store.get<Token>('tokens', by.token)?.name) || 'the owner';
-    for (const r of runs) {
+    for (const [i, r] of runs.entries()) {
+      const runner = chosen[i]!;
+      const audit = randomId(8);
       let result;
       try {
-        result = await runner.run(r.command, r.password);
+        result = await runner.run(r.command, r.password, { audit, card: card.id, field: r.field, approvedBy });
       } catch (e) {
         result = { exitCode: null, output: '', ended: `the command did not start: ${(e as Error)?.message || 'the runner failed'}` };
       }
       const output = maskPassword(result.output, r.password).slice(-MAX_OUTPUT_CHARS);
       const ended = result.ended === undefined ? undefined : maskPassword(result.ended, r.password);
       const at = this.now();
-      const audit = randomId(8);
       const entry: AuditEntry = { id: audit, card: card.id, field: r.field, agent: card.agent, command: r.command, machine: runner.machine, approvedBy, at, exitCode: result.exitCode, ...(ended ? { ended } : {}) };
       this.store.put('audit', audit, entry);
       const run: PrivilegedRun = { command: r.command, machine: runner.machine, exitCode: result.exitCode, output, ...(ended ? { ended } : {}), audit, ranAt: at };

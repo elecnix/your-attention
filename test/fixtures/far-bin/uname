@@ -1,0 +1,3 @@
+#!/bin/sh
+# The far machine's uname: -n prints the host name hosts.json gives the host ssh reached.
+exec node -e 'const fs = require("fs"), path = require("path"); const h = JSON.parse(fs.readFileSync(path.join(process.env.FAKE_SSH_DIR, "hosts.json"), "utf8"))[process.env.FAKE_FAR_HOST]; console.log(h.hostname);'

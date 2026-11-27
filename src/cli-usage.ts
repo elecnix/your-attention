@@ -69,6 +69,8 @@ const LIST: [name: string, syntax: string, summary: string][] = [
   ['secret', 'secret source remove <name>', 'remove a secret source; its folder stays as it is'],
   ['secret', 'secret age dir add|remove <dir>', 'choose the folders of *.age files the built-in age source reads'],
   ['secret', 'secret age passphrase <dir>', "keep a folder's passphrase, read on stdin, in an envelope that only\nthis computer's age identity opens"],
+  ['machines', 'machines [list]', 'list the machines a privileged action may run on over ssh, from machines.jsonl'],
+  ['machines', 'machines sudoers <name>', 'print the sudoers rule that machine needs, for /etc/sudoers.d/your-attention there'],
   ['telemetry', 'telemetry status|on|off|show|reset-id', 'read or change the anonymous usage counts, off unless you turn them on'],
   ['telemetry', 'telemetry report [--days 30] [--invites FILE]', 'for the operator: usage per invite, from Analytics Engine'],
 ];

@@ -1,4 +1,4 @@
-import { Attachments, BroadcastForm, CardView, GrantRevoke, Changes, ClosedCard, HtmlCard, LinkedText, TriagePushback } from '../components.js';
+import { Attachments, BroadcastForm, rememberMachines, CardView, GrantRevoke, Changes, ClosedCard, HtmlCard, LinkedText, TriagePushback } from '../components.js';
 import { h } from '../env.js';
 import { installPaste } from '../paste-images.js';
 import { PNG, card, dataUrl, mount } from './render.js';
@@ -88,7 +88,16 @@ const privilegedBody = expandWidgets([
   'intro = TextContent("The new nginx configuration passed nginx -t. Restarting applies it.")',
   `restart = widget privileged_action ${JSON.stringify({ name: 'restart_nginx', command: "sudo -S -p '' systemctl restart nginx", machine: 'laptop', changes: 'Restarts nginx, which drops the open connections for about a second' })}`,
 ].join('\n'), () => ({ name: 'privileged_action', ...privilegedWidget })).body;
+// The field waits to learn whether its machine takes a password or an approval. The stories tell it directly, since
+// their page has no inbox: laptop takes a password, and nas an approval.
+rememberMachines([{ name: 'laptop', sudo: 'password' }, { name: 'nas', sudo: 'approval' }]);
 export const PrivilegedAction = { render: () => mount(view(card({ title: 'Restart nginx on laptop?', body: privilegedBody, privileged: ['restart_nginx'] }))) };
+// The same widget for a machine whose sudo needs no password for the command: an approval box instead of a password.
+const approvalBody = expandWidgets([
+  'root = Card([restart])',
+  `restart = widget privileged_action ${JSON.stringify({ name: 'restart_smbd', command: '/usr/bin/systemctl restart smbd', machine: 'nas', changes: 'Restarts the file server on nas, which drops open shares for a few seconds' })}`,
+].join('\n'), () => ({ name: 'privileged_action', ...privilegedWidget })).body;
+export const PrivilegedActionApproval = { render: () => mount(view(card({ title: 'Restart smbd on nas?', body: approvalBody, privileged: ['restart_smbd'] }))) };
 
 export const HtmlAllowed = { render: () => mount(h(HtmlCard, { card: card({ html: '<p style="font:16px sans-serif">Pick one:</p><button onclick="yourAttention.answer({colour:\'blue\'})">Blue</button>' }), allowed: true, onAnswer: () => {} })) };
 

@@ -40,7 +40,7 @@ export interface TestInbox {
 
 /** A test inbox sends no usage counts and shows no notice, unless a test passes `usage` to check them.
  * It never offers to set a PIN, unless a test passes `pinPrompt` to check the offer. */
-export async function startInbox(opts: { usage?: boolean; pinPrompt?: boolean; approvals?: ApprovalSender; fetch?: typeof fetch; privileged?: PrivilegedRunner } = {}): Promise<TestInbox> {
+export async function startInbox(opts: { usage?: boolean; pinPrompt?: boolean; approvals?: ApprovalSender; fetch?: typeof fetch; privileged?: PrivilegedRunner | PrivilegedRunner[] } = {}): Promise<TestInbox> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-browser-'));
   const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, ...(opts.approvals ? { approvals: opts.approvals } : {}), ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(opts.privileged ? { privileged: opts.privileged } : {}), telemetry: { url: 'http://127.0.0.1:9/v1/report', ...(opts.usage ? {} : { blocked: 'a test inbox sends nothing' }) } });
   if (!opts.pinPrompt) server.inbox.pin.setNeverAsk(true);

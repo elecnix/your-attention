@@ -826,6 +826,26 @@ switch (command) {
     if (sub === 'reset-id') { console.log(`New install id: ${(await telemetry({ resetId: true })).installId}`); break; }
     usageError(command, `unknown subcommand ${sub}`);
   }
+  case 'machines': {
+    // The machines of machines.jsonl, which `serve` reads when it starts, and the sudoers rule each one needs.
+    const [sub = 'list', name, extra] = parseCommand(command, { args: rest, allowPositionals: true }).positionals;
+    if (extra !== undefined) usageError(command, `unexpected argument ${extra}`);
+    const { loadMachines, MACHINES_FILE } = await import('./node/privileged.ts');
+    const { sudoersRule } = await import('./core/privileged.ts');
+    const { instanceName } = await import('./secrets/registry.ts');
+    const { machines, problems } = loadMachines(homeDir(), instanceName());
+    for (const p of problems) console.error(`${p}. A card for that machine is refused.`);
+    if (sub === 'list') {
+      if (!machines.length) { console.log(`No machine is in ${path.join(homeDir(), MACHINES_FILE)}, so privileged actions run on ${instanceName()} only.`); break; }
+      for (const m of machines) console.log(`${m.name}: ssh ${m.user}@${m.host}${m.port ? `:${m.port}` : ''}, sudo by ${m.sudo}, ${m.allow.length} allowed ${m.allow.length === 1 ? 'command' : 'commands'}\n${m.allow.map((a) => `  ${a}`).join('\n')}`);
+      break;
+    }
+    if (sub !== 'sudoers') usageError(command, `unknown subcommand ${sub}`);
+    if (!name) usageError(command, 'sudoers needs the name of a machine');
+    const m = machines.find((x) => x.name === name) ?? fail(`No machine named ${name} is in ${path.join(homeDir(), MACHINES_FILE)}.`);
+    process.stdout.write(sudoersRule(m));
+    break;
+  }
   case 'secret': {
     const { secretCommand } = await import('./secrets/cli.ts');
     await secretCommand(rest, homeDir());

@@ -1,0 +1,3 @@
+#!/bin/sh
+# The far machine's logger: test/fixtures/far-bin/logger.mjs, as a file without an extension so it is found on PATH.
+exec node "$(dirname "$0")/logger.mjs" "$@"

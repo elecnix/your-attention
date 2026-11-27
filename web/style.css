@@ -228,6 +228,7 @@
   .secret .key-icon { position: absolute; left: 10px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
   .privileged { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0; }
   .privileged legend { font-weight: 600 !important; padding: 0 4px; }
+  .privileged .privileged-approve { display: flex; gap: 6px; align-items: center; margin: 8px 0 4px; font-weight: 600 !important; }
   .privileged .privileged-command { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); white-space: pre-wrap; word-break: break-all; font-family: var(--mono, ui-monospace, monospace); }
   .secret-access { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0; }
   .secret-access legend { font-weight: 600 !important; padding: 0 4px; }
