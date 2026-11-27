@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parseCommand, usageError } from '../cli-usage.ts';
 import { terminal } from '../node/pin-prompt.ts';
 import { decryptWithPassphrase } from './age.ts';
@@ -74,7 +75,7 @@ async function addSource(home: string, origin: string | undefined, values: { nam
   try {
     folder = originFolder(origin);
   } catch {
-    fail(`Give the source as a file:// address, such as file://${path.resolve(origin)}.`);
+    fail(`Give the source as a file:// address, such as ${pathToFileURL(path.resolve(origin)).href}.`);
   }
   if (!fs.existsSync(folder)) fail(`Nothing is at ${folder}.`);
   const form = values.form ?? (values.command ? 'stdio' : 'node');

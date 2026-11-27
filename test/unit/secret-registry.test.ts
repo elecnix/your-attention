@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { newSealKeys, openSealed, sealValue } from '../../src/core/sealed.ts';
 import type { SourceCandidate } from '../../src/core/secret-sources.ts';
 import { loadSecretSources, readSourceEntries, writeSourceEntries, type Builtin } from '../../src/secrets/registry.ts';
@@ -150,14 +151,14 @@ describe('the secret source registry', () => {
     const sealed = path.resolve('src/core/sealed.ts');
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ type: 'module', main: 'source.mjs' }));
     fs.writeFileSync(path.join(dir, 'source.mjs'), `
-import { sealValue } from ${JSON.stringify(new URL(`file://${sealed}`).href)};
+import { sealValue } from ${JSON.stringify(pathToFileURL(sealed).href)};
 let vault = 'none';
 export function setup(settings) { vault = settings.vault; }
 export async function detect() { return { status: 'ready' }; }
 export async function lookup(q) { return q.name === 'TOKEN' ? [{ id: 'token', label: 'Token in ' + vault }] : []; }
 export async function release(id, publicKey) { return sealValue(publicKey, 'node value'); }
 `);
-    writeSourceEntries(home, [{ kind: 'secret', name: 'team', form: 'node', origin: new URL(`file://${dir}`).href, settings: { vault: 'Team' } }]);
+    writeSourceEntries(home, [{ kind: 'secret', name: 'team', form: 'node', origin: pathToFileURL(dir).href, settings: { vault: 'Team' } }]);
     const sources = loadSecretSources({ home, instance: 'laptop', builtins: [] });
     const { candidates } = await sources.lookup({ name: 'TOKEN' });
     assert.deepEqual(candidates, [{ id: 'token', label: 'Token in Team', source: 'team', instance: 'laptop' }]);
@@ -170,6 +171,7 @@ export async function release(id, publicKey) { return sealValue(publicKey, 'node
     const entries = [{ kind: 'secret' as const, name: 'dev', form: 'stdio' as const, origin: 'file:///made/up', command: ['bin/source'] }];
     writeSourceEntries(home, entries);
     assert.deepEqual(readSourceEntries(home), entries);
-    assert.equal(fs.statSync(path.join(home, 'sources.jsonl')).mode & 0o777, 0o600);
+    // Windows has no POSIX modes: there the file inherits the home folder's access list.
+    if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(home, 'sources.jsonl')).mode & 0o777, 0o600);
   });
 });

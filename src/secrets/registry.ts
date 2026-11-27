@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isSealed } from '../core/sealed.ts';
 import type { Candidate, SecretQuery, SecretSources, SourceCandidate, SourceInfo } from '../core/secret-sources.ts';
 import type { Sealed } from '../core/types.ts';
@@ -75,7 +76,8 @@ export function originFolder(origin: string | undefined): string {
   let url: URL;
   try { url = new URL(origin); } catch { throw new Error(`the origin ${origin} is not an address`); }
   if (url.protocol !== 'file:') throw new Error(`the origin ${origin} is not a file:// address, and version 1 loads sources only from a folder on this computer`);
-  return decodeURIComponent(url.pathname);
+  // fileURLToPath gives C:\folder on Windows, where the pathname would be /C:/folder.
+  return fileURLToPath(url);
 }
 
 interface Loaded { name: string; builtin: boolean; source?: SecretSource & { stop?(): void }; problem?: string }
