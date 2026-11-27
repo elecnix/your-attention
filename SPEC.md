@@ -677,9 +677,11 @@ Here, the owner enrolls the npm key once:
 your-attention otp enroll npm --allow <session id>
 ```
 
-With no echo, the command reads two lines, or one per line from a pipe. On the first line goes the base32 key that the service showed during the authenticator setup, or its `otpauth://` address. The second line is the code that the person's authenticator shows now.
+Before running it, the person adds the key to their authenticator app, as the service's setup asks. The phone and the inbox then give the same codes, so npm sees one authenticator.
 
-For that moment, the inbox computes the code, plus the codes for one step before and one step after it. When none of them matches, the inbox rejects the key and doesn't store it, so npm never receives a key copied with a typo. Next, the person adds the same key to their authenticator app. Then the phone and the inbox give the same codes, so npm sees one authenticator.
+With no echo, the command reads two lines, or one per line from a pipe. On the first line goes the base32 key that the service showed during the authenticator setup, or its `otpauth://` address. The second line is the code that the person's authenticator shows now for that key.
+
+For that moment, the inbox computes the code, plus the codes for one step before and one step after it. When none of them matches, the inbox rejects the key and doesn't store it, so npm never receives a key copied with a typo.
 
 The inbox follows RFC 6238 with the parameters that authenticator apps and npm use: HMAC-SHA-1, six digits and 30-second steps. The inbox rejects an `otpauth://` address that asks for other parameters. A key must be at least 10 bytes.
 
@@ -765,9 +767,9 @@ Step 3's 409 reads `ticket <id> was used at 14:03:12 UTC: a ticket gives one cod
 
 Next, the inbox reads the key and checks the SHA-256 of its bytes against the checksum taken at enrollment.
 
-Then it computes the code for the current moment and checks it with the verifier, which accepts the current step and one step on each side.
+Then it computes the code for the current moment and checks it with the verifier, which accepts the current step and one step on each side. The checksum is the check that catches a damaged key. The verifier reads the same key, so it guards the generator alone: with the generator as it is, it never refuses a code, and a unit test drives it with a broken generator to prove it would.
 
-Should the inbox be unable to use the key, the answer is 500. That covers a key whose bytes changed, a hosted key that no longer decrypts, and a code that fails the check. In that case the inbox doesn't send a code:
+Should the inbox be unable to use the key, the answer is 500. That covers a key whose bytes changed, a hosted key that no longer decrypts, and a code the verifier refuses. In that case the inbox doesn't send a code:
 
 ```
 the key npm is damaged: its bytes no longer match the ones enrolled, so the inbox sent no code. Enroll it again with `your-attention otp enroll npm`

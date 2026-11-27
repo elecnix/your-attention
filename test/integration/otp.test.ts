@@ -23,7 +23,8 @@ const output: string[] = [];
 let s: CliServer;
 
 before(async () => { s = await serveForTest('ya-otp-', undefined, { output }); });
-after(async () => { await s.close(); });
+// An inbox that never started leaves nothing to close, and its own error is the one to report.
+after(async () => { await (s as CliServer | undefined)?.close(); });
 
 /** Run the CLI in this inbox's home, with lines on its standard input, as a pipe answers the hidden questions. */
 const cliWithInput = (input: string, ...args: string[]) => runCliWithInput(s.env, input, ...args);

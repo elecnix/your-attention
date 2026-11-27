@@ -416,6 +416,12 @@ describe('where the keys live', () => {
       // A file cut off in the middle of the key, as a full disk would leave it.
       fs.writeFileSync(path.join(home, OTP_KEYS_FILE), `{"npm": "${KEY_TEXT}`);
       await assert.rejects(keys.load('npm'), (e: Error) => /otp-keys\.json is not a JSON object of labels and keys$/.test(e.message) && !e.message.includes(KEY_TEXT.slice(0, 8)));
+      // Enrolling again replaces the broken file, which moves aside with its mode, so the person can recover from it.
+      await keys.save('npm', RFC_KEY);
+      assert.deepEqual(await keys.load('npm'), RFC_KEY);
+      const aside = fs.readdirSync(home).filter((f) => f.startsWith(`${OTP_KEYS_FILE}.broken-`));
+      assert.equal(aside.length, 1);
+      if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(home, aside[0]!)).mode & 0o777, 0o600);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

@@ -25,15 +25,27 @@ export function fileOtpKeys(home: string, machine: string): OtpKeyStore {
     if (!keys || typeof keys !== 'object' || Array.isArray(keys)) throw new Error(`${shown} is not a JSON object of labels and keys`);
     return keys as Record<string, string>;
   };
+  /** The keys to write over, for a change. A file that does not parse moves aside, with mode 0600, so enrolling again
+   * replaces it and the person can still recover the other keys it held. */
+  const forWrite = (): Record<string, string> => {
+    try { return read(); } catch (e) {
+      if (!fs.existsSync(file)) throw e;
+      const aside = `${file}.broken-${Date.now()}`;
+      fs.renameSync(file, aside);
+      // It may still hold keys, so only this user reads it, whatever mode the broken file had.
+      fs.chmodSync(aside, 0o600);
+      return {};
+    }
+  };
   return {
     holder: `your own inbox on ${machine}, in ${shown}, which only its user reads`,
-    save: async (label, key) => { writePrivate(file, `${JSON.stringify({ ...read(), [label]: base32Encode(key) }, null, 2)}\n`); },
+    save: async (label, key) => { writePrivate(file, `${JSON.stringify({ ...forWrite(), [label]: base32Encode(key) }, null, 2)}\n`); },
     load: async (label) => {
       const keys = read();
       return Object.hasOwn(keys, label) ? base32Decode(String(keys[label])) : undefined;
     },
     remove: async (label) => {
-      const keys = read();
+      const keys = forWrite();
       if (!Object.hasOwn(keys, label)) return;
       delete keys[label];
       writePrivate(file, `${JSON.stringify(keys, null, 2)}\n`);

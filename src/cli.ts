@@ -437,7 +437,7 @@ switch (command) {
         let key: string;
         let code: string;
         try {
-          t.say(`Enroll the key ${label}. Paste the base32 key the service showed when you set up your authenticator, or its otpauth:// address. Add the same key to your authenticator app too, so both give the same codes.`);
+          t.say(`Enroll the key ${label}. First add the key to your authenticator app, as the service's setup asks, so the app and the inbox give the same codes. Then paste the same key here: the base32 text the service showed, or its otpauth:// address.`);
           key = await t.askHidden('Key (hidden): ');
           code = await t.askHidden('The code your authenticator shows now (hidden): ');
         } finally {
