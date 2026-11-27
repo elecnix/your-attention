@@ -451,6 +451,22 @@ export interface Card {
   closed?: Closure;
   /** Agent replies stored before linked follow-ups. Nothing writes one now, and the page shows the old ones in a fold. */
   replies: Reply[];
+  /** Each time the card changed hands because the agent that held it retired, oldest first. The page shows each one. */
+  reassignedFrom?: Reassignment[];
+}
+
+/** One change of hands: the card left `from` because an agent retired. `to` is the nearest living ancestor that took
+ * it, and a reassignment without `to` found no living ancestor, so the card waits on the person, orphaned. */
+export interface Reassignment {
+  /** The agent that held the card. */
+  from: string;
+  /** The agent that holds it now. None when no ancestor is alive. */
+  to?: string;
+  at: number;
+  /** Why, in a few words, such as `fix-login retired`. */
+  why: string;
+  /** When the stream of `to` heard about it. Until then the notice waits, as an undelivered answer does. */
+  noticeSentAt?: number;
 }
 
 /** The close a late answer came after. */
@@ -619,7 +635,9 @@ export type AgentEvent =
   | { type: 'card'; id: string; card: Card; sentAt: number }
   /** The person revoked the grant of a secret_access field. `case` is the grant's case id. An inbox keeps a revoke for
    * an agent with no open stream, and sends it first when one opens. */
-  | { type: 'revoke'; id: string; card: Card; field: string; case: string };
+  | { type: 'revoke'; id: string; card: Card; field: string; case: string }
+  /** The inbox gave this agent a card whose agent retired, because this agent is its nearest living ancestor. */
+  | { type: 'reassigned'; id: string; card: Card; from: string; why: string };
 
 /** What pages receive. They refetch state on "change". */
 export type PageEvent =

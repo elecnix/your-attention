@@ -589,6 +589,11 @@ export function describeSentCard(ev: Extract<AgentEvent, { type: 'card' }>): str
   return `The person sent this session a card, ${ev.card.id}: "${ev.card.title}"${text} Reply with a card of your own if there is something to say, and carry on with what you were doing.`;
 }
 
+/** The one line a session hears when the inbox gives it a card whose agent retired. */
+export function describeReassigned(ev: Extract<AgentEvent, { type: 'reassigned' }>): string {
+  return `Card ${ev.card.id} ("${ev.card.title}") was reassigned to you because ${ev.why}: it was ${ev.from}'s, and you are its nearest living ancestor. The answer comes to this session now.`;
+}
+
 /** How each close kind reads in a late answer's first line, said to the agent that closed the card. */
 const LATE_CLOSE: Record<CloseKind, string> = {
   retracted: 'retracted it',

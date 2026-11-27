@@ -4,7 +4,7 @@ import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
 import { Approvals, AgentPin, GrantRevoke, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, PinMove, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetDrafts, forgetSecrets, refusePrivileged, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions, triageState } from './components.js';
-import { after, agentName, buildQueue, movePin, notifies, samePin, SECTION_ID } from './queue.js';
+import { after, agentName, buildQueue, movePin, notifies, reassignments, samePin, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
 import { arrivals, notifiable, readFocusMode, releaseNotice } from './focus.js';
@@ -756,6 +756,8 @@ export function App() {
       // takes no answer, since the outbox would never show one.
       current.archivedAt && h('div', { className: 'note' }, `Cleared on ${new Date(current.archivedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}. It takes no answer.`),
       current.from && h('div', { className: 'from' }, `From ${current.from}`),
+      // A card that changed hands says so, each time, with why: one that moved silently would read as the new agent's own.
+      reassignments(current, state.cards, state.presence).map((r) => h('div', { className: 'note reassigned', key: `reassigned-${r.at}` }, `${r.text} · ${time(r.at)}`)),
       (o.harness || o.host || o.herdrWorkspace || o.herdrTab) && h('div', { className: 'origin' },
         h('span', null, [o.name, o.harness, o.host, o.cwd].filter(Boolean).join(' · ')),
         (o.herdrWorkspace || o.herdrTab) && h('span', { className: 'herdr-place' },

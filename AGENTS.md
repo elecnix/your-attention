@@ -18,7 +18,7 @@ Reviewers, human or automated, check the diff against PRINCIPLES.md and block a 
 src/core/          the protocol: types, the single-writer inbox, the HTTP handler. Web standards only.
 src/adapters/      SQLite storage and mDNS discovery for the laptop build, and the Mermaid and body checks of the laptop inbox and the posting client
 src/node/          the Node HTTP server and the home directory
-src/integrations/  Claude Code (MCP channel, AskUserQuestion hooks), pi, herdr
+src/integrations/  Claude Code (MCP channel, AskUserQuestion hooks), pi, herdr, and the Bellwether watcher that reassigns a retired agent's cards
 src/client.ts      the client every integration uses
 src/cli.ts         the your-attention command
 src/watch.ts       the line of JSON `your-attention watch` prints for each event of an agent stream
@@ -60,8 +60,10 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 | any but `closed` | the person dismisses it, and the agent hears nothing | `closed` |
 | `open` | the person answers a system card, and the inbox applies the answer | `closed` |
 | `closed` | the person answers after the close | `answered` |
+| any but `closed` and `read` | its agent retires, and an ancestor runs | the same state, held by that ancestor |
+| `open` | its agent retires, and no ancestor runs | `orphaned` |
 
-`orphaned` has no transition of its own. It reads a card in `open` whose agent has been offline for an hour, and another session may then claim it.
+`orphaned` reads a card in `open` whose agent has been offline for an hour, or whose agent retired with no living ancestor, and another session may then claim it. A card moves to another agent only after Bellwether reports a retirement, and a closed stream doesn't move it ([SPEC.md](SPEC.md#a-card-whose-agent-retired)).
 
 The inbox derives the state from the card and its answer on every read. `answered` and `delivered` both mean the person answered and no agent has acknowledged yet, so the page's outbox holds your answer waiting for its agent, not a card waiting for you ([DP23](PRINCIPLES.md#dp23-answered-cards-go-to-an-outbox-then-to-sent)).
 
