@@ -36,3 +36,27 @@ export function wordDiff(before: string, after: string): { del: [string, boolean
 export interface GuidanceRow { kind: 'same' | 'del' | 'add'; text: string; words?: [string, boolean][]; undone?: boolean }
 /** The proposed guidance against the current one, line by line in order. With `base`, a removed line the proposal never saw is `undone`. */
 export function guidanceDiff(current: string, proposed: string, base?: string): GuidanceRow[];
+/** A candidate of a secret_access field, as the page reads it: `ready` is false for one whose source is not ready. */
+export interface AccessCandidate { id: string; label: string; source: string; instance: string; type?: string; host?: string; store?: string; status: string; reason?: string; ready: boolean }
+/** What the person chose on a secret_access field: a candidate key, `decline`, or `type` with the value to seal. */
+export interface AccessChoice { pick?: string; ceiling?: number; value?: string }
+/** The idle window of a grant, which each use restarts. */
+export const GRANT_IDLE_MS: number;
+/** The ceilings a card offers, from 30 minutes to 24 hours. */
+export const CEILINGS: { ms: number; label: string }[];
+/** The ceiling a field starts with: one hour. */
+export const DEFAULT_CEILING: number;
+/** The candidates a SecretAccess call gives as JSON text; none for text that is not a list of candidates. */
+export function accessCandidates(json: string): AccessCandidate[];
+/** A candidate's key on the card, unique across sources and instances. */
+export function candidateKey(c: Pick<AccessCandidate, 'id' | 'source' | 'instance'>): string;
+/** The candidates by instance, in the order given. */
+export function candidateGroups(candidates: AccessCandidate[]): { instance: string; candidates: AccessCandidate[] }[];
+/** The source and instance of a candidate, then its store, type and host. */
+export function candidateDetail(c: AccessCandidate): string;
+/** The answer value for a choice, or undefined for none and for a typed value, which the client seals. */
+export function accessValue(choice: AccessChoice | undefined, candidates: AccessCandidate[], now: number): { grant: string; source: string; instance: string; until: number } | { decline: true } | undefined;
+/** The granted fields of an answer that can still be revoked. */
+export function revocableGrants(answer: Answer | undefined, now: number): { field: string; value: { grant: string; source: string; instance: string; until: number; case?: string } }[];
+/** A time of day as hours and minutes, as a grant's end shows. */
+export function clock(t: number): string;

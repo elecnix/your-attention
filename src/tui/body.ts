@@ -3,6 +3,7 @@
 // value in a store shaped like the page renderer's, {form: {field: {value}}}, so web/answers.js turns it into the
 // same answer the page sends. A component the terminal cannot draw says so, with the card's address in the browser.
 import type { ElementNode, ParseResult } from '@openuidev/lang-core';
+import { CEILINGS, DEFAULT_CEILING, GRANT_IDLE_MS, accessCandidates, candidateDetail, candidateGroups, candidateKey, type AccessCandidate, type AccessChoice } from '../../web/answers.js';
 import { Doc, type Span } from './doc.ts';
 import { editKey, editPaste, editRows, cursorPos, indexAt, type EditState } from './edit.ts';
 import type { KeyEvent } from './input.ts';
@@ -79,6 +80,8 @@ export interface BodyContext {
   /** The public key of each secret field the card draws, as JSON Web Key text, by field name. The view seals those
    * fields before it sends. */
   secrets: Map<string, string>;
+  /** Each secret_access field the card draws, by field name: its candidates, and what the person chose there. */
+  access: Map<string, { candidates: AccessCandidate[]; choice(): AccessChoice }>;
   /** A button was pressed. `validated` is false when a rule stopped it. */
   onAction(action: Action, form: string | undefined): void;
   /** The address of this card on the page, for what the terminal cannot draw. */
@@ -304,6 +307,9 @@ export class BodyRenderer {
       case 'SecretInput':
         this.ctx.secrets.set(str(p['name']), str(p['publicKey']));
         this.textField(n, form ?? '', false, undefined, true);
+        return;
+      case 'SecretAccess':
+        this.access(n, form ?? '');
         return;
       case 'DatePicker':
         if (str(p['mode']) === 'range') { this.fallback('DatePicker'); return; }
@@ -560,6 +566,104 @@ export class BodyRenderer {
     doc.end(id);
     this.register(form, name, lit(p['rules']));
     this.error(form, name);
+  }
+
+  /** SecretAccess(name, publicKey, candidates): the candidates by instance, then Decline and Type a value. A grant shows
+   * its ceiling, which the arrow keys change, and a typed value goes in a secret field that the view seals. */
+  private access(n: ElementNode, form: string): void {
+    const p = n.props;
+    const name = str(p['name']);
+    const candidates = accessCandidates(str(p['candidates']));
+    const { s, g } = this.ctx.theme;
+    const ui = this.ctx.ui;
+    const pickKey = `access:${form}/${name}:pick`;
+    const ceilingKey = `access:${form}/${name}:ceiling`;
+    const pick = (): string | undefined => ui.get(pickKey) as string | undefined;
+    const ceiling = (): number => (ui.get(ceilingKey) as number | undefined) ?? DEFAULT_CEILING;
+    this.ctx.access.set(name, { candidates, choice: () => ({ pick: pick(), ceiling: ceiling() }) });
+    // The field is a secret, so the view never puts what was typed in a draft, and seals it only for a typed answer.
+    this.ctx.secrets.set(name, str(p['publicKey']));
+    type Item = { value: string; label: string; detail: string; ready: boolean; head?: string };
+    const items: Item[] = [];
+    for (const grp of candidateGroups(candidates)) {
+      grp.candidates.forEach((c, i) => items.push({
+        value: candidateKey(c), label: c.label, ready: c.ready,
+        detail: c.ready ? candidateDetail(c) : `${candidateDetail(c)} · unavailable: ${c.reason || `its source is ${c.status}`}`,
+        ...(i === 0 ? { head: `On ${grp.instance}` } : {}),
+      }));
+    }
+    items.push({ value: 'decline', label: `Decline: the agent gets no access to ${name}`, detail: '', ready: true, head: candidates.length ? 'Other answers' : `No source on the inbox's computers holds ${name}. Type its value, or decline.` });
+    items.push({ value: 'type', label: `Type a value for ${name} instead`, detail: '', ready: true });
+    const id = this.nextId('access', `${form}/${name}`);
+    const hiKey = `${id}:hi`;
+    const first = items.findIndex((it) => it.ready);
+    // A revision may drop rows, so the stored highlight is clamped to the rows drawn now.
+    const hi = (): number => Math.min(items.length - 1, (ui.get(hiKey) as number | undefined) ?? Math.max(first, items.findIndex((it) => it.value === pick())));
+    // The arrow keys skip a candidate the person cannot pick.
+    const step = (from: number, dir: 1 | -1): number => { for (let i = from + dir; i >= 0 && i < items.length; i += dir) if (items[i]!.ready) return i; return -1; };
+    const choose = (i: number) => { const it = items[i]; if (it?.ready) { ui.set(pickKey, it.value); ui.set(hiKey, i); } };
+    this.ctx.widgets.set(id, {
+      id,
+      key: (ev) => {
+        if (ev.ctrl) return false;
+        if (ev.name === 'up' || ev.name === 'k' || ev.name === 'down' || ev.name === 'j') {
+          const next = step(hi(), ev.name === 'up' || ev.name === 'k' ? -1 : 1);
+          if (next < 0) return false;
+          ui.set(hiKey, next);
+          return true;
+        }
+        if (ev.name === 'space' || ev.name === 'enter' || ev.name === 'x') { choose(hi()); return true; }
+        return false;
+      },
+      click: (part) => { if (part !== undefined) choose(Number(part)); },
+    });
+    const focused = this.ctx.focused === id;
+    const doc = this.doc;
+    doc.begin(id);
+    items.forEach((it, i) => {
+      if (it.head) doc.para([{ text: sanitize(it.head), style: s.dim }], { first: this.pad() });
+      const on = pick() === it.value;
+      const mark = on ? g.radioOn : g.radioOff;
+      const target = `${id}#${i}`;
+      const lit_ = focused && hi() === i;
+      const lead: Span[] = [...this.pad(), { text: lit_ ? `${g.marker} ` : '  ', style: s.focus, target }, { text: `${mark} `, style: on ? s.accent : it.ready ? {} : s.dim, target }];
+      const hang: Span[] = [...this.pad(), { text: ' '.repeat(2 + textWidth(mark) + 1), target }];
+      const labelStyle: Style = { ...(on ? s.bold : it.ready ? {} : s.dim), ...(lit_ ? { inverse: true } : {}) };
+      doc.para([{ text: sanitize(it.label), style: labelStyle, target }], { first: lead, rest: hang });
+      if (it.detail) doc.para([{ text: sanitize(it.detail), style: s.dim, target }], { first: hang, rest: hang });
+    });
+    doc.end(id);
+    // A pick that a revision made unavailable shows no ceiling, and accessValue sends nothing for it.
+    if (candidates.some((c) => c.ready && candidateKey(c) === pick())) {
+      const cid = this.nextId('ceiling', name);
+      const at = Math.max(0, CEILINGS.findIndex((c) => c.ms === ceiling()));
+      const move = (dir: number, wrap: boolean): boolean => {
+        const next = wrap ? (at + dir + CEILINGS.length) % CEILINGS.length : at + dir;
+        if (next < 0 || next >= CEILINGS.length) return false;
+        ui.set(ceilingKey, CEILINGS[next]!.ms);
+        return true;
+      };
+      this.ctx.widgets.set(cid, {
+        id: cid,
+        key: (ev) => {
+          if (ev.ctrl) return false;
+          if (ev.name === 'left' || ev.name === 'h') return move(-1, false);
+          if (ev.name === 'right' || ev.name === 'l') return move(1, false);
+          if (ev.name === 'space' || ev.name === 'enter') return move(1, true);
+          return false;
+        },
+        click: () => { move(1, true); },
+      });
+      const cf = this.ctx.focused === cid;
+      doc.begin(cid);
+      doc.para([
+        { text: `${sanitize(name)} access ends at most after `, target: cid },
+        { text: `< ${CEILINGS[at]!.label} >`, style: { ...s.bold, ...(cf ? { inverse: true } : {}) }, target: cid },
+      ], { first: [...this.pad(), { text: cf ? `${g.marker} ` : '  ', style: s.focus, target: cid }] });
+      doc.end(cid);
+      doc.para([{ text: `Access also ends after ${Math.round(GRANT_IDLE_MS / 60_000)} minutes without use, and use never moves the end later. Left and right change it.`, style: s.dim }], { first: [...this.pad(), { text: '  ' }] });
+    }
+    if (pick() === 'type') this.textField(n, form, false, undefined, true);
   }
 
   private select(n: ElementNode, form: string): void {

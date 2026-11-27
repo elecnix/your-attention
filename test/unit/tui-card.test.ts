@@ -9,32 +9,12 @@ import { editKey } from '../../src/tui/edit.ts';
 import type { Card } from '../../src/core/types.ts';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
 import { loadParser } from '../../src/tui/body.ts';
+import { plain, setup, theme } from './tui-pane.ts';
 import { CardView, onlineAgents, type CardViewHost } from '../../src/tui/cardview.ts';
 import type { KeyEvent } from '../../src/tui/input.ts';
-import { makeTheme } from '../../src/tui/theme.ts';
-
-const theme = makeTheme({ color: 0, unicode: true, hyperlinks: false });
 
 function card(c: Partial<Card> & { id: string; title: string }): Card {
   return { agent: 'a1', kind: 'ask', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], ...c };
-}
-
-/** The text a card view draws, one line of the terminal per line. */
-const plain = (doc: { lines: { spans: { text: string }[] }[] }): string => doc.lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
-
-function setup(c: Card, over: Partial<InboxState> = {}) {
-  const acts: unknown[] = [];
-  const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: (_v, a) => acts.push(a), fileText: () => undefined, now: () => 600_000 };
-  const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence: {}, states: { [c.id]: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }], ...over };
-  const view = new CardView(c, host);
-  const build = () => view.build(70, s, buildQueue(s, 'none'));
-  build();
-  const text = () => plain(build());
-  /** Focus the stop whose id starts with `prefix`. */
-  const focus = (prefix: string) => { build(); const id = view.stops().find((x) => x.startsWith(prefix)); assert.ok(id, `no stop ${prefix} in ${view.stops().join(', ')}`); view.focus = id; build(); };
-  const key = (name: string, mods: Partial<KeyEvent> = {}) => { const ok = view.key({ type: 'key', name, ctrl: false, alt: false, shift: false, ...mods }); build(); return ok; };
-  const type = (s: string) => { for (const ch of s) key(ch, { text: ch }); };
-  return { view, acts, build, text, focus, key, type };
 }
 
 before(async () => { await loadParser(); });

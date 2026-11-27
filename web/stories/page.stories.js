@@ -2,6 +2,7 @@
 import { App } from '../app.js';
 import { h } from '../env.js';
 import { PNG, card } from './render.js';
+import { SEVERAL, accessCard } from './access.js';
 
 export default { title: 'Page' };
 
@@ -9,13 +10,16 @@ function fakeInbox(state) {
   window.fetch = async (url, init) => {
     const path = String(url);
     if (path.endsWith('v1/state')) return Response.json(state);
+    // This stand-in serves no page socket, so the page listens on the faked event stream.
+    if (/v1\/ws$/.test(path)) return new Response('{}', { status: 404 });
     // The state sends summaries, and the page fetches the whole card it opens. The fixtures are whole cards already.
     const one = /v1\/cards\/([^/?]+)$/.exec(path);
     if (one && !(init && init.method)) {
       const c = state.cards.find((x) => x.id === decodeURIComponent(one[1]));
       return c ? Response.json({ card: c, answer: state.answers[c.id], state: state.states[c.id], rev: c.rev }) : new Response('{}', { status: 404 });
     }
-    if (init && init.method) return Response.json({ ok: true });
+    // Each change the page sends, for a test to read.
+    if (init && init.method) { (window.__posted = window.__posted || []).push({ path, body: init.body ? JSON.parse(init.body) : undefined }); return Response.json({ ok: true }); }
     return Response.json({});
   };
   window.EventSource = class {
@@ -29,7 +33,9 @@ function fakeInbox(state) {
   };
 }
 
-function page(cards, extra = {}) {
+function page(list, extra = {}) {
+  // The page fetches a whole card when its summary's rev changes, so each fixture has one.
+  const cards = list.map((c) => ({ rev: 1, ...c }));
   const states = Object.fromEntries(cards.map((c) => [c.id, c.state || 'open']));
   fakeInbox({ cards, answers: extra.answers || {}, presence: extra.presence || { 'claude:demo': { agent: 'claude:demo', online: true, lastSeen: Date.now() } }, states, priorities: {}, levels: [{ id: 'now', label: 'Decide now', definition: '' }, { id: 'soon', label: 'Decide soon', definition: '' }, { id: 'later', label: 'Can wait', definition: '' }], settings: { allowHtml: false }, guidance: { text: '', version: 1 } });
   try { localStorage.clear(); } catch {}
@@ -52,3 +58,8 @@ export const AgentOffline = {
 };
 
 export const NothingWaiting = { render: () => page([]) };
+
+// A card that asks for two secrets, on the whole page: Send answer posts each field's value to the stand-in inbox.
+export const SecretAccessCard = {
+  render: () => page([card({ id: 'access', title: 'Two secrets for the deploy', ...accessCard([...SEVERAL, { name: 'DEPLOY_TOKEN', candidates: [] }]) })]),
+};

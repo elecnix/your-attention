@@ -345,6 +345,8 @@ In the Node form, the module exports `detect`, `lookup` and `release` with these
 
 A reply that isn't valid JSON or gives another version fails that call, and so does a wait of more than 30 seconds. The next call then starts the source again.
 
+A Node module may also export `setup(settings)`, which the inbox calls once with the entry's `settings` before the first call. When the module fails to load, the next call imports it again, so a fix to the module's own file takes effect without a restart. Node keeps the modules it imports for the life of the process, so a fix to a file the module imports needs a restart of `serve`. A stdio source reads the same settings as JSON from the `YOUR_ATTENTION_SOURCE_SETTINGS` variable. The inbox starts a stdio command in the origin's folder. When the first word has a slash, it is a path inside that folder, and `node` is the Node that runs the inbox. Each line the source writes to stderr goes to the inbox's stderr, after the source's name in brackets. `examples/secret-source-stdio` is a stdio source with made-up values.
+
 ### Configuring sources
 
 `~/.your-attention/sources.jsonl` stores one entry per line. Each entry is local to its instance: the inbox never receives its settings.
@@ -354,19 +356,20 @@ A reply that isn't valid JSON or gives another version fails that call, and so d
 {"kind": "secret", "name": "team", "form": "node", "origin": "file:///home/me/your-attention-secret-team", "settings": {"vault": "Team"}}
 ```
 
-The built-in `age` source doesn't need an entry, and turns on when it detects its identity file. Its entry, when present, holds its settings: `{"kind": "secret", "name": "age", "builtin": true, "settings": {"dirs": ["~/.secrets"]}}`.
+The built-in sources answer first, then the entries in the order of the file. An entry that can't load, such as one with an `https:` origin or without a `command` for the stdio form, appears in the list with `status: "error"` and the reason. A command that changes the file reads it first, and while a line doesn't parse it doesn't change the file and names that line, because its rewrite would drop the line. The built-in `age` source doesn't need an entry, and turns on when it detects its identity file. Its entry, when present, holds its settings: `{"kind": "secret", "name": "age", "builtin": true, "settings": {"dirs": ["~/.secrets"]}}`.
 
 ```sh
 your-attention secret source list
 your-attention secret source add file:///home/me/your-attention-secret-dev --name dev [--form stdio --command bin/source]
 your-attention secret source remove dev
 your-attention secret age dir add ~/.secrets
+your-attention secret age dir remove ~/.secrets
 your-attention secret age passphrase ~/.secrets   # reads the folder's passphrase on stdin, and stores it in an envelope
 ```
 
 ### The age source
 
-It reads every `*.age` file of the folders in its `dirs` setting. A candidate's `id` is the file's absolute path, so two folders with a file of the same name give two candidates. Its `label` is the file's name without `.age`, its `store` is the folder, and its type is `file`. A file encrypted to the instance's identity, `~/.your-attention/age/identity.txt`, opens with that identity. A file encrypted with a passphrase opens with the passphrase from the folder's envelope, `~/.your-attention/age/envelopes/<sha256 of the folder path>.age`, which age encrypts to the same identity. So no prompt appears at release, and the source leaves the files in the folder as they are. `src/secrets/age.ts` decrypts both kinds without writing the plaintext to a file.
+It reads every `*.age` file of the folders in its `dirs` setting. A candidate's `id` is the file's absolute path, so two folders with a file of the same name give two candidates. Its `label` is the file's name without `.age`, its `store` is the folder, and its type is `file`. A file encrypted to the instance's identity, `~/.your-attention/age/identity.txt`, opens with that identity. A file encrypted with a passphrase opens with the passphrase from the folder's envelope, `~/.your-attention/age/envelopes/<sha256 of the folder path>.age`, which age encrypts to the same identity. So no prompt appears at release, and the source leaves the files in the folder as they are. `src/secrets/age.ts` decrypts both kinds without writing the plaintext to a file. A release takes only the path of a file in one of its folders. A symlink in a folder counts when its target's real path is inside the folder's real path, and the source neither lists nor releases one whose target is outside, such as an envelope. Age then reads the target that this check found. The source finds a file only by name, so a query with a `host`, or with a type other than `file`, matches none. A name matches without regard to case, and `-`, `.` and `_` count as the same, so `DATABASE_URL` finds `database-url.age`. The value loses one final line break, which `echo` adds and no variable means to hold. `your-attention secret age dir add` makes the identity with `age-keygen` the first time. `your-attention secret age passphrase` tries the passphrase on one file of the folder before it keeps it, so the envelope never stores a typo.
 
 ### Lookup
 
@@ -391,7 +394,9 @@ db_field = FormControl("DATABASE_URL", SecretAccess("DATABASE_URL", "<public key
 
 The inbox reads each `SecretAccess(name, publicKey, candidates)` call as it reads `SecretInput`, with the same 400s, and adds the names to the card's `secrets`. The inbox answers 400 unless the candidates are a JSON list of objects with `id`, `source`, `instance` and `label` each. It also answers 400 for a candidate that none of its lookups of the last hour returned with the same `source`, `instance`, `id` and `label`, so an agent can't label one secret as another. An empty list is valid, and the field then offers only the typed value.
 
-The page shows each candidate with its label, its source and its instance, and the type and host when present. A candidate whose source isn't `ready` shows as unavailable, and the person can't pick it. The person picks one candidate, declines, or types a value instead, which the page seals as the `secret` widget does. For a grant, the person also sets how long it lasts. The idle window is 15 minutes, and each use restarts it. The ceiling defaults to one hour and goes up to 24 hours. Use doesn't push it later. A card with several `secret_access` fields takes a choice for each, so the person can grant one and decline another.
+The page shows each candidate with its label, its source and its instance, and the store, type and host when present. The store tells apart two candidates with one label, such as two age files of one name in two folders. A candidate whose source isn't `ready` shows as unavailable, and the person can't pick it. The person picks one candidate, declines, or types a value instead, which the page seals as the `secret` widget does. For a grant, the person also sets how long it lasts. The idle window is 15 minutes, and each use restarts it. The ceiling defaults to one hour and goes up to 24 hours. Use doesn't push it later. A card with several `secret_access` fields takes a choice for each, so the person can grant one and decline another.
+
+The page draws the field as one radio group per secret: the candidates under a heading for each instance, then **Decline** and **Type a value instead**. The arrow keys move through the group and skip an unavailable candidate. A grant shows a list of ceilings, 30 minutes, 1 hour, 4 hours, 8 hours and 24 hours, and when it would end if sent now. The page counts `until` from the press of **Send answer**. A field the person leaves alone doesn't send a value, and the inbox reads it as declined. Only the **Decline** choice sends `{"decline": true}`. The terminal client draws the same choices from `web/answers.js`, and the left and right keys change its ceiling.
 
 ### Granting
 
