@@ -145,6 +145,19 @@ describe('a secret_access grant in the session', () => {
     assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE });
   });
 
+  it('starts a typed value\'s hour when the person answered, so an answer delivered late gets no fresh hour', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const { publicKey, privateKey } = await newSealKeys();
+    secrets.remember('c19', privateKey);
+    const card = { id: 'c19', agent: 'pi:s1', title: 'Key?', kind: 'question', secrets: ['TYPED'], createdAt: T0 } as unknown as Card;
+    const sealed = await sealValue(publicKey, 'typed-value-not-real');
+    const late = await secrets.receive(card, { values: { TYPED: sealed }, savedAt: T0 - 2 * 60 * MIN } as unknown as Answer);
+    assert.match(late, /TYPED on card c19 ended at 2026-11-27 11:00 UTC/);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+    const recent = await secrets.receive(card, { values: { TYPED: sealed }, savedAt: T0 - 10 * MIN } as unknown as Answer);
+    assert.match(recent, /until 2026-11-27 12:50 UTC/);
+  });
+
   it('delivers a grant whose name is __proto__', () => {
     const grants = new Grants(() => T0);
     grants.hold({ name: '__proto__', agent: 'a', value: 'value-not-real', until: T0 + MIN });
@@ -231,6 +244,15 @@ describe('masking a value in output', () => {
     r.add('LONG', 'xx-secret1-yy');
     r.add('TINY', 'abc');
     assert.equal(r.mask('xx-secret1-yy secret1 abc'), '[secret LONG] [secret SHORT] abc');
+  });
+
+  it('never cuts a character made of two UTF-16 units in half', () => {
+    const r = new Redactor();
+    r.add('K', 'abcd');
+    const s = r.stream();
+    const first = s.push('😀😀');
+    assert.ok(!/[\uD800-\uDBFF]$/.test(first), 'no lone high surrogate at the end of a chunk');
+    assert.equal(first + s.end(), '😀😀');
   });
 
   it('keeps streaming a value that overlaps itself, such as a run of one letter', () => {

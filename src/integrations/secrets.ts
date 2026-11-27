@@ -75,19 +75,22 @@ export class SecretRequests {
         continue;
       }
       const now = this.now();
-      // An answer can reach the session after the ceiling it carries, such as one queued while the session was away.
-      // An expired answer is no decision against the name, so a live grant another card gave for it stays.
-      if (access && access.until <= now) {
+      // A value typed on the card lasts an hour from the person's answer, as a grant with the default ceiling does. A
+      // clock that runs behind the inbox's never makes the hour start later than now.
+      const until = access ? access.until : Math.min(answer.savedAt ?? now, now) + GRANT_DEFAULT_MS;
+      // An answer can reach the session after its ceiling, such as one queued while the session was away. An expired
+      // answer is no decision against the name, so a live grant another card gave for it stays.
+      if (until <= now) {
         this.redactor.add(name, plain);
-        lines.push(`The grant of ${name} on card ${card.id} (case ${access.case}) ended at ${new Date(access.until).toISOString().slice(0, 16).replace('T', ' ')} UTC, before it reached this session, so this session has no ${name}. Ask again if you still need it.`);
+        const which = access ? ` (case ${access.case})` : '';
+        lines.push(`The grant of ${name} on card ${card.id}${which} ended at ${new Date(until).toISOString().slice(0, 16).replace('T', ' ')} UTC, before it reached this session, so this session has no ${name}. Ask again if you still need it.`);
         continue;
       }
       const grant = this.grants.hold({
         name,
         agent: card.agent,
         value: plain,
-        // A value typed on the card lasts an hour, as a grant with the default ceiling does.
-        until: access ? access.until : now + GRANT_DEFAULT_MS,
+        until,
         idleMs: GRANT_IDLE_MS,
         now,
         ...(access ? { caseId: access.case } : {}),

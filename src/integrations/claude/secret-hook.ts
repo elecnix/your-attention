@@ -65,6 +65,12 @@ export async function main(mode: string): Promise<void> {
   if (mode !== 'secret-pre' && mode !== 'secret-post') return;
   let input: HookInput;
   try { input = JSON.parse(fs.readFileSync(0, 'utf8')) as HookInput; } catch { return; }
-  const out = await handle(mode, input);
+  let out: object | undefined;
+  try {
+    out = await handle(mode, input);
+  } catch {
+    // A hook that fails must not let a rewritten command's output through unmasked.
+    out = mode === 'secret-post' ? await post('', input).catch(() => undefined) : undefined;
+  }
   if (out) process.stdout.write(`${JSON.stringify(out)}\n`);
 }

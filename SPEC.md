@@ -430,6 +430,7 @@ Version 1 has no answer for these cases, and no file holds the value for them:
 
 - A program that takes its secret only as a file path, and opens that path again or seeks in it. `ssh -i <(printf %s "$NAME")` works, since ssh reads the path once, through a pipe. A program that seeks can't use a pipe.
 - Output that opencode keeps outside the result it returns. Its `tool.execute.after` hook masks only that result, and opencode doesn't offer a hook on the output as it streams.
+- In Claude Code, after the grants end, a command that prints a value it reads from a file and then fails. The hook rewrites a command only while a grant lives, and Claude Code doesn't let a hook change a failed call's output.
 - A process the harness didn't start for the command. In Claude Code, the tools other than Bash don't get the variables. Nor does an MCP server that started before the grant, or a script that `your-attention watch` runs.
 
 The `secret` widget delivers the same way: its sealed value becomes a grant of one hour, and no integration writes `~/.your-attention/secrets/` any more.

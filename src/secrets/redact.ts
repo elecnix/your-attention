@@ -101,6 +101,9 @@ export class StreamMask {
     let cut = this.buf.length - hold;
     if (cut <= 0) return '';
     cut = this.redactor.safeCut(this.buf, cut);
+    // A character outside the Basic Multilingual Plane takes two UTF-16 units, and a chunk must not end between them.
+    const last = this.buf.charCodeAt(cut - 1);
+    if (cut > 0 && last >= 0xd800 && last <= 0xdbff) cut--;
     const out = this.redactor.mask(this.buf.slice(0, cut));
     this.buf = this.buf.slice(cut);
     return out;
