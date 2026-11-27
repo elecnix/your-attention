@@ -8,14 +8,19 @@ name: deploy-cloudflare
 #   secret    INBOX_ID_SECRET, in hosted mode: the key that signs inbox addresses. Changing it makes every address invalid
 # One dispatch deploys both Workers: the telemetry collector first, then the inbox. The collector
 # (wrangler.telemetry.jsonc) reads no secrets or variables, so it needs nothing extra.
+#
+# Which deployment: the Worker named in wrangler.jsonc, `app`. This repository's own deployment is the hosted
+# service at app.your-attention.workers.dev, which runs in hosted mode. A fork that serves one inbox runs single.
+# The mode has no default: a run that names none, or names one its environment's secrets contradict, fails in the
+# first job, before either Worker uploads. Deploy this repository with `gh workflow run deploy-cloudflare -f mode=hosted`.
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: single serves one inbox; hosted serves many, with invite codes
+        description: "Which deployment: hosted for the hosted service, many inboxes with invite codes; single for a Worker that serves one inbox. Pick one: the run refuses 'choose'."
         type: choice
-        options: [single, hosted]
-        default: single
+        options: [choose, hosted, single]
+        default: choose
       code_update:
         description: deferred gives an object a minute to finish; immediate resets it at once, for a correction that cannot wait
         type: choice
@@ -30,8 +35,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Every other job needs this one, so a run with no mode, or the wrong one, uploads nothing.
+  mode:
+    runs-on: ubuntu-latest
+    environment: cloudflare
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+      - name: check the mode against the environment
+        env:
+          MODE: ${{ inputs.mode }}
+          INBOX_ID_SECRET_SET: ${{ secrets.INBOX_ID_SECRET != '' }}
+        run: scripts/check-deploy-mode.sh
+
   # Inboxes that people run on their own computers post their daily reports here, so it deploys first and its failure stops the inbox deploy.
   deploy-telemetry:
+    needs: mode
     runs-on: ubuntu-latest
     environment: cloudflare
     env:
@@ -70,7 +90,7 @@ jobs:
         run: npx wrangler deploy -c wrangler.telemetry.jsonc
 
   deploy:
-    needs: deploy-telemetry
+    needs: [mode, deploy-telemetry]
     runs-on: ubuntu-latest
     environment: cloudflare
     env:

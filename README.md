@@ -456,7 +456,7 @@ You need a Cloudflare account with R2 turned on once in the dashboard, a workers
    - Single mode needs `OWNER_TOKEN`, your owner token. It is 12 hex digits, a dot, and 64 hex digits: `echo "$(openssl rand -hex 6).$(openssl rand -hex 32)" | gh secret set OWNER_TOKEN --env cloudflare`. Keep a copy: you sign in with it.
    - Hosted mode needs `INBOX_ID_SECRET`, which signs inbox addresses: `openssl rand -hex 32 | gh secret set INBOX_ID_SECRET --env cloudflare`. Changing it later makes every inbox address invalid.
 
-4. Run the `deploy-cloudflare` workflow from the Actions tab, and pick the mode. The Worker is named `app`, so it answers at `https://app.<subdomain>.workers.dev`.
+4. Run the `deploy-cloudflare` workflow from the Actions tab, and pick the mode. The mode has no default, and the run refuses `choose`. It also refuses `single` in an environment that has `INBOX_ID_SECRET`, because a single-mode Worker answers 404 at every hosted inbox address. Both checks run before anything uploads. The Worker is named `app`, so it answers at `https://app.<subdomain>.workers.dev`.
 
    The same run deploys the telemetry Worker first, which takes the anonymous daily counts that people's own inboxes send. It uses the same credentials as the inbox and answers at `https://telemetry.<subdomain>.workers.dev`. Deploy both with:
 
