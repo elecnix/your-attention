@@ -32,7 +32,8 @@ async function answer(r: Request): Promise<Record<string, unknown>> {
         .map(([id, s]) => ({ id, label: s.label, type: s.type, ...(s.host ? { host: s.host } : {}), store: 'example' })),
     };
     case 'release': {
-      const s = SECRETS[r.candidate ?? ''];
+      // An own property only: `__proto__` or `toString` would otherwise read as a secret every object has.
+      const s = r.candidate !== undefined && Object.hasOwn(SECRETS, r.candidate) ? SECRETS[r.candidate] : undefined;
       if (!s) return { error: `the example source has no secret named ${r.candidate}` };
       if (!r.publicKey) return { error: 'release needs a public key' };
       return { sealed: await sealValue(r.publicKey, s.value) };

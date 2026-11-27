@@ -56,8 +56,9 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
     if (alive(running) && !running.killed) {
       running.kill();
       // A source that traps SIGTERM would outlive its handle, and the next call would start a second copy beside it.
+      // This timer keeps the process alive until the source is gone, so a short command such as `secret source list`
+      // can't end first and leave the source running. The exit clears it.
       const force = setTimeout(() => { if (alive(running)) running.kill('SIGKILL'); }, killGraceMs);
-      force.unref();
       running.once('exit', () => clearTimeout(force));
     }
     const error = new Error(`the source ${name} ${reason}`);

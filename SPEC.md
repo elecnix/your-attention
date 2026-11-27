@@ -345,7 +345,7 @@ In the Node form, the module exports `detect`, `lookup` and `release` with these
 
 A reply that isn't valid JSON or gives another version fails that call, and so does a wait of more than 30 seconds. The next call then starts the source again.
 
-A Node module may also export `setup(settings)`, which the inbox calls once with the entry's `settings` before the first call. A stdio source reads the same settings as JSON from the `YOUR_ATTENTION_SOURCE_SETTINGS` variable. The inbox starts a stdio command in the origin's folder. When the first word has a slash, it is a path inside that folder, and `node` is the Node that runs the inbox. Each line the source writes to stderr goes to the inbox's stderr, after the source's name in brackets. `examples/secret-source-stdio` is a stdio source with made-up values.
+A Node module may also export `setup(settings)`, which the inbox calls once with the entry's `settings` before the first call. When the module fails to load, the next call imports it again, so a fix to the module's own file takes effect without a restart. Node keeps the modules it imports for the life of the process, so a fix to a file the module imports needs a restart of `serve`. A stdio source reads the same settings as JSON from the `YOUR_ATTENTION_SOURCE_SETTINGS` variable. The inbox starts a stdio command in the origin's folder. When the first word has a slash, it is a path inside that folder, and `node` is the Node that runs the inbox. Each line the source writes to stderr goes to the inbox's stderr, after the source's name in brackets. `examples/secret-source-stdio` is a stdio source with made-up values.
 
 ### Configuring sources
 

@@ -32,7 +32,8 @@ export function loadNodeSource(origin: string, settings: Record<string, unknown>
   const mod = (): Promise<SourceModule> => {
     ready ??= (async () => {
       // Node keeps a module that threw while it ran, and answers each later import of that address with the same error.
-      // After a failure, a new query makes a new address, so Node reads the fixed file.
+      // After a failure, a new query makes a new address, so Node reads the fixed file. The files it imports keep their
+      // addresses, and Node offers no way to drop them, so a fix there needs a restart of the process.
       const url = pathToFileURL(file);
       if (failures > 0) url.search = `?attempt=${failures}`;
       const m = (await import(url.href)) as SourceModule;

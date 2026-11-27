@@ -12,7 +12,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     case 'V2': process.stdout.write(`${JSON.stringify({ v: 2, id: r.id, candidates: [] })}\n`); return;
     case 'HANG': return;
     // Ignores the polite signal, and hangs: only SIGKILL ends it.
-    case 'STUBBORN': process.on('SIGTERM', () => {}); return;
+    case 'STUBBORN': process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); return;
     case 'CRASH': process.exit(3);
     // Exits at once, and leaves its reply to a helper that shares its stdout and writes a moment later: the exit comes
     // before the reply, and the reply must still count.

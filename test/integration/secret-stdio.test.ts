@@ -37,6 +37,10 @@ describe('a stdio secret source', () => {
     const sealed = await sources.release('example', 'EXAMPLE_API_KEY', keys.publicKey);
     assert.equal(await openSealed(keys.privateKey, sealed), 'ex-not-a-real-key-0000');
     await assert.rejects(sources.release('example', 'NOPE', keys.publicKey), /no secret named NOPE/);
+    // Names every object inherits are not secrets either.
+    for (const inherited of ['__proto__', 'constructor', 'toString']) {
+      await assert.rejects(sources.release('example', inherited, keys.publicKey), new RegExp(`no secret named ${inherited}`));
+    }
     assert.ok(logs.includes('[example] example source started'), logs.join('\n'));
   });
 
@@ -83,6 +87,24 @@ describe('a stdio secret source', () => {
     const deadline = Date.now() + 5000;
     while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
     assert.equal(alive(), false, `the source ${pid} still runs after SIGKILL`);
+  });
+
+  it('kills a source that ignores SIGTERM even when the process that started it has nothing else to do', { skip: process.platform === 'win32' ? 'Windows has no SIGTERM to ignore' : false }, async () => {
+    // A short-lived process such as `your-attention secret source list`: it would end before an unref'd SIGKILL fires.
+    const script = `
+import { stdioSource } from ${JSON.stringify(pathToFileURL(path.resolve('src/secrets/stdio-source.ts')).href)};
+const s = stdioSource({ name: 'fixture', folder: ${JSON.stringify(FIXTURE_DIR)}, command: ['node', 'stdio-source-fixture.ts'], timeoutMs: 1000, killGraceMs: 200, log: () => {} });
+const [who] = await s.lookup({ name: 'WHO' });
+console.log(who.label);
+await s.lookup({ name: 'STUBBORN' }).catch(() => {});
+`;
+    const { execFileSync } = await import('node:child_process');
+    const pid = Number(execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20_000 }).trim());
+    const alive = (): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const deadline = Date.now() + 3000;
+    while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    if (alive()) process.kill(pid, 'SIGKILL');
+    assert.ok(!alive(), `the source ${pid} outlived the process that started it`);
   });
 
   it('fails a call when the source exits, and starts again on the next call', async () => {
