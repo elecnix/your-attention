@@ -568,7 +568,7 @@ The page shows the machine, the command exactly as the card gives it in a code b
 
 The inbox makes an RSA-OAEP key pair, the broker key, the first time it needs one, and keeps it in memory only. A restart makes a new pair. `GET /v1/privileged/key` answers `{publicKey, machine, machines}` to the owner. `machine` is the inbox's own machine, and `machines` lists `{name, sudo}` for it and for each machine of `machines.jsonl`, where `sudo` is `password` or `approval`. An agent or an extension gets 403, and an inbox with no broker answers 404.
 
-When the person sends the answer, the page reads the broker key. It seals `{"command": <the command it showed>, "password": <the typed password>}` as JSON text, with the same sealing as the `secret` widget, and sends the sealed object as the field's value. For a machine that takes an approval, it seals `{"command": <the command>, "password": "", "approve": true}` once the person checks the box. An empty password, or a clear box, sends nothing for the field, and nothing runs. The inbox answers 400 to a password sealed for a machine that takes an approval, rather than send it anywhere.
+When the person sends the answer, the page reads the broker key. It seals `{"command": <the command it showed>, "machine": <the machine it showed>, "password": <the typed password>}` as JSON text, with the same sealing as the `secret` widget, and sends the sealed object as the field's value. For a machine that takes an approval, it seals `{"command": <the command>, "machine": <the machine>, "password": "", "approve": true}` once the person checks the box. An empty password, or a clear box, sends nothing for the field, and nothing runs. The inbox answers 400 to a password sealed for a machine that takes an approval, rather than send it anywhere.
 
 ### The run
 
@@ -576,7 +576,7 @@ The inbox takes these steps for each privileged field, inside the owner's `POST 
 
 1. A value that isn't sealed gets 400, so storage never gets a plain password.
 2. The inbox opens the value with the broker's private key, in memory. A value sealed before a restart doesn't open: the answer is 409, and the person types the password again.
-3. The inbox compares the sealed command with the card's command, character by character. When they differ, the answer is 409 and nothing runs. The message gives the position of the first character that differs, with the text around it in both commands. The inbox checks again after it writes the answer's images, against the card as it is then.
+3. The inbox compares the sealed command with the card's command, character by character. When they differ, the answer is 409 and nothing runs. The message gives the position of the first character that differs, with the text around it in both commands. The inbox checks again after it writes the answer's images, against the card as it is then. The inbox also compares the sealed machine with the card's, so a revision that moves the card to another machine gets 409 rather than carrying the password there.
 4. The answer is 409 when the agent closed the card, or when this field already ran or is running. A command runs once, and a new run needs a new card. Of two answers sent at the same moment, one runs the command and the other gets 409.
 5. On its own machine, the inbox starts the command with the shell of its machine, as the user that runs the inbox. On another machine, it opens an `ssh` connection, as [Another machine](#another-machine) describes. It writes the password and a newline to the standard input of the process it starts, then closes it. On another machine, it writes them only after the far side has printed its mark. The password never goes in an environment variable, an argument list, a file or a log. A run that takes more than 2 minutes is stopped.
 6. In what the command printed, the inbox replaces each occurrence of the password with `[password]`, and keeps the last 64 KB.
@@ -599,9 +599,9 @@ Each run adds one entry to the audit, in the inbox's storage: `{id, card, field,
 ```
 
 - `name` is the machine a card names.
-- `host` is the `ssh` destination, `name` by default, and `port` its port.
+- `host` is the `ssh` destination, `name` by default, and `port` its port, which the broker passes as `-p`.
 - `user` is the account `ssh` logs in as, which the sudoers rule names.
-- `hostname` is the short name `uname -n` prints on that machine, `name` by default.
+- `hostname` is the short name `uname -n` prints on that machine, up to its first dot. It defaults to `name` up to its first dot. `serve` refuses a line whose `hostname` is the inbox's own short name.
 - `sudo` is `password` for a machine whose `sudo` asks for the person's password, or `approval` for one whose sudoers rule needs none.
 - `allow` lists each command a person may approve there, as a card shows it. Each one starts with an absolute path made of letters, digits and `. _ / + -`, since sudoers reads a path as a pattern.
 
@@ -661,7 +661,7 @@ Cmnd_Alias YOUR_ATTENTION_WEB1 = /usr/bin/systemctl restart nginx
 deploy ALL=(root) YOUR_ATTENTION_WEB1
 ```
 
-An `approval` machine's rule reads `NOPASSWD: YOUR_ATTENTION_NAS`. The rule escapes each character that sudoers reads as syntax or as a wildcard. `sudo` compares the arguments as one string joined by spaces, so the broker compares words and is the stricter of the two. A command whose argument is empty, or holds whitespace other than single spaces, has no exact rule, and `serve` refuses it in `allow`.
+An `approval` machine's rule reads `NOPASSWD: YOUR_ATTENTION_NAS`. The rule escapes each character that sudoers reads as syntax or as a wildcard. `sudo` compares the arguments as one string joined by spaces, so `'a b'` and `a b` would match the same rule. So `serve` refuses an `allow` entry with an empty argument or an argument that contains whitespace, since sudoers can't list either exactly.
 
 The `ssh` key the broker uses is the inbox user's, which an agent running as that user can also read. On a `password` machine, that key opens the far account, and `sudo` still asks for the password. On an `approval` machine, an agent that uses the key can run the allowed commands without a card. Give an `approval` machine a key that the agent's user can't read, or keep its allowed commands harmless.
 

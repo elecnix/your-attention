@@ -10,14 +10,17 @@ import { MAX_OUTPUT_CHARS, NO_AUDIT_EXIT, readMachine, remoteCommand, RUN_TIMEOU
 /** Start `file` with `args`, or a shell line when `args` is undefined, write `input` to its standard input and close it,
  * and gather what it prints until it ends or the time limit stops it. With `after`, the input waits until the process
  * printed that text, and a process that ends before it gets no input at all. */
-function runProcess(file: string, args: string[] | undefined, input: string, timeoutMs: number, after?: string): Promise<RunResult> {
-  return new Promise<RunResult>((resolve) => {
+function runProcess(file: string, args: string[] | undefined, input: string, timeoutMs: number, after?: string): Promise<RunResult & { sawAfter: boolean }> {
+  return new Promise((resolve) => {
+    // Whether `after` appeared, kept apart from the output, whose start a talkative process pushes out.
+    let sawAfter = false;
     let output = '';
     let ended: string | undefined;
     let waiting = after !== undefined && input !== '';
     const add = (chunk: Buffer) => {
       output = (output + chunk.toString('utf8')).slice(-MAX_OUTPUT_CHARS * 2);
-      if (waiting && output.includes(after!)) { waiting = false; child.stdin.end(input); }
+      if (after !== undefined && !sawAfter && output.includes(after)) sawAfter = true;
+      if (waiting && sawAfter) { waiting = false; child.stdin.end(input); }
     };
     const child = args === undefined
       ? spawn(file, { shell: true, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
@@ -27,11 +30,11 @@ function runProcess(file: string, args: string[] | undefined, input: string, tim
     child.stderr.on('data', add);
     // A command that exits without reading its input closes the pipe first, and the write then fails: that is no error.
     child.stdin.on('error', () => {});
-    child.on('error', (e) => { clearTimeout(timer); resolve({ exitCode: null, output, ended: `the command did not start: ${e.message}` }); });
+    child.on('error', (e) => { clearTimeout(timer); resolve({ exitCode: null, output, ended: `the command did not start: ${e.message}`, sawAfter }); });
     child.on('close', (code) => {
       clearTimeout(timer);
       waiting = false;
-      resolve({ exitCode: code, output, ...(ended ? { ended } : {}) });
+      resolve({ exitCode: code, output, ...(ended ? { ended } : {}), sawAfter });
     });
     if (!waiting) child.stdin.end(after === undefined ? input : '');
   });
@@ -40,7 +43,7 @@ function runProcess(file: string, args: string[] | undefined, input: string, tim
 export function localRunner(machine: string, opts: { timeoutMs?: number } = {}): PrivilegedRunner {
   const timeoutMs = opts.timeoutMs ?? RUN_TIMEOUT_MS;
   // The shell of this platform reads the command, as the card shows it. Its environment is the inbox's own.
-  return { machine, run: (command, password) => runProcess(command, undefined, `${password}\n`, timeoutMs) };
+  return { machine, run: async (command, password) => { const { sawAfter: _, ...result } = await runProcess(command, undefined, `${password}\n`, timeoutMs); return result; } };
 }
 
 /** The exit code ssh gives for its own failures, such as a refused or dropped connection. */
@@ -88,8 +91,7 @@ export function sshRunner(machine: RemoteMachine, opts: { ssh?: string; timeoutM
       if (refused) return { exitCode: null, output: '', ended: `nothing ran, because ${refused}` };
       // The password waits until the far side printed its mark: it proved its name and logged the audit line first, so a
       // host that turns out to be another machine never receives it.
-      const result = await runProcess(ssh, sshArgs(machine, remoteCommand(machine, command, ctx)), machine.sudo === 'password' ? `${password}\n` : '', timeoutMs, startedMark(machine.name, ctx.audit));
-      const started = result.output.includes(startedMark(machine.name, ctx.audit));
+      const { sawAfter: started, ...result } = await runProcess(ssh, sshArgs(machine, remoteCommand(machine, command, ctx)), machine.sudo === 'password' ? `${password}\n` : '', timeoutMs, startedMark(machine.name, ctx.audit));
       if (result.ended || started) {
         if (result.exitCode === SSH_FAILED && !result.ended) return { ...result, exitCode: null, ended: `the connection to ${machine.name} ended after sudo started, so the command may have run in part: ${lastLine(result.output)}. The system log of ${machine.name} holds audit ${ctx.audit}` };
         return result;
@@ -119,7 +121,8 @@ export function loadMachines(home: string, local: string): { machines: RemoteMac
     try { parsed = JSON.parse(raw); } catch { problems.push(`line ${i + 1} of ${MACHINES_FILE} is not JSON`); continue; }
     const m = readMachine(parsed);
     if (typeof m === 'string') { problems.push(`line ${i + 1} of ${MACHINES_FILE}: ${m}`); continue; }
-    if (m.name === local) { problems.push(`line ${i + 1} of ${MACHINES_FILE}: ${m.name} is this inbox's own machine, which runs its commands without ssh`); continue; }
+    const short = local.split('.')[0];
+    if (m.name === local || m.hostname === short) { problems.push(`line ${i + 1} of ${MACHINES_FILE}: ${m.name === local ? m.name : `the hostname ${m.hostname}`} is this inbox's own machine, which runs its commands without ssh`); continue; }
     if (machines.some((x) => x.name === m.name)) { problems.push(`line ${i + 1} of ${MACHINES_FILE}: ${m.name} is already on an earlier line`); continue; }
     machines.push(m);
   }

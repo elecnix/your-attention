@@ -26,11 +26,13 @@ let savedDir: string | undefined;
 const marker = (name: string) => path.join(dir, `marker-${name}`);
 const touch = (name: string) => `/usr/bin/touch ${marker(name)}`;
 /** Quotes, spaces and a dollar sign, which a careless quoting through ssh would change or expand. */
-const QUOTED = `/usr/bin/printf '%s|' "it's here" 'costs $5 or $HOME' "a \\"b\\""`;
+const QUOTED = `/usr/bin/printf '%s|' "it's" 'cost:$5' '$HOME' "a\\"b"`;
+/** A command that prints far more than the inbox keeps, so the far side's mark leaves the kept output. */
+const TALKATIVE = '/usr/bin/seq 1 60000';
 
 const machine = (name: string, sudo: 'password' | 'approval', allow: string[]): RemoteMachine => ({ name, host: `${name}.test`, user: 'deploy', hostname: name.replace(/-/g, ''), sudo, allow });
 const MACHINES: RemoteMachine[] = [
-  machine('far-pw', 'password', [QUOTED, touch('pw')]),
+  machine('far-pw', 'password', [QUOTED, touch('pw'), TALKATIVE]),
   machine('far-ok', 'approval', [touch('ok')]),
   machine('far-down', 'password', [touch('down')]),
   machine('far-wrong', 'password', [touch('wrong')]),
@@ -56,7 +58,7 @@ const lines = (file: string): string[] => { try { return fs.readFileSync(path.jo
 const agentCtx = (agent: string) => ({ inbox: new Client({ url: h.server.url, token: h.agentToken }), secrets: new SecretRequests(), agent, origin: async () => undefined, arrival: 'later' });
 
 /** Post a card for one command on one machine, answer it as the owner, and give the run the answer stored. */
-async function approve(id: string, command: string, on: string, plain: Record<string, unknown> = { command, password: PASSWORD }): Promise<PrivilegedRun> {
+async function approve(id: string, command: string, on: string, plain: Record<string, unknown> = { command, machine: on, password: PASSWORD }): Promise<PrivilegedRun> {
   assert.match(await runTool(agentCtx(`agent-${id}`), 'card_post', { id, title: `Run on ${on}?`, body: placement('run_it', command, on) }), new RegExp(`Posted card ${id}`));
   const res = await h.owner('POST', `/v1/cards/${id}/answer`, { values: { run_it: await sealAsPage(plain) } });
   assert.equal(res.status, 200, await res.clone().text());
@@ -92,8 +94,8 @@ describe('a privileged action on another machine', { skip: process.platform === 
 
     // The command's words reached sudo on the far side as the card shows them: quotes, spaces and $ unchanged.
     const sudo = lines('far-argv.jsonl').map((l) => JSON.parse(l) as string[]).filter((a) => a[0] === 'sudo').pop()!;
-    assert.deepEqual(sudo, ['sudo', '-k', '-S', '-p', '', '--', '/usr/bin/printf', '%s|', "it's here", 'costs $5 or $HOME', 'a "b"']);
-    assert.match(run.output, /it's here\|costs \$5 or \$HOME\|a "b"\|/);
+    assert.deepEqual(sudo, ['sudo', '-k', '-S', '-p', '', '--', '/usr/bin/printf', '%s|', "it's", 'cost:$5', '$HOME', 'a"b']);
+    assert.match(run.output, /it's\|cost:\$5\|\$HOME\|a"b\|/);
 
     // The audit line is in the far machine's system log, before sudo's own line, with the audit id the answer carries.
     const syslog = lines('syslog');
@@ -119,8 +121,15 @@ describe('a privileged action on another machine', { skip: process.platform === 
     listener.stop();
   });
 
+  it('reports a run that printed more than the inbox keeps as one that ran', async () => {
+    const run = await approve('r1b', TALKATIVE, 'far-pw');
+    assert.equal(run.exitCode, 0, run.ended);
+    assert.equal(run.ended, undefined);
+    assert.match(run.output, /\n60000\n$/);
+  });
+
   it('runs on a machine that takes an approval, and sends that machine no password', async () => {
-    const run = await approve('r2', touch('ok'), 'far-ok', { command: touch('ok'), password: '', approve: true });
+    const run = await approve('r2', touch('ok'), 'far-ok', { command: touch('ok'), machine: 'far-ok', password: '', approve: true });
     assert.equal(run.exitCode, 0, run.ended ?? run.output);
     assert.ok(fs.existsSync(marker('ok')));
     const sudo = lines('far-argv.jsonl').map((l) => JSON.parse(l) as string[]).filter((a) => a[0] === 'sudo').pop()!;
@@ -128,7 +137,7 @@ describe('a privileged action on another machine', { skip: process.platform === 
 
     // A password sealed for that machine is refused rather than sent anywhere.
     await runTool(agentCtx('agent-r2b'), 'card_post', { id: 'r2b', title: 'Run on far-ok?', body: placement('run_it', touch('ok'), 'far-ok') });
-    const res = await h.owner('POST', '/v1/cards/r2b/answer', { values: { run_it: await sealAsPage({ command: touch('ok'), password: PASSWORD }) } });
+    const res = await h.owner('POST', '/v1/cards/r2b/answer', { values: { run_it: await sealAsPage({ command: touch('ok'), machine: 'far-ok', password: PASSWORD }) } });
     assert.equal(res.status, 400);
     assert.match((await res.json() as { error: string }).error, /far-ok takes an approval, not a password/);
   });

@@ -14,7 +14,7 @@ import { MemoryStorage } from '../../src/core/storage.ts';
 import { loadMachines, sshArgs } from '../../src/node/privileged.ts';
 
 const PASSWORD = 'FIXTURE-PASSWORD-DO-NOT-USE';
-const WEB1: RemoteMachine = { name: 'web1', host: 'web1.lan', user: 'deploy', hostname: 'web1', sudo: 'password', allow: ['/usr/bin/systemctl restart nginx', `/usr/bin/printf '%s|' "it's here" 'costs $5'`] };
+const WEB1: RemoteMachine = { name: 'web1', host: 'web1.lan', user: 'deploy', hostname: 'web1', sudo: 'password', allow: ['/usr/bin/systemctl restart nginx', `/usr/bin/printf '%s|' "it's" 'cost:$5'`] };
 /** The far side's shell is POSIX sh, which Windows lacks, so the tests that compare with it skip there. */
 const NEEDS_SH = { skip: process.platform === 'win32' ? 'compares with /bin/sh' : false };
 const rejects = (status: number, message: RegExp) => (e: unknown) => e instanceof InboxError && e.status === status && message.test(e.message);
@@ -60,7 +60,7 @@ describe('the line the far side runs', () => {
     assert.ok(!line.includes(PASSWORD));
     assert.match(line, /^h=\$\(uname -n\); h=\$\{h%%\.\*\}; if \[ "\$h" != 'web1' \]/);
     assert.match(line, /logger -t your-attention -p authpriv\.notice -- /);
-    assert.ok(line.endsWith(`exec sudo -k -S -p '' -- '/usr/bin/printf' '%s|' 'it'\\''s here' 'costs $5'`), line);
+    assert.ok(line.endsWith(`exec sudo -k -S -p '' -- '/usr/bin/printf' '%s|' 'it'\\''s' 'cost:$5'`), line);
     assert.ok(remoteCommand({ ...WEB1, sudo: 'approval' }, WEB1.allow[0]!, ctx).endsWith(`exec sudo -k -n -- '/usr/bin/systemctl' 'restart' 'nginx'`));
     // The audit line is one line, whatever the token name holds.
     assert.equal(auditLine('web1', 'x', ctx), "audit a1b2: page on Nico's laptop forged line approved card c1 field restart to run on web1: x");
@@ -79,7 +79,11 @@ describe('the machines of machines.jsonl', () => {
     assert.match(String(readMachine({ name: 'x', host: '-oProxyCommand=evil', user: 'u', sudo: 'password', allow: ['/bin/true'] })), /host must be an ssh host that doesn't start with -/);
     assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'maybe', allow: ['/bin/true'] })), /sudo must be "password"/);
     assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: ['systemctl restart nginx'] })), /not an absolute path/);
-    assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: [`/bin/echo 'a  b'`] })), /whitespace other than single spaces/);
+    // sudoers joins the arguments with spaces, so 'a b' and a b would match the same rule.
+    assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: [`/bin/echo 'a b'`] })), /holds whitespace, which a sudoers rule cannot tell apart from separate arguments/);
+    // The far side compares uname -n up to its first dot, so a dotted hostname could never match.
+    assert.match(String(readMachine({ name: 'x', hostname: 'web1.lan', user: 'u', sudo: 'password', allow: ['/bin/true'] })), /hostname must be the short name uname -n prints on that machine, up to its first dot/);
+    assert.equal((readMachine({ name: 'web1.lan', user: 'u', sudo: 'password', allow: ['/bin/true'] }) as RemoteMachine).hostname, 'web1');
     assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: ['/bin/ls | /bin/sh'] })), /shell syntax/);
     // A path is matched by sudoers as a pattern, so it holds only the characters of a plain path.
     assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: ["'/usr/bin/systemc*' restart nginx"] })), /the path "\/usr\/bin\/systemc\*" holds a character other than letters, digits/);
@@ -88,20 +92,21 @@ describe('the machines of machines.jsonl', () => {
   it('refuses a machine named as this inbox, and a name given twice', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-machines-'));
     const line = (name: string) => JSON.stringify({ name, user: 'u', sudo: 'password', allow: ['/bin/true'] });
-    fs.writeFileSync(path.join(home, 'machines.jsonl'), [line('laptop'), line('web1'), line('web1'), 'not json', ''].join('\n'));
+    fs.writeFileSync(path.join(home, 'machines.jsonl'), [line('laptop'), line('web1'), line('web1'), 'not json', JSON.stringify({ name: 'alias', hostname: 'laptop', user: 'u', sudo: 'password', allow: ['/bin/true'] }), ''].join('\n'));
     const { machines, problems } = loadMachines(home, 'laptop');
     assert.deepEqual(machines.map((m) => m.name), ['web1']);
     assert.deepEqual(problems, [
       "line 1 of machines.jsonl: laptop is this inbox's own machine, which runs its commands without ssh",
       'line 3 of machines.jsonl: web1 is already on an earlier line',
       'line 4 of machines.jsonl is not JSON',
+      "line 5 of machines.jsonl: the hostname laptop is this inbox's own machine, which runs its commands without ssh",
     ]);
     fs.rmSync(home, { recursive: true, force: true });
   });
 
   it('covers only the exact words of an allowed command', () => {
     assert.equal(uncovered(WEB1, '/usr/bin/systemctl  restart   nginx'), undefined, 'the same words, spaced differently');
-    assert.equal(uncovered(WEB1, `/usr/bin/printf %s\\| "it's here" costs\\ \\$5`), undefined, 'the same words, quoted differently');
+    assert.equal(uncovered(WEB1, `/usr/bin/printf %s\\| "it's" cost:\\$5`), undefined, 'the same words, quoted differently');
     assert.match(uncovered(WEB1, '/usr/bin/systemctl restart nginx.service') ?? '', /the sudoers rule of web1 doesn't cover it/);
     assert.match(uncovered(WEB1, '/usr/bin/systemctl restart nginx; /bin/sh') ?? '', /shell syntax/);
   });
@@ -111,7 +116,7 @@ describe('the machines of machines.jsonl', () => {
       '# The commands a person may approve on web1 from a your-attention card. The broker refuses any other.',
       '# Install on web1 with: sudo visudo -f /etc/sudoers.d/your-attention',
       'Cmnd_Alias YOUR_ATTENTION_WEB1 = /usr/bin/systemctl restart nginx, \\',
-      "    /usr/bin/printf %s| it's here costs $5",
+      "    /usr/bin/printf %s| it's cost\\:$5",
       'deploy ALL=(root) YOUR_ATTENTION_WEB1',
       '',
     ].join('\n'));
@@ -140,10 +145,10 @@ describe('the inbox with several machines', () => {
 
     const cmd = '/usr/bin/systemctl restart nginx';
     inbox.postCard(agent, { id: 'w', agent: 's', title: 'Run?', body: body(cmd, 'web1') });
-    await inbox.answer('w', { values: { run_it: await sealValue(key.publicKey, JSON.stringify({ command: cmd, password: PASSWORD })) }, by: owner });
+    await inbox.answer('w', { values: { run_it: await sealValue(key.publicKey, JSON.stringify({ command: cmd, machine: 'web1', password: PASSWORD })) }, by: owner });
     inbox.postCard(agent, { id: 'n', agent: 's', title: 'Run?', body: body(cmd, 'nas') });
-    await assert.rejects(inbox.answer('n', { values: { run_it: await sealValue(key.publicKey, JSON.stringify({ command: cmd, password: PASSWORD })) }, by: owner }), rejects(400, /nas takes an approval, not a password/));
-    await inbox.answer('n', { values: { run_it: await sealValue(key.publicKey, JSON.stringify({ command: cmd, password: '', approve: true })) }, by: owner });
+    await assert.rejects(inbox.answer('n', { values: { run_it: await sealValue(key.publicKey, JSON.stringify({ command: cmd, machine: 'nas', password: PASSWORD })) }, by: owner }), rejects(400, /nas takes an approval, not a password/));
+    await inbox.answer('n', { values: { run_it: await sealValue(key.publicKey, JSON.stringify({ command: cmd, machine: 'nas', password: '', approve: true })) }, by: owner });
     assert.deepEqual(calls, [`web1: ${cmd} with a password`, `nas: ${cmd} with none`]);
   });
 

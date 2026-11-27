@@ -65,10 +65,11 @@ export interface BrokerKey {
   machines: { name: string; sudo: SudoMode }[];
 }
 
-/** The plain text the page seals: the command it showed, and the password typed for it. On a machine that takes an
- * approval, the password is empty and `approve` is true. */
+/** The plain text the page seals: the command and the machine it showed, and the password typed for it. On a machine
+ * that takes an approval, the password is empty and `approve` is true. */
 export interface PrivilegedSeal {
   command: string;
+  machine: string;
   password: string;
   approve?: boolean;
 }
@@ -105,14 +106,20 @@ export function commandDifference(card: string, approved: string): string | unde
   return `the approved command differs from the card's at character ${i + 1}: the card has ${shown(card[i])} and the approval has ${shown(approved[i])}, in ${around(card)} and ${around(approved)}`;
 }
 
+/** Why the machine the person approved differs from the card's, or undefined when they are the same. A revision that
+ * moves the card to another machine after the page drew it must not carry the password there. */
+export function machineDifference(card: string, approved: string): string | undefined {
+  return card === approved ? undefined : `the card now names the machine ${JSON.stringify(card)}, and the person approved the command on ${JSON.stringify(approved)}`;
+}
+
 /** Read what the page sealed. Undefined when it is not a command and a password as text. */
 export function readSeal(plain: string): PrivilegedSeal | undefined {
   let v: unknown;
   try { v = JSON.parse(plain); } catch { return undefined; }
   if (!v || typeof v !== 'object') return undefined;
   const r = v as Record<string, unknown>;
-  if (typeof r['command'] !== 'string' || typeof r['password'] !== 'string') return undefined;
-  return { command: r['command'], password: r['password'], ...(r['approve'] === true ? { approve: true } : {}) };
+  if (typeof r['command'] !== 'string' || typeof r['machine'] !== 'string' || typeof r['password'] !== 'string') return undefined;
+  return { command: r['command'], machine: r['machine'], password: r['password'], ...(r['approve'] === true ? { approve: true } : {}) };
 }
 
 /** A runner that runs nothing and answers the command it would run, for tests and for a dry run. */
@@ -211,17 +218,20 @@ export function shellQuote(word: string): string {
 }
 
 const MACHINE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** A short host name, as the far side compares it: `uname -n` up to its first dot. */
+const SHORT_HOSTNAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const HOST = /^[A-Za-z0-9_][A-Za-z0-9._:-]{0,252}$/;
 const USER = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
 
 /** Why sudoers cannot list this command exactly, or undefined when it can. sudo compares the arguments as one string
- * joined by spaces, so an empty argument, or one with other whitespace, has no exact rule. */
+ * joined by spaces, so an empty argument, or one that holds whitespace, has no exact rule: `'a b'` and `a b` would match
+ * the same line. */
 function sudoersGap(words: string[]): string | undefined {
   if (!words[0]!.startsWith('/')) return `${JSON.stringify(words[0])} is not an absolute path, which sudoers needs and which keeps PATH on either machine out of it`;
   // sudoers matches the path as a pattern, so a * or a [ there would allow more commands than this one.
   if (!/^[A-Za-z0-9._/+-]+$/.test(words[0]!)) return `the path ${JSON.stringify(words[0])} holds a character other than letters, digits and . _ / + -, which sudoers would read as a pattern or as syntax`;
-  const bad = words.slice(1).find((w) => w === '' || /[^\S ]|^ | $| {2}/.test(w));
-  return bad === undefined ? undefined : `the argument ${JSON.stringify(bad)} is empty or holds whitespace other than single spaces, which a sudoers rule cannot list exactly`;
+  const bad = words.slice(1).find((w) => w === '' || /\s/.test(w));
+  return bad === undefined ? undefined : `the argument ${JSON.stringify(bad)} is empty or holds whitespace, which a sudoers rule cannot tell apart from separate arguments`;
 }
 
 /** A machine from one parsed line of machines.jsonl, or the sentence that says why the line is not one. */
@@ -236,8 +246,8 @@ export function readMachine(v: unknown): RemoteMachine | string {
   if (typeof user !== 'string' || !USER.test(user)) return `${name}: user must name the account ssh logs in as`;
   const port = r['port'];
   if (port !== undefined && (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535)) return `${name}: port must be a whole number from 1 to 65535`;
-  const hostname = r['hostname'] ?? name;
-  if (typeof hostname !== 'string' || !MACHINE_NAME.test(hostname)) return `${name}: hostname must be the short name uname -n prints on that machine`;
+  const hostname = r['hostname'] ?? name.split('.')[0];
+  if (typeof hostname !== 'string' || !SHORT_HOSTNAME.test(hostname)) return `${name}: hostname must be the short name uname -n prints on that machine, up to its first dot`;
   const sudo = r['sudo'];
   if (sudo !== 'password' && sudo !== 'approval') return `${name}: sudo must be "password", for a machine whose sudo asks for one, or "approval", for one whose sudoers rule needs none`;
   const allow = r['allow'];

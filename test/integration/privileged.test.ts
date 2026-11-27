@@ -42,7 +42,7 @@ const placement = (name: string, command: string) => `root = Card([run])\nrun = 
 async function sealAsPage(command: string): Promise<unknown> {
   const key = await (await h.owner('GET', '/v1/privileged/key')).json() as { publicKey: JsonWebKey; machine: string };
   assert.equal(key.machine, MACHINE);
-  return seal(key.publicKey, JSON.stringify({ command, password: PASSWORD }));
+  return seal(key.publicKey, JSON.stringify({ command, machine: MACHINE, password: PASSWORD }));
 }
 
 describe('a privileged action on the laptop server', () => {

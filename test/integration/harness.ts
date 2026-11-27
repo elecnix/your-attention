@@ -173,6 +173,11 @@ export async function serveForTest(prefix = 'ya-cli-', setup?: (env: NodeJS.Proc
   };
 }
 
+/** A file's bytes, or undefined when it went between the listing and the read, as a SQLite journal does. */
+function readIfThere(p: string): Buffer | undefined {
+  try { return fs.readFileSync(p); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw e; }
+}
+
 /** Every file under `dir` whose bytes hold `needle`, such as a fixture password that must never reach the disk. */
 export function filesHolding(dir: string, needle: string): string[] {
   const hits: string[] = [];
@@ -180,7 +185,7 @@ export function filesHolding(dir: string, needle: string): string[] {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
-      else if (e.isFile() && fs.readFileSync(p).includes(needle)) hits.push(p);
+      else if (e.isFile() && readIfThere(p)?.includes(needle)) hits.push(p);
     }
   };
   walk(dir);

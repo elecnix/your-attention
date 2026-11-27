@@ -8,7 +8,7 @@ import { readShortCode, shortCode } from './sign-in.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, waitText, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
 import { isSealed, newSealKeys, openSealed, privilegedActions, sealedFields, secretAccesses, secretInputs, withoutSealed, type PrivilegedField } from './sealed.ts';
-import { commandDifference, maskPassword, MAX_COMMAND_CHARS, MAX_OUTPUT_CHARS, readSeal, type AuditEntry, type BrokerKey, type PrivilegedRun, type PrivilegedRunner } from './privileged.ts';
+import { commandDifference, machineDifference, maskPassword, MAX_COMMAND_CHARS, MAX_OUTPUT_CHARS, readSeal, type AuditEntry, type BrokerKey, type PrivilegedRun, type PrivilegedRunner } from './privileged.ts';
 import { GRANT_MAX_MS, type AccessGrant, type SecretQuery, type SecretSources, type SourceInfo, type Candidate } from './secret-sources.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
@@ -2497,11 +2497,11 @@ export class Inbox {
 
   /** Open each password the answer carries for a privileged action, and check its command against the card's. It
    * changes `values` so the answer stores no field of a privileged action until the command ran. */
-  private async openPrivileged(card: Card, values: Record<string, unknown>, images: { field?: string }[] | undefined): Promise<{ field: string; command: string; password: string }[]> {
+  private async openPrivileged(card: Card, values: Record<string, unknown>, images: { field?: string }[] | undefined): Promise<{ field: string; command: string; machine: string; password: string }[]> {
     const names = card.privileged ?? [];
     if (!names.length) return [];
     const fields = new Map(privilegedActions(String(card.body ?? '')).map((f) => [f.name, f]));
-    const out: { field: string; command: string; password: string }[] = [];
+    const out: { field: string; command: string; machine: string; password: string }[] = [];
     for (const field of names) {
       const v = Object.hasOwn(values, field) ? values[field] : undefined;
       delete values[field];
@@ -2524,19 +2524,21 @@ export class Inbox {
       const shown = fields.get(field)?.command ?? '';
       const differs = commandDifference(shown, seal.command);
       if (differs) throw new InboxError(409, `${field}: nothing ran, because ${differs}`);
-      out.push({ field, command: seal.command, password: seal.password });
+      const elsewhere = machineDifference(fields.get(field)?.machine ?? '', seal.machine);
+      if (elsewhere) throw new InboxError(409, `${field}: nothing ran, because ${elsewhere}`);
+      out.push({ field, command: seal.command, machine: seal.machine, password: seal.password });
     }
     return out;
   }
 
   /** Run each approved command on the card as it is now, and put only what it printed in `values`, with the password
    * masked. Each run adds a line to the audit. */
-  private async runPrivileged(card: Card, before: Answer | undefined, runs: { field: string; command: string; password: string }[], values: Record<string, unknown>, late: LateAnswer | undefined, by: Caller | undefined): Promise<void> {
+  private async runPrivileged(card: Card, before: Answer | undefined, runs: { field: string; command: string; machine: string; password: string }[], values: Record<string, unknown>, late: LateAnswer | undefined, by: Caller | undefined): Promise<void> {
     if (late) throw new InboxError(409, `nothing ran: the agent closed this card, so its commands are no longer asked for`);
     const fields = new Map(privilegedActions(String(card.body ?? '')).map((f) => [f.name, f]));
     for (const r of runs) {
       // The card may have changed while the answer's files were written.
-      const differs = commandDifference(fields.get(r.field)?.command ?? '', r.command);
+      const differs = commandDifference(fields.get(r.field)?.command ?? '', r.command) ?? machineDifference(fields.get(r.field)?.machine ?? '', r.machine);
       if (differs) throw new InboxError(409, `${r.field}: nothing ran, because ${differs}`);
       if ([before, ...(before?.previous ?? [])].some((a) => isRun(a?.values?.[r.field]))) throw new InboxError(409, `${r.field}: this command already ran once. Ask the agent for a new card to run it again`);
     }

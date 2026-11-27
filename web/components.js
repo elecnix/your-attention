@@ -509,6 +509,11 @@ function rememberTyped(card, name, entry) {
 /** How each machine the broker serves takes a privileged action, "password" or "approval", as the inbox last said. */
 const machineSudo = new Map();
 
+/** Remember how machines take a privileged action without asking the inbox, as a story does for its stand-in inbox. */
+export function rememberMachines(machines) {
+  for (const m of machines) machineSudo.set(m.name, m.sudo === 'approval' ? 'approval' : 'password');
+}
+
 /** Ask the inbox how its machines take a privileged action, and remember the answer. It throws with the reason when
  * the inbox doesn't say. */
 async function readMachineSudo() {
@@ -543,10 +548,10 @@ function PrivilegedAction({ props }) {
   const mode = machineSudo.get(machine);
   const approval = mode === 'approval';
   // A revision of the card may change the command: a password typed before it seals with the command shown now.
-  React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.privileged = { ...typed.privileged, command }; }, [card, name, command]);
+  React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.privileged = { ...typed.privileged, command, machine }; }, [card, name, command, machine]);
   const failure = sealFailures.get(card)?.get(name);
   const canSeal = !!(window.isSecureContext && crypto.subtle);
-  const change = (next) => { setValue(next); rememberTyped(card, name, next && { privileged: { command, ...(approval ? { approve: true } : {}) }, value: next }); };
+  const change = (next) => { setValue(next); rememberTyped(card, name, next && { privileged: { command, machine, ...(approval ? { approve: true } : {}) }, value: next }); };
   const control = !canSeal
     ? h('div', { className: 'note warn' }, `This page cannot seal ${approval ? 'an approval' : 'a password'} over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.`)
     : mode === undefined
@@ -618,7 +623,7 @@ export async function sealSecrets(card, names) {
   const toSeal = new Map();
   const privileged = new Map();
   for (const [name, f] of typed) {
-    if (f.privileged) { privileged.set(name, JSON.stringify(f.privileged.approve ? { command: f.privileged.command, password: '', approve: true } : { command: f.privileged.command, password: f.value })); continue; }
+    if (f.privileged) { privileged.set(name, JSON.stringify(f.privileged.approve ? { command: f.privileged.command, machine: f.privileged.machine, password: '', approve: true } : { command: f.privileged.command, machine: f.privileged.machine, password: f.value })); continue; }
     if (!f.access) { toSeal.set(name, f.value); continue; }
     if (f.access.pick === 'type') { if (f.access.value) toSeal.set(name, f.access.value); continue; }
     const v = accessValue(f.access, f.candidates, now);
