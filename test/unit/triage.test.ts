@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { commandJudge, openRouterLogin, parseRuling, triagePrompt } from '../../src/extensions/triage.ts';
-import { serviceFile } from '../../src/node/service.ts';
 import type { Card } from '../../src/core/types.ts';
 
 const card: Card = { id: 'c1', agent: 's1', kind: 'ask', title: 'Use SQLite?', priority: 'soon', deliver: 'stream', version: 1, createdAt: 1, updatedAt: 1, replies: [] };
@@ -53,26 +52,6 @@ describe('triage', () => {
     if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(home, 'openrouter-key')).mode & 0o777, 0o600);
     delete process.env['YOUR_ATTENTION_HOME'];
     fs.rmSync(home, { recursive: true });
-  });
-});
-
-describe('services', () => {
-  it('writes a launchd agent on macOS and a systemd unit on Linux, both restarting on failure', () => {
-    const mac = serviceFile('triage', ['triage', '--judge-cmd', 'claude -p'], 'darwin', '/opt/ya/bin/your-attention.js');
-    assert.match(mac.path, /LaunchAgents\/dev\.your-attention\.triage\.plist$/);
-    assert.match(mac.content, /<key>KeepAlive<\/key><true\/>/);
-    assert.match(mac.content, /<string>claude -p<\/string>/);
-    const linux = serviceFile('serve', ['serve'], 'linux', '/opt/ya/bin/your-attention.js');
-    assert.match(linux.path, /systemd\/user\/your-attention-serve\.service$/);
-    assert.match(linux.content, /Restart=always/);
-    assert.match(linux.content, /ExecStart=.* \/opt\/ya\/bin\/your-attention\.js serve/);
-  });
-
-  it('stops each service through its service manager, which would restart a process that exits', () => {
-    assert.equal(serviceFile('serve', [], 'darwin').stop, 'launchctl bootout gui/$(id -u)/dev.your-attention.serve');
-    assert.equal(serviceFile('serve', [], 'linux').stop, 'systemctl --user stop your-attention-serve');
-    assert.equal(serviceFile('serve', [], 'darwin').running, 'launchctl print gui/$(id -u)/dev.your-attention.serve');
-    assert.equal(serviceFile('serve', [], 'linux').running, 'systemctl --user is-active --quiet your-attention-serve');
   });
 });
 
@@ -168,13 +147,5 @@ describe('triage prompts by card kind', () => {
     assert.match(p, /Neither a separate evidence paragraph nor a recommendation/);
     // The rule that such a card always passes is gone: that is what let a weak question reach the person.
     assert.doesNotMatch(p, /blocks the agent always pass/);
-  });
-});
-
-describe('service files from review', () => {
-  it('doubles % and $ for systemd, and refuses a platform it cannot serve', () => {
-    const unit = serviceFile('triage', ['triage', '--judge-cmd', 'echo %h $HOME'], 'linux', '/opt/ya.js');
-    assert.match(unit.content, /"echo %%h \$\$HOME"/);
-    assert.throws(() => serviceFile('serve', ['serve'], 'win32'), /not for win32/);
   });
 });

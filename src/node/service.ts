@@ -43,15 +43,27 @@ function nodeNote(node: UnitNode, name: string): string {
     : 'This unit names node by a link that follows upgrades, such as Homebrew\'s opt link, because a brew upgrade deletes a versioned path.';
 }
 
-export function serviceFile(name: string, args: string[], platform: NodeJS.Platform = process.platform, bin = process.argv[1] ?? 'your-attention', node: UnitNode = stableNode(process.execPath)): ServiceFile {
+export function serviceFile(name: string, args: string[], platform: NodeJS.Platform = process.platform, bin = process.argv[1] ?? 'your-attention', node: UnitNode = stableNode(process.execPath), env: NodeJS.ProcessEnv = process.env): ServiceFile {
   const label = `dev.your-attention.${name}`;
   const home = os.homedir();
   const log = path.join(home, '.your-attention', `${name}.log`);
   const exec = [node.path, '--disable-warning=ExperimentalWarning', bin, ...args];
   const note = nodeNote(node, name);
+  // A service manager gives its unit a PATH of its own: launchd's is /usr/bin:/bin:/usr/sbin:/sbin, which finds
+  // neither herdr nor the tools a secret source runs. The unit carries the PATH and the home of the shell that
+  // wrote it, so the inbox under the service manager behaves as it does in that shell.
+  const carried = ['PATH', 'YOUR_ATTENTION_HOME', 'HERDR_BIN_PATH'].flatMap((key) => {
+    const value = env[key];
+    return value ? [[key, value] as const] : [];
+  });
   if (platform === 'darwin') {
     const file = path.join(home, 'Library', 'LaunchAgents', `${label}.plist`);
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const environment = carried.length === 0 ? '' : `  <key>EnvironmentVariables</key>
+  <dict>
+${carried.map(([key, value]) => `    <key>${esc(key)}</key><string>${esc(value)}</string>`).join('\n')}
+  </dict>
+`;
     return {
       path: file,
       start: `launchctl bootstrap gui/$(id -u) ${file}`,
@@ -67,7 +79,7 @@ export function serviceFile(name: string, args: string[], platform: NodeJS.Platf
   <array>
 ${exec.map((a) => `    <string>${esc(a)}</string>`).join('\n')}
   </array>
-  <key>RunAtLoad</key><true/>
+${environment}  <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>${esc(log)}</string>
   <key>StandardErrorPath</key><string>${esc(log)}</string>
@@ -83,6 +95,10 @@ ${exec.map((a) => `    <string>${esc(a)}</string>`).join('\n')}
     const lit = s.replace(/%/g, '%%').replace(/\$/g, '$$$$');
     return /[\s"\\]/.test(lit) ? `"${lit.replace(/(["\\])/g, '\\$1')}"` : lit;
   };
+  // systemd expands %-specifiers in Environment= too, so a % is doubled there as well.
+  const environment = carried
+    .map(([key, value]) => `Environment="${key}=${value.replace(/%/g, '%%').replace(/(["\\])/g, '\\$1')}"`)
+    .join('\n');
   return {
     path: file,
     start: `systemctl --user daemon-reload && systemctl --user enable --now your-attention-${name}`,
@@ -94,7 +110,7 @@ Description=your-attention ${name}
 
 [Service]
 ExecStart=${exec.map(quote).join(' ')}
-Restart=always
+${environment === '' ? '' : `${environment}\n`}Restart=always
 RestartSec=2
 
 [Install]

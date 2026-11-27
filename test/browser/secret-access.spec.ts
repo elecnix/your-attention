@@ -116,9 +116,10 @@ test('the keyboard alone grants a candidate, changes the ceiling and sends', asy
 
 test('a granted field shows Revoke, which posts the field to the revoke route', async ({ page }) => {
   await story(page, 'cards--secret-access-granted');
-  // The story puts its own fetch in place as it draws, so the recorder goes in after the card is on screen, or the
-  // story's would replace it.
   await expect(page.getByText(/DATABASE_URL: granted \/home\/me\/work\/\.secrets\/db-staging\.age from age on laptop until .*, case K7Q2/)).toBeVisible();
+  // The page replaces window.fetch as it loads, and the story replaces it again in a layout effect when it mounts, which
+  // runs after goto returns. Record only once the granted row is on screen, when both have run, or the story's stand-in
+  // answers the revoke itself and the recorder never sees it.
   const calls: { url: string; body: unknown }[] = [];
   await page.exposeFunction('__record', (url: string, body: string) => { calls.push({ url, body: JSON.parse(body) }); });
   await page.evaluate(() => {
