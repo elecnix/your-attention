@@ -4,16 +4,22 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { newSealKeys, openSealed, sealValue } from '../../src/core/sealed.ts';
 import type { SourceCandidate } from '../../src/core/secret-sources.ts';
 import { loadSecretSources, readSourceEntries, writeSourceEntries, type Builtin } from '../../src/secrets/registry.ts';
 import type { SecretSource } from '../../src/secrets/source.ts';
 
-function scratchHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'ya-registry-'));
+/** Every folder the tests make, removed after the last one. */
+const made: string[] = [];
+after(() => { for (const dir of made) fs.rmSync(dir, { recursive: true, force: true }); });
+function scratch(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(dir);
+  return dir;
 }
+const scratchHome = (): string => scratch('ya-registry-');
 
 /** A source with made-up values, which answers whatever the query names. */
 function standIn(values: Record<string, string>, extra: Partial<SecretSource> = {}): SecretSource {
@@ -147,7 +153,7 @@ describe('the secret source registry', () => {
 
   it('loads a node module source from its file:// origin', async () => {
     const home = scratchHome();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-node-source-'));
+    const dir = scratch('ya-node-source-');
     const sealed = path.resolve('src/core/sealed.ts');
     fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ type: 'module', main: 'source.mjs' }));
     fs.writeFileSync(path.join(dir, 'source.mjs'), `

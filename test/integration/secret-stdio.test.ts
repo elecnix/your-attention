@@ -25,9 +25,11 @@ describe('a stdio secret source', () => {
 
   it('looks up the example and releases a value the session key opens', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-stdio-'));
+    started.push({ stop: () => fs.rmSync(home, { recursive: true, force: true }) });
     writeSourceEntries(home, [{ kind: 'secret', name: 'example', form: 'stdio', origin: pathToFileURL(EXAMPLE).href, command: ['node', 'source.ts'] }]);
     const logs: string[] = [];
     const sources = loadSecretSources({ home, instance: 'laptop', builtins: [], log: (l) => logs.push(l) });
+    started.push({ stop: () => sources.close() });
     assert.deepEqual(await sources.list(), [{ instance: 'laptop', name: 'example', builtin: false, status: 'ready' }]);
     const { candidates } = await sources.lookup({ type: 'api-key', host: 'api.example.com' });
     assert.deepEqual(candidates, [{ id: 'EXAMPLE_API_KEY', label: 'Example API key, made up', type: 'api-key', host: 'api.example.com', store: 'example', source: 'example', instance: 'laptop' }]);
@@ -36,6 +38,21 @@ describe('a stdio secret source', () => {
     assert.equal(await openSealed(keys.privateKey, sealed), 'ex-not-a-real-key-0000');
     await assert.rejects(sources.release('example', 'NOPE', keys.publicKey), /no secret named NOPE/);
     assert.ok(logs.includes('[example] example source started'), logs.join('\n'));
+  });
+
+  it('keeps the example answering after a line that is JSON but no request', async () => {
+    const { spawn } = await import('node:child_process');
+    const child = spawn(process.execPath, ['source.ts'], { cwd: EXAMPLE, stdio: ['pipe', 'pipe', 'ignore'] });
+    let out = '';
+    child.stdout.on('data', (c: Buffer) => { out += c.toString(); });
+    child.stdin.write('null\n42\n');
+    // The bad lines first, alone, so a crash they cause happens before the request below.
+    await new Promise((r) => setTimeout(r, 1000));
+    child.stdin.write('{"v":1,"id":"7","call":"detect"}\n');
+    const deadline = Date.now() + 10_000;
+    while (!out.includes('"id":"7"') && child.exitCode === null && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    child.kill();
+    assert.ok(out.includes('{"v":1,"id":"7","status":"ready"}'), `the example answered: ${out}`);
   });
 
   it('fails a call whose reply is not JSON, and starts the source again on the next call', async () => {
@@ -55,6 +72,17 @@ describe('a stdio secret source', () => {
     const s = source({ timeoutMs: 3000 });
     await assert.rejects(s.lookup({ name: 'HANG' }), /did not answer within/);
     assert.equal((await s.lookup({ name: 'WHO' })).length, 1);
+  });
+
+  it('kills a source that ignores SIGTERM after its timeout, so no copy outlives it', { skip: process.platform === 'win32' ? 'Windows has no SIGTERM to ignore' : false }, async () => {
+    const s = source({ timeoutMs: 3000, killGraceMs: 200 });
+    const [who] = await s.lookup({ name: 'WHO' });
+    const pid = Number(who?.label);
+    await assert.rejects(s.lookup({ name: 'STUBBORN' }), /did not answer within/);
+    const alive = (): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const deadline = Date.now() + 5000;
+    while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(alive(), false, `the source ${pid} still runs after SIGKILL`);
   });
 
   it('fails a call when the source exits, and starts again on the next call', async () => {

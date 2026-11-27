@@ -18,6 +18,8 @@ export interface StdioOptions {
   /** The entry's settings, which the source reads as JSON from YOUR_ATTENTION_SOURCE_SETTINGS. */
   settings?: Record<string, unknown>;
   timeoutMs?: number;
+  /** How long a stopped source has to exit after SIGTERM before SIGKILL ends it, 2 seconds by default. */
+  killGraceMs?: number;
   /** Where each line of the source's stderr goes, after its name. */
   log?: (line: string) => void;
 }
@@ -34,6 +36,7 @@ interface Pending { resolve(r: Reply): void; reject(e: Error): void; timer: Retu
 export function stdioSource(options: StdioOptions): SecretSource & { stop(): void } {
   const { name, folder } = options;
   const timeoutMs = options.timeoutMs ?? SOURCE_CALL_TIMEOUT_MS;
+  const killGraceMs = options.killGraceMs ?? 2000;
   const log = options.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   let child: ChildProcess | undefined;
   let next = 0;
@@ -44,6 +47,12 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
     if (child !== running) return;
     child = undefined;
     running.kill();
+    // A source that traps SIGTERM would outlive its handle, and the next call would start a second copy beside it.
+    if (running.exitCode === null && running.signalCode === null) {
+      const force = setTimeout(() => { if (running.exitCode === null && running.signalCode === null) running.kill('SIGKILL'); }, killGraceMs);
+      force.unref();
+      running.once('exit', () => clearTimeout(force));
+    }
     const error = new Error(`the source ${name} ${reason}`);
     for (const p of pending.values()) { clearTimeout(p.timer); p.reject(error); }
     pending.clear();

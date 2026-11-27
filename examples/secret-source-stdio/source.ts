@@ -45,6 +45,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   void (async () => {
     let r: Request;
     try { r = JSON.parse(line) as Request; } catch { console.error('a line on stdin is not JSON'); return; }
+    // `null` and `42` are JSON too. A line without an id can't get a reply, so the source logs it and waits for the next.
+    if (!r || typeof r !== 'object' || typeof r.id !== 'string') { console.error('a line on stdin is not a request with an id'); return; }
     let reply: Record<string, unknown>;
     try { reply = await answer(r); } catch (e) { reply = { error: (e as Error).message }; }
     process.stdout.write(`${JSON.stringify({ v: 1, id: r.id, ...reply })}\n`);

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
 import { ageSource, envelopePath, ensureIdentity, identityPath, writeEnvelope } from '../../src/secrets/age-source.ts';
 
@@ -16,7 +16,14 @@ const POSIX = process.platform !== 'win32';
 const NO_AGE = !POSIX ? 'the age source needs a POSIX terminal' : has('age') && has('age-keygen') && has('script') && has('mkfifo') ? false : 'age, age-keygen, script or mkfifo is missing';
 const PASS = 'made up passphrase for a test';
 
-const scratch = (prefix: string): string => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+/** Every folder the tests make, removed after the last one: some hold a generated age identity. */
+const made: string[] = [];
+after(() => { for (const dir of made) fs.rmSync(dir, { recursive: true, force: true }); });
+const scratch = (prefix: string): string => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(dir);
+  return dir;
+};
 
 function encryptTo(recipient: string, value: string, out: string): void {
   const made = spawnSync('age', ['-r', recipient, '-o', out], { input: value, encoding: 'utf8' });
