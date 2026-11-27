@@ -680,7 +680,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'POST' && b === 'redeem' && !c) return json(await inbox.otpRedeem(me, (await readJson<{ ticket?: unknown; agent?: unknown }>(req)) ?? {}));
       if (b === 'keys' && !c && method === 'GET') return json(inbox.otpKeyList(me));
       if (b === 'keys' && c) {
-        const label = decodeURIComponent(c);
+        // The router decoded each segment already, so `c` is the label as typed.
+        const label = c;
         if (method === 'PUT') return json(await inbox.otpEnroll(me, label, (await readJson<{ key?: unknown; code?: unknown; allow?: unknown }>(req)) ?? {}), 201);
         if (method === 'PATCH') return json(inbox.otpAllow(me, label, (await readJson<{ add?: unknown; remove?: unknown }>(req)) ?? {}));
         if (method === 'DELETE') { await inbox.otpRemove(me, label); return json({ ok: true }); }

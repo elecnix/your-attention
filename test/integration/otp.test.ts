@@ -89,7 +89,7 @@ describe('a one-time code on your own inbox', () => {
       const code = secrets.env(SESSION)['NPM_OTP']!;
       assert.equal(await verifyTotp(KEY, code, Date.now()), true, 'the session holds a code that verifies now');
       // A command gets it in its environment, as npm would read --otp "$NPM_OTP".
-      const cmd = spawnSync('sh', ['-c', 'test "${#NPM_OTP}" -eq 6 && echo "got a code of six digits"'], { env: { ...process.env, ...secrets.env(SESSION) }, encoding: 'utf8' });
+      const cmd = spawnSync(process.execPath, ['-e', 'if (/^\\d{6}$/.test(process.env.NPM_OTP ?? "")) console.log("got a code of six digits")'], { env: { ...process.env, ...secrets.env(SESSION) }, encoding: 'utf8' });
       assert.equal(cmd.stdout.trim(), 'got a code of six digits');
       // The ticket gives one code.
       await assert.rejects(runTool(ctx, 'card_otp', { ticket }), /was used at .* UTC: a ticket gives one code/);

@@ -286,6 +286,23 @@ describe('redeeming a ticket', () => {
     assert.equal((await call(inbox, 'agent', 'GET', '/v1/otp/keys')).status, 403);
     assert.equal((await call(inbox, 'owner', 'GET', '/v1/otp/keys')).status, 200);
   });
+
+  it('reads a key label once, so an escaped percent sign gets the route\'s own refusal', async () => {
+    const { inbox } = await approved();
+    const res = await call(inbox, 'owner', 'PUT', '/v1/otp/keys/%25', { key: KEY_TEXT, code: '000000', allow: [SESSION] });
+    assert.equal(res.status, 400);
+    assert.match(((await res.json()) as { error: string }).error, /a key label is 1 to 40 lowercase letters/);
+    assert.equal((await call(inbox, 'agent', 'PATCH', '/v1/otp/keys/npm%252Dx', { add: ['me'] })).status, 403);
+  });
+
+  it('leaves the ticket unused when the session cannot hand the code to a command', async () => {
+    const { inbox, ticket, clock } = await approved();
+    const ctx = { inbox: clientOver(inbox), secrets: new SecretRequests(clock.now), agent: SESSION, origin: async () => undefined, arrival: 'later', now: clock.now, sleep: async () => {} };
+    await assert.rejects(runTool({ ...ctx, deliverGrants: async () => 'This session could not open the socket its Bash commands read secrets from.' }, 'card_otp', { ticket }),
+      /could not open the socket .* The ticket is not used, so it still works once that is fixed\./);
+    assert.equal(tickets(inbox), 1);
+    assert.equal((storedAnswer(inbox, 'c1').values['NPM_OTP'] as OtpApproval).issuedAt, undefined);
+  });
 });
 
 describe('the code never leaves the session', () => {

@@ -172,8 +172,10 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OTP_KEY_SECRET: ${{ secrets.OTP_KEY_SECRET }}
         run: |
-          # Optional: without it the inbox keeps no one-time code keys, and says so to the person who tries to enroll one.
-          if [ -z "$OTP_KEY_SECRET" ]; then echo "OTP_KEY_SECRET is unset, so this deployment keeps no one-time code keys"; exit 0; fi
+          # Optional. A Worker that never had the secret keeps no one-time code keys, and says so to the person who tries
+          # to enroll one. An empty value here leaves the Worker's secret as it is: deleting it would make every enrolled
+          # key unreadable, so turning key storage off is a deliberate `wrangler secret delete OTP_KEY_SECRET`.
+          if [ -z "$OTP_KEY_SECRET" ]; then echo "OTP_KEY_SECRET is not in this environment, so the deploy leaves the Worker's secret as it is: set already, enrolled keys stay readable; never set, the inbox keeps no one-time code keys"; exit 0; fi
           printf %s "$OTP_KEY_SECRET" | npx wrangler secret put OTP_KEY_SECRET
       - name: check the deployment answers
         if: inputs.mode == 'hosted'

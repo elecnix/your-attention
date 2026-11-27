@@ -198,6 +198,9 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
     case 'card_otp': {
       const ticket = String(args['ticket'] ?? '').trim();
       if (!ticket) throw new Error('give the ticket from the answer to your otp card');
+      // A ticket gives one code, so the harness must be able to hand the code to a command before the ticket is spent.
+      const cannot = ctx.deliverGrants ? await ctx.deliverGrants() : undefined;
+      if (cannot) throw new Error(`${cannot} The ticket is not used, so it still works once that is fixed.`);
       // A code redeemed in the last seconds of its step dies before the command reads it, so wait for the next step.
       const now = ctx.now ?? Date.now;
       const left = STEP_MS - (now() % STEP_MS);
@@ -205,8 +208,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const r = await inbox.otpRedeem(ticket, agent);
       const line = await ctx.secrets.holdCode(r.card, agent, r.field, r.sealed, r.expiresAt);
       if (line === undefined) throw new Error(`this session no longer has the key of card ${r.card}, so it cannot open the code. The ticket is used: post a new otp card`);
-      const warning = ctx.deliverGrants ? await ctx.deliverGrants() : undefined;
-      return `The inbox issued a code from the key ${r.key} for "${r.purpose}". ${line}${warning ? `\n${warning}` : ''}`;
+      return `The inbox issued a code from the key ${r.key} for "${r.purpose}". ${line}`;
     }
     case 'card_close':
       await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));
