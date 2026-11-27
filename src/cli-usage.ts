@@ -63,6 +63,11 @@ const LIST: [name: string, syntax: string, summary: string][] = [
   ['offer', 'offer ssh <host> [--remote-port 4815]', 'offer this inbox on another machine over SSH'],
   ['relay', 'relay [--port 4900] [--key-env VAR]', 'run a relay that inboxes dial out to'],
   ['serve', 'serve --relay URL [--relay-key-env VAR]', 'also offer this inbox through a relay'],
+  ['secret', 'secret source list', 'list the secret sources of this computer, and whether each is ready'],
+  ['secret', 'secret source add <file://folder> [--name NAME] [--form node|stdio] [--command CMD]', 'add a secret source from a folder on this computer'],
+  ['secret', 'secret source remove <name>', 'remove a secret source; its folder stays as it is'],
+  ['secret', 'secret age dir add|remove <dir>', 'choose the folders of *.age files the built-in age source reads'],
+  ['secret', 'secret age passphrase <dir>', "keep a folder's passphrase, read on stdin, in an envelope that only\nthis computer's age identity opens"],
   ['telemetry', 'telemetry status|on|off|show|reset-id', 'read or change the anonymous usage counts, off unless you turn them on'],
   ['telemetry', 'telemetry report [--days 30] [--invites FILE]', 'for the operator: usage per invite, from Analytics Engine'],
 ];
@@ -152,6 +157,11 @@ const OPTIONS: Record<string, [string, string][]> = {
     ['--port PORT', 'the port to listen on, 4900 by default'],
     ['--host HOST', 'the address to listen on, 0.0.0.0 by default'],
     ['--key-env VAR', 'the variable that holds the relay key, YOUR_ATTENTION_RELAY_KEY by default'],
+  ],
+  secret: [
+    ['--name NAME', 'with source add: the name of the source, the folder name by default'],
+    ['--form node|stdio', 'with source add: a module to import, the default, or an executable to start'],
+    ['--command CMD', 'with source add: the executable and its arguments, run in the folder'],
   ],
   telemetry: [
     ['status', 'say whether usage counts are on, the default'],
