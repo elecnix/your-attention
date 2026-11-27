@@ -205,9 +205,10 @@ describe('the integration side of the secret widget', () => {
     return { post: async (c: NewCard) => inbox.postCard(agent, c) } as unknown as Client;
   }
 
-  it('fills the public key in card_post, and opens the answer into a private file named by the field', async () => {
+  it('fills the public key in card_post, and opens the answer into a grant of one hour, never a file', async () => {
     const inbox = new Inbox(new MemoryStorage());
-    const secrets = new SecretRequests();
+    let now = Date.UTC(2026, 10, 27, 12, 0);
+    const secrets = new SecretRequests(() => now);
     const ctx = { inbox: client(inbox), secrets, agent: 's1', origin: async () => undefined, arrival: 'later' };
     const said = await runTool(ctx, 'card_post', { id: 'k1', title: 'Key?', body: 'root = Card([intro, key])\nintro = TextContent("To call the demo API.")\nkey = widget secret {"name": "DEMO_KEY"}' });
     assert.match(said, /Posted card k1/);
@@ -217,50 +218,30 @@ describe('the integration side of the secret widget', () => {
     const answer = await inbox.answer('k1', { values: { DEMO_KEY: await seal(JSON.parse(publicKey), 'demo-value-not-real') } });
     const text = await secrets.receive(card, answer);
     assert.doesNotMatch(text, /demo-value-not-real/);
-    const file = /It is in (\S+), which/.exec(text)?.[1];
-    assert.equal(file, path.join(home, 'secrets', 's1', 'card-k1', 'DEMO_KEY'));
-    assert.equal(fs.readFileSync(String(file), 'utf8'), 'demo-value-not-real');
-    if (process.platform !== 'win32') assert.equal(fs.statSync(String(file)).mode & 0o777, 0o600);
+    assert.doesNotMatch(text, new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the model gets no path');
+    assert.match(text, /DEMO_KEY is available to this session until 2026-11-27 13:00 UTC/);
+    assert.match(text, /gets it as \$DEMO_KEY/);
+    assert.equal(fs.existsSync(path.join(home, 'secrets')), false);
+    assert.deepEqual(secrets.env('s1'), { DEMO_KEY: 'demo-value-not-real' });
+    now += 61 * 60_000;
+    assert.deepEqual(secrets.env('s1'), {}, 'the hour has passed');
     const empty = await inbox.answer('k1', { values: {}, comment: 'Not now.' });
     assert.match(await secrets.receive(card, empty), /did not send DEMO_KEY/);
   });
 
-  it('tells the model when it cannot write the file, and never throws, so the answer stream goes on', async () => {
-    const inbox = new Inbox(new MemoryStorage());
-    const secrets = new SecretRequests();
-    const ctx = { inbox: client(inbox), secrets, agent: 's3', origin: async () => undefined, arrival: 'later' };
-    await runTool(ctx, 'card_post', { id: 'w1', title: 'Key?', body: 'root = Card([key])\nkey = widget secret {"name": "W_KEY"}' });
-    const card = inbox.getCard('w1');
-    const publicKey = JSON.parse(JSON.parse(/SecretInput\("W_KEY", ("(?:[^"\\]|\\.)*")\)/.exec(card.body ?? '')![1]!));
-    const answer = await inbox.answer('w1', { values: { W_KEY: await seal(publicKey, 'unwritable-not-real') } });
-    // A home under a plain file: making the secrets folder fails.
-    const blocker = path.join(home, 'blocker');
-    fs.writeFileSync(blocker, '');
-    process.env['YOUR_ATTENTION_HOME'] = path.join(blocker, 'home');
-    try {
-      const text = await secrets.receive(card, answer);
-      assert.match(text, /The person sent W_KEY on card w1, but this session could not write it to a file: /);
-      assert.doesNotMatch(text, /unwritable-not-real/);
-    } finally {
-      process.env['YOUR_ATTENTION_HOME'] = home;
-    }
-  });
-
-  it('writes the same secret name from two cards to two files', async () => {
+  it('holds the same secret name from a second card as a new grant, which replaces the first', async () => {
     const inbox = new Inbox(new MemoryStorage());
     const secrets = new SecretRequests();
     const ctx = { inbox: client(inbox), secrets, agent: 's2', origin: async () => undefined, arrival: 'later' };
-    const files: string[] = [];
     for (const [id, value] of [['a1', 'first-not-real'], ['a2', 'second-not-real']] as const) {
       await runTool(ctx, 'card_post', { id, title: 'Key?', body: 'root = Card([key])\nkey = widget secret {"name": "SAME_KEY"}' });
       const card = inbox.getCard(id);
       const publicKey = JSON.parse(JSON.parse(/SecretInput\("SAME_KEY", ("(?:[^"\\]|\\.)*")\)/.exec(card.body ?? '')![1]!));
       const answer = await inbox.answer(id, { values: { SAME_KEY: await seal(publicKey, value) } });
-      files.push(String(/It is in (\S+), which/.exec(await secrets.receive(card, answer))?.[1]));
+      await secrets.receive(card, answer);
     }
-    assert.notEqual(files[0], files[1]);
-    assert.equal(fs.readFileSync(files[0]!, 'utf8'), 'first-not-real');
-    assert.equal(fs.readFileSync(files[1]!, 'utf8'), 'second-not-real');
+    assert.deepEqual(secrets.env('s2'), { SAME_KEY: 'second-not-real' });
+    assert.equal(secrets.mask('a first-not-real and a second-not-real'), 'a [secret SAME_KEY] and a [secret SAME_KEY]');
   });
 
   it('answers a tool name that an object inherits as an unknown tool', async () => {

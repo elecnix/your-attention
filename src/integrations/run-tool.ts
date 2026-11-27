@@ -106,7 +106,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const inherited = posted.inheritedTags ?? [];
       const tags = inherited.length ? `It took the default tags ${inherited.join(', ')}.` : 'It took no default tags.';
       if (posted.warning) return `Saved card ${posted.id} as version ${posted.version}. ${tags} Warning: ${posted.warning}`;
-      const asks = sealing.count ? ` The answer names a file for each secret, never the value.` : '';
+      const asks = sealing.count ? ` Once answered, each command you run gets each secret as a variable of its name, and you never see the value.` : '';
       return `Posted card ${posted.id}. ${tags} The answer arrives ${ctx.arrival}; keep working meanwhile.${asks}`;
     }
     case 'card_patch': {

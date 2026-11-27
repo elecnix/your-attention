@@ -445,7 +445,7 @@ function SecretInput({ props }) {
       h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
       h('input', { type: 'password', name, 'aria-label': name, autoComplete: 'off', spellCheck: false, value, onChange: (e) => change(e.target.value) })),
     failure && h('div', { className: 'note warn', role: 'alert' }, `${name} could not be sealed, so nothing was sent: ${failure}. Ask the agent to post the card again.`),
-    h('span', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the agent gets a file path, never the value.'));
+    h('span', { className: 'hint' }, 'Your browser encrypts the value for this session only. The inbox stores the ciphertext, and the commands of that session get the value as a variable the model never sees.'));
 }
 
 /** The secrets typed on a card, each sealed with the public key its field shows, by field name. `names` lists the

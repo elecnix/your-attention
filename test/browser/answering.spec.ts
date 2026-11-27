@@ -141,7 +141,7 @@ test('a secret is sealed in the browser, never saved in a draft, and only the as
   if (ev?.type !== 'answer') throw new Error('no answer');
   expect(JSON.stringify(ev.answer)).not.toContain('typed-in-the-browser');
   expect(ev.answer.comment).toBe('The staging token.');
-  expect(await secrets.receive(ev.card, ev.answer)).toMatch(/It is in .*DEMO_TOKEN/);
+  expect(await secrets.receive(ev.card, ev.answer)).toMatch(/DEMO_TOKEN is available to this session/);
 });
 
 test('a dismissed card shows its secret field empty when reopened, since the value it showed is gone', async ({ page }) => {
@@ -212,7 +212,7 @@ test('a secret field sits beside the other questions of a card', async ({ page }
   if (ev?.type !== 'answer') throw new Error('no answer');
   expect(ev.answer.values['where']).toBe('staging');
   expect(JSON.stringify(ev.answer)).not.toContain('preview-token-not-real');
-  expect(await secrets.receive(ev.card, ev.answer)).toMatch(/It is in .*PREVIEW_TOKEN/);
+  expect(await secrets.receive(ev.card, ev.answer)).toMatch(/PREVIEW_TOKEN is available to this session/);
 });
 
 test('an HTML card stays hidden until the owner allows it, then answers from its sandbox', async ({ page }) => {

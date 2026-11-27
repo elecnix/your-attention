@@ -15,6 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
+import { serveSecrets } from './secret-socket.ts';
 import { runTool } from '../run-tool.ts';
 import { SessionName } from './session-name.ts';
 import { CardAsks } from '../card-asks.ts';
@@ -252,7 +253,10 @@ const asks = new CardAsks({
 });
 
 const stop = new AbortController();
-const quit = (): void => { stop.abort(); asks.stop(); process.exit(0); };
+// The Bash hooks read the session's grants from this socket, so it opens before any answer can bring one.
+let socketError = '';
+const secretSocket = await serveSecrets(secrets, agent, session).catch((e: Error) => { socketError = e.message; log('no socket for secrets:', e.message); return undefined; });
+const quit = (): void => { stop.abort(); asks.stop(); secretSocket?.close(); process.exit(0); };
 // Exit with the session: a leftover server would show the agent as listening.
 process.stdin.on('end', quit);
 process.stdin.on('close', quit);
@@ -271,7 +275,7 @@ function listen(client: Client): void {
   asks.resync();
   void client.stream(agent, async (ev) => {
     // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
-    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
+    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer' || ev.type === 'revoke') asks.activity();
     // A new rule may move the next ask, or turn the asks on or off.
     if (ev.type === 'settings') return asks.resync();
     if (ev.type === 'guidance') {
@@ -290,6 +294,11 @@ function listen(client: Client): void {
       await notify(describeSentCard(ev), { card_id: ev.card.id });
       return;
     }
+    if (ev.type === 'revoke') {
+      // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
+      if (secrets.revoke(ev.case)) await notify(`The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`, { card_id: ev.card.id });
+      return;
+    }
     if (ev.type !== 'answer') return;
     const { card, answer } = ev;
     const dismissed = card.dialog ? await closeOwnDialog(card.origin?.herdrPane) : false;
@@ -298,7 +307,9 @@ function listen(client: Client): void {
       ? `The person answered your AskUserQuestion in the inbox. Treat this as their answer${dismissed ? ' and ignore the cancelled dialog' : ''}:`
       : `The person answered card "${card.title}":`;
     const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
-    const sealed = await secrets.receive(card, answer);
+    let sealed = await secrets.receive(card, answer);
+    // Without the socket, the Bash hooks have nothing to read, so the model hears that the variable won't come.
+    if (!secretSocket && secrets.holds(agent)) sealed += `\nThis session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get these variables. Tell the person.`;
     const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
     // A newer answer to the same card replaces the one the channel is still trying to deliver.
     for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);

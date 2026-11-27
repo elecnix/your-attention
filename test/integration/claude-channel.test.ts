@@ -1,6 +1,8 @@
 // Runs the Claude Code channel as Claude Code does: an MCP server over stdio.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
@@ -8,12 +10,27 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { DEFAULT_GUIDANCE, DEFAULT_GUIDANCE_VERSION } from '../../src/core/inbox.ts';
 import type { Card } from '../../src/core/types.ts';
 import { seal } from '../../web/sealed.js';
-import { ROOT, start, until, type Harness } from './harness.ts';
+import { ROOT, runHook, start, until, type Harness } from './harness.ts';
 
 let h: Harness;
 let mcp: McpClient;
 const notes: { content: string; meta: { card_id: string; receipt: string } }[] = [];
 const SESSION = 'test-session-1';
+/** The runtime folder of the channel's socket, so the test leaves nothing in the system's. macOS's temp folder is long
+ * enough that a socket path under a folder made inside it passes the 104 bytes macOS allows, as XDG_RUNTIME_DIR would
+ * not on a real machine. */
+const RUNTIME = fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'ya-rt-'));
+
+/** Every file under `dir` whose bytes contain `text`. */
+function filesHolding(dir: string, text: string): string[] {
+  const found: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    if (fs.readFileSync(file).includes(text)) found.push(file);
+  }
+  return found;
+}
 
 before(async () => {
   h = await start();
@@ -24,13 +41,14 @@ before(async () => {
   await mcp.connect(new StdioClientTransport({
     command: process.execPath,
     args: ['--disable-warning=ExperimentalWarning', path.join(ROOT, 'src/cli.ts'), 'claude-channel'],
-    env: { ...process.env, YOUR_ATTENTION_HOME: h.home, HOME: h.home, USERPROFILE: h.home, CLAUDE_CODE_SESSION_ID: SESSION, HERDR_PANE_ID: '' } as Record<string, string>,
+    env: { ...process.env, YOUR_ATTENTION_HOME: h.home, HOME: h.home, USERPROFILE: h.home, CLAUDE_CODE_SESSION_ID: SESSION, HERDR_PANE_ID: '', XDG_RUNTIME_DIR: RUNTIME } as Record<string, string>,
     stderr: 'ignore',
   }));
 });
 after(async () => {
   await mcp.close();
   await h.stop();
+  fs.rmSync(RUNTIME, { recursive: true, force: true });
 });
 
 describe('the Claude Code channel', () => {
@@ -87,9 +105,9 @@ describe('the Claude Code channel', () => {
     assert.equal(s.states['cc-2'], 'closed');
   });
 
-  it('asks for a secret with the secret widget, and hands the model a file path, never the value', async () => {
+  it('gives each Bash command the secret through the hooks, once per token, masks it in the output, and writes no file', async () => {
     const res = await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-key', title: 'Need the demo key', text: 'To set the CI secret.', body: 'root = Card([key])\nkey = widget secret {"name": "DEMO_API_KEY"}' } });
-    assert.match(JSON.stringify(res.content), /Posted card cc-key\..*names a file for each secret/);
+    assert.match(JSON.stringify(res.content), /Posted card cc-key\..*each command you run gets each secret as a variable of its name/);
     const id = 'cc-key';
     const card = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === id);
     assert.deepEqual(card?.secrets, ['DEMO_API_KEY']);
@@ -98,10 +116,36 @@ describe('the Claude Code channel', () => {
     const note = await until(() => notes.find((n) => n.meta.card_id === id));
     assert.doesNotMatch(note.content, /demo-value-not-real/);
     assert.match(note.content, /DEMO_API_KEY: \(sealed\)/);
-    const file = /It is in (\S+), which/.exec(note.content)?.[1];
-    assert.ok(file, note.content);
-    assert.equal(fs.readFileSync(file, 'utf8'), 'demo-value-not-real');
-    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.match(note.content, /DEMO_API_KEY is available to this session until .* \(case [0-9a-f]+\)\. Every command you run gets it as \$DEMO_API_KEY/);
+    if (process.platform === 'win32') return;
+
+    const env = { XDG_RUNTIME_DIR: RUNTIME };
+    const socketDir = path.join(RUNTIME, `your-attention-${process.getuid!()}`);
+    assert.equal(fs.statSync(socketDir).mode & 0o777, 0o700);
+    for (const f of fs.readdirSync(socketDir)) assert.equal(fs.statSync(path.join(socketDir, f)).mode & 0o777, 0o600);
+
+    const input = { command: 'cd / && printf "%s|%s" "$DEMO_API_KEY" "${#DEMO_API_KEY}"', description: 'Print the key', timeout: 60000 };
+    const pre = await runHook(h, 'secret-pre', { session_id: SESSION, tool_name: 'Bash', tool_input: input }, { env });
+    const rewritten = (JSON.parse(pre.out) as { hookSpecificOutput: { hookEventName: string; updatedInput: typeof input } }).hookSpecificOutput;
+    assert.equal(rewritten.hookEventName, 'PreToolUse');
+    assert.equal(rewritten.updatedInput.description, 'Print the key', 'updatedInput replaces the whole input, so the other fields go back');
+    assert.doesNotMatch(rewritten.updatedInput.command, /demo-value-not-real/, 'the value is never in argv');
+    const run = spawnSync('bash', ['-c', rewritten.updatedInput.command], { encoding: 'utf8' });
+    assert.equal(run.stdout, 'demo-value-not-real|19', run.stderr);
+    const again = spawnSync('bash', ['-c', rewritten.updatedInput.command], { encoding: 'utf8' });
+    assert.equal(again.stdout, '', 'a token works once, so the command never ran');
+    // The rewritten command reports the failure as text and ends with status 0, so secret-post still runs on it.
+    assert.equal(again.status, 0);
+    assert.match(again.stderr, /did not reach the command: this token is unknown, used or expired\nExit code 1\n$/);
+
+    const post = await runHook(h, 'secret-post', { session_id: SESSION, tool_name: 'Bash', tool_input: rewritten.updatedInput, tool_response: { stdout: run.stdout, stderr: '', interrupted: false, isImage: false } }, { env });
+    const masked = (JSON.parse(post.out) as { hookSpecificOutput: { hookEventName: string; updatedToolOutput: { stdout: string; isImage: boolean } } }).hookSpecificOutput;
+    assert.equal(masked.hookEventName, 'PostToolUse');
+    assert.deepEqual(masked.updatedToolOutput, { stdout: '[secret DEMO_API_KEY]|19', stderr: '', interrupted: false, isImage: false });
+
+    const elsewhere = await runHook(h, 'secret-pre', { session_id: 'another-session', tool_name: 'Bash', tool_input: input }, { env });
+    assert.equal(elsewhere.out, '', 'a session with no channel socket runs its command as written');
+    for (const dir of [h.home, RUNTIME]) assert.deepEqual(filesHolding(dir, 'demo-value-not-real'), [], `no file under ${dir} holds the value`);
   });
 
   it('saves a pasted image to a private file and names its path in the event', async () => {
