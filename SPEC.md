@@ -282,7 +282,7 @@ To seal the value, the page encrypts it with a new AES-256-GCM key, then wraps t
 
 The page keeps the typed value in the tab's memory, out of the saved draft, and seals it when the person presses **Send answer**. The terminal client seals the same way. When a client can't seal a value, it stops the answer, and the field shows why. Each client drops a value that the person typed in a field a revision removed or renamed. A page on plain HTTP from another machine shows a warning in place of the field, because browsers give Web Crypto to secure origins only.
 
-A secret field stores only ciphertext: the inbox answers 400 to a plain value there, and to a pasted image for that field. An empty field declines, and the inbox drops it from the answer. A dismissal leaves the secret fields out of its draft. Hooks and answer webhooks get the answer without the sealed value, since only the asking session can open it, and the agent stream gets all of it. The integration opens each sealed value into `~/.your-attention/secrets/<agent>/card-<card id>/<name>`, a file only this user can read, and tells the model its path. Each card gets its own folder, so two cards that ask for the same name keep two files. When the integration can't write the file, the model reads that error instead of a path, and the answer stream goes on. The answer text shows the field as `OLLAMA_API_KEY: (sealed)`.
+A secret field stores only ciphertext: the inbox answers 400 to a plain value there, and to a pasted image for that field. An empty field declines, and the inbox drops it from the answer. A dismissal leaves the secret fields out of its draft. Hooks and answer webhooks get the answer without the sealed value, since only the asking session can open it, and the agent stream gets all of it. Until the integrations deliver as [Secret sources](#secret-sources) describes, the integration opens each sealed value into `~/.your-attention/secrets/<agent>/card-<card id>/<name>`, a file only this user can read, and tells the model its path. Each card gets its own folder, so two cards that ask for the same name keep two files. When the integration can't write the file, the model reads that error instead of a path, and the answer stream goes on. The answer text shows the field as `OLLAMA_API_KEY: (sealed)`.
 
 This change removed the `card_ask_secret` tool and the `secret` card kind. A call to `card_ask_secret` returns an error that points to the widget, and a new card with `kind: "secret"` gets 400 with the same pointer. A secret card that an older inbox stored keeps its `secret: {name, publicKey}`. The page and the terminal client draw it as a `SecretInput` field named `sealed`, so the session that posted it can still open the answer. Its agent can still revise it with `card_patch`.
 
@@ -301,6 +301,123 @@ the page cannot draw all of this body:
 Some cards stored before the check have a body the page can't draw whole. For such a card, the laptop inbox's `GET /v1/cards/<id>` adds `bodyFallback: {body, faults}`, which the inbox computes and never stores. When a card has no `bodyFallback`, the page and the terminal client read the body themselves and compute the same fallback. Its `body` starts with the statements before the first broken one, unchanged. A code block of the source from the broken statement on comes last. The page draws it below a warning, with the source lines wrapped and the comment box with **Send answer** below. A revision with a body that draws whole drops `bodyFallback`.
 
 The fold under a card that follows another one shows the earlier card's text as Markdown, as the card itself does.
+
+## Secret sources
+
+A secret source reads secrets from one store, such as a folder of `age` files or a password manager. With `POST /v1/secrets/lookup`, an agent sends a name or a type, and the inbox returns candidates: metadata, never a value. The agent then posts a card that places the `secret_access` widget with those candidates. When the person grants one, the source releases the value sealed to the card's public key. That ciphertext goes to the posting session over the agent stream. Nobody copies or pastes the value, and no file ever holds it. This section describes version 1 of [#153](https://github.com/elecnix/your-attention/issues/153).
+
+### What version 1 covers
+
+The laptop inbox runs the secret sources of its own computer, in the `serve` process. A source takes one of two forms: a Node module that the process imports, or an executable that it starts and talks to over stdio. Both forms use the same messages, version 1, so a source can later move to a WebSocket or an SSE connection without changing what it says. The hosted inbox has no sources in version 1. A lookup there returns an empty list, and the hosted inbox still accepts a `secret_access` card and draws it.
+
+Version 1 leaves out these parts of the issue:
+
+- the WebSocket and SSE forms
+- sources linked with OAuth
+- sources that a paired machine announces over the network
+- installs from GitHub or an https address
+- the audit log
+
+### The source interface
+
+`src/secrets/source.ts` declares it. A source has a `name`, unique on its instance, and three calls:
+
+- `detect()` answers `{status: "ready"}`, or `{status: "off", reason}` with a sentence that says what the source did not find, such as `no identity file at ~/.your-attention/age/identity.txt`.
+- `lookup(query)` takes `{name?, type?, host?}` and answers a list of candidates. Each one holds an `id`, unique within its source, a `label`, and optionally the `store`, `type`, `host` and `changedAt`, in milliseconds. A source answers only what matches the query, never its whole store. A query without any field doesn't match a candidate.
+- `release(id, publicKey)` answers a value sealed to `publicKey`, in the format of [Secret widget](#secret-widget), or throws with a sentence for the person. A source never returns a plain value. `sealValue(publicKey, text)` in `src/core/sealed.ts` uses the page's sealing format.
+
+The inbox adds `source` and `instance` to each candidate. `instance` names the computer, as `server.json` records it.
+
+In the Node form, the module exports `detect`, `lookup` and `release` with these signatures. In the stdio form, the executable reads one JSON message per line on stdin and answers one per line on stdout. Its logs go to stderr. Each request contains `v: 1`, an `id` the reply repeats, and a `call`:
+
+```json
+{"v": 1, "id": "1", "call": "detect"}
+{"v": 1, "id": "2", "call": "lookup", "query": {"type": "api-key", "host": "api.openai.com"}}
+{"v": 1, "id": "3", "call": "release", "candidate": "openai", "publicKey": {"kty": "RSA", "n": "...", "e": "AQAB"}}
+```
+
+```json
+{"v": 1, "id": "1", "status": "ready"}
+{"v": 1, "id": "2", "candidates": [{"id": "openai", "label": "OpenAI key, personal", "type": "api-key", "host": "api.openai.com"}]}
+{"v": 1, "id": "3", "sealed": {"alg": "RSA-OAEP-256+A256GCM", "key": "...", "iv": "...", "data": "..."}}
+{"v": 1, "id": "3", "error": "the item is gone from the vault"}
+```
+
+A reply that isn't valid JSON or gives another version fails that call, and so does a wait of more than 30 seconds. The next call then starts the source again.
+
+### Configuring sources
+
+`~/.your-attention/sources.jsonl` stores one entry per line. Each entry is local to its instance: the inbox never receives its settings.
+
+```json
+{"kind": "secret", "name": "dev", "form": "stdio", "origin": "file:///home/me/your-attention-secret-dev", "command": ["bin/source"]}
+{"kind": "secret", "name": "team", "form": "node", "origin": "file:///home/me/your-attention-secret-team", "settings": {"vault": "Team"}}
+```
+
+The built-in `age` source doesn't need an entry, and turns on when it detects its identity file. Its entry, when present, holds its settings: `{"kind": "secret", "name": "age", "builtin": true, "settings": {"dirs": ["~/.secrets"]}}`.
+
+```sh
+your-attention secret source list
+your-attention secret source add file:///home/me/your-attention-secret-dev --name dev [--form stdio --command bin/source]
+your-attention secret source remove dev
+your-attention secret age dir add ~/.secrets
+your-attention secret age passphrase ~/.secrets   # reads the folder's passphrase on stdin, and stores it in an envelope
+```
+
+### The age source
+
+It reads every `*.age` file of the folders in its `dirs` setting. A candidate's `id` is the file's absolute path, so two folders with a file of the same name give two candidates. Its `label` is the file's name without `.age`, its `store` is the folder, and its type is `file`. A file encrypted to the instance's identity, `~/.your-attention/age/identity.txt`, opens with that identity. A file encrypted with a passphrase opens with the passphrase from the folder's envelope, `~/.your-attention/age/envelopes/<sha256 of the folder path>.age`, which age encrypts to the same identity. So no prompt appears at release, and the source leaves the files in the folder as they are. `src/secrets/age.ts` decrypts both kinds without writing the plaintext to a file.
+
+### Lookup
+
+`POST /v1/secrets/lookup` takes `{name?, type?, host?}`. An agent or the owner may call it. It sends the query to every source that is `ready`, and answers `{candidates, sources}`. The inbox merges `candidates` in source order, and `sources` lists each source with its `instance`, `name`, `builtin`, `status` and `reason`. A source that fails or times out appears with `status: "error"` and its reason, and the others still answer. `GET /v1/secrets/sources` answers the same `sources` list.
+
+### The secret_access widget
+
+A card places one per secret it asks for:
+
+```
+db = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}
+ai = widget secret_access {"name": "OPENAI_API_KEY", "query": {"type": "api-key", "host": "api.openai.com"}}
+```
+
+Before `card_post` posts the card, it runs the lookup for each placement's `query`. It then sets `candidates` to the result as JSON text, and `publicKey` to the public half of the key pair it keeps for the card. A placement may also list its own `candidates`. `card_post` keeps those, and the inbox checks them as the next paragraph says. The widget places one field:
+
+```
+db = Form("DATABASE_URL", db_buttons, [db_field])
+db_buttons = Buttons([])
+db_field = FormControl("DATABASE_URL", SecretAccess("DATABASE_URL", "<public key JWK>", "<candidates JSON>"))
+```
+
+The inbox reads each `SecretAccess(name, publicKey, candidates)` call as it reads `SecretInput`, with the same 400s, and adds the names to the card's `secrets`. The inbox answers 400 unless the candidates are a JSON list of objects with `id`, `source`, `instance` and `label` each. It also answers 400 for a candidate that none of its lookups of the last hour returned with the same `source`, `instance`, `id` and `label`, so an agent can't label one secret as another. An empty list is valid, and the field then offers only the typed value.
+
+The page shows each candidate with its label, its source and its instance, and the type and host when present. A candidate whose source isn't `ready` shows as unavailable, and the person can't pick it. The person picks one candidate, declines, or types a value instead, which the page seals as the `secret` widget does. For a grant, the person also sets how long it lasts. The idle window is 15 minutes, and each use restarts it. The ceiling defaults to one hour and goes up to 24 hours. Use doesn't push it later. A card with several `secret_access` fields takes a choice for each, so the person can grant one and decline another.
+
+### Granting
+
+For each `secret_access` field, the page sends one of these values:
+
+```json
+{"grant": "<candidate id>", "source": "age", "instance": "laptop", "until": 1767225600000}
+{"decline": true}
+{"alg": "RSA-OAEP-256+A256GCM", "key": "...", "iv": "...", "data": "..."}
+```
+
+Only the owner may answer: `POST /v1/cards/<id>/answer` answers 403 to an agent or an extension token. For each grant, the inbox first checks that the card lists the candidate. Its source then releases the value sealed to the field's public key, and the inbox stores `{grant, source, instance, until, case, sealed}` as the field's value. `case` is a short id for the grant, the card id and the field name, which the person can copy from the card and the agent quotes. The inbox caps `until` at 24 hours after the answer. When a source refuses, the whole answer fails with 502 and the source's sentence, so the person sees why and the inbox doesn't keep a partial grant. For a decline, the inbox stores `{decline: true}`, and the answer text says that the person declined. The release happens only inside the owner's answer: no route releases a value on its own.
+
+Hooks, answer webhooks and triage get the answer without these fields, as for the `secret` widget. The agent stream gets all of it.
+
+`POST /v1/cards/<id>/revoke` takes `{field}` and revokes that field's grant. Only the owner may call it, and an agent or extension token gets 403. The inbox records the revocation on the answer value as `revokedAt`, and sends the agent stream `{type: "revoke", id, card, field, case}`. When no stream of that agent is open, the inbox keeps the event and sends it first when a stream opens, so a revocation never waits for the grant to expire. The page shows a **Revoke** button on each granted field of a card in the outbox or in Sent, until its `until` passes.
+
+### Delivery in the session
+
+The integration opens the sealed value in memory and keeps it in the session's grant store, `src/secrets/grant.ts`, with the idle window and the ceiling. It never writes the value to a file. The model reads a line with the secret's name, the case id and both deadlines, and says that every command it runs gets `$NAME`. The harness then adds the variable to the environment of each command it starts, while the grant lives. A `revoke` event ends the grant before the next command. When a value appears in a command's output, the integration masks it as `[secret NAME]` before the model reads it.
+
+- **pi** adds the variables to the environment of each bash command it spawns.
+- **Claude Code** rewrites each Bash command in a `PreToolUse` hook so that it first reads the variables from a socket of the channel process, once, with a one-time token, and then runs the command. The channel masks the values in the output.
+- **opencode** adds them in its shell environment hook.
+
+The `secret` widget delivers the same way: its sealed value becomes a grant of one hour, and no integration writes `~/.your-attention/secrets/` any more.
 
 ## Secret grants
 
@@ -423,7 +540,7 @@ A widget version can also carry `when` and `response`, as `POST /v1/widgets {nam
 
 `response` is text for the agent. When the person answers, the inbox fills it and stores it in the answer's `responses`. The agent reads it after the answer fields. `{{field}}` is the answer's value for that field. When the answer has no value for a field, the inbox uses the value that the card placed the widget with, so a prefilled field the person never edits still counts. `{{#field}}...{{/field}}` shows its text when the field is on or filled, and `{{^field}}...{{/field}}` when it is off or empty. A check box group counts as on when one of its items is on. A response can tell the agent what to do next, such as where to post a message the person approved.
 
-The page adds three components to OpenUI's. `Mermaid(source)` draws a diagram, as [Diagrams](#diagrams) describes. `SecretInput(name, publicKey)` draws a secret field, as [Secret widget](#secret-widget) describes. `CheckWithText(label, check, [content])` It shows a check box and a label. A click on the label shows or hides the content, such as a `TextArea` the person can edit, and it leaves the box as it was. Hovering the label previews the text of the content's fields. The content stays on the page while hidden, so its fields send their values with the answer. A `FormControl` or a `Card` can hold it.
+The page adds four components to OpenUI's. `Mermaid(source)` draws a diagram, as [Diagrams](#diagrams) describes. `SecretInput(name, publicKey)` draws a secret field, as [Secret widget](#secret-widget) describes. `SecretAccess(name, publicKey, candidates)` draws a request for access to a secret, as [Secret sources](#secret-sources) describes. `CheckWithText(label, check, [content])` It shows a check box and a label. A click on the label shows or hides the content, such as a `TextArea` the person can edit, and it leaves the box as it was. Hovering the label previews the text of the content's fields. The content stays on the page while hidden, so its fields send their values with the answer. A `FormControl` or a `Card` can hold it.
 
 ## Diagrams
 
@@ -432,7 +549,7 @@ A card draws [Mermaid](https://mermaid.js.org) diagrams in two places:
 - In `text` and `recommendation`, a fenced block whose first line is ```` ```mermaid ```` draws its lines as a diagram.
 - In `body`, the `Mermaid(source)` component draws one. Its source must be a string literal in double or single quotes, such as `flow = Mermaid("flowchart TD\n  A --> B")`, and the inbox refuses a reference to another statement. The inbox reads the body as OpenUI does, so it skips a call in a `//` or `#` comment. A `Card`, `SectionItem`, `TabItem`, `AccordionItem` or `Carousel` can hold it, as for a `CodeBlock`.
 
-Every inbox has two built-in widgets. `secret` asks for a sealed value, as [Secret widget](#secret-widget) describes. The widget `mermaid`, version 1, places `Mermaid` with its `source` value: `flow = widget mermaid {"source": "flowchart TD\n  A --> B"}`. `GET /v1/widgets` lists both first, with `builtin: true`, and the catalog in `GET /v1/guidance` lists them with the saved widgets. Saving a widget named `mermaid` or `secret` answers 400.
+Every inbox has three built-in widgets. `secret` asks for a sealed value, as [Secret widget](#secret-widget) describes. `secret_access` asks the person to grant a secret from a source, as [Secret sources](#secret-sources) describes. The widget `mermaid`, version 1, places `Mermaid` with its `source` value: `flow = widget mermaid {"source": "flowchart TD\n  A --> B"}`. `GET /v1/widgets` lists them first, with `builtin: true`, and the catalog in `GET /v1/guidance` lists them with the saved widgets. Saving a widget named `mermaid`, `secret` or `secret_access` answers 400.
 
 When an agent posts or patches a card, the laptop inbox parses each diagram with mermaid 11.17.2, after it fills a template and places widgets. That covers `POST /v1/cards`, `card_patch`, and a widget or template that expands into a diagram. The inbox refuses a diagram that does not parse with 400. Its message names where the diagram is and quotes mermaid's error. For a dotted link with text and a pipe label, mermaid's error reads:
 
@@ -675,13 +792,13 @@ A client adds `instance=<id>` to the stream, `/v1/ws` or `/v1/poll` address, wit
 
 Answers for an offline agent wait. `GET /v1/dead-letters` lists them, and `POST /v1/cards/<id>/claim {agent}` hands one to a successor session. A guidance answer waits for the agent in `broadcast.from`, and a claim of that card sets `broadcast.from` to the successor. `GET /v1/unread` counts every answer this caller has not acknowledged, and names up to 20 cards to acknowledge. `?agent=<id>` narrows it to one agent, which is what a watcher asks when it starts or ends: an answer that arrived while nothing was listening is in that count and in no event. A guidance answer counts for the agent in `broadcast.from` until that agent acknowledges it.
 
-`your-attention watch` follows that stream for a script: it prints each event as one line of JSON, the inbox's own event with `receivedAt` added and nothing else changed. A `beat` is not one of those events. It reports that the stream answers, rather than a card, so the watcher drops it as the client already drops it on the event stream and the long-poll. An inbox with nothing to say prints the `hello` line when a stream opens, and then only the events that arrive, which are `answer`, `card`, `guidance`, `returned` and `advice`. `--agent` names the agent, `--no-card` leaves the card out, `--select` keeps the card fields it names, and `--ack` acknowledges each answer after printing it. Without `--ack` the watcher acknowledges nothing, so it never marks read what the agent waiting for that answer has not seen. A script that takes an answer out of band marks it read with `your-attention ack <card>`, which is the `POST /v1/cards/<id>/ack` route.
+`your-attention watch` follows that stream for a script: it prints each event as one line of JSON, the inbox's own event with `receivedAt` added and nothing else changed. A `beat` is not one of those events. It reports that the stream answers, rather than a card, so the watcher drops it as the client already drops it on the event stream and the long-poll. An inbox with nothing to say prints the `hello` line when a stream opens, and then only the events that arrive, which are `answer`, `card`, `guidance`, `returned`, `advice` and `revoke`. `--agent` names the agent, `--no-card` leaves the card out, `--select` keeps the card fields it names, and `--ack` acknowledges each answer after printing it. Without `--ack` the watcher acknowledges nothing, so it never marks read what the agent waiting for that answer has not seen. A script that takes an answer out of band marks it read with `your-attention ack <card>`, which is the `POST /v1/cards/<id>/ack` route.
 
 `your-attention watch --role owner` follows the page events. It signs in with the owner token of the inbox this machine runs, or else with the owner pairing in `owner.json`, as `login-url` does. It opens the page socket, `/v1/ws?page=1`, with the token in the `Authorization` header and no `viewer`. So the inbox counts no page for it, and `GET /v1/person` never reports a script as the person. When the socket never opens, the watcher reads `GET /v1/events` the same way. It tries the socket again when that stream ends or answers 410, as the hosted inbox does.
 
 A page event gives a card's id only, so for each `change` the watcher reads `GET /v1/cards/<id>` and prints `{type: "change", id, card, answer, state, rev, receivedAt}`. On these lines `id` is the card's id. The watcher skips a change whose `rev` matches the line it printed last for that card. For a card that is gone, it prints `{type: "change", id, receivedAt}`. An empty `id` means many cards changed at once, as after `clear`. `presence` and `code` pass through as the inbox writes them. The page socket doesn't send `hello`, so the watcher writes `{type: "hello", role: "owner"}` each time the socket or the stream opens.
 
-`--agent` keeps the cards and presence of that agent, and the `hello` lines. `--no-card` and `--select` cut the card after that filter reads it. `--type` keeps the event types it lists, with either role: `hello`, `answer`, `card`, `guidance`, `returned` and `advice` for an agent, and `hello`, `change`, `presence` and `code` for the owner. `--ack` with `--role owner` exits with an error, since only the token that posted a card may acknowledge its answer. Before it opens the socket, the watcher calls `GET /v1/pin`, which only an owner may call. A 403 there, or a machine with no owner pairing, makes it exit with the advice to run `your-attention pair <url> --role owner`.
+`--agent` keeps the cards and presence of that agent, and the `hello` lines. `--no-card` and `--select` cut the card after that filter reads it. `--type` keeps the event types it lists, with either role: `hello`, `answer`, `card`, `guidance`, `returned`, `advice` and `revoke` for an agent, and `hello`, `change`, `presence` and `code` for the owner. `--ack` with `--role owner` exits with an error, since only the token that posted a card may acknowledge its answer. Before it opens the socket, the watcher calls `GET /v1/pin`, which only an owner may call. A 403 there, or a machine with no owner pairing, makes it exit with the advice to run `your-attention pair <url> --role owner`.
 
 An owner watcher sees every card and every answer, and the agents' presence, as a page does. It uses an owner token: the `owner-token` file, or the paired token in `owner.json`. `writePrivate` writes both with mode 0600. To end a paired watcher's access, sign that machine out from the devices list on the page, which sends `DELETE /v1/tokens/<id>`.
 

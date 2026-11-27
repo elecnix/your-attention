@@ -12,6 +12,25 @@ export async function newSealKeys(): Promise<{ publicKey: JsonWebKey; privateKey
   return { publicKey: (await crypto.subtle.exportKey('jwk', pair.publicKey)) as JsonWebKey, privateKey: pair.privateKey };
 }
 
+/** Base64 in chunks, since spreading a large buffer into one call overflows the stack. */
+function base64(buf: ArrayBuffer | Uint8Array): string {
+  const all = new Uint8Array(buf);
+  let text = '';
+  for (let i = 0; i < all.length; i += 0x8000) text += String.fromCharCode(...all.subarray(i, i + 0x8000));
+  return btoa(text);
+}
+
+/** Seal `text` to an agent's public key, as web/sealed.js does in the page. A secret source seals with it, so the value
+ * leaves the source only as ciphertext. */
+export async function sealValue(publicKey: JsonWebKey, text: string): Promise<Sealed> {
+  const pub = await crypto.subtle.importKey('jwk', publicKey, RSA, false, ['wrapKey']);
+  const aes = (await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt'])) as CryptoKey;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aes, new TextEncoder().encode(text));
+  const key = await crypto.subtle.wrapKey('raw', aes, pub, { name: 'RSA-OAEP' });
+  return { alg: SEAL_ALG, key: base64(key), iv: base64(iv), data: base64(data) };
+}
+
 export async function openSealed(privateKey: CryptoKey, sealed: Sealed): Promise<string> {
   if (sealed.alg !== SEAL_ALG) throw new Error(`unknown sealing ${sealed.alg}`);
   const aes = await crypto.subtle.unwrapKey('raw', bytes(sealed.key), privateKey, { name: 'RSA-OAEP' }, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
