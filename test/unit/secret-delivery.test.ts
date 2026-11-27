@@ -25,11 +25,16 @@ async function granted(secrets: SecretRequests, id: string, until: number, extra
   return { card, answer: { values: { DATABASE_URL: value }, answeredAt: T0 } as unknown as Answer };
 }
 
+/** A session at T0 that received a grant of DATABASE_URL on card `id`, and the line the model read about it. */
+async function received(id: string, until: number, extra: Partial<AccessGrant> = {}): Promise<{ secrets: SecretRequests; text: string }> {
+  const secrets = new SecretRequests(() => T0);
+  const { card, answer } = await granted(secrets, id, until, extra);
+  return { secrets, text: await secrets.receive(card, answer) };
+}
+
 describe('a secret_access grant in the session', () => {
   it('tells the model the name, the case id and both deadlines, and never the value or a path', async () => {
-    const secrets = new SecretRequests(() => T0);
-    const { card, answer } = await granted(secrets, 'c1', T0 + 60 * MIN);
-    const text = await secrets.receive(card, answer);
+    const { text } = await received('c1', T0 + 60 * MIN);
     assert.match(text, /DATABASE_URL is available to this session until 2026-11-27 13:00 UTC/);
     assert.match(text, /after 15 min unused \(case case-c1\)/);
     assert.match(text, /\$DATABASE_URL/);
@@ -86,9 +91,7 @@ describe('a secret_access grant in the session', () => {
   });
 
   it('holds no grant for an answer that arrives after its ceiling, and says the grant ended', async () => {
-    const secrets = new SecretRequests(() => T0);
-    const { card, answer } = await granted(secrets, 'c10', T0 - MIN);
-    const text = await secrets.receive(card, answer);
+    const { secrets, text } = await received('c10', T0 - MIN);
     assert.match(text, /DATABASE_URL on card c10 \(case case-c10\) ended at 2026-11-27 11:59 UTC/);
     assert.doesNotMatch(text, /Every command you run gets it/);
     assert.deepEqual(secrets.env('pi:s1'), {});
@@ -117,9 +120,8 @@ describe('a secret_access grant in the session', () => {
   });
 
   it('holds no grant for a field the inbox already marked revoked', async () => {
-    const secrets = new SecretRequests(() => T0);
-    const { card, answer } = await granted(secrets, 'c6', T0 + 60 * MIN, { revokedAt: T0 });
-    assert.match(await secrets.receive(card, answer), /revoked DATABASE_URL on card c6 \(case case-c6\)/);
+    const { secrets, text } = await received('c6', T0 + 60 * MIN, { revokedAt: T0 });
+    assert.match(text, /revoked DATABASE_URL on card c6 \(case case-c6\)/);
     assert.deepEqual(secrets.env('pi:s1'), {});
   });
 
