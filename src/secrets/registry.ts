@@ -77,7 +77,12 @@ export function originFolder(origin: string | undefined): string {
   try { url = new URL(origin); } catch { throw new Error(`the origin ${origin} is not an address`); }
   if (url.protocol !== 'file:') throw new Error(`the origin ${origin} is not a file:// address, and version 1 loads sources only from a folder on this computer`);
   // fileURLToPath gives C:\folder on Windows, where the pathname would be /C:/folder.
-  return fileURLToPath(url);
+  try {
+    return fileURLToPath(url);
+  } catch {
+    // On Windows a file:// address without a drive letter names no folder.
+    throw new Error(`the origin ${origin} does not name a folder on this computer`);
+  }
 }
 
 interface Loaded { name: string; builtin: boolean; source?: SecretSource & { stop?(): void }; problem?: string }
@@ -86,12 +91,13 @@ interface Loaded { name: string; builtin: boolean; source?: SecretSource & { sto
 function loadEntry(entry: SourceEntry, options: RegistryOptions): Loaded {
   const loaded = { name: entry.name, builtin: false };
   try {
+    // What the entry lacks comes first, then what its origin names on this computer.
+    if (entry.form === 'stdio' && (!Array.isArray(entry.command) || entry.command.length === 0 || !entry.command.every((w) => typeof w === 'string'))) {
+      throw new Error('a stdio source needs a command, the executable and its arguments');
+    }
     const folder = originFolder(entry.origin);
     const settings = entry.settings ?? {};
-    if (entry.form === 'stdio') {
-      if (!Array.isArray(entry.command) || entry.command.length === 0 || !entry.command.every((w) => typeof w === 'string')) {
-        throw new Error('a stdio source needs a command, the executable and its arguments');
-      }
+    if (entry.form === 'stdio' && entry.command) {
       return { ...loaded, source: stdioSource({ name: entry.name, folder, command: entry.command, settings, timeoutMs: options.timeoutMs, log: options.log }) };
     }
     if (entry.form === 'node' || entry.form === undefined) return { ...loaded, source: loadNodeSource(folder, settings) };
