@@ -97,7 +97,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const text = (t: unknown) => ({ content: [{ type: 'text' as const, text: typeof t === 'string' ? t : JSON.stringify(t, null, 2) }] });
   try {
     const place = async () => ({ ...origin, name: sessionName.read(), ...(await herdrPlace(pane)) });
-    return text(await runTool({ inbox: need(), secrets, agent, origin: place, arrival: 'as a channel event' }, req.params.name, args));
+    // A one-time code becomes a grant inside card_otp, and the Bash hooks read it from the socket the first grant opens.
+    const deliver = async () => ((await openSecretSocket()) ? undefined : `This session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get the code. Tell the person.`);
+    return text(await runTool({ inbox: need(), secrets, agent, origin: place, arrival: 'as a channel event', deliverGrants: deliver }, req.params.name, args));
   } catch (e) {
     return { ...text(String((e as Error).message)), isError: true };
   }

@@ -2,7 +2,12 @@
 // approval mints, and the redemption that seals a fresh code to the posting session. SPEC.md#one-time-codes holds the
 // contract. The last test searches every place a code could leak for the digits the session received.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
+import { sealedOtpKeys } from '../../src/cloudflare/otp-keys.ts';
+import { fileOtpKeys, OTP_KEYS_FILE } from '../../src/node/otp-keys.ts';
 import { describeAnswer, type Client } from '../../src/client.ts';
 import { createHandler } from '../../src/core/http.ts';
 import { Inbox, InboxError, type Caller } from '../../src/core/inbox.ts';
@@ -356,6 +361,49 @@ describe('the code never leaves the session', () => {
     } finally {
       methods.forEach((m, i) => { console[m] = saved[i]!; });
     }
+  });
+});
+
+describe('where the keys live', () => {
+  it('keeps the laptop keys in one file of mode 0600 beside owner-token, and refuses a key damaged on disk', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-otp-'));
+    try {
+      const keys = fileOtpKeys(home, 'test-machine');
+      assert.match(keys.holder, /^the laptop inbox on test-machine, in .*otp-keys\.json, which only its user reads$/);
+      const inbox = new Inbox(new MemoryStorage(), () => NOW, undefined, { otpKeys: keys });
+      await inbox.otpEnroll(owner, 'npm', { key: KEY_TEXT, code: await totp(RFC_KEY, NOW), allow: [SESSION] });
+      const file = path.join(home, OTP_KEYS_FILE);
+      if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      assert.deepEqual(await keys.load('npm'), RFC_KEY);
+      const session = await newSealKeys();
+      post(inbox, session.publicKey);
+      const answer = await inbox.answer('c1', { values: { NPM_OTP: 'approve' }, by: owner });
+      // One character of the stored key changes, as a stray edit or a bad disk would change it.
+      const stored = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, string>;
+      fs.writeFileSync(file, JSON.stringify({ npm: `${stored['npm']!.startsWith('A') ? 'B' : 'A'}${stored['npm']!.slice(1)}` }));
+      await assert.rejects(inbox.otpRedeem(agent, { ticket: (answer.values['NPM_OTP'] as OtpApproval).ticket, agent: SESSION }), rejects(500, /the key npm is damaged/));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the hosted keys as ciphertext under the Worker secret, which another inbox or another secret cannot open', async () => {
+    const storage = new MemoryStorage();
+    const keys = sealedOtpKeys('worker-secret-for-tests', 'inbox-a', storage);
+    await keys.save('npm', RFC_KEY);
+    assert.deepEqual(await keys.load('npm'), RFC_KEY);
+    assert.doesNotMatch(JSON.stringify(storage.list('otpsealed')), new RegExp(`${KEY_TEXT}|12345678901234567890`));
+    await assert.rejects(sealedOtpKeys('worker-secret-for-tests', 'inbox-b', storage).load('npm'), /does not decrypt/);
+    await assert.rejects(sealedOtpKeys('another-secret', 'inbox-a', storage).load('npm'), /does not decrypt/);
+    // A redemption over a key that no longer decrypts refuses with the reason, and sends no code.
+    const inbox = new Inbox(new MemoryStorage(), () => NOW, undefined, { otpKeys: sealedOtpKeys('worker-secret-for-tests', 'inbox-a', storage) });
+    await inbox.otpEnroll(owner, 'npm', { key: KEY_TEXT, code: await totp(RFC_KEY, NOW), allow: [SESSION] });
+    const session = await newSealKeys();
+    post(inbox, session.publicKey);
+    const answer = await inbox.answer('c1', { values: { NPM_OTP: 'approve' }, by: owner });
+    const sealed = storage.get<{ iv: string; data: string }>('otpsealed', 'npm')!;
+    storage.put('otpsealed', 'npm', { ...sealed, data: `${sealed.data.startsWith('A') ? 'B' : 'A'}${sealed.data.slice(1)}` });
+    await assert.rejects(inbox.otpRedeem(agent, { ticket: (answer.values['NPM_OTP'] as OtpApproval).ticket, agent: SESSION }), rejects(500, /the key npm is damaged: its ciphertext does not decrypt/));
   });
 });
 
