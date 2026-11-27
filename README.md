@@ -72,11 +72,17 @@ The inbox keeps its files in `~/.your-attention`. Set `YOUR_ATTENTION_HOME` to m
 
 The [PIN](#protect-the-inbox-with-a-pin) is optional. Your own inbox, used by one person, works fine without it. In a terminal, `start` and `serve` offer to set it while the inbox has none: type `y` and the PIN twice, `s` to skip until the next start, or `n` to stop asking. A service started at login has no terminal, so it never asks.
 
-To start the inbox when you log in (optional), write a launchd or systemd unit. Without `--write`, the command only prints the unit.
+To start the inbox at login, and to have it restart when it stops, install it as a service. The command writes a launchd agent on macOS, or a systemd unit on Linux, and prints the unit instead when you leave out `--write`.
 
 ```sh
 your-attention service serve --write
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.your-attention.serve.plist   # macOS
+systemctl --user enable --now your-attention-serve                                       # Linux
 ```
+
+Load the unit into the domain of the desktop session, `gui/$(id -u)` on macOS. A unit that an SSH login loads runs in the background domain and ends with that shell. FileVault asks for a login at every boot, which creates the desktop domain, so the inbox returns with that login.
+
+The unit sets the `PATH` of the shell that wrote it, and `YOUR_ATTENTION_HOME` and `HERDR_BIN_PATH` when that shell defines them. launchd and systemd give a unit a short `PATH` of their own, which finds neither `herdr` for an approval nor the programs a secret source runs, so write the unit from the shell that has them.
 
 **On a hosted inbox:**
 
@@ -234,7 +240,7 @@ Triage reads each new card and sends back one that lacks a goal, options, eviden
 
 ```sh
 your-attention triage login                         # once, for OpenRouter
-your-attention service triage --write               # a launchd or systemd unit
+your-attention service triage --write               # a launchd or systemd unit, loaded as step 4 shows
 your-attention triage --judge-cmd "claude -p"       # or a harness instead
 ```
 
