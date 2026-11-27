@@ -15,6 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { Client, describeAdvice, describeAnswer, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
+import { serveSecrets } from './secret-socket.ts';
 import { runTool } from '../run-tool.ts';
 import { SessionName } from './session-name.ts';
 import { CardAsks } from '../card-asks.ts';
@@ -252,7 +253,9 @@ const asks = new CardAsks({
 });
 
 const stop = new AbortController();
-const quit = (): void => { stop.abort(); asks.stop(); process.exit(0); };
+// The Bash hooks read the session's grants from this socket, so it opens before any answer can bring one.
+const secretSocket = await serveSecrets(secrets, agent, session).catch((e: Error) => { log('no socket for secrets:', e.message); return undefined; });
+const quit = (): void => { stop.abort(); asks.stop(); secretSocket?.close(); process.exit(0); };
 // Exit with the session: a leftover server would show the agent as listening.
 process.stdin.on('end', quit);
 process.stdin.on('close', quit);
@@ -288,6 +291,11 @@ function listen(client: Client): void {
     }
     if (ev.type === 'card') {
       await notify(describeSentCard(ev), { card_id: ev.card.id });
+      return;
+    }
+    if (ev.type === 'revoke') {
+      const live = secrets.revoke(ev.case);
+      await notify(`The person revoked ${ev.field} on card ${ev.card} (case ${ev.case}).${live ? ` Commands no longer get $${ev.field}.` : ''}`, { card_id: ev.card });
       return;
     }
     if (ev.type !== 'answer') return;

@@ -737,8 +737,9 @@ switch (command) {
     break;
   case 'claude-hook': {
     const { positionals } = parseCommand(command, { args: rest, allowPositionals: true });
-    if (!['ask-pre', 'ask-post', 'ask-cancel', 'turn-end'].includes(positionals[0] ?? '')) usageError(command, positionals[0] === undefined ? 'needs the hook to run' : `unknown hook ${positionals[0]}`);
+    if (!['ask-pre', 'ask-post', 'ask-cancel', 'turn-end', 'secret-pre', 'secret-post'].includes(positionals[0] ?? '')) usageError(command, positionals[0] === undefined ? 'needs the hook to run' : `unknown hook ${positionals[0]}`);
     if (rest[0] === 'turn-end') await (await import('./integrations/claude/turn-end-hook.ts')).main();
+    else if (rest[0] === 'secret-pre' || rest[0] === 'secret-post') await (await import('./integrations/claude/secret-hook.ts')).main(rest[0]);
     else await (await import('./integrations/claude/ask-hook.ts')).main(rest[0] ?? '');
     break;
   }

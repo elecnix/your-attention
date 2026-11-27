@@ -37,6 +37,8 @@ export interface HoldOptions {
   until: number;
   idleMs?: number;
   now?: number;
+  /** The case id the inbox gave this approval, which the person sees on the card. A new one when absent. */
+  caseId?: string;
 }
 
 const key = (agent: string, name: string): string => `${agent}\u0000${name}`;
@@ -63,7 +65,7 @@ export class Grants {
       until: Math.min(options.until, now + MAX_UNTIL_MS),
       idleMs: options.idleMs ?? DEFAULT_IDLE_MS,
       usedAt: now,
-      caseId: randomId(4),
+      caseId: options.caseId ?? randomId(4),
     };
     this.held.set(key(grant.agent, grant.name), grant);
     return grant;
@@ -96,6 +98,20 @@ export class Grants {
     return [...this.held.values()]
       .filter((grant) => grant.agent === agent && this.alive(grant, now))
       .map((grant) => grant.name);
+  }
+
+  /**
+   * Every live grant of this agent as `{name: value}`, for the environment of one command it is about to start. Each
+   * one counts as a use, so its idle window restarts, and a dead one is dropped as it is found.
+   */
+  env(agent: string, now = this.now()): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const name of this.names(agent, now)) {
+      const value = this.take(agent, name, now);
+      if (value !== undefined) out[name] = value;
+    }
+    this.sweep(now);
+    return out;
   }
 
   /** Kills the grant with this case id, and says whether one was found. Takes effect on the next `take`. */

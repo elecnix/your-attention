@@ -30,7 +30,7 @@ function line(event: object, card: Card | undefined, options: WatchOptions, rece
 
 /** The line for one event, cut to the fields the watcher asked for. */
 export function watchLine(event: AgentEvent, options: WatchOptions, receivedAt: number): WatchLine {
-  return line(event, 'card' in event ? event.card : undefined, options, receivedAt) as WatchLine;
+  return line(event, 'card' in event && typeof event.card === 'object' ? event.card : undefined, options, receivedAt) as WatchLine;
 }
 
 /** The card a line keeps, as `{card}`, or nothing with --no-card. */

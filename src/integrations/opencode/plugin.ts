@@ -27,6 +27,11 @@ interface Hooks {
   tool?: Record<string, ToolDefinition>;
   event?: (input: { event: { type: string; properties?: { sessionID?: string } } }) => Promise<void>;
   'chat.message'?: (input: { sessionID: string }, output: { message?: unknown; parts: { type: string; text?: string }[] }) => Promise<void>;
+  /** The environment of each shell OpenCode starts: the agent's bash tool, with the session's id, and the person's own
+   * terminal, without one. */
+  'shell.env'?: (input: { cwd: string; sessionID?: string; callID?: string }, output: { env: Record<string, string> }) => Promise<void>;
+  /** Each tool's result before the model reads it, which a plugin may change in place. */
+  'tool.execute.after'?: (input: { tool: string; sessionID: string; callID: string }, output: { title: string; output: string; metadata: unknown }) => Promise<void>;
   dispose?: () => Promise<void>;
 }
 
@@ -113,6 +118,11 @@ export function createPlugin(z: unknown) {
         if (ev.type === 'returned') { await send(session, `[your-attention] ${describeReturned(ev)}`); return; }
         if (ev.type === 'advice') { await send(session, `[your-attention] ${describeAdvice(ev)}`); return; }
         if (ev.type === 'card') { await send(session, `[your-attention] ${describeSentCard(ev)}`); return; }
+        if (ev.type === 'revoke') {
+          const live = secrets.revoke(ev.case);
+          await send(session, `[your-attention] The person revoked ${ev.field} on card ${ev.card} (case ${ev.case}).${live ? ` Commands no longer get $${ev.field}.` : ''}`);
+          return;
+        }
         if (ev.type !== 'answer') return;
         pending.set(ev.id, ev.card.id);
         const sealed = await secrets.receive(ev.card, ev.answer);
@@ -173,6 +183,17 @@ export function createPlugin(z: unknown) {
           pending.delete(receipt);
           await inbox.ack(card).catch(() => {});
         }
+      },
+      // A grant reaches the shells of its own session only. The person's terminal has no session, and gets none.
+      async 'shell.env'(input, output) {
+        if (input.sessionID) Object.assign(output.env, secrets.env(agentOf(input.sessionID)));
+      },
+      // A value a command printed reaches the model as [secret NAME].
+      async 'tool.execute.after'(_input, output) {
+        if (!secrets.received) return;
+        output.output = secrets.maskDeep(output.output);
+        output.title = secrets.maskDeep(output.title);
+        output.metadata = secrets.maskDeep(output.metadata);
       },
       async dispose() {
         lifetime.abort();
