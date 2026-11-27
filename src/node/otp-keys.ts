@@ -1,7 +1,7 @@
 // The laptop inbox's one-time code keys: one file, otp-keys.json, in the inbox's home folder beside owner-token, of mode
 // 0600 in a folder of mode 0700. A TOTP key can't be stored as a hash, since the inbox computes each code with the key
 // itself, so the file's mode is what protects it: only the user that runs the inbox reads it. The inbox reads a key only
-// inside a redemption. SPEC.md#where-the-keys-live says why this is the exception to the rule that tokens are hashed.
+// inside a redemption. SPEC.md#key-storage says why this is the exception to the rule that tokens are hashed.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

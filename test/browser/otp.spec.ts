@@ -36,7 +36,6 @@ test('the person approves a code on the card, never sees one, and the card says 
   await expect(field).toContainText('release agent on test-host');
   await expect(field).toContainText(/the laptop inbox on .*otp-keys\.json, which only its user reads/);
   await field.getByLabel('Approve one code from npm').check();
-  if (process.env['OTP_SHOT']) await page.screenshot({ path: `${process.env['OTP_SHOT']}/otp-card.png` });
   await page.getByRole('button', { name: 'Send answer' }).click();
 
   await expect.poll(async () => (await inbox.detail('otp')).answer?.values['NPM_OTP']).toBeTruthy();
@@ -50,7 +49,6 @@ test('the person approves a code on the card, never sees one, and the card says 
   expect(code).toMatch(/^\d{6}$/);
   await page.getByRole('button', { name: /Approve the npm publish of your-attention 1\.4\.0\?/ }).click();
   await expect(page.locator('body')).toContainText(/Approved one code from npm, issued at/);
-  if (process.env['OTP_SHOT']) await page.screenshot({ path: `${process.env['OTP_SHOT']}/otp-issued.png` });
   expect(await page.locator('body').innerText()).not.toContain(code);
   expect(JSON.stringify(await inbox.detail('otp'))).not.toContain(code);
 });

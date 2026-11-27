@@ -92,7 +92,10 @@ flowchart TB
     ET["extension-token: extension"]
   end
   subgraph INBOX["inbox: laptop server, or hosted Durable Object at /i/inbox-id/"]
-    DB[("SHA-256 of each token, SHA-256 of the PIN key, PIN salt, sign-in codes, pairings, answer webhook headers and signing secrets, the VAPID private key, and the push subscriptions of the owner's devices")]
+    DB[("SHA-256 of each token, SHA-256 of the PIN key, PIN salt, sign-in codes, pairings, answer webhook headers and signing secrets, the VAPID private key, the push subscriptions of the owner's devices, and each one-time code key's label, allowlist and SHA-256 checksum, with its tickets")]
+  end
+  subgraph OTPK["one-time code keys"]
+    OK["laptop: otp-keys.json, mode 0600, beside owner-token. Hosted: AES-GCM under the Worker secret OTP_KEY_SECRET"]
   end
   subgraph WORKER["hosted Worker"]
     KV[("invite codes, uses left")]
@@ -153,6 +156,11 @@ flowchart TB
   BROWSER -- "inside the owner's answer: the shown command and the password, sealed to the broker key" --> BK
   BK -- "the password on standard input, for one run" --> RUN
   RUN -- "what it printed, the password masked" --> INBOX
+  OJ -- "otp enroll, owner only: the key and a current code, once" --> INBOX
+  INBOX -- "the key, at enrollment" --> OK
+  OK -- "the key, inside one redemption, to compute one code" --> INBOX
+  INBOX -- "agent stream: the answer to an approved otp card holds a ticket, never a code" --> CLIENT
+  INBOX -- "POST /v1/otp/redeem by the posting session: one code, sealed to the card's key" --> GR
 ```
 
 - The inbox stores a hash of each token, never the token. Only the machine or tab named in its box holds the secret.
@@ -166,6 +174,7 @@ flowchart TB
 - A secret source releases a value only inside the owner's `POST /v1/cards/<id>/answer`, and seals it to the public key on the card before the value leaves the source. Of the value, the inbox stores only that ciphertext. A lookup answers metadata only, and an agent or extension token gets 403 on the answer and on the revoke route. Hooks, webhooks and triage never see a grant.
 - A password for a privileged action is sealed to the broker key, never to a key on the card, so no agent session can open it. The laptop inbox opens it in memory inside the owner's answer and refuses a command that differs from the card's. It then writes the password to the command's standard input, and stores only the output, with the password masked. The `serve` process keeps the broker key in memory and makes a new one at each start. The hosted inbox has no broker and refuses the card.
 - A granted secret opens only in the memory of the session that posted the card, and each command gets it in its environment, never in argv or a file. In Claude Code the shell reads it from the channel's socket, mode 0600 in a folder of mode 0700, with a token that works once within 30 minutes. A revoke ends the grant before the next command.
+- A TOTP key is the one secret the inbox keeps whole, which is the exception to the first rule above. The inbox computes each code with an HMAC keyed by the key itself, and a hash of the key computes nothing. The laptop inbox keeps the keys in `otp-keys.json`, mode 0600, beside `owner-token`, and stores only each key's label, allowlist and SHA-256 checksum in SQLite. The hosted inbox encrypts each key with AES-GCM under a key that HKDF derives from the Worker secret `OTP_KEY_SECRET` and the inbox's id. At enrollment, the owner gives the key to the inbox, once. After that, no route, page, terminal client or agent gets the key back. The inbox computes a code only when the session that posted an approved otp card redeems its ticket, and the code leaves the inbox sealed to that card's public key alone. The inbox records when it issued a code, never the code. [SPEC.md](SPEC.md#key-storage) holds the details.
 - An agent's answer webhook gets nothing until the person approves it on its system card. The inbox keeps the header values the agent gave, and sends them only to that webhook, never to a client or a page. The signing secret goes to the agent once.
 - The inbox makes its own VAPID key pair for Web Push and keeps the private half in its storage, never in a route, a log or the repository. Each push device belongs to the owner token that saved it, and revoking the token removes it. A push contains only the card's title and id, encrypted for the device, so the service that relays it cannot read it.
 - An invite code is the operator's secret. The hosted inbox keeps only its invite id, the first 16 hex digits of the code's SHA-256, for usage counts.
