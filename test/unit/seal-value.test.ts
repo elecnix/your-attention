@@ -20,6 +20,12 @@ describe('sealing a value outside the page', () => {
     assert.equal(ours.alg, page.alg);
   });
 
+  it('seals a value of a megabyte without overflowing the stack', async () => {
+    const { publicKey, privateKey } = await newSealKeys();
+    const big = 'x'.repeat(1 << 20);
+    assert.equal(await openSealed(privateKey, await sealValue(publicKey, big)), big);
+  });
+
   it('never holds the value in the clear', async () => {
     const { publicKey } = await newSealKeys();
     const sealed = await sealValue(publicKey, 'needle-in-the-hay');

@@ -65,8 +65,10 @@ export interface AccessGrant {
   revokedAt?: number;
 }
 
-/** The idle window of a grant: each use restarts it. */
+/** The idle window of a grant: each use restarts it. The session's grant store records the last use and applies this
+ * window, since only the session sees each use. The inbox stores the ceiling, `until`, alone. */
 export const GRANT_IDLE_MS = 15 * 60_000;
-/** The ceiling a card offers by default, and the most a card may ask for. */
+/** The ceiling a card offers by default. */
 export const GRANT_DEFAULT_MS = 60 * 60_000;
+/** The longest ceiling a card may ask for. The inbox caps `until` at this much after the answer. */
 export const GRANT_MAX_MS = 24 * 60 * 60_000;
