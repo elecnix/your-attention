@@ -64,6 +64,8 @@ export interface CardSummary {
   /** The start of its text, for a link's hover preview. */
   preview?: string;
   answer?: AnswerSummary;
+  /** The card's last change of hands, which says whether it waits on the person because no ancestor of its agent is alive. */
+  lastReassignment?: NonNullable<Card['reassignedFrom']>[number];
   /** Changes with every change to the card or its answer, so a client knows its copy of the whole card is current. */
   rev: string;
 }
@@ -93,6 +95,7 @@ export function summarize(card: Card, answer: Answer | undefined): CardSummary {
     triage: card.triage ? { state: card.triage.state } : undefined,
     links: links.length ? links : undefined, preview: text ? text.slice(0, PREVIEW_CHARS) : undefined,
     answer: answer ? { version: answer.version, savedAt: answer.savedAt, deliveredAt: answer.deliveredAt, readAt: answer.readAt, forcedAt: answer.forcedAt } : undefined,
+    lastReassignment: card.reassignedFrom?.at(-1),
     rev: randomId(6),
   };
 }

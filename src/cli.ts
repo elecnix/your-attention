@@ -7,6 +7,7 @@ import { Client, describeAnswer, loadConfig, notOwnerAdvice, ownerConfig, ownerP
 import { herdrPlace } from './integrations/herdr/place.ts';
 import { parseTagsFlag } from './integrations/tags.ts';
 import type { Option, Priority, PublicSubscription } from './core/types.ts';
+import type { ReassignInbox } from './integrations/bellwether/watch.ts';
 import { homeDir, readHome, writePrivate } from './node/home.ts';
 import { choosePin, httpPinApi, offerPin, terminal } from './node/pin-prompt.ts';
 import { NOTICE, askYesNo, queryUsage, summarize } from './node/telemetry.ts';
@@ -676,6 +677,26 @@ switch (command) {
     await triage.runTriage({ ...config, judge, name: values.name, screen: values['screen-open'] ? 'open' : 'new' }, stop.signal);
     break;
   }
+  case 'bellwether': {
+    const { values } = parseCommand(command, { args: rest, options: { once: { type: 'boolean', default: false }, home: { type: 'string' } } });
+    const target = ownerConfig() ?? fail('This machine runs no inbox and is not paired with one as owner. Pair it as owner with `your-attention pair <url> --role owner`, or start an inbox with `your-attention start`.');
+    const { InboxApi, ApiError } = await import('./tui/api.ts');
+    const api = new InboxApi(target);
+    const bw = await import('./integrations/bellwether/watch.ts');
+    const inbox: ReassignInbox = {
+      state: () => api.call('GET', '/v1/state'),
+      reassign: (id: string, input: { to: string | null; why: string }) => api.call('POST', `/v1/cards/${encodeURIComponent(id)}/reassign`, input),
+    };
+    // A pairing as agent reaches the routes, and the inbox answers that only the owner reads the state.
+    await inbox.state().catch((e: unknown) => fail(e instanceof ApiError && e.status === 403 ? notOwnerAdvice(target.url) : `The inbox at ${target.url} refused: ${(e as Error).message}`));
+    const home = values.home ?? bw.bellwetherHome();
+    const stop = new AbortController();
+    process.on('SIGTERM', () => stop.abort());
+    process.on('SIGINT', () => stop.abort());
+    if (!values.once) console.error(`[bellwether] reading ${path.join(home, 'retire.log')} for retirements`);
+    await bw.watchRetirements({ inbox, home, cursorFile: path.join(homeDir(), 'bellwether.json'), signal: stop.signal, once: values.once, log: (line) => console.log(line) });
+    break;
+  }
   case 'service': {
     // The options after the name go to the service as they were typed, without --write.
     // Strict parsing would refuse those options, so this one only answers --help.
@@ -683,7 +704,7 @@ switch (command) {
     const [name, ...given] = rest;
     const write = given.includes('--write');
     const args = given.filter((a) => a !== '--write');
-    if (name !== 'serve' && name !== 'triage') usageError(command, name === undefined ? 'needs serve or triage' : `the unit runs serve or triage, not ${name}`);
+    if (name !== 'serve' && name !== 'triage' && name !== 'bellwether') usageError(command, name === undefined ? 'needs serve, triage or bellwether' : `the unit runs serve, triage or bellwether, not ${name}`);
     const { serviceFile } = await import('./node/service.ts');
     const unit = serviceFile(name, [name, ...args]);
     if (!write) { console.log(`# ${unit.path}\n${unit.content}\n# then: ${unit.start}`); break; }

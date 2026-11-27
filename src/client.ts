@@ -227,8 +227,8 @@ export class Client {
   }
 
   /** An inbox that does not check diagrams or bodies itself, such as the hosted one, takes them unchecked. So the client
-   * reads what the inbox would store, after templates and widgets, and checks it as a laptop inbox would, before it sends the card.
-   * It fails with the laptop inbox's own words. */
+   * reads what the inbox would store, after templates and widgets, and checks it as your own inbox would, before it sends the card.
+   * It fails with the words of your own inbox. */
   private async checkFirst(route: string, req: { card?: NewCard; id?: string; edits?: { old: string; new: string }[]; field?: string | undefined; pullRequests?: PullRequest | PullRequest[] | null }): Promise<void> {
     this.inboxChecks ??= this.call<{ checks?: { diagrams: boolean; body: boolean } }>('GET', '/v1/info')
       .then((i) => i.checks ?? { diagrams: true, body: true }, (e: unknown) => { this.inboxChecks = undefined; throw e; });
@@ -582,6 +582,11 @@ export function describeAdvice(ev: Extract<AgentEvent, { type: 'advice' }>): str
 export function describeSentCard(ev: Extract<AgentEvent, { type: 'card' }>): string {
   const text = ev.card.text ? `:\n${ev.card.text}` : '.';
   return `The person sent this session a card, ${ev.card.id}: "${ev.card.title}"${text} Reply with a card of your own if there is something to say, and carry on with what you were doing.`;
+}
+
+/** The one line a session hears when the inbox gives it a card whose agent retired. */
+export function describeReassigned(ev: Extract<AgentEvent, { type: 'reassigned' }>): string {
+  return `Card ${ev.card.id} ("${ev.card.title}") was reassigned to you because ${ev.why}: it was ${ev.from}'s, and you are its nearest living ancestor. The answer comes to this session now.`;
 }
 
 /** How each close kind reads in a late answer's first line, said to the agent that closed the card. */

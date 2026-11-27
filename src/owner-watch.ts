@@ -1,6 +1,6 @@
 // `your-attention watch --role owner`: follow the page events with an owner token, as the page and the terminal client
-// do, and print each one as a line. Both builds send page events over the page socket, so the watcher works with the
-// laptop inbox and the hosted one. It opens the socket without a page id, so the inbox does not count it as a page
+// do, and print each one as a line. Both builds send page events over the page socket, so the watcher works with
+// your own inbox and the hosted one. It opens the socket without a page id, so the inbox does not count it as a page
 // that someone looks at, and extensions that read `GET /v1/person` never take a script for the person.
 import type { PageEvent } from './core/types.ts';
 import { InboxApi } from './tui/api.ts';

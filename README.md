@@ -8,7 +8,7 @@ One inbox for the questions all your coding agents ask you. An agent posts a car
 
 With 100 sessions open, a question waits in whichever terminal asked it, and you find it late or never. Your Attention puts every question on one queue, sorted by priority, one card at a time. Each card shows whether its agent is listening, busy or offline, and where your answer is: stored, delivered, or read by the model. An answer to an offline agent waits until its session resumes.
 
-Claude Code and pi post cards through tools, and herdr turns any blocked agent into a card. A card can draw Mermaid diagrams, such as a flowchart of the choice on the card. A click copies a command or an approval sentence that the agent wrote as code. A diagram that doesn't parse goes back to the agent with mermaid's error. The laptop inbox refuses it when the agent posts the card. On a hosted inbox, the agent's client checks it first, and the page sends back any card that skipped that check. To request a key, the agent places the secret widget, `key = widget secret {"name": "OLLAMA_API_KEY"}`, beside the card's other questions. Your browser encrypts the key for that session, and each command the session runs gets it as `$OLLAMA_API_KEY`, while the model sees only the name. Each new client pairs with a code you confirm.
+Claude Code and pi post cards through tools, and herdr turns any blocked agent into a card. A card can draw Mermaid diagrams, such as a flowchart of the choice on the card. A click copies a command or an approval sentence that the agent wrote as code. A diagram that doesn't parse goes back to the agent with mermaid's error. Your own inbox refuses it when the agent posts the card. On the hosted inbox, the agent's client checks it first, and the page sends back any card that skipped that check. To request a key, the agent places the secret widget, `key = widget secret {"name": "OLLAMA_API_KEY"}`, beside the card's other questions. Your browser encrypts the key for that session, and each command the session runs gets it as `$OLLAMA_API_KEY`, while the model sees only the name. Each new client pairs with a code you confirm.
 
 [PRINCIPLES.md](PRINCIPLES.md) states the design and [SPEC.md](SPEC.md) the protocol.
 
@@ -36,11 +36,11 @@ The inbox is one server that holds your cards. Pick one place for it:
 
 | Where | What you get | Choose it when |
 | -- | -- | -- |
-| On your laptop | Unlimited and free, without an account. Agents on the same machine find it on their own. It stops when the laptop sleeps. | You work from one machine. This is the default. |
+| On your own computer | Unlimited and free, without an account. Agents on the same machine find it on their own. It stops when that computer sleeps. | You work from one machine. This is the default. |
 | Your own Cloudflare inbox | Always on, reachable from any machine and your phone. You deploy it to your own Cloudflare account. | You run agents on several machines, and want to own the deployment. See [Run your own cloud inbox](#run-your-own-cloud-inbox-optional). |
 | A hosted inbox | Always on, with no deployment. Someone who runs the service gives you an invite code. Each inbox has [limits](#limits-of-a-cloud-inbox). | Someone already runs the service for you. |
 
-You can change your mind later. Each machine pairs with one inbox at a time.
+The rest of this README calls the first choice your own inbox. You can change your mind later. Each machine pairs with one inbox at a time.
 
 ### 3. Install the command
 
@@ -60,7 +60,7 @@ The package is also on npm, and `npm install -g your-attention` works. The publi
 
 ### 4. Start or open your inbox
 
-**On your laptop:**
+**On your own computer:**
 
 ```sh
 your-attention start            # runs the inbox in the background, on port 4815
@@ -70,7 +70,7 @@ your-attention open --link      # prints a one-time sign-in link, for a private 
 
 The inbox keeps its files in `~/.your-attention`. Set `YOUR_ATTENTION_HOME` to move them.
 
-The [PIN](#protect-the-inbox-with-a-pin) is optional. A laptop inbox used by one person works fine without it. In a terminal, `start` and `serve` offer to set it while the inbox has none: type `y` and the PIN twice, `s` to skip until the next start, or `n` to stop asking. A service started at login has no terminal, so it never asks.
+The [PIN](#protect-the-inbox-with-a-pin) is optional. Your own inbox, used by one person, works fine without it. In a terminal, `start` and `serve` offer to set it while the inbox has none: type `y` and the PIN twice, `s` to skip until the next start, or `n` to stop asking. A service started at login has no terminal, so it never asks.
 
 To start the inbox when you log in (optional), write a launchd or systemd unit. Without `--write`, the command only prints the unit.
 
@@ -219,7 +219,7 @@ A machine whose inbox runs elsewhere pairs once:
 2. A card with a code appears in your inbox. Approve it only when the code matches.
 3. The machine saves its token in `~/.your-attention/client.json`, and its agents use that inbox from then on.
 
-For a hosted inbox, the address is the one you bookmarked, such as `https://app.example.workers.dev/i/<inbox id>`. On your network, `your-attention discover` lists the laptop inboxes it finds, with their addresses.
+For a hosted inbox, the address is the one you bookmarked, such as `https://app.example.workers.dev/i/<inbox id>`. On your network, `your-attention discover` lists the inboxes that computers on it run, with their addresses.
 
 ```sh
 your-attention discover
@@ -238,9 +238,9 @@ your-attention service triage --write               # a launchd or systemd unit
 your-attention triage --judge-cmd "claude -p"       # or a harness instead
 ```
 
-#### Reach a laptop inbox from containers, CI or other machines (optional)
+#### Reach your own inbox from containers, CI or other machines (optional)
 
-Agents that can't reach your laptop connect through a bridge, an SSH tunnel or a relay:
+Agents that can't reach the computer that runs your inbox connect through a bridge, an SSH tunnel or a relay:
 
 ```sh
 your-attention bridge --upstream https://inbox.example
@@ -256,19 +256,19 @@ If the camera opens the wrong browser, select **Copy the sign-in link** in the d
 
 The dialog also shows a short code, such as `K7QM-3XTP`. Type it, or paste the sign-in link, in the **Sign-in code or link** field of the sign-in page. A Home Screen app signs in this way, since it has no address bar. The devices button, left of the phone button, lists every key to the inbox and signs one out, so a phone you lost ends without touching the others.
 
-A cloud inbox works from anywhere, and a laptop inbox from a phone on the same network. The laptop inbox listens on every network interface, IPv4 and IPv6, by default. Its QR code opens the laptop's `.local` name, such as `http://my-laptop.local:4815`, and the dialog also gives an IP address, for a phone that cannot open `.local` names.
+A cloud inbox works from anywhere, and your own inbox works from a phone on the same network. Your own inbox listens on every network interface, IPv4 and IPv6, by default. Its QR code opens your computer's `.local` name, such as `http://my-computer.local:4815`, and the dialog also gives an IP address, for a phone that cannot open `.local` names.
 
-If the phone cannot open the inbox, check for a VPN on the laptop. A VPN that sends your home network's IPv4 traffic into its tunnel breaks every connection from the phone to the laptop over IPv4. The inbox still answers over IPv6, which most home networks and phones use. Otherwise, exclude your home network from the VPN, or use a cloud inbox.
+If the phone cannot open the inbox, check for a VPN on the computer that runs the inbox. A VPN that sends your home network's IPv4 traffic into its tunnel breaks every connection from the phone to that computer over IPv4. The inbox still answers over IPv6, which most home networks and phones use. Otherwise, exclude your home network from the VPN, or use a cloud inbox.
 
 ## Phone notifications
 
 Your phone can buzz when an agent posts a card, even with the page closed. This is Web Push. It works on an https address only, so the inbox page must come from one of these:
 
 - the hosted inbox, which is https already;
-- a laptop inbox behind an https relay: `your-attention serve --relay https://relay.example`, as in step 5;
-- the laptop itself, at `http://localhost`, for notifications on the same computer.
+- your own inbox behind an https relay: `your-attention serve --relay https://relay.example`, as in step 5;
+- your own inbox at `http://localhost`, for notifications on the computer that runs it.
 
-A laptop inbox opened over plain http, such as `http://my-laptop.local:4815` from a phone, cannot send them. Its **Notify me** switch stays greyed out and says "needs an https address".
+Your own inbox opened over plain http, such as `http://my-computer.local:4815` from a phone, cannot send them. Its **Notify me** switch stays greyed out and says "needs an https address".
 
 **Android, or a computer:**
 
@@ -302,7 +302,7 @@ your-attention login-url        # prints a sign-in link that works once, within 
 your-attention stop             # stops the inbox, or its launchd or systemd service
 ```
 
-A card can link a file on the agent's computer with a `file:` address, such as `file:///Users/me/report.html`. On the laptop inbox, a click opens the file in a new tab, when the card came from the same computer. The inbox serves only files that the card's text or recommendation contains, to the owner only, and a served HTML file can't run scripts. A cloud inbox, and a card from another computer, show the path as code.
+A card can link a file on the agent's computer with a `file:` address, such as `file:///Users/me/report.html`. On your own inbox, a click opens the file in a new tab, when the card came from the same computer. The inbox serves only files that the card's text or recommendation contains, to the owner only, and a served HTML file can't run scripts. A cloud inbox, and a card from another computer, show the path as code.
 
 The inbox deletes a cleared card 30 days after you clear it. It also deletes a card nobody answered 30 days after its agent last changed it, even a card that still waits for you. Each deletion takes the answer and the files with the card. An answered card you haven't cleared stays.
 
@@ -367,7 +367,7 @@ A watcher receives the answers to cards that this machine's token posted as the 
 
 The inbox reports an answer as read only when something acknowledges it, so `--ack` is off by default. A watcher that acknowledged every answer would mark read what the session waiting for it has not seen.
 
-`--role owner` follows every card in the inbox, as the page does, so one process can wake an orchestrator on any card or forward each new card to a notifier. It uses the owner token of the inbox on this machine, or the pairing from `your-attention pair <url> --role owner`, and works with the laptop inbox and the hosted one. Each change to a card prints one `change` line with the whole card, its answer and its `state`, such as `open`, `answered` or `closed`. `--agent` keeps one agent's cards, and `--type` keeps the event types it lists, with either role. `--ack` stays with the agent role: only the token that posted a card may mark its answer read.
+`--role owner` follows every card in the inbox, as the page does, so one process can wake an orchestrator on any card or forward each new card to a notifier. It uses the owner token of the inbox on this machine, or the pairing from `your-attention pair <url> --role owner`, and works with your own inbox and the hosted one. Each change to a card prints one `change` line with the whole card, its answer and its `state`, such as `open`, `answered` or `closed`. `--agent` keeps one agent's cards, and `--type` keeps the event types it lists, with either role. `--ack` stays with the agent role: only the token that posted a card may mark its answer read.
 
 ```sh
 your-attention watch --role owner | jq -c 'select(.type == "change" and .state == "answered")'
@@ -408,11 +408,11 @@ The PIN commands act on the inbox this machine runs, with its `owner-token` file
 - The PIN never leaves your browser or terminal. The page and the CLI derive a key from it with a slow salted hash, and the inbox stores a hash of that key. Nobody can read the PIN back, including you.
 - Without a PIN, the page offers to set one each time it opens. **Skip** asks again next time, and **Never ask again** stops the offer for that inbox.
 
-The PIN guards the page and every sign-in link. Agents and their tokens, and the `owner-token` file on the laptop, work without it. A PIN does not protect the inbox from someone who can read files on the laptop, or from a person who watches you type it. A 4-digit PIN has 10,000 values, so the wait after wrong tries is what stops a guesser. After about 60 tries in the first day and a half, a guesser gets 5 tries a day.
+The PIN guards the page and every sign-in link. Agents and their tokens, and the `owner-token` file on the computer that runs the inbox, work without it. A PIN does not protect the inbox from someone who can read files on that computer, or from a person who watches you type it. A 4-digit PIN has 10,000 values, so the wait after wrong tries is what stops a guesser. After about 60 tries in the first day and a half, a guesser gets 5 tries a day.
 
 ## Usage counts
 
-A laptop inbox sends nothing unless you turn usage counts on. The first start in a terminal asks once, and the inbox page offers them until you pick. When on, the inbox sends the maintainers one anonymous report a day. It counts cards posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected, with a random install id. It never sends card text, answers, agent names, paths, host names, addresses or anything else that says who you are.
+Your own inbox sends nothing unless you turn usage counts on. The first start in a terminal asks once, and the inbox page offers them until you pick. When on, the inbox sends the maintainers one anonymous report a day. It counts cards posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected, with a random install id. It never sends card text, answers, agent names, paths, host names, addresses or anything else that says who you are.
 
 ```sh
 your-attention telemetry status     # on or off, where reports go, and the install id
@@ -424,7 +424,7 @@ your-attention telemetry reset-id   # picks a new random install id
 
 `DO_NOT_TRACK=1` or `YOUR_ATTENTION_TELEMETRY=off` keeps reports off whatever the setting says, and `YOUR_ATTENTION_TELEMETRY_DEBUG=1` prints each report to stderr in place of sending it.
 
-The hosted service always sends the same counts, with an id made from the invite code that created the inbox, and has no off switch. Its landing page and the inbox page say so. To keep the counts to yourself, run the inbox on your laptop. [SPEC.md](SPEC.md#usage-counts) lists every field.
+The hosted service always sends the same counts, with an id made from the invite code that created the inbox, and has no off switch. Its landing page and the inbox page say so. To keep the counts to yourself, run your own inbox. [SPEC.md](SPEC.md#usage-counts) lists every field.
 
 ## Run your own cloud inbox (optional)
 
@@ -458,7 +458,7 @@ You need a Cloudflare account with R2 turned on once in the dashboard, a workers
 
 4. Run the `deploy-cloudflare` workflow from the Actions tab, and pick the mode. The Worker is named `app`, so it answers at `https://app.<subdomain>.workers.dev`.
 
-   The same run deploys the telemetry Worker first, which takes laptop inboxes' anonymous daily counts. It uses the same credentials as the inbox and answers at `https://telemetry.<subdomain>.workers.dev`. Deploy both with:
+   The same run deploys the telemetry Worker first, which takes the anonymous daily counts that people's own inboxes send. It uses the same credentials as the inbox and answers at `https://telemetry.<subdomain>.workers.dev`. Deploy both with:
 
    ```sh
    gh workflow run deploy-cloudflare -f mode=hosted
@@ -487,4 +487,4 @@ The Cloudflare build sets these in `wrangler.jsonc`, so a free account stays wit
 - R2 deletes each file 30 days after its upload. The card stays.
 - Pages and agents get their events over WebSockets, so an idle inbox sleeps. The event stream and long-poll routes answer 410.
 
-A laptop inbox has none of these limits.
+Your own inbox has none of these limits.

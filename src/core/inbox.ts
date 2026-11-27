@@ -19,7 +19,7 @@ import { Usage } from './telemetry.ts';
 import { generateVapid, sendPush, b64urlDecode, type Vapid } from './webpush.ts';
 import { MAX_PULL_REQUESTS, MAX_TAGS } from './types.ts';
 import type {
-  AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
+  Reassignment, AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, PullRequest, RequireCardInput, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
   FeedbackFinding, FeedbackVerdict, LateAnswer, OpenCards, TriageFeedback, TriagePushback,
 } from './types.ts';
@@ -170,7 +170,7 @@ export interface InboxOptions {
   approvals?: ApprovalSender | undefined;
   /** How the inbox calls answer webhooks and push services. The default is the platform's fetch. */
   fetch?: typeof fetch | undefined;
-  /** The secret sources of this computer, which the laptop's serve runs. Without them, as on the hosted inbox, a lookup
+  /** The secret sources of this computer, which the serve process of your own inbox runs. Without them, as on the hosted inbox, a lookup
    * finds nothing and a grant fails with 502. */
   secretSources?: SecretSources | undefined;
   /** Run the command of a privileged action the owner approved, with the password the page sealed to the broker's key,
@@ -303,6 +303,8 @@ to 80, as a card's agent is. */
 export const MAX_PINS = 20;
 export const MAX_TAG_CHARS = 100;
 export const MAX_AGENT_CHARS = 80;
+/** The longest reason a reassignment keeps, such as `fix-login retired`. */
+export const MAX_REASSIGN_WHY = 200;
 /** How long a sign-in code from the phone dialog works. */
 export const SIGN_IN_CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_SIGN_IN_CODES = 5;
@@ -322,7 +324,7 @@ export const MAX_TAG_VALUES = 15;
 export const PAIRING_KEEP_MS = 24 * 60 * 60 * 1000;
 /** How long a cleared card, or a card nobody answered, stays after its last change before the purge deletes it. */
 export const PURGE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
-/** Where the purge keeps the files a delete could not remove, so a laptop retries them on its next pass. */
+/** Where the purge keeps the files a delete could not remove, so your own inbox retries them on its next pass. */
 const PENDING_FILE_DELETES = 'pending-file-deletes';
 /** The most cards one purge pass deletes, so no alarm does unbounded work. */
 export const PURGE_BATCH = 100;
@@ -532,7 +534,7 @@ export class Inbox {
     // A page that opened before the PIN changed must unlock again.
     this.pin.onChange(() => this.closeLockedPages());
     markDialogCards(this.store);
-    // On a laptop, connections do not survive a restart, so nobody is online at start.
+    // On your own inbox, connections do not survive a restart, so nobody is online at start.
     if (!opts.keepPresence) {
       for (const p of store.list<Presence>('presence')) {
         if (p.online) store.put('presence', p.agent, { ...p, online: false });
@@ -606,7 +608,7 @@ export class Inbox {
     for (const d of this.store.list<PushDevice>('pushes')) if (d.token === id) this.store.delete('pushes', d.id);
   }
 
-  /** Let an owner token act without the PIN, such as the laptop's owner-token file, which only this machine's user reads. */
+  /** Let an owner token act without the PIN, such as the owner-token file of your own inbox, which only this machine's user reads. */
   exemptFromPin(id: string): void {
     const t = this.store.get<Token>('tokens', id);
     if (t && t.role === 'owner' && !t.pinExempt) this.store.put<Token>('tokens', id, { ...t, pinExempt: true });
@@ -941,7 +943,7 @@ export class Inbox {
   }
 
   /** The page could not draw a card it shows: a diagram that mermaid cannot parse, or a body the OpenUI parser reads in part.
-   * The card goes back to its agent with the errors, as a laptop inbox would have refused the post. Only the owner reports. */
+   * The card goes back to its agent with the errors, as your own inbox would have refused the post. Only the owner reports. */
   drawFault(caller: Caller, id: string, sent: { version?: unknown; renderer?: unknown; diagrams?: unknown; body?: unknown } | null): Card {
     if (caller.role !== 'owner') throw new InboxError(403, 'only the page reports what it cannot draw');
     const report = sent && typeof sent === 'object' ? sent : {};
@@ -2278,6 +2280,51 @@ export class Inbox {
     return next;
   }
 
+  /** The owner hands a card whose agent retired to `to`, the nearest living ancestor of that agent, with the reason. With
+   * no `to`, no ancestor is alive: the card stays where it is and reads `orphaned`, so it waits on the person. The card
+   * keeps each change of hands, and the new agent's stream hears it once, now or when it next connects. */
+  reassign(caller: Caller, id: string, input: { to?: unknown; why?: unknown }): Card {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner reassigns a card');
+    const card = this.getCard(id);
+    const why = typeof input.why === 'string' ? input.why.trim() : '';
+    if (!why || why.length > MAX_REASSIGN_WHY || /[\r\n]/.test(why)) throw new InboxError(400, `why must be one line of 1 to ${MAX_REASSIGN_WHY} characters`);
+    if (input.to !== undefined && input.to !== null && typeof input.to !== 'string') throw new InboxError(400, 'to must be an agent id, or null when no ancestor is alive');
+    const to = typeof input.to === 'string' && input.to !== '' ? input.to : undefined;
+    if (to !== undefined && to.length > MAX_AGENT_CHARS) throw new InboxError(400, `to must be at most ${MAX_AGENT_CHARS} characters`);
+    if (card.kind === 'system' || card.deliver !== 'stream') throw new InboxError(409, 'only a card that waits for its agent changes hands');
+    const s = cardState(card, this.store.get<Answer>('answers', id));
+    if (!WAITING_STATES.has(s)) throw new InboxError(409, `the card is ${s}, and only a card its agent still waits on changes hands`);
+    if (to === card.agent) throw new InboxError(409, `the card is already with ${to}`);
+    // A second notice of the same retirement finds the card already waiting on the person, and changes nothing.
+    if (!to && leftWithoutAgent(card)) return card;
+    const at = this.now();
+    const entry: Reassignment = { from: card.agent, ...(to ? { to } : {}), at, why };
+    // A new holder gets the hour that an agent which never connected has before its card reads orphaned.
+    const next: Card = { ...card, ...(to ? { agent: to, updatedAt: at } : {}), reassignedFrom: [...(card.reassignedFrom ?? []), entry] };
+    this.store.put('cards', id, next);
+    this.emit({ type: 'change', card: id });
+    if (to) {
+      this.sendReassignments(card.token ?? '', to);
+      // An answer the retired agent never received goes to the new holder, as a claim sends it.
+      this.flush(to);
+    }
+    return this.store.get<Card>('cards', id) ?? next;
+  }
+
+  /** Tell this agent's streams about each card the inbox gave it that they have not heard of yet, and record that they did. */
+  private sendReassignments(token: string, agent: string): void {
+    const subs = this.agents.get(this.key(token, agent));
+    if (!subs?.size) return;
+    for (const card of this.store.list<Card>('cards')) {
+      const last = card.reassignedFrom?.at(-1);
+      if (card.agent !== agent || (card.token ?? '') !== token || !last || last.to !== agent || last.noticeSentAt !== undefined) continue;
+      const sent: Card = { ...card, reassignedFrom: [...card.reassignedFrom!.slice(0, -1), { ...last, noticeSentAt: this.now() }] };
+      this.store.put('cards', card.id, sent);
+      const ev: AgentEvent = { type: 'reassigned', id: randomId(6), card: publicCard(sent), from: last.from, why: last.why };
+      for (const send of subs) send(ev);
+    }
+  }
+
   // ---- answers ----
 
   async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number; images?: (NewAttachment & { field?: string })[]; by?: Caller }): Promise<Answer> {
@@ -2406,7 +2453,7 @@ export class Inbox {
   /** The PrivilegedAction fields of a body, checked against the runner this inbox has: their names. */
   private checkPrivileged(fields: PrivilegedField[], secrets: string[]): string[] {
     if (!fields.length) return [];
-    if (!this.runners.size) throw new InboxError(400, 'this inbox runs no privileged actions: only the laptop inbox runs a command on its own machine');
+    if (!this.runners.size) throw new InboxError(400, 'this inbox runs no privileged actions: only your own inbox runs a command, on the computer that runs it or on a machine of machines.jsonl');
     for (const f of fields) {
       if (secrets.includes(f.name)) throw new InboxError(400, `${f.name} names both a secret and a privileged action: give each its own name`);
       if (f.command.length > MAX_COMMAND_CHARS) throw new InboxError(400, `privileged action ${f.name}: the command is ${f.command.length} characters, over the limit of ${MAX_COMMAND_CHARS}`);
@@ -3049,6 +3096,8 @@ export class Inbox {
     if (!opts.resumed) send({ type: 'hello', agent, version: 1, guidance: this.guidance().version });
     // A revoke the agent missed goes before anything else, so its session ends the grant before its next command.
     this.sendRevokes(caller.token, agent);
+    // A card the inbox gave this agent while it was away, because the agent that asked retired.
+    this.sendReassignments(caller.token, agent);
     this.flush(agent);
     // A card the person sent while this agent was away goes out as soon as it connects, as a waiting answer does.
     this.deliverSent(agent);
@@ -3311,7 +3360,7 @@ export class Inbox {
     // Every record goes before the first await, so no request sees half a batch.
     if (removed) this.emit({ type: 'change', card: '' });
     // The records are gone already, so a failed delete must not stop the alarm that called this. R2 deletes the file
-    // 30 days after its upload anyway, and a laptop retries the delete on its next pass.
+    // 30 days after its upload anyway, and your own inbox retries the delete on its next pass.
     const retry = this.store.get<string[]>('meta', PENDING_FILE_DELETES) ?? [];
     const settled = await Promise.allSettled([...retry, ...files].map((f) => this.blobs.delete(f)));
     const failed = [...retry, ...files].filter((_, i) => settled[i]?.status === 'rejected').slice(0, PURGE_BATCH * 10);
@@ -3390,6 +3439,8 @@ export class Inbox {
    * and so does a card whose agent never connected, once the card itself is old enough. */
   private orphaned(c: Card | CardSummary, s: CardState, p: Presence | undefined, now: number): boolean {
     if (s !== 'open' || c.deliver !== 'stream') return false;
+    // The agent retired and no ancestor of it was alive to take the card, so no session will reconnect for it.
+    if (leftWithoutAgent(c)) return true;
     if (p) return !p.online && now - p.lastSeen > ORPHAN_MS;
     return now - (c.updatedAt ?? c.createdAt) > ORPHAN_MS;
   }
@@ -3766,6 +3817,13 @@ function webhookHeaders(headers: unknown): Record<string, string> {
 
 /** A card without what only the person reads: the id of the token that posted it, and the draft they left on a card
  * they dismissed. */
+/** The reassignment that left this card without an agent: its agent retired and no ancestor of it was alive. A claim
+ * gives the card another agent, and the card no longer reads orphaned for this reason. */
+export function leftWithoutAgent(c: { agent: string; reassignedFrom?: Reassignment[]; lastReassignment?: Reassignment }): Reassignment | undefined {
+  const last = c.lastReassignment ?? c.reassignedFrom?.at(-1);
+  return last && !last.to && last.from === c.agent ? last : undefined;
+}
+
 export function publicCard(card: Card): Card {
   const { token: _token, pushed: _pushed, ...rest } = card;
   if (!rest.closed?.draft) return rest;

@@ -12,7 +12,7 @@ import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
+import { Client, describeAdvice, describeAnswer, describeOpenCards, describeReassigned, describeReturned, describeSentCard, loadConfig, NO_INBOX, waitForConfig } from '../../client.ts';
 import { saveAnswerImages } from '../images.ts';
 import { SecretRequests } from '../secrets.ts';
 import { serveSecrets } from './secret-socket.ts';
@@ -304,6 +304,10 @@ function listen(client: Client): void {
     }
     if (ev.type === 'card') {
       await notify(describeSentCard(ev), { card_id: ev.card.id });
+      return;
+    }
+    if (ev.type === 'reassigned') {
+      await notify(describeReassigned(ev), { card_id: ev.card.id });
       return;
     }
     if (ev.type === 'revoke') {

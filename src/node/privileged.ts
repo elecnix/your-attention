@@ -1,4 +1,4 @@
-// The laptop inbox's brokers for privileged actions. `localRunner` runs the approved command on this machine, as the
+// The brokers of your own inbox for privileged actions. `localRunner` runs the approved command on this machine, as the
 // user that runs the inbox. `sshRunner` runs it on another machine over an ssh connection the broker opens, through
 // sudo on the far side. Either one writes the password to the standard input of the process it starts, and nowhere
 // else: never an environment variable, an argument list, a file or a log.

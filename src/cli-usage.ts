@@ -58,7 +58,8 @@ const LIST: [name: string, syntax: string, summary: string][] = [
   ['triage', 'triage [--judge-cmd "claude -p" | --judge-url URL --judge-model M --judge-key-env VAR]', 'check each card before you see it (OpenRouter by default)'],
   ['triage', 'triage login', 'sign in to OpenRouter for the default judge'],
   ['triage', 'triage feedback [--verdict any|agree|disagree|partly]', "as the owner: one line of JSON per card triage pushed back on, with\nthe reason, the agent's feedback and how the card ended"],
-  ['service', 'service serve|triage [--write]', 'print or write a launchd or systemd unit'],
+  ['bellwether', 'bellwether [--once] [--home DIR]', "as the owner: when Bellwether retires an agent, hand each of its cards to\nits nearest living ancestor, or to you when none is alive"],
+  ['service', 'service serve|triage|bellwether [--write]', 'print or write a launchd or systemd unit'],
   ['bridge', 'bridge [--upstream URL] [--port 4815] [--mdns]', 'offer a remote inbox on this machine'],
   ['offer', 'offer ssh <host> [--remote-port 4815]', 'offer this inbox on another machine over SSH'],
   ['relay', 'relay [--port 4900] [--key-env VAR]', 'run a relay that inboxes dial out to'],
@@ -143,8 +144,12 @@ const OPTIONS: Record<string, [string, string][]> = {
     ['--screen-open', 'also check the open cards that have no verdict from this extension yet, once'],
     ['--verdict any|agree|disagree|partly', 'with feedback: only the cards with this verdict from the agent'],
   ],
+  bellwether: [
+    ['--once', 'read retire.log once, apply what it says, and exit'],
+    ['--home DIR', "Bellwether's home, BELLWETHER_HOME or ~/.bellwether by default"],
+  ],
   service: [
-    ['serve|triage', 'the command the unit runs; options after it go to that command'],
+    ['serve|triage|bellwether', 'the command the unit runs; options after it go to that command'],
     ['--write', 'write the unit file instead of printing it'],
   ],
   bridge: [

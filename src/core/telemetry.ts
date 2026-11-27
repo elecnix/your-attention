@@ -1,7 +1,7 @@
 // Usage counts: one report a day of how much an inbox was used, never what it holds.
-// The inbox counts in its own storage. The platform sends each finished day: the laptop
+// The inbox counts in its own storage. The platform sends each finished day: the Node
 // build posts it to the collector, and a hosted inbox writes it to Analytics Engine.
-// A laptop inbox counts only after the person turns the counts on, and its reports carry a
+// Your own inbox counts only after the person turns the counts on, and its reports carry a
 // random install id only. A hosted inbox always counts, with its invite id, and says so.
 import { sha256 } from './crypto.ts';
 import type { Storage } from './storage.ts';
@@ -22,9 +22,9 @@ export type Source = 'laptop' | 'hosted';
 export interface TelemetryReport {
   schema: 1;
   source: Source;
-  /** A random UUID for this inbox, the only id a laptop report carries. `telemetry reset-id` replaces it. */
+  /** A random UUID for this inbox, the only id a report from your own inbox carries. `telemetry reset-id` replaces it. */
   installId: string;
-  /** The invite id that created a hosted inbox, or empty on a laptop. */
+  /** The invite id that created a hosted inbox, or empty on your own inbox. */
   invite: string;
   version: string;
   /** The UTC day counted, as YYYY-MM-DD. */
@@ -34,7 +34,7 @@ export interface TelemetryReport {
 
 export interface TelemetrySettings {
   enabled: boolean;
-  /** Whether the person has seen the notice: on a laptop, the offer to turn counts on. */
+  /** Whether the person has seen the notice: on your own inbox, the offer to turn counts on. */
   notified: boolean;
   /** A hosted inbox has no off switch. */
   alwaysOn: boolean;
@@ -58,7 +58,7 @@ interface Stored extends Omit<TelemetrySettings, 'alwaysOn'> {
   pending: DayCounts[];
 }
 
-/** Days kept for a platform that could not send them, such as a laptop that was offline. */
+/** Days kept for a platform that could not send them, such as a computer that was offline. */
 const KEEP_DAYS = 7;
 /** Distinct keys kept per set and day. The count stops there. */
 const SET_CAP = 1000;
@@ -88,7 +88,7 @@ export class Usage {
   private readonly now: () => number;
   private readonly alwaysOn: boolean;
 
-  /** `alwaysOn` is for a hosted inbox, which counts whatever is stored. A laptop inbox starts off. */
+  /** `alwaysOn` is for a hosted inbox, which counts whatever is stored. Your own inbox starts off. */
   constructor(store: Storage, now: () => number = Date.now, opts: { alwaysOn?: boolean } = {}) {
     this.store = store;
     this.now = now;

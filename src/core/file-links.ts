@@ -1,4 +1,4 @@
-// The file: addresses a card names. The laptop inbox serves a file to the owner's page only when its card names it,
+// The file: addresses a card names. Your own inbox serves a file to the owner's page only when its card names it,
 // so the agent that posted the card chooses what is exposed. web/markdown.js links the same addresses.
 const FILE_URL = /file:\/\/[^\s<>()[\]`]+/g;
 const URL_TAIL = /[.,;:!?'"*_]+$/;

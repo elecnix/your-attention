@@ -397,7 +397,7 @@ export interface Card {
   /** Set by the inbox in the page's state, never stored: what the page draws for a body stored before the inbox checked
    * bodies, when the page can't draw it whole. `body` draws the statements that parse, then the source from the broken one on. */
   bodyFallback?: { body: string; faults: string[] };
-  /** Set by the laptop inbox in GET /v1/cards/<id> for the owner, never stored: the card came from this machine, and the
+  /** Set by your own inbox in GET /v1/cards/<id> for the owner, never stored: the card came from this machine, and the
    * inbox serves the files its text and recommendation name with file: addresses. */
   localFiles?: boolean;
   priority: Priority;
@@ -446,6 +446,22 @@ export interface Card {
   closed?: Closure;
   /** Agent replies stored before linked follow-ups. Nothing writes one now, and the page shows the old ones in a fold. */
   replies: Reply[];
+  /** Each time the card changed hands because the agent that held it retired, oldest first. The page shows each one. */
+  reassignedFrom?: Reassignment[];
+}
+
+/** One change of hands: the card left `from` because an agent retired. `to` is the nearest living ancestor that took
+ * it, and a reassignment without `to` found no living ancestor, so the card waits on the person, orphaned. */
+export interface Reassignment {
+  /** The agent that held the card. */
+  from: string;
+  /** The agent that holds it now. None when no ancestor is alive. */
+  to?: string;
+  at: number;
+  /** Why, in a few words, such as `fix-login retired`. */
+  why: string;
+  /** When the stream of `to` heard about it. Until then the notice waits, as an undelivered answer does. */
+  noticeSentAt?: number;
 }
 
 /** The close a late answer came after. */
@@ -489,7 +505,7 @@ export interface Token {
   name: string;
   role: Role;
   createdAt: number;
-  /** An owner token kept on a machine, such as the laptop's owner-token file or a paired client, which acts without the PIN. A token that can travel as a link or a cookie never has it. */
+  /** An owner token kept on a machine, such as the owner-token file of your own inbox or a paired client, which acts without the PIN. A token that can travel as a link or a cookie never has it. */
   pinExempt?: boolean;
 }
 
@@ -614,7 +630,9 @@ export type AgentEvent =
   | { type: 'card'; id: string; card: Card; sentAt: number }
   /** The person revoked the grant of a secret_access field. `case` is the grant's case id. An inbox keeps a revoke for
    * an agent with no open stream, and sends it first when one opens. */
-  | { type: 'revoke'; id: string; card: Card; field: string; case: string };
+  | { type: 'revoke'; id: string; card: Card; field: string; case: string }
+  /** The inbox gave this agent a card whose agent retired, because this agent is its nearest living ancestor. */
+  | { type: 'reassigned'; id: string; card: Card; from: string; why: string };
 
 /** What pages receive. They refetch state on "change". */
 export type PageEvent =

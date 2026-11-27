@@ -16,9 +16,9 @@ Reviewers, human or automated, check the diff against PRINCIPLES.md and block a 
 
 ```
 src/core/          the protocol: types, the single-writer inbox, the HTTP handler. Web standards only.
-src/adapters/      SQLite storage and mDNS discovery for the laptop build, and the Mermaid and body checks of the laptop inbox and the posting client
+src/adapters/      SQLite storage and mDNS discovery for the Node build, and the Mermaid and body checks of your own inbox and the posting client
 src/node/          the Node HTTP server and the home directory
-src/integrations/  Claude Code (MCP channel, AskUserQuestion hooks), pi, herdr
+src/integrations/  Claude Code (MCP channel, AskUserQuestion hooks), pi, herdr, and the Bellwether watcher that reassigns a retired agent's cards
 src/client.ts      the client every integration uses
 src/cli.ts         the your-attention command
 src/watch.ts       the line of JSON `your-attention watch` prints for each event of an agent stream
@@ -39,7 +39,7 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 - Storage calls are synchronous. A method on `Inbox` finishes its change before the next change starts, which is how one inbox has one writer without locks. Never put an `await` between a read and the write that depends on it.
 - Node runs the TypeScript sources directly, so write only syntax that Node can erase. Enums, namespaces and parameter properties fail at run time. Import local files with their `.ts` extension and types with `import type`.
 - Logs from the Claude Code channel go to stderr, because stdout carries the MCP protocol.
-- The herdr integration may send keys only to the pane of its own session. Never send keys to another pane. The one exception is an approval: the laptop inbox types its sentence into the card's named pane, and only after the owner turns it on and sends the answer. The page shows that pane's agent and tab as herdr reports them, and the agent cannot supply them.
+- The herdr integration may send keys only to the pane of its own session. Never send keys to another pane. The one exception is an approval: your own inbox types its sentence into the card's named pane, and only after the owner turns it on and sends the answer. The page shows that pane's agent and tab as herdr reports them, and the agent cannot supply them.
 - Each user-visible string names the thing it shows. The person may leave any answer field empty.
 
 ## Card states
@@ -60,8 +60,10 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 | any but `closed` | the person dismisses it, and the agent hears nothing | `closed` |
 | `open` | the person answers a system card, and the inbox applies the answer | `closed` |
 | `closed` | the person answers after the close | `answered` |
+| any but `closed` and `read` | its agent retires, and an ancestor runs | the same state, held by that ancestor |
+| `open` | its agent retires, and no ancestor runs | `orphaned` |
 
-`orphaned` has no transition of its own. It reads a card in `open` whose agent has been offline for an hour, and another session may then claim it.
+`orphaned` reads a card in `open` whose agent has been offline for an hour, or whose agent retired with no living ancestor, and another session may then claim it. A card moves to another agent only after Bellwether reports a retirement, and a closed stream doesn't move it ([SPEC.md](SPEC.md#a-card-whose-agent-retired)).
 
 The inbox derives the state from the card and its answer on every read. `answered` and `delivered` both mean the person answered and no agent has acknowledged yet, so the page's outbox holds your answer waiting for its agent, not a card waiting for you ([DP23](PRINCIPLES.md#dp23-answered-cards-go-to-an-outbox-then-to-sent)).
 
@@ -89,7 +91,7 @@ flowchart TB
     AT["agent-token: agent"]
     ET["extension-token: extension"]
   end
-  subgraph INBOX["inbox: laptop server, or hosted Durable Object at /i/inbox-id/"]
+  subgraph INBOX["inbox: your own, on a Node server, or hosted on a Durable Object at /i/inbox-id/"]
     DB[("SHA-256 of each token, SHA-256 of the PIN key, PIN salt, sign-in codes, pairings, answer webhook headers and signing secrets, the VAPID private key, and the push subscriptions of the owner's devices")]
   end
   subgraph WORKER["hosted Worker"]
@@ -143,7 +145,7 @@ flowchart TB
   CMD["the shell of one command"]
   INBOX -- "agent stream: a value sealed to the card's key" --> GR
   GR -- "pi: spawn environment. Claude Code: Unix socket 0600, one-time token. opencode: shell.env" --> CMD
-  subgraph BROKER["laptop inbox's serve process: memory only"]
+  subgraph BROKER["your own inbox's serve process: memory only"]
     BK["broker private key, new at each start"]
   end
   RUN["the one command a privileged_action card shows, on the inbox's machine"]
@@ -166,10 +168,10 @@ flowchart TB
 - An agent token can't make a sign-in code, approve a pairing or read the state. On a machine paired only as an agent, the owner commands, `open`, `tui` and `pin`, say to pair as owner. That pairing goes in `owner.json` and leaves `client.json` to the agents.
 - The PIN never leaves the device that types it. The tab, the CLI and the terminal client derive a key from it with PBKDF2, using the salt from `GET /v1/pin`, and send the key. The inbox stores a SHA-256 hash of that key.
 - A token minted at `serve` or by pairing as owner skips the PIN. When the inbox has a PIN, a browser's owner token needs an unlock token as well, which the tab sends as `x-your-attention-unlock`. An unlock token ends after 12 hours without use.
-- The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. The new tab opens the file at the address of a folder ticket, and that address is the credential, since a sandboxed page loads its assets without the cookie. A ticket for an HTML file opens the files in its folder and below, except hidden ones, and never a symlink that leaves the folder. It ends when its card is cleared, and with a PIN, when the unlock of the tab that asked for it ends. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
-- The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. When the inbox has a PIN, the new tab opens the file only with a ticket that an unlocked tab asked for, which works once within 60 seconds. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
+- Your own inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. The new tab opens the file at the address of a folder ticket, and that address is the credential, since a sandboxed page loads its assets without the cookie. A ticket for an HTML file opens the files in its folder and below, except hidden ones, and never a symlink that leaves the folder. It ends when its card is cleared, and with a PIN, when the unlock of the tab that asked for it ends. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
+- Your own inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. When the inbox has a PIN, the new tab opens the file only with a ticket that an unlocked tab asked for, which works once within 60 seconds. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
 - A secret source releases a value only inside the owner's `POST /v1/cards/<id>/answer`, and seals it to the public key on the card before the value leaves the source. Of the value, the inbox stores only that ciphertext. A lookup answers metadata only, and an agent or extension token gets 403 on the answer and on the revoke route. Hooks, webhooks and triage never see a grant.
-- A password for a privileged action is sealed to the broker key, never to a key on the card, so no agent session can open it. The laptop inbox opens it in memory inside the owner's answer and refuses a command that differs from the card's. It then writes the password to the command's standard input, and stores only the output, with the password masked. The `serve` process keeps the broker key in memory and makes a new one at each start. The hosted inbox has no broker and refuses the card.
+- A password for a privileged action is sealed to the broker key, never to a key on the card, so no agent session can open it. Your own inbox opens it in memory inside the owner's answer and refuses a command that differs from the card's. It then writes the password to the command's standard input, and stores only the output, with the password masked. The `serve` process keeps the broker key in memory and makes a new one at each start. The hosted inbox has no broker and refuses the card.
 - A privileged action on another machine runs over an `ssh` connection that the broker opens to the machine on the card, and to that one only. The password goes to the standard input of `ssh`, and from there to `sudo -S` on the far side. Argument lists, environment variables and files on either machine don't get it. When the connection fails, the run ends there, and the broker doesn't fall back to its own machine. The far side checks its own name, and writes the audit line to its system log before `sudo` starts. The broker uses the inbox user's `ssh` key. An agent that runs as that user can read the key too. On a machine whose sudoers rule doesn't ask for a password, an agent with that key can run the allowed commands.
 - A granted secret opens only in the memory of the session that posted the card, and each command gets it in its environment, never in argv or a file. In Claude Code the shell reads it from the channel's socket, mode 0600 in a folder of mode 0700, with a token that works once within 30 minutes. A revoke ends the grant before the next command.
 - An agent's answer webhook gets nothing until the person approves it on its system card. The inbox keeps the header values the agent gave, and sends them only to that webhook, never to a client or a page. The signing secret goes to the agent once.
@@ -199,7 +201,7 @@ A release is a tag whose name carries the version `package.json` declares. `rele
 3. Tag and push only the tag: `git tag -a v1.2.3 -m "v1.2.3" && git push origin v1.2.3`.
 4. Watch the run with `gh run watch --workflow release.yml`. A red run produces nothing to install.
 
-Publishing to npm happens on a laptop, not in the workflow, because this account requires two-factor authentication for a publish and its token can only deposit a version in the staging area. From a checkout of the tagged commit:
+Publishing to npm happens on a maintainer's own computer, not in the workflow, because this account requires two-factor authentication for a publish and its token can only deposit a version in the staging area. From a checkout of the tagged commit:
 
 ```sh
 npm stage publish --access public --otp 123456   # answers a staged id

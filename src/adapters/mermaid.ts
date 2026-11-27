@@ -1,5 +1,5 @@
 // Checks a Mermaid diagram with mermaid's own parser, the version the page draws with.
-// Both builds use it: the laptop inbox in Node, and the hosted inbox in its Durable Object.
+// Both builds use it: your own inbox in Node, and the hosted inbox in its Durable Object.
 // It loads mermaid on the first diagram, so an inbox that never sees one never pays for it.
 import type { DiagramCheck } from '../core/diagrams.ts';
 

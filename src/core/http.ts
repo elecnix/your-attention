@@ -117,11 +117,11 @@ export interface HandlerOptions {
   heartbeatMs?: number;
   /** Whether to serve the event stream, agent streams and long-polls. A platform that bills for open requests turns them off and serves WebSockets only. */
   streams?: boolean;
-  /** Where a device on the same network reaches this inbox, such as http://laptop.local:4815. */
+  /** Where a device on the same network reaches this inbox, such as http://my-computer.local:4815. */
   networkAddresses?: () => string[];
   /** Where this build sends usage counts, and why it sends none, such as DO_NOT_TRACK. Without it, GET /v1/telemetry answers 404. */
   telemetry?: { source: Source; destination: string; blocked?: () => string | undefined };
-  /** The files of this machine, which the laptop inbox serves for a card's file: links. `host` is this machine's name, as
+  /** The files of this machine, which your own inbox serves for a card's file: links. `host` is this machine's name, as
    * a client puts it in a card's origin. A build with no file system has none, and GET /v1/cards/<id>/file answers 404. */
   localFiles?: { host: string; file(path: string, folder?: string): Promise<{ size: number; read(): Promise<Uint8Array<ArrayBuffer>> } | undefined> };
 }
@@ -560,7 +560,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       }
       const s = inbox.usage.settings();
       const blocked = t.blocked?.() ?? null;
-      // A laptop offers the counts once. A hosted inbox tells the person once that they are always on.
+      // Your own inbox offers the counts once. A hosted inbox tells the person once that they are always on.
       return json({ ...s, notice: !s.notified && !blocked, blocked, source: t.source, destination: t.destination, next: inbox.usage.report(inbox.usage.today(), t.source) });
     }
     // One rule, read or changed per session or for the whole inbox. A change for the whole inbox is a card the person
@@ -768,6 +768,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           return json(publicCard(inbox.tagCard(me, b, body?.['tags'])));
         case 'claim':
           return json(publicCard(inbox.claim(me, b, String(body['agent'] ?? ''))));
+        case 'reassign':
+          return json(publicCard(inbox.reassign(me, b, body ?? {})));
         case 'draw-fault':
           return json(publicCard(inbox.drawFault(me, b, body)));
         case 'force':
