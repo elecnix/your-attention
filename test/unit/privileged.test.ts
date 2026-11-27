@@ -211,7 +211,7 @@ describe('the answer text of a privileged action', () => {
   it('says where the command ran, how it ended and what it printed, or that it did not run', async () => {
     const { inbox, owner } = await setup();
     const card = inbox.postCard(agent, { id: 'p1', agent: 's1', title: 'Create the marker?', body: body() });
-    assert.match(describeAnswer(card, await inbox.answer('p1', { values: {}, by: owner })), /run_it: not run, because the person sent no password/);
+    assert.match(describeAnswer(card, await inbox.answer('p1', { values: {}, by: owner })), /run_it: not run, because the person sent no password or approval/);
     const text = describeAnswer(card, await inbox.answer('p1', { values: { run_it: await sealFor(inbox, owner) }, by: owner }));
     assert.match(text, /run_it: ran on test-machine, exit code 0 \(audit \w+\)\. The command printed:\n```\nchecked \[password\]\nran touch/);
     assert.ok(!text.includes(PASSWORD));

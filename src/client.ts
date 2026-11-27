@@ -647,9 +647,10 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
   // A privileged action says what ran, where, and what it printed, which the inbox masked. It never holds a password.
   for (const name of card.privileged ?? []) {
     const v = answer.values[name] as Partial<PrivilegedRun> | undefined;
-    if (!v || typeof v.command !== 'string') { lines.push(`${name}: not run, because the person sent no password`); continue; }
-    const how = v.exitCode === null || v.exitCode === undefined ? `stopped: ${v.ended ?? 'no exit code'}` : `exit code ${v.exitCode}`;
-    lines.push(`${name}: ran on ${v.machine}, ${how} (audit ${v.audit}). The command printed:`, '```', String(v.output ?? '').trimEnd(), '```');
+    if (!v || typeof v.command !== 'string') { lines.push(`${name}: not run, because the person sent no password or approval`); continue; }
+    // A run with no exit code ended early or never started, and `ended` says which, such as a refused connection.
+    const head = v.exitCode === null || v.exitCode === undefined ? `${name}: on ${v.machine}, ${v.ended ?? 'the run ended with no exit code'}` : `${name}: ran on ${v.machine}, exit code ${v.exitCode}`;
+    lines.push(`${head} (audit ${v.audit}). The command printed:`, '```', String(v.output ?? '').trimEnd(), '```');
   }
   for (const [k, v] of Object.entries(answer.values)) {
     if (card.privileged?.includes(k)) continue;

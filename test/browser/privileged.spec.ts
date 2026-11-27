@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import type { PrivilegedRun } from '../../src/core/privileged.ts';
+import type { PrivilegedRun, RunContext } from '../../src/core/privileged.ts';
 import { localRunner } from '../../src/node/privileged.ts';
 import { startInbox, type TestInbox } from './inbox.ts';
 
@@ -15,8 +15,10 @@ const PSEUDO = path.resolve(import.meta.dirname, '..', 'fixtures', 'pseudo-sudo.
 
 let inbox: TestInbox;
 let work: string;
+/** The runs of the approval machine: a stand-in for the ssh runner of a machine whose sudo needs no password. */
+const approvals: { command: string; password: string; ctx: RunContext }[] = [];
 test.beforeAll(async () => {
-  inbox = await startInbox({ privileged: localRunner('test-machine') });
+  inbox = await startInbox({ privileged: [localRunner('test-machine'), { machine: 'nas', sudo: 'approval', run: async (command, password, ctx) => { approvals.push({ command, password, ctx }); return { exitCode: 0, output: 'restarted\n' }; } }] });
   work = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-privileged-page-'));
 });
 test.afterAll(async () => {
@@ -45,4 +47,23 @@ test('the person types the password on the card, and the inbox runs the command 
   expect(run.exitCode).toBe(0);
   expect(run.output).toContain('authenticated with [password]');
   expect(JSON.stringify(answer)).not.toContain(PASSWORD);
+});
+
+test('a machine that takes an approval shows a box instead of a password, and runs the command with none', async ({ page }) => {
+  const command = '/usr/bin/systemctl restart smbd';
+  await inbox.agent.post({
+    id: 'privileged-nas', agent: 's-privileged', title: 'Restart smbd on nas?', priority: 'now',
+    body: `root = Card([run])\nrun = widget privileged_action ${JSON.stringify({ name: 'restart_smbd', command, machine: 'nas', changes: 'Restarts the file server on nas' })}`,
+  });
+  await inbox.open(page);
+  const field = page.locator('fieldset.privileged').filter({ hasText: 'Run on nas' });
+  await expect(field.getByRole('checkbox', { name: 'Run this command on nas' })).toBeVisible();
+  await expect(field.locator('input[type=password]')).toHaveCount(0);
+  await field.getByRole('checkbox', { name: 'Run this command on nas' }).check();
+  await page.getByRole('button', { name: 'Send answer' }).click();
+
+  await expect.poll(() => approvals.length).toBe(1);
+  expect(approvals[0]).toMatchObject({ command, password: '', ctx: { card: 'privileged-nas', field: 'restart_smbd' } });
+  const { answer } = await inbox.detail('privileged-nas');
+  expect((answer?.values['restart_smbd'] as PrivilegedRun).machine).toBe('nas');
 });

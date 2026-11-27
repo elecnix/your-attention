@@ -503,10 +503,22 @@ function SecretAccess({ props }) {
     failure && h('div', { className: 'note warn', role: 'alert' }, `${name} could not be sealed, so nothing was sent: ${failure}. Ask the agent to post the card again.`));
 }
 
-// PrivilegedAction(name, command, machine, changes): a command that needs the person's password, which the
+/** How each machine the broker serves takes a privileged action, "password" or "approval", as the inbox last said. */
+const machineSudo = new Map();
+
+/** Ask the inbox how its machines take a privileged action, and remember the answer. A page that can't ask, such as a
+ * story, keeps what it knew. */
+async function readMachineSudo() {
+  const res = await fetch(`${BASE}v1/privileged/key`).catch(() => undefined);
+  const body = res?.ok ? await res.json().catch(() => ({})) : {};
+  for (const m of Array.isArray(body.machines) ? body.machines : []) if (typeof m?.name === 'string') machineSudo.set(m.name, m.sudo === 'approval' ? 'approval' : 'password');
+}
+
+// PrivilegedAction(name, command, machine, changes): a command that needs the person's password or approval, which the
 // privileged_action widget places. The page shows the command exactly as the card holds it, and Send answer seals the
-// password, with that command, to the inbox's broker: never to the agent, which holds no key that opens it. The broker
-// runs that one command and refuses when it differs from the card's.
+// password, with that command, to the inbox's broker: never to the agent, which holds no key that opens it. A machine
+// whose sudo needs no password for the command shows an approval box instead, and the page seals the command alone.
+// The broker runs that one command, on that one machine, and refuses when it differs from the card's.
 function PrivilegedAction({ props }) {
   const card = React.useContext(SecretScope);
   const name = String(props.name ?? '');
@@ -516,18 +528,33 @@ function PrivilegedAction({ props }) {
   const [value, setValue] = React.useState(() => typedSecrets.get(card)?.get(name)?.value ?? '');
   const [, redraw] = React.useState(0);
   React.useEffect(() => { const f = () => redraw((n) => n + 1); secretWatchers.add(f); return () => { secretWatchers.delete(f); }; }, []);
+  React.useEffect(() => { let live = true; readMachineSudo().then(() => { if (live) redraw((n) => n + 1); }); return () => { live = false; }; }, [machine]);
+  const approval = machineSudo.get(machine) === 'approval';
   // A revision of the card may change the command: a password typed before it seals with the command shown now.
-  React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.privileged = { command }; }, [card, name, command]);
+  React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.privileged = { ...typed.privileged, command }; }, [card, name, command]);
   const failure = sealFailures.get(card)?.get(name);
   const canSeal = !!(window.isSecureContext && crypto.subtle);
   const change = (next) => {
     setValue(next);
     if (sealFailures.get(card)?.delete(name)) secretsChanged();
     const fields = typedSecrets.get(card) ?? new Map();
-    if (next) fields.set(name, { privileged: { command }, value: next });
+    if (next) fields.set(name, { privileged: { command, ...(approval ? { approve: true } : {}) }, value: next });
     else fields.delete(name);
     typedSecrets.set(card, fields);
   };
+  if (approval) {
+    return h('fieldset', { className: 'secret privileged' },
+      h('legend', null, `Run on ${machine}`),
+      h('pre', { className: 'privileged-command', 'aria-label': `The command ${name} runs` }, h('code', null, command)),
+      h('div', { className: 'privileged-changes' }, h('strong', null, 'What it changes: '), changes),
+      canSeal
+        ? h('label', { className: 'privileged-approve' },
+          h('input', { type: 'checkbox', name, checked: value === 'approve', onChange: (e) => change(e.target.checked ? 'approve' : '') }),
+          ` Run this command on ${machine}`)
+        : h('div', { className: 'note warn' }, 'This page cannot seal an approval over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.'),
+      failure && h('div', { className: 'note warn', role: 'alert' }, `Not sent: ${failure}`),
+      h('span', { className: 'hint' }, `${machine} runs this command through sudo without a password, so it needs your approval only. Send answer runs it once there, and the agent gets only what it prints. Leave the box clear to send your answer without running it.`));
+  }
   return h('fieldset', { className: 'secret privileged' },
     h('legend', null, `Run on ${machine}`),
     h('pre', { className: 'privileged-command', 'aria-label': `The command ${name} runs` }, h('code', null, command)),
@@ -587,7 +614,7 @@ export async function sealSecrets(card, names) {
   const toSeal = new Map();
   const privileged = new Map();
   for (const [name, f] of typed) {
-    if (f.privileged) { privileged.set(name, JSON.stringify({ command: f.privileged.command, password: f.value })); continue; }
+    if (f.privileged) { privileged.set(name, JSON.stringify(f.privileged.approve ? { command: f.privileged.command, password: '', approve: true } : { command: f.privileged.command, password: f.value })); continue; }
     if (!f.access) { toSeal.set(name, f.value); continue; }
     if (f.access.pick === 'type') { if (f.access.value) toSeal.set(name, f.access.value); continue; }
     const v = accessValue(f.access, f.candidates, now);

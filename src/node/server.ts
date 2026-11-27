@@ -16,7 +16,7 @@ import { createHandler, originParam } from '../core/http.ts';
 import type { ApprovalSender, Caller } from '../core/inbox.ts';
 import type { PrivilegedRunner } from '../core/privileged.ts';
 import { instanceName } from '../secrets/registry.ts';
-import { localRunner } from './privileged.ts';
+import { loadMachines, localRunner, MACHINES_FILE, sshRunner } from './privileged.ts';
 import { agentSocket, pageSocket } from '../core/socket.ts';
 import { WebSocketServer } from 'ws';
 import { Inbox } from '../core/inbox.ts';
@@ -67,9 +67,9 @@ export interface ServeOptions {
   fetch?: typeof fetch;
   /** The secret sources this inbox runs. Tests pass a stand-in. */
   secretSources?: SecretSources;
-  /** Runs the privileged actions the owner approves. The default runs each one on this machine, as this user. Tests
-   * pass a dry runner, and `false` turns privileged actions off. */
-  privileged?: PrivilegedRunner | false;
+  /** Run the privileged actions the owner approves. The default runs each one on this machine, as this user, or over
+   * ssh on a machine of machines.jsonl in the home. Tests pass their own runners, and `false` turns privileged actions off. */
+  privileged?: PrivilegedRunner | PrivilegedRunner[] | false;
 }
 
 export interface RunningServer {
@@ -111,12 +111,21 @@ function serveStatic(pathname: string, res: http.ServerResponse): boolean {
   return true;
 }
 
+/** This machine's runner, then one ssh runner for each machine of machines.jsonl. A line that isn't a machine is left
+ * out, and the log says why, so a card for it is refused rather than run elsewhere. */
+function defaultRunners(home: string, log: (...a: unknown[]) => void): PrivilegedRunner[] {
+  const local = instanceName();
+  const { machines, problems } = loadMachines(home, local);
+  for (const p of problems) log(`privileged actions: ${p}. Cards for that machine are refused until ${MACHINES_FILE} is fixed and the inbox restarts.`);
+  return [localRunner(local), ...machines.map((m) => sshRunner(m))];
+}
+
 export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const log = opts.log ?? ((...a: unknown[]) => console.error('[your-attention]', ...a));
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, privileged: opts.privileged === false ? undefined : opts.privileged ?? localRunner(instanceName()), pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, privileged: opts.privileged === false ? undefined : opts.privileged ?? defaultRunners(home, log), pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');
