@@ -43,7 +43,8 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
   let next = 0;
   const pending = new Map<string, Pending>();
 
-  const alive = (running: ChildProcess): boolean => running.exitCode === null && running.signalCode === null;
+  // A process without a pid never started: there is nothing to signal, and no 'exit' would ever clear a kill timer.
+  const alive = (running: ChildProcess): boolean => running.pid !== undefined && running.exitCode === null && running.signalCode === null;
 
   /** Take a process out of service, so the next call starts a new one. Calls it already owes still wait for it. */
   function detach(running: ChildProcess): void {

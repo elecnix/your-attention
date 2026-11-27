@@ -127,4 +127,20 @@ await s.lookup({ name: 'STUBBORN' }).catch(() => {});
   it('says when its command cannot start', async () => {
     await assert.rejects(source({ command: ['./missing-source'] }).detect(), /could not start/);
   });
+
+  it('lets the process that asked end at once when the command never started', async () => {
+    // `secret source list` with a missing command: no source runs, so there is nothing to wait for before SIGKILL.
+    const script = `
+import { stdioSource } from ${JSON.stringify(pathToFileURL(path.resolve('src/secrets/stdio-source.ts')).href)};
+const s = stdioSource({ name: 'missing', folder: ${JSON.stringify(FIXTURE_DIR)}, command: ['./missing-source'], killGraceMs: 8000, log: () => {} });
+await s.detect().catch((e) => console.log(e.message));
+console.log(Date.now());
+`;
+    const { execFileSync } = await import('node:child_process');
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20_000 }).trim().split('\n');
+    const ended = Date.now();
+    assert.match(out[0] ?? '', /could not start/);
+    const lingered = ended - Number(out[1]);
+    assert.ok(lingered < 4000, `the process stayed ${lingered} ms after its last call, waiting on a kill timer`);
+  });
 });

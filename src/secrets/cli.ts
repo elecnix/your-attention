@@ -10,7 +10,7 @@ import { terminal } from '../node/pin-prompt.ts';
 import { decryptWithPassphrase } from './age.ts';
 import { ageDirs, ensureIdentity, envelopePath, folderPath, identityPath, isPassphraseFile, writeEnvelope } from './age-source.ts';
 import { moduleFile } from './node-source.ts';
-import { BUILTINS, instanceName, loadSecretSources, originFolder, readSourceEntries, writeSourceEntries } from './registry.ts';
+import { BUILTINS, editableEntries, instanceName, loadSecretSources, originFolder, readSourceEntries, writeSourceEntries } from './registry.ts';
 import type { SourceEntry } from './source.ts';
 
 const COMMAND = 'secret';
@@ -85,7 +85,7 @@ async function addSource(home: string, origin: string | undefined, values: { nam
   const name = values.name ?? path.basename(folder).replace(/^your-attention-secret-/, '');
   if (!NAME.test(name)) fail(`${name} is not a name a source can take: use letters, digits, - and _, up to 40 characters, with --name.`);
   if (BUILTINS.some((b) => b.name === name)) fail(`${name} is the name of a built-in source. Choose another with --name.`);
-  const entries = readSourceEntries(home);
+  const entries = editable(home);
   if (entries.some((e) => e.name === name)) fail(`A source is already named ${name}. Remove it first, or choose another name with --name.`);
   if (form === 'node') {
     try { moduleFile(folder); } catch (e) { fail(`The node source cannot load: ${(e as Error).message}.`); }
@@ -98,15 +98,23 @@ async function addSource(home: string, origin: string | undefined, values: { nam
 function removeSource(home: string, name: string | undefined): void {
   if (!name) usageError(COMMAND, 'source remove needs the name of a source');
   if (BUILTINS.some((b) => b.name === name)) fail(`${name} is built in, so it cannot be removed. It is off while it has no folder: remove its folders with \`your-attention secret age dir remove <dir>\`.`);
-  const entries = readSourceEntries(home);
+  const entries = editable(home);
   if (!entries.some((e) => e.name === name)) fail(`No source is named ${name}. \`your-attention secret source list\` lists them.`);
   writeSourceEntries(home, entries.filter((e) => e.name !== name));
   console.log(`Removed the source ${name}. Its folder is as it was.`);
 }
 
+/** The entries of sources.jsonl for a change, or a stop with the sentence that names a line that doesn't parse. */
+function editable(home: string): SourceEntry[] {
+  try { return editableEntries(home); } catch (e) { fail((e as Error).message); }
+}
+
+/** The age source's folders, from an entries file that a change may rewrite. */
+const ageDirsToChange = (home: string): string[] => ageDirs(editable(home).find((e) => e.builtin && e.name === 'age')?.settings ?? {});
+
 /** Change the age source's folders, keeping the rest of its entry. */
 function setAgeDirs(home: string, change: (dirs: string[]) => string[]): void {
-  const entries = readSourceEntries(home);
+  const entries = editable(home);
   const current = entries.find((e) => e.builtin && e.name === 'age');
   const settings = { ...current?.settings, dirs: change(ageDirs(current?.settings ?? {})) };
   const entry: SourceEntry = { kind: 'secret', name: 'age', builtin: true, settings };
@@ -140,6 +148,8 @@ async function addAgeDir(home: string, dir: string | undefined): Promise<void> {
   if (!dir) usageError(COMMAND, 'age dir add needs a folder');
   const folder = folderPath(dir);
   requireFolder(folder);
+  // Before the identity: a file this command can't rewrite stops it with nothing made.
+  editable(home);
   const recipient = await ensureIdentity(home);
   setAgeDirs(home, (dirs) => (dirs.includes(folder) ? dirs : [...dirs, folder]));
   const lines = [
@@ -155,7 +165,7 @@ async function addAgeDir(home: string, dir: string | undefined): Promise<void> {
 function removeAgeDir(home: string, dir: string | undefined): void {
   if (!dir) usageError(COMMAND, 'age dir remove needs a folder');
   const folder = folderPath(dir);
-  if (!ageDirs(readSourceEntries(home).find((e) => e.builtin && e.name === 'age')?.settings ?? {}).includes(folder)) fail(`The age source does not read ${folder}.`);
+  if (!ageDirsToChange(home).includes(folder)) fail(`The age source does not read ${folder}.`);
   setAgeDirs(home, (dirs) => dirs.filter((d) => d !== folder));
   fs.rmSync(envelopePath(home, folder), { force: true });
   console.log(`The age source no longer reads ${tilde(folder)}. Its files are as they were.`);

@@ -52,6 +52,24 @@ describe('your-attention secret source', () => {
     assert.deepEqual(readSourceEntries(home), []);
   });
 
+  it('refuses to rewrite sources.jsonl while a line of it does not parse, and names the line', async () => {
+    const { env, home } = scratch();
+    const file = path.join(home, 'sources.jsonl');
+    const before = `${JSON.stringify({ kind: 'secret', name: 'kept', form: 'stdio', origin: pathToFileURL(EXAMPLE).href, command: ['node', 'source.ts'] })}\n{"kind": "secret", "name": "half-typed",\n`;
+    fs.writeFileSync(file, before);
+    const changes = [
+      ['source', 'add', pathToFileURL(EXAMPLE).href, '--name', 'another', '--command', 'node source.ts'],
+      ['source', 'remove', 'kept'],
+      ['age', 'dir', 'remove', home],
+    ];
+    for (const change of changes) {
+      const r = await runCli(env, 'secret', ...change);
+      assert.equal(r.code, 1, `${change.join(' ')}: ${r.stderr}`);
+      assert.match(r.stderr, /line 2 of .*sources\.jsonl is not JSON/, change.join(' '));
+      assert.equal(fs.readFileSync(file, 'utf8'), before, `${change.join(' ')} left the file as it was`);
+    }
+  });
+
   it('says in a sentence that it cannot read a folder, for the age folder and its passphrase', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs a folder this user cannot search' : false }, async () => {
     const { env, home } = scratch();
     const file = path.join(home, 'a-file');

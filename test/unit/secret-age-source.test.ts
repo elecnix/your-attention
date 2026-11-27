@@ -122,4 +122,22 @@ describe('the age source', { skip: NO_AGE }, () => {
       await assert.rejects(source.release(id, keys.publicKey), /no age file at/, id);
     }
   });
+
+  it('neither lists nor releases a symlink that leaves its folder, and keeps one that stays inside', async () => {
+    const home = scratch('ya-age-home-');
+    const dir = scratch('ya-age-dir-');
+    const outside = scratch('ya-age-outside-');
+    const recipient = await ensureIdentity(home);
+    // The envelope of a folder is exactly the kind of file outside every folder that a link must not reach.
+    await writeEnvelope(home, outside, PASS);
+    fs.symlinkSync(envelopePath(home, outside), path.join(dir, 'LEAK.age'));
+    encryptTo(recipient, plainFile('made-up-inside'), path.join(dir, 'real.age'));
+    fs.symlinkSync(path.join(dir, 'real.age'), path.join(dir, 'ALIAS.age'));
+    const source = ageSource({ home, settings: { dirs: [dir] } });
+    const keys = await newSealKeys();
+    assert.deepEqual(await source.lookup({ name: 'LEAK' }), []);
+    await assert.rejects(source.release(path.join(dir, 'LEAK.age'), keys.publicKey), /leaves/);
+    assert.deepEqual((await source.lookup({ name: 'ALIAS' })).map((c) => c.id), [path.join(dir, 'ALIAS.age')]);
+    assert.equal(await openSealed(keys.privateKey, await source.release(path.join(dir, 'ALIAS.age'), keys.publicKey)), 'made-up-inside');
+  });
 });

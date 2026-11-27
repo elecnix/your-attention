@@ -65,8 +65,21 @@ export function readSourceEntries(home: string): SourceEntry[] {
   return readLines(home).flatMap((l) => ('entry' in l ? [l.entry] : []));
 }
 
-/** Replace sources.jsonl with these entries, readable only by this user. */
+/** The entries of sources.jsonl for a change to it. A rewrite keeps only the lines that parse, so while one doesn't,
+ * this throws with a sentence that names it, and the person's line stays as they wrote it. */
+export function editableEntries(home: string): SourceEntry[] {
+  const lines = readLines(home);
+  const problems = lines.flatMap((l) => ('problem' in l ? [l.problem] : []));
+  if (problems.length > 0) {
+    throw new Error(`${problems.join('; ')}. Fix or remove ${problems.length === 1 ? 'that line' : 'those lines'} in ${path.join(home, SOURCES_FILE)}, then run the command again. Nothing changed.`);
+  }
+  return lines.flatMap((l) => ('entry' in l ? [l.entry] : []));
+}
+
+/** Replace sources.jsonl with these entries, readable only by this user. It refuses while a line of the file doesn't
+ * parse, since the rewrite would drop it. */
 export function writeSourceEntries(home: string, entries: SourceEntry[]): void {
+  editableEntries(home);
   writePrivate(path.join(home, SOURCES_FILE), entries.map((e) => `${JSON.stringify(e)}\n`).join(''));
 }
 
