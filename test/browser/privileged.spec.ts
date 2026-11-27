@@ -41,7 +41,9 @@ test('the person types the password on the card, and the inbox runs the command 
   await field.getByLabel('Password to run create_marker on test-machine').fill(PASSWORD);
   await page.getByRole('button', { name: 'Send answer' }).click();
 
-  await expect.poll(() => fs.existsSync(marker)).toBe(true);
+  // The command writes the marker while it runs, and the inbox stores the answer once the run ended, so wait for that.
+  await expect.poll(async () => (await inbox.detail('privileged')).answer?.values['create_marker'] !== undefined).toBe(true);
+  expect(fs.existsSync(marker)).toBe(true);
   const { answer } = await inbox.detail('privileged');
   const run = answer?.values['create_marker'] as PrivilegedRun;
   expect(run.exitCode).toBe(0);
@@ -62,7 +64,8 @@ test('a machine that takes an approval shows a box instead of a password, and ru
   await field.getByRole('checkbox', { name: 'Run this command on nas' }).check();
   await page.getByRole('button', { name: 'Send answer' }).click();
 
-  await expect.poll(() => approvals.length).toBe(1);
+  await expect.poll(async () => (await inbox.detail('privileged-nas')).answer?.values['restart_smbd'] !== undefined).toBe(true);
+  expect(approvals).toHaveLength(1);
   expect(approvals[0]).toMatchObject({ command, password: '', ctx: { card: 'privileged-nas', field: 'restart_smbd' } });
   const { answer } = await inbox.detail('privileged-nas');
   expect((answer?.values['restart_smbd'] as PrivilegedRun).machine).toBe('nas');
