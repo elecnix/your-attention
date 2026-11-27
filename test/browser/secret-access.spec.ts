@@ -1,10 +1,13 @@
 // The secret_access field on the whole page, on the stand-in inbox of the built stories: what Send answer posts for each
 // field, the ceiling the person picks, a typed value sealed to the card's key, keyboard-only use, and Revoke.
 // Run `npm run storybook:build` first.
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { openSealed } from '../../src/core/sealed.ts';
 import type { Sealed } from '../../src/core/types.ts';
-import { serveStories } from './stories-server.ts';
+import { STORIES_DIR, serveStories } from './stories-server.ts';
 import { TEST_PRIVATE_KEY } from './test-private-key.ts';
 
 let storybook: Awaited<ReturnType<typeof serveStories>> | undefined;
@@ -145,4 +148,19 @@ test('two age files of one name in two folders draw as two rows, each with its s
 
 test('the story server answers 404 to a path with a stray percent escape', async ({ request }) => {
   expect((await request.get(`${base}/%`)).status()).toBe(404);
+});
+
+test('the story server answers 404 to a file of a sibling folder whose name starts like its own', async () => {
+  const sibling = fs.mkdtempSync(`${STORIES_DIR}-sibling-`);
+  fs.writeFileSync(path.join(sibling, 'a.js'), 'outside');
+  try {
+    // A path in the request options keeps the `..` that a URL or a browser would resolve before sending.
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      const { hostname, port } = new URL(base);
+      http.get({ hostname, port, path: `/../${path.basename(sibling)}/a.js` }, (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject);
+    });
+    expect(status).toBe(404);
+  } finally {
+    fs.rmSync(sibling, { recursive: true, force: true });
+  }
 });
