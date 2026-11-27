@@ -58,3 +58,5 @@ export function candidateDetail(c: AccessCandidate): string;
 export function accessValue(choice: AccessChoice | undefined, candidates: AccessCandidate[], now: number): { grant: string; source: string; instance: string; until: number } | { decline: true } | undefined;
 /** The granted fields of an answer that can still be revoked. */
 export function revocableGrants(answer: Answer | undefined, now: number): { field: string; value: { grant: string; source: string; instance: string; until: number; case?: string } }[];
+/** A time of day as hours and minutes, as a grant's end shows. */
+export function clock(t: number): string;

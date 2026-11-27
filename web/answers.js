@@ -408,7 +408,8 @@ export function accessValue(choice, candidates, now) {
 }
 
 const isGrantValue = (v) => !!v && typeof v === 'object' && typeof v.grant === 'string' && typeof v.until === 'number';
-const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/** A time of day as hours and minutes, as a grant's end shows. */
+export const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** The granted fields of an answer that the person can still revoke: not revoked, and before their ceiling. */
 export function revocableGrants(answer, now) {
