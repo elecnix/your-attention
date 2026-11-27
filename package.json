@@ -36,8 +36,8 @@
     "typecheck:tsgo": "tsgo --noEmit -p . && tsgo --noEmit -p tsconfig.cloudflare.json",
     "typecheck:tsc-rs": "tsc-rs --noEmit -p . && tsc-rs --noEmit -p tsconfig.cloudflare.json",
     "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "node --disable-warning=ExperimentalWarning scripts/node-test.ts --experimental-test-isolation=none --disable-warning=ExperimentalWarning \"test/unit/**/*.test.ts\"",
-    "test:integration": "node --disable-warning=ExperimentalWarning scripts/node-test.ts --test-concurrency=4 --disable-warning=ExperimentalWarning \"test/integration/**/*.test.ts\"",
+    "test:unit": "node --disable-warning=ExperimentalWarning scripts/node-test.ts --experimental-test-isolation=none --disable-warning=ExperimentalWarning -- \"test/unit/**/*.test.ts\"",
+    "test:integration": "node --disable-warning=ExperimentalWarning scripts/node-test.ts --test-concurrency=4 --disable-warning=ExperimentalWarning -- \"test/integration/**/*.test.ts\"",
     "start": "node --disable-warning=ExperimentalWarning src/cli.ts serve",
     "test:browser": "playwright test",
     "storybook": "storybook dev -p 6006",
@@ -46,7 +46,7 @@
     "cloudflare:check": "npm run cloudflare:build && wrangler deploy --dry-run --outdir .cloudflare/dist",
     "cpu-budget": "node --disable-warning=ExperimentalWarning scripts/cpu-budget.ts",
     "check:principles": "node --disable-warning=ExperimentalWarning scripts/check-principle-links.ts",
-    "test:cloudflare": "npm run cloudflare:build && node --disable-warning=ExperimentalWarning scripts/node-test.ts --test-concurrency=1 --disable-warning=ExperimentalWarning \"test/cloudflare/**/*.test.ts\"",
+    "test:cloudflare": "npm run cloudflare:build && node --disable-warning=ExperimentalWarning scripts/node-test.ts --test-concurrency=1 --disable-warning=ExperimentalWarning -- \"test/cloudflare/**/*.test.ts\"",
     "prepack": "node scripts/pack-sources.js"
   },
   "dependencies": {

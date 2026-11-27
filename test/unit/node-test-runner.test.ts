@@ -15,19 +15,37 @@ const run = (...args: string[]) =>
 
 describe('the test runner', () => {
   it('fails when a pattern selects no test file', () => {
-    const result = run('test/no-such-folder/**/*.test.ts');
+    const result = run('--', 'test/no-such-folder/**/*.test.ts');
     assert.equal(result.status, 1);
     assert.match(result.stderr, /selects no test file/);
   });
 
   it('fails when one of several patterns selects nothing', () => {
-    const result = run('test/unit/age.test.ts', 'test/no-such-folder/*.test.ts');
+    const result = run('--', 'test/unit/age.test.ts', 'test/no-such-folder/*.test.ts');
     assert.equal(result.status, 1);
     assert.match(result.stderr, /no-such-folder/);
   });
 
+  it('refuses patterns that are not after --', () => {
+    const result = run('test/unit/age.test.ts');
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /after --/);
+  });
+
+  it('passes a flag whose value is a separate argument to node --test', () => {
+    const result = run('--test-reporter', 'tap', '--', 'test/unit/age.test.ts');
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^# pass [1-9]/m);
+  });
+
+  it('passes a flag that npm appends after the patterns to node --test', () => {
+    const result = run('--test-reporter=tap', '--experimental-test-isolation=none', '--', 'test/unit/age.test.ts', '--test-name-pattern=no test has this name');
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^# tests 0/m);
+  });
+
   it('runs the tests a pattern selects', () => {
-    const result = run('--test-reporter=tap', 'test/unit/age.test.ts');
+    const result = run('--test-reporter=tap', '--', 'test/unit/age.test.ts');
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /^# pass [1-9]/m);
   });
