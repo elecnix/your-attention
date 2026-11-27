@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError, type SearchFilters, type SearchPage, type TriageFeedbackRecord } from './core/inbox.ts';
-import { isSealed } from './core/sealed.ts';
+import { isSealed, secretAccesses } from './core/sealed.ts';
+import type { AccessGrant, Candidate, SecretQuery, SourceInfo } from './core/secret-sources.ts';
 import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, Origin, PublicSubscription, PullRequest, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
@@ -206,6 +207,11 @@ export class Client {
   async post(card: NewCard): Promise<Card & { warning?: string; inheritedTags?: string[] }> {
     await this.checkFirst('POST /v1/cards', { card: { ...card, attachments: undefined } });
     return this.call('POST', '/v1/cards', card);
+  }
+
+  /** The candidates the inbox's secret sources offer for a query: metadata, never a value. */
+  secretLookup(query: SecretQuery): Promise<{ candidates: Candidate[]; sources: SourceInfo[] }> {
+    return this.call('POST', '/v1/secrets/lookup', query);
   }
 
   /** The default tags this token keeps for one agent id: every card that agent posts inherits them. */
@@ -603,7 +609,15 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
       : 'approved, but the inbox recorded no send';
     lines.push(`Approval ${i + 1} for pane ${a.pane}, "${a.text}": ${done}`);
   });
+  // A secret_access field says whether the person granted it, never its value. One the answer leaves out was declined.
+  const access = new Set(card.body === undefined ? [] : (() => { try { return secretAccesses(String(card.body)).map((f) => f.name); } catch { return []; } })());
+  for (const name of access) {
+    const v = answer.values[name] as Partial<AccessGrant> | undefined;
+    if (v && typeof v.grant === 'string') lines.push(`${name}: ${v.revokedAt === undefined ? 'granted' : 'revoked'} (case ${v.case}, until ${new Date(Number(v.until)).toISOString()})`);
+    else if (!isSealed(v)) lines.push(`${name}: declined`);
+  }
   for (const [k, v] of Object.entries(answer.values)) {
+    if (access.has(k) && !isSealed(v)) continue;
     if (card.questions?.length && /^q\d+(_comment)?$/.test(k)) continue;
     if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;
     // A sealed secret is never written out: the integration opens it into a file and names the file.

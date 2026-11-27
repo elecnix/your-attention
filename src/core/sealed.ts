@@ -1,6 +1,7 @@
 // Sealed secrets: the agent side, a key pair per card and opening what the page sealed with web/sealed.js, and the
 // inbox side, the fields of a card that take only a sealed value. Web Crypto only.
 import { InboxError } from './inbox.ts';
+import type { Candidate } from './secret-sources.ts';
 import type { Answer, Card, Sealed } from './types.ts';
 
 export const SEAL_ALG = 'RSA-OAEP-256+A256GCM';
@@ -131,12 +132,35 @@ function stringAt(src: string, i: number): { value: string; end: number } | unde
   return undefined;
 }
 
-/** The field names of the SecretInput calls in a body, in order, read with the OpenUI parser's strings, comments and
- * fences. Each call must give its field name and an RSA public key as string literals, so the inbox knows every field
- * that takes only a sealed value. */
-export function secretInputs(body: string): string[] {
+/** A field the secret_access widget places: the secret's name, the card's public key, and the candidates it offers. */
+export interface AccessField {
+  name: string;
+  publicKey: string;
+  candidates: Candidate[];
+}
+
+const ACCESS_LITERALS = 'SecretAccess takes three string literals, the field name, the public key and the candidates. Place it with the secret_access widget: db = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}';
+
+/** Each candidate needs these as text. Other fields, such as a status the lookup gave, stay as the card gave them. */
+const CANDIDATE_FIELDS = ['id', 'source', 'instance', 'label'] as const;
+
+function candidatesOf(name: string, text: string): Candidate[] {
+  const bad = (): InboxError => new InboxError(400, `secret ${name}: the candidates must be a JSON list of objects with id, source, instance and label as text, as POST /v1/secrets/lookup answers them`);
+  let list: unknown;
+  try { list = JSON.parse(text); } catch { throw bad(); }
+  if (!Array.isArray(list)) throw bad();
+  for (const c of list) {
+    if (!c || typeof c !== 'object' || Array.isArray(c) || CANDIDATE_FIELDS.some((k) => typeof (c as Record<string, unknown>)[k] !== 'string')) throw bad();
+  }
+  return list as Candidate[];
+}
+
+/** The SecretInput and SecretAccess calls in a body, in order, read with the OpenUI parser's strings, comments and
+ * fences. Each call must give its arguments as string literals, so the inbox knows every field that takes only a
+ * sealed value, and the candidates each access field offers. */
+function secretCalls(body: string): { name: string; publicKey: string; candidates?: Candidate[] }[] {
   const src = withoutComments(fencedCode(body.trim())).trim();
-  const names: string[] = [];
+  const calls: { name: string; publicKey: string; candidates?: Candidate[] }[] = [];
   const space = (i: number) => { while (/\s/.test(src[i] ?? '')) i++; return i; };
   let i = 0;
   while (i < src.length) {
@@ -145,24 +169,42 @@ export function secretInputs(body: string): string[] {
     const word = /^[A-Za-z_]\w*/.exec(src.slice(i, i + 64))?.[0];
     if (!word) { i++; continue; }
     i += word.length;
-    if (word !== 'SecretInput' || src[space(i)] !== '(') continue;
-    const first = stringAt(src, space(space(i) + 1));
-    const comma = first ? space(first.end) : -1;
-    const second = first && src[comma] === ',' ? stringAt(src, space(comma + 1)) : undefined;
-    if (!first || !second || src[space(second.end)] !== ')') throw new InboxError(400, LITERALS);
-    i = space(second.end) + 1;
-    const name = first.value;
-    const key = second.value;
+    if ((word !== 'SecretInput' && word !== 'SecretAccess') || src[space(i)] !== '(') continue;
+    const count = word === 'SecretInput' ? 2 : 3;
+    const args: string[] = [];
+    let at = space(space(i) + 1);
+    for (;;) {
+      const arg = stringAt(src, at);
+      if (!arg) break;
+      args.push(arg.value);
+      at = space(arg.end);
+      if (args.length === count || src[at] !== ',') break;
+      at = space(at + 1);
+    }
+    if (args.length !== count || src[at] !== ')') throw new InboxError(400, count === 2 ? LITERALS : ACCESS_LITERALS);
+    i = at + 1;
+    const [name = '', key = '', candidates] = args;
     if (!FIELD_NAME.test(name)) throw new InboxError(400, `secret ${JSON.stringify(name)}: the name must be a variable name, such as API_KEY`);
-    if (names.includes(name)) throw new InboxError(400, `the card asks for ${name} twice: give each secret its own name`);
+    if (calls.some((c) => c.name === name)) throw new InboxError(400, `the card asks for ${name} twice: give each secret its own name`);
     if (!key) throw new InboxError(400, `secret ${name} needs the public key that card_post fills in. Post the card with the card_post tool of a Claude Code, pi or opencode session, which keeps the private key`);
     let jwk: Record<string, unknown>;
     try { jwk = JSON.parse(key) as Record<string, unknown>; } catch { throw new InboxError(400, `secret ${name}: the public key must be an RSA key as JSON Web Key text`); }
     if (!jwk || typeof jwk !== 'object' || jwk['kty'] !== 'RSA' || typeof jwk['n'] !== 'string' || typeof jwk['e'] !== 'string') throw new InboxError(400, `secret ${name}: the public key must be an RSA key as JSON Web Key text`);
     if (PRIVATE_MEMBERS.some((k) => Object.hasOwn(jwk, k))) throw new InboxError(400, `secret ${name}: the key is a private key. The private key never leaves the agent's session: place only the public key`);
-    names.push(name);
+    calls.push(candidates === undefined ? { name, publicKey: key } : { name, publicKey: key, candidates: candidatesOf(name, candidates) });
   }
-  return names;
+  return calls;
+}
+
+/** The field names of the SecretInput and SecretAccess calls in a body, in order. Each one takes only a sealed value,
+ * or for SecretAccess a grant or a decline. */
+export function secretInputs(body: string): string[] {
+  return secretCalls(body).map((c) => c.name);
+}
+
+/** The SecretAccess fields of a body, with the public key and the candidates each one offers. */
+export function secretAccesses(body: string): AccessField[] {
+  return secretCalls(body).filter((c): c is AccessField => c.candidates !== undefined);
 }
 
 /** The answer fields of a card that take only a sealed value. A secret card that an older inbox stored has one, `sealed`. */

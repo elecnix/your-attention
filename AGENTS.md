@@ -130,6 +130,10 @@ flowchart TB
   CJ -- "system card: webhook url and headers" --> INBOX
   INBOX -- "signing secret, once" --> CJ
   INBOX -- "after the person approves: each answer, signed, with the headers" --> HOOK
+  SRC[("secret sources of the inbox machine: their stores and keys")]
+  INBOX -- "inside the owner's answer only: release a granted candidate to the card's public key" --> SRC
+  SRC -- "the value, sealed to the card's public key" --> INBOX
+  INBOX -- "agent stream: the sealed grant, which only the posting session opens" --> CLIENT
   UT -- "POST /v1/cards/id/file-ticket" --> FT["folder ticket: one card's file, its folder for HTML, until the card is cleared or the unlock ends"]
   FT -- "new tab and its assets: GET /v1/files/ticket/path" --> LF
   LF -- "sandboxed" --> BROWSER
@@ -143,6 +147,7 @@ flowchart TB
 - A token minted at `serve` or by pairing as owner skips the PIN. When the inbox has a PIN, a browser's owner token needs an unlock token as well, which the tab sends as `x-your-attention-unlock`. An unlock token ends after 12 hours without use.
 - The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. The new tab opens the file at the address of a folder ticket, and that address is the credential, since a sandboxed page loads its assets without the cookie. A ticket for an HTML file opens the files in its folder and below, except hidden ones, and never a symlink that leaves the folder. It ends when its card is cleared, and with a PIN, when the unlock of the tab that asked for it ends. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
 - The laptop inbox serves the owner a file on its computer only when a card from that computer contains the file's `file:` address. The agent that posted the card chooses what the route exposes. When the inbox has a PIN, the new tab opens the file only with a ticket that an unlocked tab asked for, which works once within 60 seconds. The file opens in a sandbox, so a served HTML page can't run scripts or read the cookie. The hosted inbox has no such route.
+- A secret source releases a value only inside the owner's `POST /v1/cards/<id>/answer`, and seals it to the public key on the card before the value leaves the source. Of the value, the inbox stores only that ciphertext. A lookup answers metadata only, and an agent or extension token gets 403 on the answer and on the revoke route. Hooks, webhooks and triage never see a grant.
 - An agent's answer webhook gets nothing until the person approves it on its system card. The inbox keeps the header values the agent gave, and sends them only to that webhook, never to a client or a page. The signing secret goes to the agent once.
 - The inbox makes its own VAPID key pair for Web Push and keeps the private half in its storage, never in a route, a log or the repository. Each push device belongs to the owner token that saved it, and revoking the token removes it. A push contains only the card's title and id, encrypted for the device, so the service that relays it cannot read it.
 - An invite code is the operator's secret. The hosted inbox keeps only its invite id, the first 16 hex digits of the code's SHA-256, for usage counts.

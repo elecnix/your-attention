@@ -28,6 +28,15 @@ export const BUILTIN_WIDGETS: Template[] = [{
     when: 'A value the person must not paste into the conversation, such as an API key. Place it in the card body of a card_post call, on a card of any kind: `key = widget secret {"name": "OLLAMA_API_KEY"}`. Give only `name`, a variable name: card_post fills `publicKey`, and the private key stays in your session. The person\'s browser seals the value, the answer names a file that holds it, and you never see the value. Use the file inside a command and never print it.',
     at: 0,
   }],
+}, {
+  name: 'secret_access',
+  builtin: true,
+  versions: [{
+    version: 1,
+    source: 'root = Form({{name}}, buttons, [field])\nbuttons = Buttons([])\nfield = FormControl({{name}}, SecretAccess({{name}}, {{publicKey}}, {{candidates}}))',
+    when: 'A secret that a source on the person\'s computer already keeps, such as a database address or an API key, which this session needs for a while. Place it in the card body of a card_post call, once per secret: `db = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}`. `name` is the variable your commands read, and `query` takes `name`, `type` or `host`. card_post looks up the candidates and fills `candidates` and `publicKey`, and the private key stays in your session. The person grants one candidate for a time, declines, or types a value. The source seals the value to your session, and the answer gives the case id and the deadline, never the value. Each command you run then gets `$NAME` until the grant ends or the person revokes it.',
+    at: 0,
+  }],
 }];
 
 export interface WidgetSource {
@@ -65,9 +74,17 @@ export function respond(template: string, answer: Record<string, unknown>, place
 const PLACE = /^(\s*)([A-Za-z_]\w*)\s*=\s*widget\s+([\w.-]+)(?:@(\d+))?\s*(.*)$/;
 const STRING = /("(?:[^"\\]|\\.)*")/;
 
-/** Set `values` on each line of the body that places `widget`, over any the line gives. Returns the new body and how
- * many lines it set. The integrations fill a secret widget's public key this way. */
-export function addToPlacements(body: string, widget: string, values: Record<string, unknown>): { body: string; count: number } {
+/** The values each line of the body that places `widget` gives, in order. A line whose values aren't a JSON object is left out. */
+export function placementValues(body: string, widget: string): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  addToPlacements(body, widget, (vars) => { out.push(vars); return {}; });
+  return out;
+}
+
+/** Set `values` on each line of the body that places `widget`, over any the line gives. `values` may be a function of
+ * the line's own values and its index among the placements. Returns the new body and how many lines it set. The
+ * integrations fill a secret widget's public key this way. */
+export function addToPlacements(body: string, widget: string, values: Record<string, unknown> | ((vars: Record<string, unknown>, index: number) => Record<string, unknown>)): { body: string; count: number } {
   let count = 0;
   const lines = body.split('\n').map((line) => {
     const m = PLACE.exec(line);
@@ -75,8 +92,9 @@ export function addToPlacements(body: string, widget: string, values: Record<str
     let vars: unknown = {};
     try { vars = m[5]!.trim() ? JSON.parse(m[5]!) : {}; } catch { return line; }
     if (!vars || typeof vars !== 'object' || Array.isArray(vars)) return line;
+    const add = typeof values === 'function' ? values(vars as Record<string, unknown>, count) : values;
     count++;
-    return `${m[1]}${m[2]} = widget ${m[3]}${m[4] === undefined ? '' : `@${m[4]}`} ${JSON.stringify({ ...vars, ...values })}`;
+    return `${m[1]}${m[2]} = widget ${m[3]}${m[4] === undefined ? '' : `@${m[4]}`} ${JSON.stringify({ ...vars, ...add })}`;
   });
   return { body: lines.join('\n'), count };
 }

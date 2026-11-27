@@ -370,7 +370,7 @@ It reads every `*.age` file of the folders in its `dirs` setting, and each file'
 
 ### Lookup
 
-`POST /v1/secrets/lookup` takes `{name?, type?, host?}`. An agent or the owner may call it. It sends the query to every source that is `ready`, and answers `{candidates, sources}`. The inbox merges `candidates` in source order, and `sources` lists each source with its `instance`, `name`, `builtin`, `status` and `reason`. A source that fails or times out appears with `status: "error"` and its reason, and the others still answer. `GET /v1/secrets/sources` answers the same `sources` list.
+`POST /v1/secrets/lookup` takes `{name?, type?, host?}`. An agent or the owner may call it. It sends the query to every source that is `ready`, and answers `{candidates, sources}`. The inbox merges `candidates` in source order, and `sources` lists each source with its `instance`, `name`, `builtin`, `status` and `reason`. A source that fails or times out appears with `status: "error"` and its reason, and the others still answer. `GET /v1/secrets/sources` answers `{sources}`, the same list. An extension token gets 403 on both routes, and a query field that isn't text gets 400. An inbox with no sources, such as the hosted one, answers `{candidates: [], sources: []}`. A lookup doesn't change the inbox, so the inbox doesn't keep its reply to replay for an `x-message-id`.
 
 ### The secret_access widget
 
@@ -381,7 +381,7 @@ db = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_U
 ai = widget secret_access {"name": "OPENAI_API_KEY", "query": {"type": "api-key", "host": "api.openai.com"}}
 ```
 
-Before `card_post` posts the card, it runs the lookup for each placement's `query`. It then sets `candidates` to the result as JSON text, and `publicKey` to the public half of the key pair it keeps for the card. A placement may give `candidates` itself, and then `card_post` keeps them. The widget places one field:
+Before `card_post` posts the card, it runs the lookup for each placement's `query`. It then sets `candidates` to the result as JSON text, and `publicKey` to the public half of the key pair it keeps for the card. A placement without `query` looks up its `name`. When a placement gives `candidates` itself, as JSON text or as a list, `card_post` keeps them. The `secret` and `secret_access` placements of one card share its key pair. The widget places one field:
 
 ```
 db = Form("DATABASE_URL", db_buttons, [db_field])
@@ -389,7 +389,7 @@ db_buttons = Buttons([])
 db_field = FormControl("DATABASE_URL", SecretAccess("DATABASE_URL", "<public key JWK>", "<candidates JSON>"))
 ```
 
-The inbox reads each `SecretAccess(name, publicKey, candidates)` call as it reads `SecretInput`, with the same 400s, and adds the names to the card's `secrets`. The inbox answers 400 unless the candidates are a JSON list of objects with `id`, `source`, `instance` and `label` each.
+The inbox reads each `SecretAccess(name, publicKey, candidates)` call as it reads `SecretInput`, with the same 400s, and adds the names to the card's `secrets`. The inbox answers 400 unless the candidates are a JSON list of objects with `id`, `source`, `instance` and `label` as text. A candidate keeps any other field the card gives, such as a `status` and a `reason` from the lookup.
 
 The page shows each candidate with its label, its source and its instance, and the type and host when present. A candidate whose source isn't `ready` shows as unavailable, and the person can't pick it. The person picks one candidate, declines, or types a value instead, which the page seals as the `secret` widget does. For a grant, the person also sets how long it lasts. The idle window is 15 minutes, and each use restarts it. The ceiling defaults to one hour and goes up to 24 hours. Use doesn't push it later. A card with several `secret_access` fields takes a choice for each, so the person can grant one and decline another.
 
@@ -403,11 +403,18 @@ For each `secret_access` field, the page sends one of these values:
 {"alg": "RSA-OAEP-256+A256GCM", "key": "...", "iv": "...", "data": "..."}
 ```
 
-Only the owner may answer: `POST /v1/cards/<id>/answer` answers 403 to an agent or an extension token. For each grant, the inbox first checks that the card lists the candidate. Its source then releases the value sealed to the field's public key, and the inbox stores `{grant, source, instance, until, case, sealed}` as the field's value. `case` is a short id for the grant, the card id and the field name, which the person can copy from the card and the agent quotes. The inbox caps `until` at 24 hours after the answer. When a source refuses, the whole answer fails with 502 and the source's sentence, so the person sees why and the inbox doesn't keep a partial grant. For a decline, the inbox stores `{decline: true}`, and the answer text says that the person declined. The release happens only inside the owner's answer: no route releases a value on its own.
+Only the owner may answer: `POST /v1/cards/<id>/answer` answers 403 to an agent or an extension token. For each grant, the inbox first checks that the card lists the candidate. Its source then releases the value sealed to the field's public key, and the inbox stores `{grant, source, instance, until, case, sealed}` as the field's value. `case` is a short id for the grant, the card id and the field name, which the person can copy from the card and the agent quotes. The inbox caps `until` at 24 hours after the answer, and answers 400 to an `until` already past and to a candidate the card doesn't list, with the same `id`, `source` and `instance`. When a source refuses, or the inbox has no sources, the whole answer fails with 502 and the source's sentence, so the person sees why and the inbox doesn't keep a partial grant. Every release runs before the inbox stores the answer. For a decline, the inbox stores `{decline: true}`. A field the answer leaves out is declined too, and the inbox stores nothing for it. A sealed value that the person typed is stored as for the `secret` widget, and any other value gets 400. The release happens only inside the owner's answer: no route releases a value on its own.
+
+The answer text for the agent shows one line per `secret_access` field, and never a value:
+
+```text
+DATABASE_URL: granted (case 3f9a1c0b, until 2026-11-27T18:30:00.000Z)
+OPENAI_API_KEY: declined
+```
 
 Hooks, answer webhooks and triage get the answer without these fields, as for the `secret` widget. The agent stream gets all of it.
 
-`POST /v1/cards/<id>/revoke` takes `{field}` and revokes that field's grant. Only the owner may call it, and an agent or extension token gets 403. The inbox records the revocation on the answer value as `revokedAt`, and sends the agent stream `{type: "revoke", id, card, field, case}`. The page shows a **Revoke** button on each granted field of a card in the outbox or in Sent, until its `until` passes.
+`POST /v1/cards/<id>/revoke` takes `{field}` and revokes that field's grant. Only the owner may call it, and an agent or extension token gets 403. The inbox records the revocation on the answer value as `revokedAt`, and sends the agent stream `{type: "revoke", id, card, field, case}`, where `card` is the card, as in the other agent events. A field without a grant gets 409, and a second revoke of the same grant doesn't change it. The page shows a **Revoke** button on each granted field of a card in the outbox or in Sent, until its `until` passes.
 
 ### Delivery in the session
 

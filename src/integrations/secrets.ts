@@ -4,7 +4,8 @@
 import path from 'node:path';
 import { isSealed, newSealKeys, openSealed, sealedFields } from '../core/sealed.ts';
 import type { Answer, Card } from '../core/types.ts';
-import { addToPlacements } from '../core/widgets.ts';
+import type { Candidate, SecretQuery } from '../core/secret-sources.ts';
+import { addToPlacements, placementValues } from '../core/widgets.ts';
 import { homeDir, writePrivate } from '../node/home.ts';
 
 export class SecretRequests {
@@ -12,13 +13,28 @@ export class SecretRequests {
   // earlier version still opens.
   private readonly keys = new Map<string, CryptoKey[]>();
 
-  /** Fill the public key into each secret widget the body places. `keep` holds the private key under the posted card's id. */
-  async prepare(body: string | undefined): Promise<{ body: string | undefined; count: number; keep: (id: string) => void }> {
-    if (body === undefined || !/\bwidget\s+secret\b/.test(body)) return { body, count: 0, keep: () => {} };
+  /** Fill the public key into each secret and secret_access widget the body places, with one key pair for the card.
+   * A secret_access placement without `candidates` gets the candidates `lookup` finds for its `query`, or for its name
+   * when it gives no query. `keep` holds the private key under the posted card's id. */
+  async prepare(body: string | undefined, lookup?: (query: SecretQuery) => Promise<{ candidates: Candidate[] }>): Promise<{ body: string | undefined; count: number; keep: (id: string) => void }> {
+    if (body === undefined || !/\bwidget\s+secret(_access)?\b/.test(body)) return { body, count: 0, keep: () => {} };
+    const asks = placementValues(body, 'secret_access');
+    const found: (string | undefined)[] = [];
+    for (const vars of asks) {
+      if (vars['candidates'] !== undefined) { found.push(typeof vars['candidates'] === 'string' ? undefined : JSON.stringify(vars['candidates'])); continue; }
+      const query = vars['query'] && typeof vars['query'] === 'object' ? vars['query'] as SecretQuery : { name: String(vars['name'] ?? '') };
+      if (!lookup) throw new Error(`secret ${String(vars['name'])}: this session cannot look up candidates, so give them in candidates`);
+      let result;
+      try { result = await lookup(query); } catch (e) { throw new Error(`could not look up the candidates for ${String(vars['name'])}: ${(e as Error).message}`); }
+      found.push(JSON.stringify(result.candidates));
+    }
     const { publicKey, privateKey } = await newSealKeys();
-    const filled = addToPlacements(body, 'secret', { publicKey: JSON.stringify(publicKey) });
-    if (!filled.count) return { body, count: 0, keep: () => {} };
-    return { ...filled, keep: (id) => this.keys.set(id, [privateKey, ...(this.keys.get(id) ?? [])].slice(0, 10)) };
+    const key = JSON.stringify(publicKey);
+    const sealedOnly = addToPlacements(body, 'secret', { publicKey: key });
+    const access = addToPlacements(sealedOnly.body, 'secret_access', (_vars, i) => ({ publicKey: key, ...(found[i] === undefined ? {} : { candidates: found[i] }) }));
+    const count = sealedOnly.count + access.count;
+    if (!count) return { body, count: 0, keep: () => {} };
+    return { body: access.body, count, keep: (id) => this.keys.set(id, [privateKey, ...(this.keys.get(id) ?? [])].slice(0, 10)) };
   }
 
   /** The lines for the model about each secret field of the card. They never contain a value. Empty for a card with

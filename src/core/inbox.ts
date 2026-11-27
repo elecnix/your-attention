@@ -7,7 +7,8 @@ import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { readShortCode, shortCode } from './sign-in.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, waitText, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
-import { isSealed, sealedFields, secretInputs, withoutSealed } from './sealed.ts';
+import { isSealed, sealedFields, secretAccesses, secretInputs, withoutSealed } from './sealed.ts';
+import { GRANT_MAX_MS, type AccessGrant, type SecretQuery, type SecretSources, type SourceInfo, type Candidate } from './secret-sources.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
 import { PinLock } from './pin.ts';
@@ -110,6 +111,18 @@ export const MAX_APPROVALS = 5;
 export const MAX_APPROVAL_CHARS = 1000;
 const MAX_APPROVAL_LABEL_CHARS = 120;
 
+/** A secret_access answer that declines. */
+function isDecline(v: unknown): v is { decline: true } {
+  return !!v && typeof v === 'object' && (v as Record<string, unknown>)['decline'] === true;
+}
+
+/** A secret_access answer that grants one candidate until a time, as the page sends it. */
+function isGrantChoice(v: unknown): v is { grant: string; source: string; instance: string; until: number } {
+  if (!v || typeof v !== 'object') return false;
+  const g = v as Record<string, unknown>;
+  return typeof g['grant'] === 'string' && typeof g['source'] === 'string' && typeof g['instance'] === 'string' && typeof g['until'] === 'number' && Number.isFinite(g['until']);
+}
+
 export interface InboxOptions {
   keepPresence?: boolean;
   uploadLimitBytes?: number | undefined;
@@ -135,6 +148,9 @@ export interface InboxOptions {
   approvals?: ApprovalSender | undefined;
   /** How the inbox calls answer webhooks and push services. The default is the platform's fetch. */
   fetch?: typeof fetch | undefined;
+  /** The secret sources of this computer, which the laptop's serve runs. Without them, as on the hosted inbox, a lookup
+   * finds nothing and a grant fails with 502. */
+  secretSources?: SecretSources | undefined;
   /** Whether a new card pushes to a device that collapsed these groups. The page's own rule, `notifies` in web/queue.js,
    * which an adapter passes in because the core imports only the core. Without it, every new card pushes to every device. */
   pushRule?: ((state: ReturnType<Inbox['summaryState']>, card: CardSummary, collapsed: ReadonlySet<string>) => boolean) | undefined;
@@ -199,7 +215,7 @@ export const DEFAULT_PRIORITIES: PriorityLevel[] = [
   { id: 'later', label: 'Can wait', definition: 'The answer refines the work later.' },
 ];
 /** The version of `DEFAULT_GUIDANCE`. It moves whenever that text changes, so a client reads the words it has not seen. */
-export const DEFAULT_GUIDANCE_VERSION = 6;
+export const DEFAULT_GUIDANCE_VERSION = 7;
 export const DEFAULT_GUIDANCE = [
   'On a card, "you" is the person who reads it. Write about yourself in the third person, as "this agent" or the name in `from`, never "I" or "we", so the person always knows who acts.',
   'Write each card so the person can answer it without opening the session.',
@@ -216,7 +232,7 @@ export const DEFAULT_GUIDANCE = [
   'When an action needs the person\'s own words in a session, post the sentence as an approval on the card instead of asking the person to type it there.',
   'A card title is one line of plain text: no Markdown and no links. Name the thing there, as "PR #93 — an empty list no longer looks like a success". Put the link in `text`, or in a field label in the body: both read inline Markdown.',
   'When the person answers a card, post this agent\'s response as a new card with `follows: "<answered card id>"`, not only as a message in the session, and follow up on any card the same way. The inbox links the two cards both ways, so the person reads the response beside the answer. There is no reply to a card.',
-  'Never ask for a secret, such as an API key, in a text field. Place the secret widget in the card body, `key = widget secret {"name": "API_KEY"}`, and card_post seals it for this session.',
+  'Never ask for a secret, such as an API key, in a text field. Place the secret widget in the card body, `key = widget secret {"name": "API_KEY"}`, and card_post seals it for this session. For a secret a source on the person\'s computer already keeps, place `db = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}`: card_post looks up its candidates, and the person grants one for a time.',
   'Search earlier answers before you post, and never ask the same thing twice.',
 ].join('\n');
 export const MAX_ATTACHMENTS = 10;
@@ -420,6 +436,7 @@ export class Inbox {
   private readonly shownCardLimit: number | undefined;
   private readonly now: () => number;
   private readonly approvalSender: ApprovalSender | undefined;
+  private readonly secretSources: SecretSources | undefined;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
   private readonly pages = new Set<PageSend>();
@@ -458,6 +475,7 @@ export class Inbox {
     this.clientChecks = opts.clientChecks === true;
     this.shownCardLimit = opts.shownCardLimit;
     this.approvalSender = opts.approvals;
+    this.secretSources = opts.secretSources;
     // Workers refuse a fetch called as a method of another object, so the default calls it bare.
     this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
     this.pushRule = opts.pushRule;
@@ -2218,13 +2236,40 @@ export class Inbox {
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
     const values = input.values && typeof input.values === 'object' ? { ...input.values } : {};
     if (input.images !== undefined && !Array.isArray(input.images)) throw new InboxError(400, 'images must be a list');
-    // A secret field takes only a sealed value, so plain text never reaches storage. An empty one declines.
+    // A secret field takes only a sealed value, so plain text never reaches storage. An empty one declines. A
+    // secret_access field also takes a grant of one of its candidates, or a decline.
+    const access = new Map(posted.body === undefined ? [] : secretAccesses(String(posted.body)).map((f) => [f.name, f]));
+    const grants: { field: string; publicKey: JsonWebKey; choice: { grant: string; source: string; instance: string; until: number } }[] = [];
     for (const field of sealedFields(posted)) {
       // An own property only: a field named like an inherited one, such as constructor, is empty when the answer leaves it out.
       const v = Object.hasOwn(values, field) ? values[field] : undefined;
+      const offered = access.get(field);
       if (v === undefined || v === null || v === '') delete values[field];
+      else if (offered && isDecline(v)) values[field] = { decline: true };
+      else if (offered && isGrantChoice(v)) {
+        if (!offered.candidates.some((c) => c.id === v.grant && c.source === v.source && c.instance === v.instance)) {
+          throw new InboxError(400, `${field}: ${v.grant} from ${v.source} on ${v.instance} is not one the card offers`);
+        }
+        if (v.until <= this.now()) throw new InboxError(400, `${field}: until must be later than now`);
+        grants.push({ field, publicKey: JSON.parse(offered.publicKey) as JsonWebKey, choice: { grant: v.grant, source: v.source, instance: v.instance, until: Math.min(v.until, this.now() + GRANT_MAX_MS) } });
+      } else if (offered && !isSealed(v)) throw new InboxError(400, `${field} takes a grant of one of its candidates, {"decline": true}, or a sealed value`);
       else if (!isSealed(v)) throw new InboxError(400, `${field} takes only a sealed value: seal it with the public key on the card`);
       if (input.images?.some((f) => f?.field === field)) throw new InboxError(400, `${field} takes no images`);
+    }
+    // Each source seals its value to the card's key before the answer is stored, so a refusal leaves no partial grant.
+    // This happens only here, inside the owner's answer: no route releases a value on its own.
+    for (const g of grants) {
+      const sources = this.secretSources;
+      if (!sources) throw new InboxError(502, `this inbox runs no secret sources, so it cannot release ${g.field}`);
+      let sealed;
+      try {
+        sealed = await sources.release(g.choice.source, g.choice.grant, g.publicKey);
+      } catch (e) {
+        throw new InboxError(502, `${g.field}: ${(e as Error)?.message || 'the source did not release the value'}`);
+      }
+      if (!isSealed(sealed)) throw new InboxError(502, `${g.field}: the source ${g.choice.source} answered something other than a sealed value`);
+      const stored: AccessGrant = { ...g.choice, case: randomId(4), sealed };
+      values[g.field] = stored;
     }
     // A pairing request takes a code and its card goes a day later, and the sweep deletes the answer without its
     // files, so an image here would be stored bytes nothing can name again. The stored pairing decides, not the id:
@@ -2287,6 +2332,45 @@ export class Inbox {
       this.queueAnswer(card, saved);
     }
     return this.store.get<Answer>('answers', id) ?? answer;
+  }
+
+  // ---- secret sources ----
+
+  /** The candidates the sources of this computer offer for a query: metadata, never a value. An agent or the owner asks. */
+  async secretLookup(caller: Caller, query: unknown): Promise<{ candidates: Candidate[]; sources: SourceInfo[] }> {
+    if (caller.role === 'extension') throw new InboxError(403, 'extensions cannot look up secrets');
+    if (!query || typeof query !== 'object' || Array.isArray(query)) throw new InboxError(400, 'a lookup takes {name, type, host}');
+    const q: SecretQuery = {};
+    for (const k of ['name', 'type', 'host'] as const) {
+      const v = (query as Record<string, unknown>)[k];
+      if (v === undefined) continue;
+      if (typeof v !== 'string') throw new InboxError(400, `${k} must be text`);
+      q[k] = v;
+    }
+    if (!this.secretSources) return { candidates: [], sources: [] };
+    return this.secretSources.lookup(q);
+  }
+
+  /** The sources of this computer and their status, never their settings. */
+  async secretSourceList(caller: Caller): Promise<SourceInfo[]> {
+    if (caller.role === 'extension') throw new InboxError(403, 'extensions cannot list secret sources');
+    return this.secretSources ? this.secretSources.list() : [];
+  }
+
+  /** The person revokes the grant of a secret_access field. The answer records when, and the agent's stream hears it,
+   * so the session ends the grant before its next command. A second revoke changes nothing. */
+  revokeGrant(caller: Caller, id: string, field: string): Answer {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner revokes a grant');
+    const card = this.getCard(id);
+    const answer = this.store.get<Answer>('answers', id);
+    const v = answer && Object.hasOwn(answer.values, field) ? answer.values[field] as Partial<AccessGrant> : undefined;
+    if (!answer || !v || typeof v !== 'object' || typeof v.grant !== 'string' || typeof v.case !== 'string') throw new InboxError(409, `${field} has no grant on this card`);
+    if (v.revokedAt !== undefined) return answer;
+    const next: Answer = { ...answer, values: { ...answer.values, [field]: { ...v, revokedAt: this.now() } } };
+    this.store.put('answers', id, next);
+    this.emit({ type: 'change', card: id });
+    this.tellAgent(card, { type: 'revoke', id: randomId(6), card: publicCard(card), field, case: v.case });
+    return next;
   }
 
   /** Type each approval the owner turned on in the card's answer into its pane, once per card version, and record what
