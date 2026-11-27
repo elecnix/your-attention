@@ -14,7 +14,7 @@ export interface RunResult {
   ended?: string;
 }
 
-/** Runs a command on one machine with a password on its standard input. The laptop inbox runs one on its own machine;
+/** Runs a command on one machine with a password on its standard input. Your own inbox runs one on the machine it runs on;
  * a remote one would run it over ssh. */
 export interface PrivilegedRunner {
   /** The machine the runner runs commands on, as a card names it. */

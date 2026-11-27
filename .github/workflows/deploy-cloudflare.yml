@@ -49,7 +49,7 @@ jobs:
           INBOX_ID_SECRET_SET: ${{ secrets.INBOX_ID_SECRET != '' }}
         run: scripts/check-deploy-mode.sh
 
-  # Laptop inboxes post their daily reports here, so it deploys first and its failure stops the inbox deploy.
+  # Inboxes that people run on their own computers post their daily reports here, so it deploys first and its failure stops the inbox deploy.
   deploy-telemetry:
     needs: mode
     runs-on: ubuntu-latest

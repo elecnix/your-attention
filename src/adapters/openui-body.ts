@@ -1,4 +1,4 @@
-// A card body is OpenUI Lang, and the page draws what the OpenUI parser reads of it. The laptop inbox and the posting client
+// A card body is OpenUI Lang, and the page draws what the OpenUI parser reads of it. Your own inbox and the posting client
 // use this check. The parser drops a statement it cannot read, and everything after a string that never closes, without an
 // error. So the inbox reads each body with the same parser and the page's component list, and refuses one the page would
 // draw only in part. web/body-faults.js reads the parser's result, so the page finds the same faults on an inbox that does not check.
