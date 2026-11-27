@@ -3,13 +3,14 @@
 // 2. ~/.your-attention/client.json, written by `your-attention pair`
 // 3. the inbox running on this machine, with its local agent token
 import type { PrivilegedRun } from './core/privileged.ts';
+import { isOtpApproval, isOtpDecline, TICKET_MS, utc, type OtpKeyInfo } from './core/otp.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
 import { InboxError, type SearchFilters, type SearchPage, type TriageFeedbackRecord } from './core/inbox.ts';
 import { isSealed, secretAccesses } from './core/sealed.ts';
 import type { AccessGrant, Candidate, SecretQuery, SourceInfo } from './core/secret-sources.ts';
-import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, OpenCards, Origin, PublicSubscription, PullRequest, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, OpenCards, Origin, PublicSubscription, PullRequest, Sealed, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 import { cardAge } from '../web/age.js';
@@ -214,6 +215,31 @@ export class Client {
   /** The candidates the inbox's secret sources offer for a query: metadata, never a value. */
   secretLookup(query: SecretQuery): Promise<{ candidates: Candidate[]; sources: SourceInfo[] }> {
     return this.call('POST', '/v1/secrets/lookup', query);
+  }
+
+  /** Redeem the ticket of an approved otp card for a code sealed to the card's public key. Only the session that
+   * posted the card redeems it, once. */
+  otpRedeem(ticket: string, agent: string): Promise<{ card: string; field: string; key: string; purpose: string; sealed: Sealed; issuedAt: number; expiresAt: number }> {
+    return this.call('POST', '/v1/otp/redeem', { ticket, agent });
+  }
+
+  /** The one-time code keys of the inbox, and which inbox holds them. The owner only. */
+  otpKeys(): Promise<{ holder: string; keys: OtpKeyInfo[] }> {
+    return this.call('GET', '/v1/otp/keys');
+  }
+
+  /** Enroll a key with the current code of the person's authenticator. The owner only. */
+  otpEnroll(label: string, input: { key: string; code: string; allow: string[] }): Promise<OtpKeyInfo> {
+    return this.call('PUT', `/v1/otp/keys/${encodeURIComponent(label)}`, input);
+  }
+
+  /** Add or remove session ids from a key's allowlist. The owner only. */
+  otpAllow(label: string, change: { add?: string[]; remove?: string[] }): Promise<OtpKeyInfo> {
+    return this.call('PATCH', `/v1/otp/keys/${encodeURIComponent(label)}`, change);
+  }
+
+  otpRemove(label: string): Promise<{ ok: true }> {
+    return this.call('DELETE', `/v1/otp/keys/${encodeURIComponent(label)}`);
   }
 
   /** The default tags this token keeps for one agent id: every card that agent posts inherits them. */
@@ -656,8 +682,17 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
     const how = v.exitCode === null || v.exitCode === undefined ? `stopped: ${v.ended ?? 'no exit code'}` : `exit code ${v.exitCode}`;
     lines.push(`${name}: ran on ${v.machine}, ${how} (audit ${v.audit}). The command printed:`, '```', String(v.output ?? '').trimEnd(), '```');
   }
+  // A one-time code field gives the ticket and what to do with it, or says there is none. It never holds a code.
+  for (const name of card.otp ?? []) {
+    const v = answer.values[name];
+    if (isOtpApproval(v)) {
+      const used = v.issuedAt === undefined ? '' : ` The inbox already issued its code at ${utc(v.issuedAt)}, so the ticket is used.`;
+      lines.push(`${name}: the person approved a code from the key ${v.key} for "${v.purpose}". Call card_otp with ticket ${v.ticket} right before the command that needs it, and that command gets a fresh code as $${name}. The ticket gives one code and ends at ${utc(v.expiresAt)}, ${TICKET_MS / 60_000} minutes after the approval.${used}`);
+    } else if (isOtpDecline(v)) lines.push(`${name}: the person declined, so there is no ticket and no code. Do not run the command that needs it.`);
+    else lines.push(`${name}: the person did not approve a code, so there is no ticket. Do not run the command that needs it.`);
+  }
   for (const [k, v] of Object.entries(answer.values)) {
-    if (card.privileged?.includes(k)) continue;
+    if (card.privileged?.includes(k) || card.otp?.includes(k)) continue;
     if (access.has(k) && !isSealed(v)) continue;
     if (card.questions?.length && /^q\d+(_comment)?$/.test(k)) continue;
     if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;

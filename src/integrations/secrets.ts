@@ -36,7 +36,7 @@ export class SecretRequests {
    * A secret_access placement without `candidates` gets the candidates `lookup` finds for its `query`, or for its name
    * when it gives no query. `keep` holds the private key under the posted card's id. */
   async prepare(body: string | undefined, lookup?: (query: SecretQuery) => Promise<{ candidates: Candidate[] }>): Promise<{ body: string | undefined; count: number; keep: (id: string) => void }> {
-    if (body === undefined || !/\bwidget\s+secret(_access)?\b/.test(body)) return { body, count: 0, keep: () => {} };
+    if (body === undefined || !/\bwidget\s+(secret(_access)?|otp)\b/.test(body)) return { body, count: 0, keep: () => {} };
     const asks = placementValues(body, 'secret_access');
     const found: (string | undefined)[] = [];
     for (const vars of asks) {
@@ -51,9 +51,11 @@ export class SecretRequests {
     const key = JSON.stringify(publicKey);
     const sealedOnly = addToPlacements(body, 'secret', { publicKey: key });
     const access = addToPlacements(sealedOnly.body, 'secret_access', (_vars, i) => ({ publicKey: key, ...(found[i] === undefined ? {} : { candidates: found[i] }) }));
-    const count = sealedOnly.count + access.count;
+    // A one-time code is sealed to the same key, when the session redeems the ticket the person's approval gave it.
+    const codes = addToPlacements(access.body, 'otp', { publicKey: key });
+    const count = sealedOnly.count + access.count + codes.count;
     if (!count) return { body, count: 0, keep: () => {} };
-    return { body: access.body, count, keep: (id) => this.remember(id, privateKey) };
+    return { body: codes.body, count, keep: (id) => this.remember(id, privateKey) };
   }
 
   /** Keep the private key of a card's post, newest first, so an answer sealed for an earlier version still opens. */
@@ -118,6 +120,19 @@ export class SecretRequests {
       lines.push(`${this.grants.describe(grant)} Every command you run gets it as $${name} in its environment: write "$${name}" in the command, and never print the value or write it to a file. ${mask}`);
     }
     return { text: lines.join('\n'), granted };
+  }
+
+  /** Open a one-time code the inbox sealed to a card's key, and hold it as a grant of `name` until the end of the
+   * code's step, so the next command gets it as $NAME. The line for the model names the variable and the deadline,
+   * never the code or a path. Undefined when this session no longer has the card's key. */
+  async holdCode(card: string, agent: string, name: string, sealed: Parameters<typeof openSealed>[1], until: number): Promise<string | undefined> {
+    const plain = await this.open(card, sealed);
+    if (plain === undefined) return undefined;
+    const now = this.now();
+    this.grants.hold({ name, agent, value: plain, until, idleMs: GRANT_IDLE_MS, now });
+    this.redactor.add(name, plain);
+    const left = Math.max(0, Math.round((until - now) / 1000));
+    return `$${name} holds a fresh one-time code until ${new Date(until).toISOString().slice(11, 19)} UTC, ${left} seconds from now. Run the command that needs it at once, with "$${name}" in it, such as --otp "$${name}". Never print the code or write it to a file. Output that shows it reads [secret ${name}].`;
   }
 
   /** The live grants of `agent` as `{NAME: value}`, for the environment of one command it is about to start. Each

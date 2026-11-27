@@ -674,6 +674,19 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET' && b === 'audit' && !c) return json({ audit: inbox.privilegedAudit(me) });
       return json({ error: 'not found' }, 404);
     }
+    // One-time codes: the owner enrolls a key and names the sessions that may ask for it, and the session that posted an
+    // approved otp card redeems its ticket for a code sealed to its own key.
+    if (a === 'otp') {
+      if (method === 'POST' && b === 'redeem' && !c) return json(await inbox.otpRedeem(me, (await readJson<{ ticket?: unknown; agent?: unknown }>(req)) ?? {}));
+      if (b === 'keys' && !c && method === 'GET') return json(inbox.otpKeyList(me));
+      if (b === 'keys' && c) {
+        const label = decodeURIComponent(c);
+        if (method === 'PUT') return json(await inbox.otpEnroll(me, label, (await readJson<{ key?: unknown; code?: unknown; allow?: unknown }>(req)) ?? {}), 201);
+        if (method === 'PATCH') return json(inbox.otpAllow(me, label, (await readJson<{ add?: unknown; remove?: unknown }>(req)) ?? {}));
+        if (method === 'DELETE') { await inbox.otpRemove(me, label); return json({ ok: true }); }
+      }
+      return json({ error: 'not found' }, 404);
+    }
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
     // The person sends a card to an agent: it waits for the agent's stream, and goes out as soon as one opens.
     if (method === 'POST' && a === 'send' && !b) {

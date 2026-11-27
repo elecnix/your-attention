@@ -215,6 +215,15 @@ export const cardTools: CardTool[] = [
     },
   },
   {
+    name: 'card_otp',
+    description: 'Redeem the ticket from an approved otp card for a fresh one-time code, right before the command that needs it, such as `npm stage publish --otp "$NPM_OTP"`. The inbox computes the code from the key at this moment and seals it to this session, and the next commands you run get it as the variable the card named, until its 30-second step ends. When fewer than 10 seconds of the step are left, this call waits for the next step first, so the code has time to reach the command. You never see the digits: never print the code, log it or write it to a file. A ticket gives one code and lasts 10 minutes from the approval. For another code, such as the second one a staged publish needs, post a new otp card.',
+    schema: {
+      type: 'object',
+      properties: { ticket: { type: 'string', description: 'The ticket the answer to the otp card gave.' } },
+      required: ['ticket'],
+    },
+  },
+  {
     name: 'card_search',
     description: 'Search the cards of every session, or list them by filters alone. Search past answers before you post, so the person never answers the same thing twice. A filter works without a query: state "open" lists every card that waits for the person. Each result carries the card\'s state, tags, posting agent, and posted and updated times, so a list answers the common questions without a card_read per card. When the reply carries next_cursor, pass it back as cursor to read the rest of the list.',
     schema: {

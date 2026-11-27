@@ -46,6 +46,15 @@ export const BUILTIN_WIDGETS: Template[] = [{
     when: 'A command that needs the person\'s password, such as one run with sudo, which you must never see. Place it in the card body of a card_post call: `restart = widget privileged_action {"name": "restart_nginx", "command": "systemctl restart nginx", "machine": "laptop", "changes": "Restarts nginx, which drops open connections"}`. `command` is the exact command, which reads the password on its standard input as `sudo -S` does, `machine` the machine the inbox runs it on, and `changes` one sentence about what it changes. The person reads the command and types the password, which the page seals to the inbox\'s broker. The inbox runs that one command with the password on its standard input, and the answer gives you only what it printed, with the exit code. The command runs once: ask on a new card to run it again.',
     at: 0,
   }],
+}, {
+  name: 'otp',
+  builtin: true,
+  versions: [{
+    version: 1,
+    source: 'root = Form({{name}}, buttons, [field])\nbuttons = Buttons([])\nfield = FormControl({{name}}, OneTimeCode({{name}}, {{key}}, {{purpose}}, {{publicKey}}))',
+    when: 'A one-time code from an authenticator key the person enrolled in the inbox, such as the npm key for a publish that asks for --otp. Place it in the card body of a card_post call: `npm = widget otp {"name": "NPM_OTP", "key": "npm", "purpose": "npm stage publish your-attention@1.4.0"}`. `name` is the variable your command reads, `key` the label the person enrolled, and `purpose` one line that says what the code is for, which the person reads before approving. card_post fills `publicKey`. The person approves or declines, and never reads digits. An approval gives you a ticket, never a code: call card_otp with it right before the command, and that command gets a fresh code as $NPM_OTP. A ticket gives one code and lasts 10 minutes from the approval. Only a session the person allowed for that key may post the card.',
+    at: 0,
+  }],
 }];
 
 export interface WidgetSource {
