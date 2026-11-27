@@ -60,11 +60,11 @@ test('a candidate whose source is off shows as unavailable and cannot be picked'
 
 test('each field of a card is answered on its own: one grant and one decline', async ({ page }) => {
   await openCard(page);
-  await field(page, 'DATABASE_URL').getByLabel(/Staging database URL/).check();
+  await field(page, 'DATABASE_URL').getByLabel(/~\/work\/\.secrets/).check();
   await field(page, 'OPENAI_API_KEY').getByLabel('Decline: the agent gets no access to OPENAI_API_KEY').check();
   await page.getByRole('button', { name: 'Send answer' }).click();
   const values = await posted(page);
-  expect(values['DATABASE_URL']).toMatchObject({ grant: 'db-staging', source: 'age', instance: 'laptop' });
+  expect(values['DATABASE_URL']).toMatchObject({ grant: '/home/me/work/.secrets/db-staging.age', source: 'age', instance: 'laptop' });
   expect(values['OPENAI_API_KEY']).toEqual({ decline: true });
   expect(values['DEPLOY_TOKEN']).toBeUndefined();
 });
@@ -119,7 +119,7 @@ test('a granted field shows Revoke, which posts the field to the revoke route', 
     const w = window as unknown as { __record: (u: string, b: string) => void };
     window.fetch = async (url, init) => { if (String(url).endsWith('/revoke')) w.__record(String(url), String(init?.body ?? 'null')); return Response.json({ ok: true }); };
   });
-  await expect(page.getByText(/DATABASE_URL: granted db-staging from age on laptop until .*, case K7Q2/)).toBeVisible();
+  await expect(page.getByText(/DATABASE_URL: granted \/home\/me\/work\/\.secrets\/db-staging\.age from age on laptop until .*, case K7Q2/)).toBeVisible();
   await page.getByRole('button', { name: 'Revoke DATABASE_URL' }).click();
   await expect.poll(() => calls.length).toBe(1);
   expect(calls[0]!.url).toMatch(/v1\/cards\/access-granted\/revoke$/);
@@ -129,9 +129,16 @@ test('a granted field shows Revoke, which posts the field to the revoke route', 
 test('a pick that a revision makes unavailable loses its grant controls and sends nothing', async ({ page }) => {
   await story(page, 'cards--secret-access-revised');
   const db = field(page, 'DATABASE_URL');
-  await db.getByLabel(/Staging database URL/).check();
+  await db.getByLabel(/~\/\.secrets · file/).check();
   await expect(db.getByLabel('DATABASE_URL access ends at most after')).toBeVisible();
   await page.getByRole('button', { name: 'Mark the source off' }).click();
-  await expect(db.getByLabel(/Staging database URL/)).toBeDisabled();
+  await expect(db.getByLabel(/~\/\.secrets · file/)).toBeDisabled();
   await expect(db.getByLabel('DATABASE_URL access ends at most after')).toHaveCount(0);
+});
+
+test('two age files of one name in two folders draw as two rows, each with its store', async ({ page }) => {
+  await story(page, 'cards--secret-access-same-name-two-folders');
+  const db = field(page, 'DATABASE_URL');
+  await expect(db.getByRole('radio', { name: /^db-staging age on laptop · ~\/\.secrets · file$/ })).toBeVisible();
+  await expect(db.getByRole('radio', { name: /^db-staging age on laptop · ~\/work\/\.secrets · file$/ })).toBeVisible();
 });

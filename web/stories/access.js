@@ -4,8 +4,10 @@ import { TEST_PUBLIC_KEY } from './test-key.js';
 
 const J = JSON.stringify;
 
+// Two age files of one name in two folders: the store tells their rows apart.
 export const DATABASE_URL = [
-  { id: 'db-staging', label: 'Staging database URL', source: 'age', instance: 'laptop', type: 'file' },
+  { id: '/home/me/.secrets/db-staging.age', label: 'db-staging', store: '~/.secrets', source: 'age', instance: 'laptop', type: 'file' },
+  { id: '/home/me/work/.secrets/db-staging.age', label: 'db-staging', store: '~/work/.secrets', source: 'age', instance: 'laptop', type: 'file' },
 ];
 export const OPENAI_API_KEY = [
   { id: 'openai', label: 'OpenAI key, personal', source: 'age', instance: 'laptop', type: 'api-key', host: 'api.openai.com' },

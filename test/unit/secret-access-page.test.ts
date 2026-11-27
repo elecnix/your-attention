@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { accessCandidates, accessValue, candidateGroups, candidateKey, CEILINGS, describe as describeAnswer, revocableGrants } from '../../web/answers.js';
+import { accessCandidates, accessValue, candidateDetail, candidateGroups, candidateKey, CEILINGS, describe as describeAnswer, revocableGrants } from '../../web/answers.js';
 import { GRANT_DEFAULT_MS, GRANT_IDLE_MS, GRANT_MAX_MS } from '../../src/core/secret-sources.ts';
 import { GRANT_IDLE_MS as PAGE_IDLE_MS } from '../../web/answers.js';
 import type { Card } from '../../src/core/types.ts';
@@ -27,6 +27,15 @@ describe('the candidates of a secret_access field', () => {
   it('tells apart one id offered by two sources and by two instances', () => {
     const keys = accessCandidates(JSON.stringify(list)).map(candidateKey);
     assert.equal(new Set(keys).size, 3);
+  });
+
+  it('names the store, so two age files of one name in two folders draw as two different rows', () => {
+    const [a, b] = accessCandidates(JSON.stringify([
+      { id: '/home/me/.secrets/db.age', label: 'db', store: '~/.secrets', source: 'age', instance: 'laptop', type: 'file' },
+      { id: '/home/me/work/.secrets/db.age', label: 'db', store: '~/work/.secrets', source: 'age', instance: 'laptop', type: 'file' },
+    ]));
+    assert.equal(candidateDetail(a!), 'age on laptop · ~/.secrets · file');
+    assert.notEqual(candidateDetail(a!), candidateDetail(b!));
   });
 
   it('groups the candidates by instance, in the order the inbox gave them', () => {

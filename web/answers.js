@@ -391,8 +391,9 @@ export function candidateGroups(candidates) {
   return groups;
 }
 
-/** What one candidate shows under its label: its source and instance, then its type and host when it has them. */
-export const candidateDetail = (c) => [`${c.source} on ${c.instance}`, c.type, c.host].filter(Boolean).join(' · ');
+/** What one candidate shows under its label: its source and instance, then its store, type and host when it has them.
+ * The store tells apart two candidates with one label, such as two age files of one name in two folders. */
+export const candidateDetail = (c) => [`${c.source} on ${c.instance}`, c.store, c.type, c.host].filter(Boolean).join(' · ');
 
 /** The value of a SecretAccess field for what the person chose: a grant until `now` plus the ceiling, capped at 24 hours,
  * or a decline. Nothing for an untouched field, for a candidate that is not ready, or for a typed value, which the

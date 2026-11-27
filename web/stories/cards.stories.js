@@ -164,7 +164,11 @@ export const WithPastedImages = {
 
 // The secret_access widget: one field per secret, each with the candidates the sources found.
 export const SecretAccessOneCandidate = {
-  render: () => mount(view(card({ id: 'access-one', title: 'Read the staging database', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL }]) }))),
+  render: () => mount(view(card({ id: 'access-one', title: 'Read the staging database', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL.slice(0, 1) }]) }))),
+};
+// Two age files of one name in two folders, told apart by their store.
+export const SecretAccessSameNameTwoFolders = {
+  render: () => mount(view(card({ id: 'access-folders', title: 'Read the staging database', ...accessCard([{ name: 'DATABASE_URL', candidates: DATABASE_URL }]) }))),
 };
 // One secret offered on two instances, and by a source that is off, which the person cannot pick.
 export const SecretAccessTwoInstances = {
@@ -184,7 +188,7 @@ export const SecretAccessGranted = {
     window.fetch = async () => Response.json({ ok: true });
     const savedAt = Date.now() - 60000;
     const sealed = { alg: 'RSA-OAEP-256+A256GCM', key: 'AAAA', iv: 'AAAA', data: 'AAAA' };
-    const answer = { values: { DATABASE_URL: { grant: 'db-staging', source: 'age', instance: 'laptop', until: savedAt + 3600000, case: 'K7Q2', sealed } }, comment: '', savedAt };
+    const answer = { values: { DATABASE_URL: { grant: '/home/me/work/.secrets/db-staging.age', source: 'age', instance: 'laptop', until: savedAt + 3600000, case: 'K7Q2', sealed } }, comment: '', savedAt };
     return mount(h(GrantRevoke, { card: card({ id: 'access-granted' }), answer }));
   },
 };

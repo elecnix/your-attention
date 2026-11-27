@@ -52,7 +52,7 @@ export function accessCandidates(json: string): AccessCandidate[];
 export function candidateKey(c: Pick<AccessCandidate, 'id' | 'source' | 'instance'>): string;
 /** The candidates by instance, in the order given. */
 export function candidateGroups(candidates: AccessCandidate[]): { instance: string; candidates: AccessCandidate[] }[];
-/** The source and instance of a candidate, then its type and host. */
+/** The source and instance of a candidate, then its store, type and host. */
 export function candidateDetail(c: AccessCandidate): string;
 /** The answer value for a choice, or undefined for none and for a typed value, which the client seals. */
 export function accessValue(choice: AccessChoice | undefined, candidates: AccessCandidate[], now: number): { grant: string; source: string; instance: string; until: number } | { decline: true } | undefined;
