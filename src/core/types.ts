@@ -589,8 +589,9 @@ export type AgentEvent =
   | { type: 'advice'; id: string; card: Card; advice: string; by: string }
   /** A card the person sent to this agent, as the panel in the page sends it. */
   | { type: 'card'; id: string; card: Card; sentAt: number }
-  /** The person revoked the grant of a secret_access field. `card` is the card's id, and `case` the grant's case id. */
-  | { type: 'revoke'; id: string; card: string; field: string; case: string };
+  /** The person revoked the grant of a secret_access field. `case` is the grant's case id. An inbox keeps a revoke for
+   * an agent with no open stream, and sends it first when one opens. */
+  | { type: 'revoke'; id: string; card: Card; field: string; case: string };
 
 /** What pages receive. They refetch state on "change". */
 export type PageEvent =

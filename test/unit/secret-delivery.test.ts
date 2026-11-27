@@ -76,6 +76,15 @@ describe('a secret_access grant in the session', () => {
     assert.equal(secrets.mask(`url=${VALUE}`), 'url=[secret DATABASE_URL]', 'the value stays masked after the grant ends');
   });
 
+  it('ignores a revoke for a grant this session does not hold, such as one the inbox kept across a restart', async () => {
+    const secrets = new SecretRequests(() => T0);
+    assert.equal(secrets.revoke('case-from-before'), false, 'a session with no grants');
+    const { card, answer } = await granted(secrets, 'c9', T0 + 60 * MIN);
+    await secrets.receive(card, answer);
+    assert.equal(secrets.revoke('case-of-another-session'), false);
+    assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE }, 'the live grant is untouched');
+  });
+
   it('holds no grant for a declined field, and says so', async () => {
     const secrets = new SecretRequests(() => T0);
     const card = { id: 'c5', agent: 'pi:s1', title: 'Database?', secrets: ['DATABASE_URL'], createdAt: T0 } as unknown as Card;

@@ -413,7 +413,7 @@ Hooks, answer webhooks and triage get the answer without these fields, as for th
 
 The integration opens the sealed value in memory. The session's grant store, `src/secrets/grant.ts`, keeps it with the idle window, the ceiling from `until` and the inbox's `case`, and nothing writes it to a file. The model reads a line with the secret's name, the case id and both deadlines. That line says that every command it runs gets `$NAME`, and it never shows the value or a path. While the grant lives, the harness adds the variable to the environment of each command it starts. Each command counts as a use.
 
-A `revoke` event ends the grant before the next command, and the model reads that the person revoked it. A declined field doesn't become a grant, and neither does one the inbox already marked `revokedAt`.
+A `revoke` event ends the grant before the next command, and the model reads that the person revoked it. The session ignores a revoke for a grant it doesn't hold. The inbox sends one of those when it kept a revoke across a restart. A declined field doesn't become a grant, and neither does one the inbox already marked `revokedAt`.
 
 When a command prints a value, the model reads `[secret NAME]` in its place. The mask applies to the values this session received, also after their grant ends. A value shorter than four characters stays as it is.
 

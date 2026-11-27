@@ -119,8 +119,8 @@ export function createPlugin(z: unknown) {
         if (ev.type === 'advice') { await send(session, `[your-attention] ${describeAdvice(ev)}`); return; }
         if (ev.type === 'card') { await send(session, `[your-attention] ${describeSentCard(ev)}`); return; }
         if (ev.type === 'revoke') {
-          const live = secrets.revoke(ev.case);
-          await send(session, `[your-attention] The person revoked ${ev.field} on card ${ev.card} (case ${ev.case}).${live ? ` Commands no longer get $${ev.field}.` : ''}`);
+          // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
+          if (secrets.revoke(ev.case)) await send(session, `[your-attention] The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`);
           return;
         }
         if (ev.type !== 'answer') return;

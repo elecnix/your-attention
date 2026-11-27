@@ -139,8 +139,9 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
           return;
         }
         if (ev.type === 'revoke') {
-          const live = secrets.revoke(ev.case);
-          const note = `[your-attention] The person revoked ${ev.field} on card ${ev.card} (case ${ev.case}).${live ? ` Commands no longer get $${ev.field}.` : ''}`;
+          // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
+          if (!secrets.revoke(ev.case)) return;
+          const note = `[your-attention] The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`;
           if (ctx.isIdle()) pi.sendUserMessage(note);
           else pi.sendUserMessage(note, { deliverAs: 'followUp' });
           return;

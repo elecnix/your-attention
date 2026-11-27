@@ -294,8 +294,8 @@ function listen(client: Client): void {
       return;
     }
     if (ev.type === 'revoke') {
-      const live = secrets.revoke(ev.case);
-      await notify(`The person revoked ${ev.field} on card ${ev.card} (case ${ev.case}).${live ? ` Commands no longer get $${ev.field}.` : ''}`, { card_id: ev.card });
+      // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
+      if (secrets.revoke(ev.case)) await notify(`The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`, { card_id: ev.card.id });
       return;
     }
     if (ev.type !== 'answer') return;
