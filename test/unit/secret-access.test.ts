@@ -1,6 +1,9 @@
 // The secret_access widget on the inbox side: the lookup routes, the card that asks, the release inside the owner's
 // answer, and revocation. SPEC.md#secret-sources holds the contract. A stand-in SecretSources plays the laptop's sources.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { describeAnswer } from '../../src/client.ts';
 import { createHandler } from '../../src/core/http.ts';
@@ -366,5 +369,34 @@ describe('card_post fills secret_access', () => {
     // One key pair per card: the secret widget and secret_access seal to the same key.
     assert.equal(fields[0]?.publicKey, fields[1]?.publicKey);
     assert.ok(!('d' in JSON.parse(fields[0]!.publicKey)));
+  });
+});
+
+describe('a secret_access grant in the session', () => {
+  it('opens a granted value into a live grant in memory, and writes no file', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-access-'));
+    const before = process.env['YOUR_ATTENTION_HOME'];
+    process.env['YOUR_ATTENTION_HOME'] = home;
+    try {
+      const { inbox } = await setup();
+      const client = {
+        post: async (c: NewCard) => inbox.postCard(agent, c),
+        secretLookup: (q: SecretQuery) => inbox.secretLookup(agent, q),
+      } as unknown as Client;
+      const secrets = new SecretRequests(() => NOW);
+      const ctx = { inbox: client, secrets, agent: 's1', origin: async () => undefined, arrival: 'later' };
+      await runTool(ctx, 'card_post', { id: 'a1', title: 'Database?', body: 'root = Card([db])\ndb = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}' });
+      const answer = await inbox.answer('a1', { values: { DATABASE_URL: grant() } });
+      const said = await secrets.receive(inbox.getCard('a1'), answer);
+      const g = answer.values['DATABASE_URL'] as AccessGrant;
+      assert.match(said, new RegExp(g.case));
+      assert.doesNotMatch(said, /postgres:|did not send/);
+      assert.deepEqual(secrets.env('s1'), { DATABASE_URL: 'postgres://demo:not-real@localhost/demo' });
+      assert.deepEqual(fs.readdirSync(home), [], 'nothing under the home directory');
+    } finally {
+      if (before === undefined) delete process.env['YOUR_ATTENTION_HOME'];
+      else process.env['YOUR_ATTENTION_HOME'] = before;
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
