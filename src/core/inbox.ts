@@ -117,9 +117,14 @@ export const LOOKUP_MEMORY_MS = 60 * 60_000;
 /** A grant as the inbox stores it, with when its revoke reached the agent's stream. */
 type KeptGrant = AccessGrant & { revokeSentAt?: number };
 
-/** A candidate by the four fields a card must repeat as a lookup gave them. */
-function candidateKey(c: Pick<Candidate, 'source' | 'instance' | 'id' | 'label'>): string {
-  return JSON.stringify([c.source, c.instance, c.id, c.label]);
+/** The fields of a candidate the page shows, which a card must repeat exactly as a lookup gave them, so an agent can't
+ * change the label, host or type the person reads. */
+const CANDIDATE_METADATA = ['source', 'instance', 'id', 'label', 'store', 'type', 'host', 'changedAt', 'status', 'reason'] as const;
+
+/** A candidate by its metadata. A field the candidate leaves out counts as absent, never as any value. */
+function candidateKey(c: Candidate): string {
+  const r = c as unknown as Record<string, unknown>;
+  return JSON.stringify(CANDIDATE_METADATA.map((k) => (r[k] === undefined ? null : r[k])));
 }
 
 /** A secret_access answer that declines. */
@@ -2383,7 +2388,7 @@ export class Inbox {
         if ((this.lookedUp.get(key) ?? 0) > this.now()) continue;
         kept ??= new Set(before === undefined ? [] : (() => { try { return secretAccesses(before).flatMap((x) => x.candidates.map(candidateKey)); } catch { return []; } })());
         if (kept.has(key)) continue;
-        throw new InboxError(400, `secret ${f.name}: no lookup of the last hour found ${c.id} labeled ${JSON.stringify(c.label)} in ${c.source} on ${c.instance}. Leave out candidates, and card_post looks them up`);
+        throw new InboxError(400, `secret ${f.name}: no lookup of the last hour returned ${c.id} from ${c.source} on ${c.instance} with this label, store, type, host, changedAt, status and reason. Leave out candidates, and card_post looks them up`);
       }
     }
   }

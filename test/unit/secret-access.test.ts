@@ -22,6 +22,8 @@ const NOW = 1_800_000_000_000;
 
 const SOURCES: SourceInfo[] = [{ instance: 'laptop', name: 'age', builtin: true, status: 'ready' }];
 const DB: Candidate = { id: 'db-staging', label: 'Staging database', source: 'age', instance: 'laptop', type: 'file' };
+/** A candidate the lookup gave with a status and a reason, as a source that isn't ready reports. */
+const OFF = { id: 'db-old', label: 'Old database', source: 'age', instance: 'laptop', type: 'file', host: 'db.example.test', status: 'off', reason: 'no identity file' } as Candidate;
 
 /** A stand-in for the laptop's sources: one `age` source that holds made-up values, and records each release. */
 function standIn(values: Record<string, string> = { 'db-staging': 'postgres://demo:not-real@localhost/demo' }) {
@@ -31,7 +33,7 @@ function standIn(values: Record<string, string> = { 'db-staging': 'postgres://de
     list: async () => SOURCES,
     lookup: async (q) => {
       queries.push(q);
-      return { candidates: q.name === 'DATABASE_URL' ? [DB] : [], sources: SOURCES };
+      return { candidates: q.name === 'DATABASE_URL' ? [DB, OFF] : [], sources: SOURCES };
     },
     release: async (source, candidate, publicKey) => {
       released.push({ source, candidate });
@@ -76,7 +78,7 @@ describe('the secret lookup routes', () => {
       const res = await call(inbox, role, 'POST', '/v1/secrets/lookup', { name: 'DATABASE_URL' });
       assert.equal(res.status, 200);
       const got = await res.json() as { candidates: Candidate[]; sources: SourceInfo[] };
-      assert.deepEqual(got, { candidates: [DB], sources: SOURCES });
+      assert.deepEqual(got, { candidates: [DB, OFF], sources: SOURCES });
       assert.doesNotMatch(JSON.stringify(got), /postgres:/);
     }
     const listed = await call(inbox, 'agent', 'GET', '/v1/secrets/sources');
@@ -130,7 +132,11 @@ describe('the secret_access widget', () => {
   it('refuses a candidate no lookup of the last hour returned, and takes an empty list', async () => {
     const { inbox, keys, clock } = await setup();
     const relabeled = { ...DB, label: 'Production database' };
-    assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [relabeled]) }), rejects(400, /no lookup of the last hour found db-staging/));
+    assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [relabeled]) }), rejects(400, /no lookup of the last hour returned db-staging/));
+    // Every field the page shows must match the lookup: host, type, store, changedAt, status and reason, and a field the lookup left out stays out.
+    for (const changed of [{ ...OFF, host: 'db.attacker.test' }, { ...OFF, type: 'api-key' }, { ...OFF, status: 'ready' }, { ...OFF, reason: 'fine' }, { ...OFF, store: 'Team' }, { ...OFF, changedAt: 1 }, { ...DB, host: 'db.example.test' }]) {
+      assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [changed]) }), rejects(400, /no lookup/), JSON.stringify(changed));
+    }
     assert.throws(() => inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [{ ...DB, instance: 'other' }]) }), rejects(400, /no lookup/));
     assert.equal(inbox.postCard(agent, { agent: 's1', title: 'Typed only?', body: accessBody(keys.publicKey, []) }).secrets?.[0], 'DATABASE_URL');
     inbox.postCard(agent, { id: 'a1', agent: 's1', title: 'Database?', body: accessBody(keys.publicKey) });
@@ -143,9 +149,8 @@ describe('the secret_access widget', () => {
 
   it('keeps fields beyond the four it checks, such as a status the lookup gave', async () => {
     const { inbox, keys } = await setup();
-    const extra = { ...DB, status: 'off', reason: 'no identity file' };
-    const card = inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [extra]) });
-    assert.deepEqual(secretAccesses(card.body ?? '')[0]?.candidates, [extra]);
+    const card = inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [OFF]) });
+    assert.deepEqual(secretAccesses(card.body ?? '')[0]?.candidates, [OFF]);
   });
 });
 
@@ -344,13 +349,13 @@ describe('card_post fills secret_access', () => {
     const secrets = new SecretRequests();
     const ctx = { inbox: client, secrets, agent: 's1', origin: async () => undefined, arrival: 'later' };
     // Candidates the agent gives stay as given, and still must come from a lookup of the last hour.
-    const kept = { ...DB, status: 'ready' };
+    const kept = OFF;
     const body = `root = Card([db, other])\ndb = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}\nother = widget secret_access ${JSON.stringify({ name: 'OTHER', candidates: [kept] })}`;
     await runTool(ctx, 'card_post', { id: 'a1', title: 'Database?', body });
     assert.deepEqual(queries, [{ name: 'DATABASE_URL' }]);
     const card: Card = inbox.getCard('a1');
     const fields = secretAccesses(card.body ?? '');
-    assert.deepEqual(fields.map((f) => f.candidates), [[DB], [kept]]);
+    assert.deepEqual(fields.map((f) => f.candidates), [[DB, OFF], [kept]]);
     // One key pair per card: the secret widget and secret_access seal to the same key.
     assert.equal(fields[0]?.publicKey, fields[1]?.publicKey);
     assert.ok(!('d' in JSON.parse(fields[0]!.publicKey)));
