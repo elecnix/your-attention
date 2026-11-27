@@ -101,7 +101,7 @@ describe('what the page says about a card that changed hands', () => {
     assert.deepEqual(reassignments(card, named), [{ at: 5, text: 'Reassigned from fix-login to release lead, because fix-login retired' }]);
     // Once the card moved, the agent that posted it may have no card left to name it, and the card's origin names it.
     const alone = { ...card, origin: { name: 'fix-login' } };
-    assert.deepEqual(reassignments(alone, [named[1]]), [{ at: 5, text: 'Reassigned from fix-login to release lead, because fix-login retired' }]);
+    assert.deepEqual(reassignments(alone, named.slice(1)), [{ at: 5, text: 'Reassigned from fix-login to release lead, because fix-login retired' }]);
   });
 
   it('says on the pill that no agent is left, and why, instead of waiting for a reconnect', () => {

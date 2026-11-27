@@ -63,7 +63,7 @@ test/browser/      Playwright on the page, two people in two browser contexts, a
 | any but `closed` and `read` | its agent retires, and an ancestor runs | the same state, held by that ancestor |
 | `open` | its agent retires, and no ancestor runs | `orphaned` |
 
-`orphaned` reads a card in `open` whose agent has been offline for an hour, or whose agent retired with no living ancestor, and another session may then claim it. Only a retirement that Bellwether reports moves a card to another agent: a stream that goes quiet never does ([SPEC.md](SPEC.md#a-card-whose-agent-retired)).
+`orphaned` reads a card in `open` whose agent has been offline for an hour, or whose agent retired with no living ancestor, and another session may then claim it. A card moves to another agent only after Bellwether reports a retirement, and a closed stream doesn't move it ([SPEC.md](SPEC.md#a-card-whose-agent-retired)).
 
 The inbox derives the state from the card and its answer on every read. `answered` and `delivered` both mean the person answered and no agent has acknowledged yet, so the page's outbox holds your answer waiting for its agent, not a card waiting for you ([DP23](PRINCIPLES.md#dp23-answered-cards-go-to-an-outbox-then-to-sent)).
 
