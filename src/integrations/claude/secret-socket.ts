@@ -125,14 +125,20 @@ const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** The lines the shell evaluates for the channel's reply to an `env` request: an `export` per variable, or a line
  * that fails with the reason, so the command does not run without its variables. */
-export function exportLines(reply: Record<string, unknown> | undefined): string {
+export function exportLines(reply: Record<string, unknown> | undefined, masker: string[]): string {
+  const fail = (why: string): string => `echo ${shellQuote(`your-attention: the secrets of this session did not reach the command: ${why}`)} >&2; false`;
   const env = reply?.['env'];
-  if (!env || typeof env !== 'object') {
-    const why = typeof reply?.['error'] === 'string' ? reply['error'] : 'the Claude Code channel did not answer';
-    return `echo ${shellQuote(`your-attention: the secrets of this session did not reach the command: ${why}`)} >&2; false`;
-  }
+  if (!env || typeof env !== 'object') return fail(typeof reply?.['error'] === 'string' ? reply['error'] : 'the Claude Code channel did not answer');
   const names = Object.keys(env).filter((n) => NAME.test(n));
-  return [...names.map((n) => `export ${n}=${shellQuote(String((env as Record<string, unknown>)[n]))}`), 'true'].join('\n');
+  // A grant can end between the hook and the command. Running the command with the variables empty would send, say,
+  // an Authorization header with no token, so the command fails with the reason instead.
+  if (!names.length) return fail('no grant of this session is live any more');
+  return [
+    ...names.map((n) => `export ${n}=${shellQuote(String((env as Record<string, unknown>)[n]))}`),
+    // Every byte the command writes passes through the masker, so even a shell that dies shows no value.
+    `exec > >(${[...masker, ...names].map(shellQuote).join(' ')}) 2>&1`,
+    'true',
+  ].join('\n');
 }
 
 /** The command the hook runs instead of `command`: read the variables once with `token`, export them, then run it.

@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { ask, exportLines, rewrite, serveSecrets, socketDir, socketPath } from '../../src/integrations/claude/secret-socket.ts';
 import { handle, READER } from '../../src/integrations/claude/secret-hook.ts';
+import { MASKER } from '../../src/integrations/claude/secret-env-paths.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { newSealKeys, sealValue } from '../../src/core/sealed.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
@@ -50,9 +51,27 @@ describe('the secrets socket of the Claude Code channel', { skip: process.platfo
     }
   });
 
-  it('refuses an unknown token with a line that fails, and writes one export per variable', () => {
-    assert.match(exportLines({ error: 'this token is unknown, used or expired' }), /did not reach the command: this token is unknown, used or expired' >&2; false$/);
-    assert.equal(exportLines({ env: { API_KEY: "it's-not-real", 'BAD NAME': 'x' } }), "export API_KEY='it'\\''s-not-real'\ntrue");
+  it('refuses an unknown token with a line that fails, and writes one export per variable and the masker', () => {
+    assert.match(exportLines({ error: 'this token is unknown, used or expired' }, ['node', 'm.ts']), /did not reach the command: this token is unknown, used or expired' >&2; false$/);
+    assert.equal(exportLines({ env: { API_KEY: "it's-not-real", 'BAD NAME': 'x' } }, ['node', 'm.ts']), "export API_KEY='it'\\''s-not-real'\nexec > >('node' 'm.ts' 'API_KEY') 2>&1\ntrue");
+  });
+
+  it('fails the command when no grant is live any more, rather than run it with the variables empty', () => {
+    assert.match(exportLines({ env: {} }, ['node', 'm.ts']), /did not reach the command: no grant of this session is live any more' >&2; false$/);
+  });
+
+  it('masks the output as it streams, so a shell killed by a signal or replaced by exec still shows no value', () => {
+    for (const shell of ['bash', 'zsh']) {
+      if (spawnSync(shell, ['-c', 'true']).error) continue;
+      for (const ending of ['kill -9 $$', 'exec false', 'trap - EXIT; exit 1']) {
+        const lines = exportLines({ env: { K: 'value-not-real' } }, [process.execPath, MASKER]);
+        const reader = ['sh', '-c', `printf '%s\\n' "$0"`, lines];
+        const run = spawnSync(shell, ['-c', rewrite(`printf "%s|" "$K"; printf "%s" "$K" >&2; ${ending}`, '/run/s.sock', 'tok', reader)], { encoding: 'utf8' });
+        const all = `${run.stdout}${run.stderr}`;
+        assert.doesNotMatch(all, /value-not-real/, `${shell}, ${ending}`);
+        assert.match(all, /\[secret K\]\|\[secret K\]/, `${shell}, ${ending}`);
+      }
+    }
   });
 
   it('runs the command after a newline, so a command without a trailing semicolon still closes the group', () => {

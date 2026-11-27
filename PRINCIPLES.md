@@ -52,7 +52,7 @@ Resending a large card for each small edit wastes tokens and hides what changed.
 
 ### DP8: Secrets go to the agent sealed, and never into the conversation
 
-The secret widget requests one value, such as an API key, on a card of any kind. The card contains a public key. The matching private key stays in the memory of the session that posted the card. Your browser encrypts the value with it before it leaves the page, so the inbox stores ciphertext only. The session opens the value in memory, and its harness puts it in the environment of each command the agent runs, until the grant ends. The model gets only the variable's name, and output that shows the value reads `[secret NAME]`, except in the few cases [SPEC.md](SPEC.md#delivery-in-the-session) lists. The value itself never appears in a transcript, a log or a file.
+The secret widget requests one value, such as an API key, on a card of any kind. The card contains a public key. The matching private key stays in the memory of the session that posted the card. Your browser encrypts the value with it before it leaves the page, so the inbox stores ciphertext only. The session opens the value in memory, and its harness puts it in the environment of each command the agent runs, until the grant ends. The model gets only the variable's name, and output that shows the value reads `[secret NAME]`, except in the few cases [SPEC.md](SPEC.md#delivery-in-the-session) lists. your-attention itself never writes the value to a transcript, a log or a file, although a command that has the variable can.
 
 Agents need keys to finish their work, and a key typed into a chat remains in its transcript after the session ends.
 

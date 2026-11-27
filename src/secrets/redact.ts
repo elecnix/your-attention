@@ -68,7 +68,8 @@ export class Redactor {
     if (typeof value === 'string') return this.mask(value) as T;
     if (Array.isArray(value)) return value.map((v) => this.maskDeep(v)) as T;
     if (value && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, this.maskDeep(v)])) as T;
+      // A value can be a key too, such as a map from a token to its user.
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [this.mask(k), this.maskDeep(v)])) as T;
     }
     return value;
   }

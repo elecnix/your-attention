@@ -8,7 +8,7 @@
 // A session whose channel has no socket, or holds no grant, gets no output from either hook, so Claude Code runs the
 // command as the model wrote it.
 import fs from 'node:fs';
-import path from 'node:path';
+import { READER_SCRIPT } from './secret-env-paths.ts';
 import { ask, readerPrefix, rewrite, socketPath } from './secret-socket.ts';
 
 interface HookInput {
@@ -19,7 +19,7 @@ interface HookInput {
 }
 
 /** The command that reads the variables: this Node, on the reader script beside this file. */
-export const READER = [process.execPath, path.join(import.meta.dirname, 'secret-env.ts')];
+export const READER = [process.execPath, READER_SCRIPT];
 
 /** What the hook prints for `input`, or undefined to leave the call as it is. */
 export async function handle(mode: 'secret-pre' | 'secret-post', input: HookInput, env: NodeJS.ProcessEnv = process.env): Promise<object | undefined> {

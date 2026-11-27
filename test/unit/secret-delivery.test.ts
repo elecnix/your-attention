@@ -168,6 +168,8 @@ describe('a secret_access grant in the session', () => {
     fs.mkdirSync(path.join(home, '.your-attention'), { recursive: true });
     fs.mkdirSync(tmp);
     const saved = { HOME: process.env['HOME'], TMPDIR: process.env['TMPDIR'], YOUR_ATTENTION_HOME: process.env['YOUR_ATTENTION_HOME'] };
+    // The runner's own environment may export the same name, so the check compares against what it held before.
+    const runnerValue = process.env['DATABASE_URL'];
     Object.assign(process.env, { HOME: home, TMPDIR: tmp, YOUR_ATTENTION_HOME: path.join(home, '.your-attention') });
     try {
       const before = snapshot(root);
@@ -177,7 +179,7 @@ describe('a secret_access grant in the session', () => {
       // A command started with the grant in its environment, as the harness starts it.
       const out = execFileSync('/bin/sh', ['-c', 'printf %s "$DATABASE_URL" | wc -c'], { env: { ...process.env, ...secrets.env('pi:s1') }, cwd: home }).toString().trim();
       assert.equal(Number(out), VALUE.length);
-      assert.equal(process.env['DATABASE_URL'], undefined, 'the value never enters this process environment');
+      assert.equal(process.env['DATABASE_URL'], runnerValue, 'the value never enters this process environment');
       assert.deepEqual(snapshot(root), before);
     } finally {
       for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
@@ -235,6 +237,7 @@ describe('masking a value in output', () => {
     const r = new Redactor();
     r.add('K', 'value-not-real');
     assert.deepEqual(r.maskDeep({ stdout: 'k=value-not-real', n: 1, list: ['value-not-real'] }), { stdout: 'k=[secret K]', n: 1, list: ['[secret K]'] });
+    assert.deepEqual(r.maskDeep({ 'value-not-real': 'alice' }), { '[secret K]': 'alice' }, 'a key is masked too');
   });
 });
 
