@@ -12,6 +12,7 @@ import type { AccessGrant, Candidate, SecretQuery, SourceInfo } from './core/sec
 import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, OpenCards, Origin, PublicSubscription, PullRequest, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
+import { answerFields, cardAt, cardFields, describeFields, type FieldId } from '../web/field-ids.js';
 import { cardAge } from '../web/age.js';
 
 export interface ClientConfig {
@@ -206,9 +207,11 @@ export class Client {
 
   /** The posted card. A revision the person won't see carries `warning`, `inheritedTags` names the keys the card
    * took from the agent's default tags, and `openCards` lists the agent's other open cards. */
-  async post(card: NewCard): Promise<Card & { warning?: string; inheritedTags?: string[]; openCards?: OpenCards }> {
+  /** Post a card. The reply carries `fields`, the IDs of its forms, fields and options at the version saved. */
+  async post(card: NewCard): Promise<Card & { warning?: string; inheritedTags?: string[]; openCards?: OpenCards; fields: FieldId[] }> {
     await this.checkFirst('POST /v1/cards', { card: { ...card, attachments: undefined } });
-    return this.call('POST', '/v1/cards', card);
+    const posted = await this.call<Card & { warning?: string; inheritedTags?: string[]; openCards?: OpenCards }>('POST', '/v1/cards', card);
+    return { ...posted, fields: cardFields(posted) };
   }
 
   /** The candidates the inbox's secret sources offer for a query: metadata, never a value. */
@@ -254,10 +257,12 @@ export class Client {
   close(id: string, kind: CloseKind, outcome: string, ifUnanswered = false): Promise<Card> {
     return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/close`, { kind, outcome, ifUnanswered });
   }
-  async patch(id: string, edits: { old: string; new: string }[], field?: string, pullRequests?: PullRequest | PullRequest[] | null): Promise<Card & { warning?: string }> {
+  /** Patch a card. The reply carries `fields`, the IDs of the new version, which differ from every earlier one's. */
+  async patch(id: string, edits: { old: string; new: string }[], field?: string, pullRequests?: PullRequest | PullRequest[] | null): Promise<Card & { warning?: string; fields: FieldId[] }> {
     const route = `/v1/cards/${encodeURIComponent(id)}/patch`;
     await this.checkFirst(`POST ${route}`, { id, edits, field, pullRequests });
-    return this.call('POST', route, { edits, field, pullRequests });
+    const patched = await this.call<Card & { warning?: string }>('POST', route, { edits, field, pullRequests });
+    return { ...patched, fields: cardFields(patched) };
   }
   status(id: string, status: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/status`, { status }); }
   /** Merge tags into a card already posted, and drop a key whose value is empty. */
@@ -622,12 +627,28 @@ export function describeOpenCards(open: OpenCards | undefined): string {
   return `\n\n${[head, ...lines, ...(more > 0 ? [`… and ${more} more`] : [])].join('\n')}`;
 }
 
+/** What a card_post or card_patch reply says about a card's IDs: one line per form, for the version just saved. */
+export function describeCardFields(card: Card): string {
+  const fields = cardFields(card);
+  if (!fields.length) return '';
+  return `\n\nIDs of version ${card.version}, which the answer repeats beside each value and the comment:\n${describeFields(fields)}`;
+}
+
 export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]): string {
   const lines: string[] = [];
+  // Each value and the comment start with the ID of their field at the version the person answered. An answer to an
+  // earlier version says so first, so the agent reads it against what that version asked.
+  const ids = answerFields(card, answer);
+  const byName = new Map(cardFields(cardAt(card, ids.version)).filter((f) => f.kind !== 'form' && f.kind !== 'option').map((f) => [f.name, f.id]));
+  for (const f of ids.fields) byName.set(f.name, f.id);
+  const tag = (name: string): string => { const id = byName.get(name); return id ? `[${id}] ` : ''; };
+  if (ids.stale) {
+    lines.push(`This answer is to version ${ids.stale.answered} of the card, and the card is now version ${ids.stale.current}, so its IDs are not the ones your last card_post or card_patch returned. Read it against what version ${ids.stale.answered} asked.`, '');
+  }
   // A late answer says so first, with the agent's own close quoted, so the agent weighs it against what it did since.
   const late = answer.late;
   if (late) lines.push(`Late answer: you had already closed this card when the person sent this. You ${LATE_CLOSE[late.kind] ?? 'closed it'}, with the outcome "${late.outcome}". Act on it if it still matters, or post a new card that follows this one.`, '');
-  if (card.questions?.length) lines.push(...questionLines(card, answer.values));
+  if (card.questions?.length) lines.push(...questionLines(card, answer.values, Object.fromEntries(byName)));
   card.approvals?.forEach((a, i) => {
     const r = answer.approvalResults?.[i];
     // Only a recorded send reads as sent: an answer with no result entry says nothing about the pane.
@@ -636,7 +657,7 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
       : r && 'sentAt' in r ? 'approved, and the inbox typed it into the pane as the person\'s message'
       : r && 'error' in r ? `approved, but not sent: ${r.error}`
       : 'approved, but the inbox recorded no send';
-    lines.push(`Approval ${i + 1} for pane ${a.pane}, "${a.text}": ${done}`);
+    lines.push(`${tag(`approval_${i}`)}Approval ${i + 1} for pane ${a.pane}, "${a.text}": ${done}`);
   });
   // A secret_access field says whether the person granted it, never its value. One the answer leaves out was declined.
   const access = new Set(card.body === undefined ? [] : (() => { try { return secretAccesses(String(card.body)).map((f) => f.name); } catch { return []; } })());
@@ -645,16 +666,16 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
     if (v && typeof v.grant === 'string') {
       // The inbox stores `until` in epoch milliseconds. Any other shape loses only the deadline, never the answer text.
       const until = typeof v.until === 'number' && Number.isFinite(v.until) ? `until ${new Date(v.until).toISOString()}` : 'no deadline given';
-      lines.push(`${name}: ${v.revokedAt === undefined ? 'granted' : 'revoked'} (case ${v.case}, ${until})`);
+      lines.push(`${tag(name)}${name}: ${v.revokedAt === undefined ? 'granted' : 'revoked'} (case ${v.case}, ${until})`);
     }
-    else if (!isSealed(v)) lines.push(`${name}: declined`);
+    else if (!isSealed(v)) lines.push(`${tag(name)}${name}: declined`);
   }
   // A privileged action says what ran, where, and what it printed, which the inbox masked. It never holds a password.
   for (const name of card.privileged ?? []) {
     const v = answer.values[name] as Partial<PrivilegedRun> | undefined;
-    if (!v || typeof v.command !== 'string') { lines.push(`${name}: not run, because the person sent no password`); continue; }
+    if (!v || typeof v.command !== 'string') { lines.push(`${tag(name)}${name}: not run, because the person sent no password`); continue; }
     const how = v.exitCode === null || v.exitCode === undefined ? `stopped: ${v.ended ?? 'no exit code'}` : `exit code ${v.exitCode}`;
-    lines.push(`${name}: ran on ${v.machine}, ${how} (audit ${v.audit}). The command printed:`, '```', String(v.output ?? '').trimEnd(), '```');
+    lines.push(`${tag(name)}${name}: ran on ${v.machine}, ${how} (audit ${v.audit}). The command printed:`, '```', String(v.output ?? '').trimEnd(), '```');
   }
   for (const [k, v] of Object.entries(answer.values)) {
     if (card.privileged?.includes(k)) continue;
@@ -662,16 +683,16 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
     if (card.questions?.length && /^q\d+(_comment)?$/.test(k)) continue;
     if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;
     // A sealed secret is never written out: the session opens it into a grant in memory.
-    if (isSealed(v)) { lines.push(`${k}: (sealed)`); continue; }
+    if (isSealed(v)) { lines.push(`${tag(k)}${k}: (sealed)`); continue; }
     // A check box or switch group answers with each item on or off, by the item names the agent gave.
     const on = v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((x) => (v as Record<string, unknown>)[x]) : undefined;
     const label = on ? on.join(', ') || '(none turned on)'
       : k === 'choice' && card.options
         ? [v].flat().map((x) => card.options?.find((o) => (o.id ?? o.label) === x)?.label ?? String(x)).join(', ')
         : [v].flat().join(', ');
-    lines.push(`${k}: ${label}`);
+    lines.push(`${tag(k)}${k}: ${label}`);
   }
-  if (answer.comment) lines.push(`Comment: ${answer.comment}`);
+  if (answer.comment) lines.push(`${tag('comment')}Comment: ${answer.comment}`);
   // Pasted images are files: name each path, or say how many came when the integration has not saved them.
   const images = answer.images ?? [];
   if (imagePaths?.length) images.forEach((f, i) => lines.push(`Image${f.field ? ` pasted in ${f.field}` : ''}: ${imagePaths[i] ?? f.name}`));

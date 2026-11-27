@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { describeAnswer } from '../../src/client.ts';
+import { describeAnswer as describeWithIds } from '../../src/client.ts';
 import { createHandler } from '../../src/core/http.ts';
 import { DEFAULT_GUIDANCE, Inbox, InboxError, type Caller } from '../../src/core/inbox.ts';
 import { GRANT_MAX_MS, type Candidate, type SecretQuery, type SecretSources, type SourceInfo } from '../../src/core/secret-sources.ts';
@@ -17,6 +17,10 @@ import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import type { Client } from '../../src/client.ts';
 import { sealValue } from '../../src/core/sealed.ts';
+import { withoutIds } from './fixture.ts';
+
+// The text around the field IDs, which test/unit/field-ids.test.ts covers.
+const describeAnswer = (...args: Parameters<typeof describeWithIds>): string => withoutIds(describeWithIds(...args));
 
 const agent: Caller = { token: 'ta', role: 'agent' };
 const owner: Caller = { token: 'to', role: 'owner' };
