@@ -38,23 +38,9 @@ const MACHINES: RemoteMachine[] = [
   machine('far-nolog', 'password', [touch('nolog')]),
 ];
 
-before(async () => {
-  const sha = createHash('sha256').update(PASSWORD).digest('hex');
-  const far = (m: RemoteMachine, extra: Record<string, unknown> = {}) => [m.host, { hostname: m.hostname, sudoers: m.allow.map(parseCommand), sudoSha256: sha, ...extra }];
-  const [pw, ok, down, wrong, cut, nolog] = MACHINES as [RemoteMachine, RemoteMachine, RemoteMachine, RemoteMachine, RemoteMachine, RemoteMachine];
-  fs.writeFileSync(path.join(dir, 'hosts.json'), JSON.stringify(Object.fromEntries([
-    far(pw), far(ok, { nopasswd: true }), far(down, { refuse: true }), far(wrong, { hostname: 'imposter' }), far(cut, { cutAfterMs: 2500 }), far(nolog, { noSyslog: true }),
-  ])));
-  savedDir = process.env['FAKE_SSH_DIR'];
-  process.env['FAKE_SSH_DIR'] = dir;
-  h = await start({ privileged: [localRunner('test-machine'), ...MACHINES.map((m) => sshRunner(m, { ssh: FAKE_SSH }))] });
-});
-after(async () => {
-  await h.stop();
-  if (savedDir === undefined) delete process.env['FAKE_SSH_DIR'];
-  else process.env['FAKE_SSH_DIR'] = savedDir;
-  fs.rmSync(dir, { recursive: true, force: true });
-});
+
+// The folder exists on every platform, so it goes on every platform, the skipped one included.
+after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const placement = (name: string, command: string, on: string) => `root = Card([run])\nrun = widget privileged_action ${JSON.stringify({ name, command, machine: on, changes: 'Runs a fixture command on the far machine' })}`;
 
@@ -93,6 +79,23 @@ async function approve(id: string, command: string, on: string, plain: Record<st
 
 // The far side is POSIX: /bin/sh and the stand-ins on its PATH, which Windows lacks.
 describe('a privileged action on another machine', { skip: process.platform === 'win32' ? 'the far side runs /bin/sh' : false }, () => {
+  before(async () => {
+    const sha = createHash('sha256').update(PASSWORD).digest('hex');
+    const far = (m: RemoteMachine, extra: Record<string, unknown> = {}) => [m.host, { hostname: m.hostname, sudoers: m.allow.map(parseCommand), sudoSha256: sha, ...extra }];
+    const [pw, ok, down, wrong, cut, nolog] = MACHINES as [RemoteMachine, RemoteMachine, RemoteMachine, RemoteMachine, RemoteMachine, RemoteMachine];
+    fs.writeFileSync(path.join(dir, 'hosts.json'), JSON.stringify(Object.fromEntries([
+      far(pw), far(ok, { nopasswd: true }), far(down, { refuse: true }), far(wrong, { hostname: 'imposter' }), far(cut, { cutAfterMs: 2500 }), far(nolog, { noSyslog: true }),
+    ])));
+    savedDir = process.env['FAKE_SSH_DIR'];
+    process.env['FAKE_SSH_DIR'] = dir;
+    h = await start({ privileged: [localRunner('test-machine'), ...MACHINES.map((m) => sshRunner(m, { ssh: FAKE_SSH }))] });
+  });
+  after(async () => {
+    await h.stop();
+    if (savedDir === undefined) delete process.env['FAKE_SSH_DIR'];
+    else process.env['FAKE_SSH_DIR'] = savedDir;
+  });
+
   it('runs on the far machine through sudo, and the password reaches nothing the agent reads', async () => {
     const client = new Client({ url: h.server.url, token: h.agentToken });
     const listener = h.listen(client, 'agent-r1');
