@@ -67,24 +67,23 @@ describe('a stdio secret source', () => {
     assert.ok(out.includes('{"v":1,"id":"7","status":"ready"}'), `the example answered: ${out}`);
   });
 
-  it('fails a call whose reply is not JSON, and starts the source again on the next call', async () => {
-    const s = source();
-    const [first] = await s.lookup({ name: 'WHO' });
-    await assert.rejects(s.lookup({ name: 'GARBLE' }), /not JSON/);
-    const [second] = await s.lookup({ name: 'WHO' });
-    assert.notEqual(first?.label, second?.label, 'a new process answers after the fault');
-  });
-
-  it('fails a call whose reply gives another version', async () => {
-    await assert.rejects(source().lookup({ name: 'V2' }), /version other than 1/);
-  });
-
-  it('fails a call that takes longer than its timeout, and starts again on the next call', async () => {
-    // Long enough for a new Node process to start on a busy runner, so only the hanging call times out.
-    const s = source({ timeoutMs: 3000 });
-    await assert.rejects(s.lookup({ name: 'HANG' }), /did not answer within/);
-    assert.equal((await s.lookup({ name: 'WHO' })).length, 1);
-  });
+  // Each fault fails the call, and a new process answers the next one.
+  const faults: [what: string, query: string, error: RegExp][] = [
+    ['a reply that is not JSON', 'GARBLE', /not JSON/],
+    ['a reply that gives another version', 'V2', /version other than 1/],
+    ['a call that takes longer than its timeout', 'HANG', /did not answer within/],
+    ['an exit while a call waits', 'CRASH', /stopped \(exit 3\)/],
+  ];
+  for (const [what, query, error] of faults) {
+    it(`fails ${what}, and starts the source again on the next call`, async () => {
+      // A timeout long enough for a new Node process to start on a busy runner, so only the hanging call times out.
+      const s = source({ timeoutMs: 3000 });
+      const [first] = await s.lookup({ name: 'WHO' });
+      await assert.rejects(s.lookup({ name: query }), error);
+      const [second] = await s.lookup({ name: 'WHO' });
+      assert.notEqual(first?.label, second?.label, 'a new process answers after the fault');
+    });
+  }
 
   it('kills a source that ignores SIGTERM after its timeout, so no copy outlives it', { skip: process.platform === 'win32' ? 'Windows has no SIGTERM to ignore' : false }, async () => {
     const s = source({ timeoutMs: 3000, killGraceMs: 200 });
@@ -109,12 +108,6 @@ await s.lookup({ name: 'STUBBORN' }).catch(() => {});
     // The verdict comes first: killing a survivor here must not turn a failure into a pass.
     if (!ended) process.kill(pid, 'SIGKILL');
     assert.ok(ended, `the source ${pid} outlived the process that started it`);
-  });
-
-  it('fails a call when the source exits, and starts again on the next call', async () => {
-    const s = source();
-    await assert.rejects(s.lookup({ name: 'CRASH' }), /stopped \(exit 3\)/);
-    assert.equal((await s.lookup({ name: 'WHO' })).length, 1);
   });
 
   it('keeps a reply the source wrote just before it exited', async () => {

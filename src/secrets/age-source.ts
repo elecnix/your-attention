@@ -1,14 +1,13 @@
 // The built-in age source. It reads the *.age files of the folders in its `dirs` setting, and opens each one with the
 // instance's identity, or with the passphrase that the folder's envelope keeps encrypted to that identity. So a
 // release asks nothing, and the folder's files stay as they are. SPEC.md#the-age-source holds the contract.
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { sealValue } from '../core/sealed.ts';
 import type { SecretQuery, SourceCandidate } from '../core/secret-sources.ts';
-import { decryptWithIdentity, decryptWithPassphrase } from './age.ts';
+import { decryptWithIdentity, decryptWithPassphrase, firstLine, run } from './age.ts';
 import type { Detected, SecretSource } from './source.ts';
 
 export interface AgeSourceOptions {
@@ -38,30 +37,13 @@ export function ageDirs(settings: Record<string, unknown>): string[] {
   return Array.isArray(dirs) ? dirs.filter((d): d is string => typeof d === 'string' && d !== '').map(folderPath) : [];
 }
 
-interface Run { code: number; stdout: string; stderr: string; missing: boolean }
-
-function run(command: string, argv: string[], input?: string): Promise<Run> {
-  return new Promise((resolve) => {
-    const child = spawn(command, argv, { stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
-    const out: Buffer[] = [];
-    const err: Buffer[] = [];
-    child.stdout?.on('data', (c: Buffer) => out.push(c));
-    child.stderr?.on('data', (c: Buffer) => err.push(c));
-    child.on('error', (e: NodeJS.ErrnoException) => resolve({ code: -1, stdout: '', stderr: e.message, missing: e.code === 'ENOENT' }));
-    child.on('close', (code) => resolve({ code: code ?? 1, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8'), missing: false }));
-    if (input !== undefined) { child.stdin?.on('error', () => {}); child.stdin?.end(input); }
-  });
-}
-
-const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';
-
 /** The recipient of the instance's identity, made with age-keygen the first time. The file is readable only by this user. */
 export async function ensureIdentity(home: string, ageKeygen = 'age-keygen'): Promise<string> {
   const file = identityPath(home);
   if (!fs.existsSync(file)) {
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     const made = await run(ageKeygen, ['-o', file]);
-    if (made.code !== 0) throw new Error(made.missing ? `${ageKeygen} is not installed, or not on the PATH` : `age-keygen could not make ${file}: ${firstLine(made.stderr)}`);
+    if (made.code !== 0) throw new Error(`age-keygen could not make ${file}: ${firstLine(made.stderr)}`);
     fs.chmodSync(file, 0o600);
   }
   const shown = await run(ageKeygen, ['-y', file]);
@@ -75,7 +57,7 @@ export async function writeEnvelope(home: string, dir: string, passphrase: strin
   const file = envelopePath(home, dir);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
-  const made = await run(age, ['-r', recipient, '-o', tmp], passphrase);
+  const made = await run(age, ['-r', recipient, '-o', tmp], { input: passphrase });
   if (made.code !== 0) { fs.rmSync(tmp, { force: true }); throw new Error(`age could not write the envelope: ${firstLine(made.stderr)}`); }
   fs.chmodSync(tmp, 0o600);
   fs.renameSync(tmp, file);
@@ -119,8 +101,8 @@ export function ageSource(options: AgeSourceOptions): SecretSource {
 
   return {
     async detect(): Promise<Detected> {
-      const version = await run(age, ['--version']);
-      if (version.missing) return { status: 'off', reason: `${age} is not installed, or not on the PATH` };
+      // run rejects with "age is not installed, or not on the PATH" when there is no such command.
+      try { await run(age, ['--version']); } catch (e) { return { status: 'off', reason: (e as Error).message }; }
       if (!fs.existsSync(identity)) return { status: 'off', reason: `no identity file at ${identity}; run \`your-attention secret age dir add <dir>\` to make one` };
       if (dirs.length === 0) return { status: 'off', reason: 'no folder of age files is set; add one with `your-attention secret age dir add <dir>`' };
       if (!dirs.some((d) => fs.existsSync(d))) return { status: 'off', reason: `none of its folders exists: ${dirs.join(', ')}` };
