@@ -239,6 +239,17 @@ describe('granting a secret_access field', () => {
     assert.doesNotMatch(text, /A256GCM|postgres/);
   });
 
+  it('writes the grant line without a deadline when the value has no epoch-millisecond until, and keeps the rest of the answer', async () => {
+    const { inbox, keys } = await setup();
+    inbox.postCard(agent, { id: 'a1', agent: 's1', title: 'Database?', body: accessBody(keys.publicKey) });
+    const answer = await inbox.answer('a1', { values: { DATABASE_URL: grant() } });
+    const card = inbox.getCard('a1');
+    for (const until of [undefined, '2026-11-27T18:30:00Z', Number.NaN]) {
+      const odd = { ...answer, values: { ...answer.values, DATABASE_URL: { ...(answer.values['DATABASE_URL'] as AccessGrant), until } } };
+      assert.equal(describeAnswer(card, odd as unknown as typeof answer), `DATABASE_URL: granted (case ${(answer.values['DATABASE_URL'] as AccessGrant).case}, no deadline given)`);
+    }
+  });
+
   it('sends hooks and webhooks the answer without the grant, and the agent stream all of it', async () => {
     const sent: string[] = [];
     const fetcher = (async (_url: string | URL | Request, init?: RequestInit) => { sent.push(String(init?.body)); return new Response(null, { status: 200 }); }) as typeof fetch;
