@@ -1,7 +1,7 @@
 // `your-attention secret`: adding, listing and removing secret sources, and giving the age source its folders and
 // a folder's passphrase, all in a temporary home.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,10 +10,9 @@ import { pathToFileURL } from 'node:url';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
 import { envelopePath, identityPath } from '../../src/secrets/age-source.ts';
 import { loadSecretSources, readSourceEntries } from '../../src/secrets/registry.ts';
+import { encryptWithPassphrase, has } from '../age-fixtures.ts';
 import { CLI_ARGS, runCli } from './harness.ts';
 
-const IS_DARWIN = process.platform === 'darwin';
-const has = (command: string): boolean => spawnSync('sh', ['-c', `command -v ${command}`], { stdio: 'ignore' }).status === 0;
 const NO_AGE = process.platform === 'win32' ? 'the age source needs a POSIX terminal' : has('age') && has('age-keygen') && has('script') && has('mkfifo') ? false : 'age, age-keygen, script or mkfifo is missing';
 const EXAMPLE = path.resolve('examples/secret-source-stdio');
 const PASS = 'made up passphrase for the CLI';
@@ -108,9 +107,7 @@ describe('your-attention secret age', { skip: NO_AGE }, () => {
     // A file encrypted with the passphrase, as a folder made by hand would hold.
     const plain = path.join(home, 'plain');
     fs.writeFileSync(plain, 'made-up-value\n');
-    const command = `age -p -o ${JSON.stringify(path.join(dir, 'TOKEN.age'))} ${JSON.stringify(plain)}`;
-    const argv = IS_DARWIN ? ['-q', '/dev/null', 'sh', '-c', command] : ['-qec', command, '/dev/null'];
-    assert.equal(spawnSync('script', argv, { input: `${PASS}\n${PASS}\n` }).status, 0);
+    await encryptWithPassphrase(plain, path.join(dir, 'TOKEN.age'), PASS);
     fs.rmSync(plain);
 
     const added = await runCli(env, 'secret', 'age', 'dir', 'add', dir);

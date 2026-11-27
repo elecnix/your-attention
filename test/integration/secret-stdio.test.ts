@@ -13,6 +13,14 @@ import { stdioSource } from '../../src/secrets/stdio-source.ts';
 const EXAMPLE = path.resolve('examples/secret-source-stdio');
 const FIXTURE_DIR = path.resolve('test/integration');
 
+/** Whether the process `pid` ends within `ms`. */
+async function ends(pid: number, ms: number): Promise<boolean> {
+  const alive = (): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const deadline = Date.now() + ms;
+  while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  return !alive();
+}
+
 describe('a stdio secret source', () => {
   const started: { stop(): void }[] = [];
   const source = (o: Partial<Parameters<typeof stdioSource>[0]> = {}): ReturnType<typeof stdioSource> => {
@@ -83,10 +91,7 @@ describe('a stdio secret source', () => {
     const [who] = await s.lookup({ name: 'WHO' });
     const pid = Number(who?.label);
     await assert.rejects(s.lookup({ name: 'STUBBORN' }), /did not answer within/);
-    const alive = (): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
-    const deadline = Date.now() + 5000;
-    while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
-    assert.equal(alive(), false, `the source ${pid} still runs after SIGKILL`);
+    assert.ok(await ends(pid, 5000), `the source ${pid} still runs after SIGKILL`);
   });
 
   it('kills a source that ignores SIGTERM even when the process that started it has nothing else to do', { skip: process.platform === 'win32' ? 'Windows has no SIGTERM to ignore' : false }, async () => {
@@ -100,11 +105,10 @@ await s.lookup({ name: 'STUBBORN' }).catch(() => {});
 `;
     const { execFileSync } = await import('node:child_process');
     const pid = Number(execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20_000 }).trim());
-    const alive = (): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
-    const deadline = Date.now() + 3000;
-    while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
-    if (alive()) process.kill(pid, 'SIGKILL');
-    assert.ok(!alive(), `the source ${pid} outlived the process that started it`);
+    const ended = await ends(pid, 3000);
+    // The verdict comes first: killing a survivor here must not turn a failure into a pass.
+    if (!ended) process.kill(pid, 'SIGKILL');
+    assert.ok(ended, `the source ${pid} outlived the process that started it`);
   });
 
   it('fails a call when the source exits, and starts again on the next call', async () => {

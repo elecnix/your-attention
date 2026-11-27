@@ -115,6 +115,13 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
     });
   }
 
+  /** The field of a reply that a call answers, or a sentence that names what the reply lacked. */
+  async function field<T>(request: Call, key: string, what: string, valid: (v: unknown) => v is T): Promise<T> {
+    const r = await call(request);
+    if (!valid(r[key])) throw new Error(`the source ${name} answered ${request.call} without ${what}`);
+    return r[key];
+  }
+
   return {
     async detect(): Promise<Detected> {
       const r = await call({ call: 'detect' });
@@ -122,17 +129,9 @@ export function stdioSource(options: StdioOptions): SecretSource & { stop(): voi
       if (r['status'] === 'off') return { status: 'off', reason: typeof r['reason'] === 'string' ? r['reason'] : 'the source is off' };
       throw new Error(`the source ${name} answered detect without a status`);
     },
-    async lookup(query): Promise<SourceCandidate[]> {
-      const r = await call({ call: 'lookup', query });
-      if (!Array.isArray(r['candidates'])) throw new Error(`the source ${name} answered lookup without candidates`);
-      return r['candidates'] as SourceCandidate[];
-    },
-    async release(candidate, publicKey): Promise<Sealed> {
-      const r = await call({ call: 'release', candidate, publicKey });
-      // A source answers only a sealed value: a plain one would cross this process in the clear.
-      if (!isSealed(r['sealed'])) throw new Error(`the source ${name} answered release without a sealed value`);
-      return r['sealed'];
-    },
+    lookup: (query) => field({ call: 'lookup', query }, 'candidates', 'candidates', (v): v is SourceCandidate[] => Array.isArray(v)),
+    // A source answers only a sealed value: a plain one would cross this process in the clear.
+    release: (candidate, publicKey) => field({ call: 'release', candidate, publicKey }, 'sealed', 'a sealed value', isSealed),
     stop() {
       if (child) fault(child, 'was stopped');
     },

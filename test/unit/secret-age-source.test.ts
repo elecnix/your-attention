@@ -1,7 +1,6 @@
 // The built-in age source: a folder of *.age files, read with the instance's identity, or with a passphrase kept in an
 // envelope encrypted to that identity. The folder is never rewritten, and no release asks for anything.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,9 +8,8 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
 import { ageSource, envelopePath, ensureIdentity, identityPath, writeEnvelope } from '../../src/secrets/age-source.ts';
+import { encryptTo, encryptWithPassphrase, has } from '../age-fixtures.ts';
 
-const IS_DARWIN = process.platform === 'darwin';
-const has = (command: string): boolean => spawnSync('sh', ['-c', `command -v ${command}`], { stdio: 'ignore' }).status === 0;
 const POSIX = process.platform !== 'win32';
 const NO_AGE = !POSIX ? 'the age source needs a POSIX terminal' : has('age') && has('age-keygen') && has('script') && has('mkfifo') ? false : 'age, age-keygen, script or mkfifo is missing';
 const PASS = 'made up passphrase for a test';
@@ -25,24 +23,12 @@ const scratch = (prefix: string): string => {
   return dir;
 };
 
-function encryptTo(recipient: string, value: string, out: string): void {
-  const made = spawnSync('age', ['-r', recipient, '-o', out], { input: value, encoding: 'utf8' });
-  assert.equal(made.status, 0, made.stderr);
-}
-
-function encryptWithPassphrase(value: string, out: string): Promise<void> {
-  const plain = `${out}.plain`;
-  fs.writeFileSync(plain, value);
-  const command = `age -p -o ${JSON.stringify(out)} ${JSON.stringify(plain)}`;
-  const argv = IS_DARWIN ? ['-q', '/dev/null', 'sh', '-c', command] : ['-qec', command, '/dev/null'];
-  return new Promise((resolve, reject) => {
-    const child = spawn('script', argv, { stdio: ['pipe', 'ignore', 'pipe'] });
-    const stderr: Buffer[] = [];
-    child.stderr.on('data', (c: Buffer) => stderr.push(c));
-    child.on('close', (code) => { fs.rmSync(plain); code === 0 ? resolve() : reject(new Error(Buffer.concat(stderr).toString('utf8'))); });
-    child.stdin.end(`${PASS}\n${PASS}\n`);
-  });
-}
+/** A made-up value in a plain file of its own scratch folder, which a test encrypts into the folder under test. */
+const plainFile = (value: string): string => {
+  const file = path.join(scratch('ya-age-plain-'), 'plain');
+  fs.writeFileSync(file, value);
+  return file;
+};
 
 /** Each file of a folder with its bytes and its modification time, to show the folder was left as it was. */
 function snapshot(dir: string): Record<string, string> {
@@ -78,7 +64,7 @@ describe('the age source', { skip: NO_AGE }, () => {
     const home = scratch('ya-age-home-');
     const dir = scratch('ya-age-dir-');
     const recipient = await ensureIdentity(home);
-    encryptTo(recipient, 'made-up-token\n', path.join(dir, 'GITHUB_TOKEN.age'));
+    encryptTo(recipient, plainFile('made-up-token\n'), path.join(dir, 'GITHUB_TOKEN.age'));
     fs.writeFileSync(path.join(dir, 'README'), 'not a secret');
     const source = ageSource({ home, settings: { dirs: [dir] } });
     const found = await source.lookup({ name: 'github-token' });
@@ -96,8 +82,8 @@ describe('the age source', { skip: NO_AGE }, () => {
     const personal = scratch('ya-age-personal-');
     const work = scratch('ya-age-work-');
     const recipient = await ensureIdentity(home);
-    encryptTo(recipient, 'made-up-personal', path.join(personal, 'openai.age'));
-    encryptTo(recipient, 'made-up-work', path.join(work, 'openai.age'));
+    encryptTo(recipient, plainFile('made-up-personal'), path.join(personal, 'openai.age'));
+    encryptTo(recipient, plainFile('made-up-work'), path.join(work, 'openai.age'));
     const source = ageSource({ home, settings: { dirs: [personal, work] } });
     const found = await source.lookup({ name: 'OPENAI' });
     assert.deepEqual(found.map((c) => [c.id, c.label, c.store]), [
@@ -113,7 +99,7 @@ describe('the age source', { skip: NO_AGE }, () => {
     const home = scratch('ya-age-home-');
     const dir = scratch('ya-age-dir-');
     await ensureIdentity(home);
-    await encryptWithPassphrase('made-up-password', path.join(dir, 'DB_PASSWORD.age'));
+    await encryptWithPassphrase(plainFile('made-up-password'), path.join(dir, 'DB_PASSWORD.age'), PASS);
     const before = snapshot(dir);
     const source = ageSource({ home, settings: { dirs: [dir] } });
     const keys = await newSealKeys();
