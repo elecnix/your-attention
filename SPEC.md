@@ -448,7 +448,7 @@ The page draws the field as one radio group per secret: the candidates under a h
 For each `secret_access` field, the page sends one of these values:
 
 ```json
-{"grant": "<candidate id>", "source": "age", "instance": "laptop", "until": 1767225600000}
+{"grant": "<candidate id>", "source": "age", "instance": "office-pc", "until": 1767225600000}
 {"decline": true}
 {"alg": "RSA-OAEP-256+A256GCM", "key": "...", "iv": "...", "data": "..."}
 ```
@@ -499,7 +499,7 @@ Some commands need the person's password, such as one that runs with `sudo`. For
 An agent places the built-in widget `privileged_action`, version 1, in a card body:
 
 ```
-restart = widget privileged_action {"name": "restart_nginx", "command": "sudo -S -p '' systemctl restart nginx", "machine": "laptop", "changes": "Restarts nginx, which drops open connections"}
+restart = widget privileged_action {"name": "restart_nginx", "command": "sudo -S -p '' systemctl restart nginx", "machine": "office-pc", "changes": "Restarts nginx, which drops open connections"}
 ```
 
 `name` is the answer field, a variable name such as `restart_nginx`. `command` is the exact text the shell runs. `machine` names where the inbox runs it, and `changes` is one sentence about what it changes. The widget places `PrivilegedAction(name, command, machine, changes)`, four string literals, inside a form. Unlike `secret`, the card has no key. `card_post` fills in nothing, and the agent's session has no key to open the password with.
@@ -531,7 +531,7 @@ The inbox takes these steps for each privileged field, inside the owner's `POST 
 5. The inbox starts the command with the shell of its machine, as the user that runs the inbox. It writes the password and a newline to the command's standard input, then closes it. The password never goes in an environment variable, an argument list, a file or a log. A run that takes more than 2 minutes is stopped.
 6. In what the command printed, the inbox replaces each occurrence of the password with `[password]`, and keeps the last 64 KB.
 
-In the stored answer, the field holds `{command, machine, exitCode, output, ended?, audit, ranAt}`, and never the sealed value. `exitCode` is null when the run stopped early, and `ended` says why. Only the owner answers, so an agent's answer to its own card gets 403. A later answer to the card keeps the stored run. This answer goes to the agent stream, to hooks and to webhooks, like any other answer. The answer text for the agent reads `restart_nginx: ran on laptop, exit code 0 (audit 1a2b3c4d). The command printed:`, with the output in a fenced block after it. A field without a password reads `restart_nginx: not run, because the person sent no password`.
+In the stored answer, the field holds `{command, machine, exitCode, output, ended?, audit, ranAt}`, and never the sealed value. `exitCode` is null when the run stopped early, and `ended` says why. Only the owner answers, so an agent's answer to its own card gets 403. A later answer to the card keeps the stored run. This answer goes to the agent stream, to hooks and to webhooks, like any other answer. The answer text for the agent reads `restart_nginx: ran on office-pc, exit code 0 (audit 1a2b3c4d). The command printed:`, with the output in a fenced block after it. A field without a password reads `restart_nginx: not run, because the person sent no password`.
 
 The `serve` process keeps the password in memory from the moment it opens it until the run ends. JavaScript can't wipe a string. So the process drops each reference to it, and the garbage collector frees that memory.
 
@@ -814,7 +814,7 @@ A hosted inbox writes its own reports to the `TELEMETRY` binding at its next req
 
 | Column | Value |
 | --- | --- |
-| `index1` | the invite id, or `laptop` |
+| `index1` | the invite id, or `laptop` for your own inbox, the same wire value that `source` keeps |
 | `blob1` to `blob5` | source, version, day, install id, invite id |
 | `double1` to `double7` | cards, answers, pairings, pages, agents, instances, tokens |
 

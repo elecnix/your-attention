@@ -40,7 +40,7 @@ The inbox is one server that holds your cards. Pick one place for it:
 | Your own Cloudflare inbox | Always on, reachable from any machine and your phone. You deploy it to your own Cloudflare account. | You run agents on several machines, and want to own the deployment. See [Run your own cloud inbox](#run-your-own-cloud-inbox-optional). |
 | A hosted inbox | Always on, with no deployment. Someone who runs the service gives you an invite code. Each inbox has [limits](#limits-of-a-cloud-inbox). | Someone already runs the service for you. |
 
-You can change your mind later. Each machine pairs with one inbox at a time.
+The rest of this README calls the first choice your own inbox. You can change your mind later. Each machine pairs with one inbox at a time.
 
 ### 3. Install the command
 
