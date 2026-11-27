@@ -11,6 +11,7 @@ import { checkMermaid } from '../adapters/mermaid.ts';
 import { bodyErrors, fallbackBody } from '../adapters/openui-body.ts';
 import { SqliteStorage } from '../adapters/sqlite.ts';
 import { randomId } from '../core/crypto.ts';
+import type { SecretSources } from '../core/secret-sources.ts';
 import { createHandler, originParam } from '../core/http.ts';
 import type { ApprovalSender, Caller } from '../core/inbox.ts';
 import { agentSocket, pageSocket } from '../core/socket.ts';
@@ -61,6 +62,8 @@ export interface ServeOptions {
   approvals?: ApprovalSender;
   /** How the inbox calls webhooks. Tests take the calls here, since a webhook is https only. */
   fetch?: typeof fetch;
+  /** The secret sources this inbox runs. Tests pass a stand-in. */
+  secretSources?: SecretSources;
 }
 
 export interface RunningServer {
@@ -107,7 +110,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');

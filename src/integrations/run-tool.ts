@@ -100,7 +100,7 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
           ? 'vars fills a template: name one with template, and put the card\'s own text in text'
           : 'a card needs something the person can read: give text, a body, questions, options, html, an attachment, or approvals');
       }
-      const sealing = await ctx.secrets.prepare(card.body);
+      const sealing = await ctx.secrets.prepare(card.body, (q) => inbox.secretLookup(q));
       const posted = await inbox.post({ ...card, body: sealing.body });
       sealing.keep(posted.id);
       const inherited = posted.inheritedTags ?? [];

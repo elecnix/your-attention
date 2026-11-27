@@ -2,10 +2,10 @@
 // stays in this process, so only the session that asked can open the answer. Each value opens in memory into the
 // session's grant store, and the harness adds it to the environment of each command it starts while the grant lives.
 // Nothing here writes a value to a file, and the model gets the variable's name, never the value or a path.
-import { GRANT_DEFAULT_MS, GRANT_IDLE_MS, type AccessGrant } from '../core/secret-sources.ts';
+import { GRANT_DEFAULT_MS, GRANT_IDLE_MS, type AccessGrant, type Candidate, type SecretQuery } from '../core/secret-sources.ts';
 import { isSealed, newSealKeys, openSealed, sealedFields } from '../core/sealed.ts';
 import type { Answer, Card } from '../core/types.ts';
-import { addToPlacements } from '../core/widgets.ts';
+import { addToPlacements, placementValues } from '../core/widgets.ts';
 import { Grants } from '../secrets/grant.ts';
 import { MIN_MASKED, Redactor, type StreamMask } from '../secrets/redact.ts';
 
@@ -32,13 +32,28 @@ export class SecretRequests {
     this.grants = new Grants(now);
   }
 
-  /** Fill the public key into each secret widget the body places. `keep` holds the private key under the posted card's id. */
-  async prepare(body: string | undefined): Promise<{ body: string | undefined; count: number; keep: (id: string) => void }> {
-    if (body === undefined || !/\bwidget\s+secret\b/.test(body)) return { body, count: 0, keep: () => {} };
+  /** Fill the public key into each secret and secret_access widget the body places, with one key pair for the card.
+   * A secret_access placement without `candidates` gets the candidates `lookup` finds for its `query`, or for its name
+   * when it gives no query. `keep` holds the private key under the posted card's id. */
+  async prepare(body: string | undefined, lookup?: (query: SecretQuery) => Promise<{ candidates: Candidate[] }>): Promise<{ body: string | undefined; count: number; keep: (id: string) => void }> {
+    if (body === undefined || !/\bwidget\s+secret(_access)?\b/.test(body)) return { body, count: 0, keep: () => {} };
+    const asks = placementValues(body, 'secret_access');
+    const found: (string | undefined)[] = [];
+    for (const vars of asks) {
+      if (vars['candidates'] !== undefined) { found.push(typeof vars['candidates'] === 'string' ? undefined : JSON.stringify(vars['candidates'])); continue; }
+      const query = vars['query'] && typeof vars['query'] === 'object' ? vars['query'] as SecretQuery : { name: String(vars['name'] ?? '') };
+      if (!lookup) throw new Error(`secret ${String(vars['name'])}: this session cannot look up candidates, so give them in candidates`);
+      let result;
+      try { result = await lookup(query); } catch (e) { throw new Error(`could not look up the candidates for ${String(vars['name'])}: ${(e as Error).message}`); }
+      found.push(JSON.stringify(result.candidates));
+    }
     const { publicKey, privateKey } = await newSealKeys();
-    const filled = addToPlacements(body, 'secret', { publicKey: JSON.stringify(publicKey) });
-    if (!filled.count) return { body, count: 0, keep: () => {} };
-    return { ...filled, keep: (id) => this.remember(id, privateKey) };
+    const key = JSON.stringify(publicKey);
+    const sealedOnly = addToPlacements(body, 'secret', { publicKey: key });
+    const access = addToPlacements(sealedOnly.body, 'secret_access', (_vars, i) => ({ publicKey: key, ...(found[i] === undefined ? {} : { candidates: found[i] }) }));
+    const count = sealedOnly.count + access.count;
+    if (!count) return { body, count: 0, keep: () => {} };
+    return { body: access.body, count, keep: (id) => this.remember(id, privateKey) };
   }
 
   /** Keep the private key of a card's post, newest first, so an answer sealed for an earlier version still opens. */

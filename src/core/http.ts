@@ -333,12 +333,13 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     if (gate.locked && !pinRoute && !fileRoute) return json({ error: 'this inbox is locked: type its PIN to open it', locked: true }, 423);
     const me: Caller = { token: who.token.id, role: who.token.role };
     // A full inbox takes the writes that free space or answer cards, and the reply route, which writes nothing, and refuses the rest.
-    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'dismiss' || c === 'answer' || c === 'reply' || c === 'file-ticket'));
+    const frees = method === 'DELETE' || pinRoute || (method === 'POST' && (a === 'reset' || a === 'archive' || a === 'logout' || a === 'person' || c === 'close' || c === 'dismiss' || c === 'answer' || c === 'reply' || c === 'file-ticket' || c === 'revoke' || a === 'secrets'));
     if (method !== 'GET' && !frees && inbox.storageFull()) return json({ error: 'this inbox is full: remove cards, templates or widgets to make room' }, 507);
     // A message that arrives over two links, or again after a retry, is applied once: the inbox
     // keeps the first result for each x-message-id, per client.
     // A PIN response carries an unlock token, and a file ticket works once, so the inbox never keeps either to replay.
-    const messageId = method === 'GET' || pinRoute || c === 'file-ticket' ? null : req.headers.get(MESSAGE_HEADER);
+    // A lookup writes nothing, so it has nothing to apply once.
+    const messageId = method === 'GET' || pinRoute || c === 'file-ticket' || a === 'secrets' ? null : req.headers.get(MESSAGE_HEADER);
     if (messageId !== null) {
       if (!/^[\w-]{8,64}$/.test(messageId)) return json({ error: `${MESSAGE_HEADER} must be 8 to 64 letters, digits, dashes or underscores` }, 400);
       const key = `${me.token}:${messageId}`;
@@ -661,6 +662,12 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'PUT') return json(inbox.setDefaultTags(me, (await readJson(req)) ?? {}));
     }
 
+    // A lookup answers metadata, never a value: a value leaves a source only inside the owner's answer.
+    if (a === 'secrets') {
+      if (method === 'POST' && b === 'lookup' && !c) return json(await inbox.secretLookup(me, await readJson<unknown>(req, BODY_LIMIT.open)));
+      if (method === 'GET' && b === 'sources' && !c) return json({ sources: await inbox.secretSourceList(me) });
+      return json({ error: 'not found' }, 404);
+    }
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
     // The person sends a card to an agent: it waits for the agent's stream, and goes out as soon as one opens.
     if (method === 'POST' && a === 'send' && !b) {
@@ -726,6 +733,10 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           // The owner's answer types each approval it turned on into its pane, and the reply says how each went.
           return json((await inbox.sendApprovals(me, b)) ?? saved);
         }
+        case 'revoke':
+          owner();
+          // A null JSON body names no field, and the inbox refuses it rather than failing on a property read.
+          return json(inbox.revokeGrant(me, b, String(body?.['field'] ?? '')));
         case 'close':
           return json(publicCard(inbox.close(me, b, body['kind'] as CloseKind, String(body['outcome'] ?? ''), body['ifUnanswered'] === true)));
         case 'dismiss':
