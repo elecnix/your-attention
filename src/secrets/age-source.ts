@@ -83,14 +83,34 @@ export function isPassphraseFile(file: string): boolean {
 /** A name as a query and a file both write it, so DATABASE_URL finds database-url.age. */
 const normal = (name: string): string => name.toLowerCase().replace(/[-.\s]/g, '_');
 
-/** The file a candidate's id names, when it is an *.age file directly inside one of the folders, and nowhere else. */
-function findFile(dirs: string[], id: string): { dir: string; file: string } | undefined {
+/** Whether the real path `file` is below the real path `folder`. A relative path compares the two, since a prefix test
+ * would look for `//` under the root folder. */
+export function isInside(folder: string, file: string): boolean {
+  const rel = path.relative(folder, file);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
+/** Where `file` really is, when that is a regular file inside the real path of `dir`; `leaves` when a symlink takes it
+ * outside the folder; undefined when there is no such file. */
+function realInside(dir: string, file: string): string | 'leaves' | undefined {
+  let real: string;
+  let realDir: string;
+  try { real = fs.realpathSync(file); realDir = fs.realpathSync(dir); } catch { return undefined; }
+  if (!isInside(realDir, real)) return 'leaves';
+  return fs.statSync(real, { throwIfNoEntry: false })?.isFile() ? real : undefined;
+}
+
+/** The file a candidate's id names, when it is an *.age file directly inside one of the folders, and nowhere else. `real`
+ * is the path to open: a symlink is followed once, here, so the file the check passed is the file age reads. */
+function findFile(dirs: string[], id: string): { dir: string; real: string } | undefined {
   if (!path.isAbsolute(id)) return undefined;
   const file = path.resolve(id);
   const dir = path.dirname(file);
   const name = path.basename(file);
   if (file !== id || !dirs.includes(dir) || !name.endsWith('.age') || name.startsWith('.')) return undefined;
-  return fs.statSync(file, { throwIfNoEntry: false })?.isFile() ? { dir, file } : undefined;
+  const real = realInside(dir, file);
+  if (real === 'leaves') throw new Error(`The age source refuses ${id}: it is a link that leaves ${dir}.`);
+  return real ? { dir, real } : undefined;
 }
 
 export function ageSource(options: AgeSourceOptions): SecretSource {
@@ -123,9 +143,10 @@ export function ageSource(options: AgeSourceOptions): SecretSource {
           const label = f.slice(0, -'.age'.length);
           if (normal(label) !== wanted) continue;
           const file = path.join(dir, f);
-          const stat = fs.statSync(file, { throwIfNoEntry: false });
-          if (!stat?.isFile()) continue;
-          found.push({ id: file, label, type: 'file', store: dir, changedAt: Math.round(stat.mtimeMs) });
+          // A link that leaves the folder is not one of its files, so it is not a candidate either.
+          const real = realInside(dir, file);
+          if (!real || real === 'leaves') continue;
+          found.push({ id: file, label, type: 'file', store: dir, changedAt: Math.round(fs.statSync(real).mtimeMs) });
         }
       }
       return found;
@@ -135,13 +156,13 @@ export function ageSource(options: AgeSourceOptions): SecretSource {
       const hit = findFile(dirs, id);
       if (!hit) throw new Error(`The age source has no age file at ${id} in its folders.`);
       let value: string;
-      if (isPassphraseFile(hit.file)) {
+      if (isPassphraseFile(hit.real)) {
         const envelope = envelopePath(home, hit.dir);
         if (!fs.existsSync(envelope)) throw new Error(`The age source has no passphrase for ${hit.dir}. Give it one with \`your-attention secret age passphrase ${hit.dir}\`.`);
         const passphrase = await decryptWithIdentity(envelope, identity, { age });
-        value = await decryptWithPassphrase(hit.file, passphrase, { age });
+        value = await decryptWithPassphrase(hit.real, passphrase, { age });
       } else {
-        value = await decryptWithIdentity(hit.file, identity, { age });
+        value = await decryptWithIdentity(hit.real, identity, { age });
       }
       // A file written by `echo` ends with a newline, which no variable means to hold.
       return sealValue(publicKey, value.replace(/\r?\n$/, ''));

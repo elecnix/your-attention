@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
-import { ageSource, envelopePath, ensureIdentity, identityPath, writeEnvelope } from '../../src/secrets/age-source.ts';
+import { ageSource, envelopePath, ensureIdentity, identityPath, isInside, writeEnvelope } from '../../src/secrets/age-source.ts';
 import { encryptTo, encryptWithPassphrase, has } from '../age-fixtures.ts';
 
 const POSIX = process.platform !== 'win32';
@@ -37,6 +37,21 @@ function snapshot(dir: string): Record<string, string> {
     return [f, `${createHash('sha256').update(fs.readFileSync(p)).digest('hex')} ${fs.statSync(p).mtimeMs}`];
   }));
 }
+
+describe('a real path inside a folder', () => {
+  it('counts a file below the folder, the root folder included, and nothing outside or the folder itself', () => {
+    const cases: [folder: string, file: string, inside: boolean][] = [
+      ['/vault', '/vault/x.age', true],
+      ['/vault', '/vault/sub/x.age', true],
+      ['/', '/x.age', true],
+      ['/vault', '/vault', false],
+      ['/vault', '/vault-other/x.age', false],
+      ['/vault', '/elsewhere/x.age', false],
+      ['/vault', '/vault/../elsewhere/x.age', false],
+    ];
+    for (const [folder, file, inside] of cases) assert.equal(isInside(folder, file), inside, `${file} in ${folder}`);
+  });
+});
 
 describe('the age source', { skip: NO_AGE }, () => {
   it('is off, and says why, until it has an identity and a folder', async () => {
@@ -121,5 +136,23 @@ describe('the age source', { skip: NO_AGE }, () => {
     for (const id of ['../identity', identityPath(home), path.join(dir, '..', path.basename(home), 'age', 'identity.txt'), path.join(dir, 'missing.age'), path.join(dir, 'sub', 'nested.age')]) {
       await assert.rejects(source.release(id, keys.publicKey), /no age file at/, id);
     }
+  });
+
+  it('neither lists nor releases a symlink that leaves its folder, and keeps one that stays inside', async () => {
+    const home = scratch('ya-age-home-');
+    const dir = scratch('ya-age-dir-');
+    const outside = scratch('ya-age-outside-');
+    const recipient = await ensureIdentity(home);
+    // The envelope of a folder is exactly the kind of file outside every folder that a link must not reach.
+    await writeEnvelope(home, outside, PASS);
+    fs.symlinkSync(envelopePath(home, outside), path.join(dir, 'LEAK.age'));
+    encryptTo(recipient, plainFile('made-up-inside'), path.join(dir, 'real.age'));
+    fs.symlinkSync(path.join(dir, 'real.age'), path.join(dir, 'ALIAS.age'));
+    const source = ageSource({ home, settings: { dirs: [dir] } });
+    const keys = await newSealKeys();
+    assert.deepEqual(await source.lookup({ name: 'LEAK' }), []);
+    await assert.rejects(source.release(path.join(dir, 'LEAK.age'), keys.publicKey), /leaves/);
+    assert.deepEqual((await source.lookup({ name: 'ALIAS' })).map((c) => c.id), [path.join(dir, 'ALIAS.age')]);
+    assert.equal(await openSealed(keys.privateKey, await source.release(path.join(dir, 'ALIAS.age'), keys.publicKey)), 'made-up-inside');
   });
 });
