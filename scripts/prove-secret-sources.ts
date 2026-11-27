@@ -1,4 +1,4 @@
-// Prove secret sources on a running laptop inbox, end to end, with the code an agent session runs:
+// Prove secret sources on your own inbox while it runs, end to end, with the code an agent session runs:
 //
 //   node scripts/prove-secret-sources.ts NAME [--expect-sha256 HEX]
 //

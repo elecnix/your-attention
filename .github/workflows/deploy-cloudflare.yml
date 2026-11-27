@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Laptop inboxes post their daily reports here, so it deploys first and its failure stops the inbox deploy.
+  # Inboxes that people run on their own computers post their daily reports here, so it deploys first and its failure stops the inbox deploy.
   deploy-telemetry:
     runs-on: ubuntu-latest
     environment: cloudflare

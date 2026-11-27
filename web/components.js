@@ -34,7 +34,7 @@ function CheckWithText({ props, renderNode }) {
     // The content stays rendered while hidden, so its fields keep their values and send them with the answer.
     h('div', { ref: box, className: 'revealed', hidden: !open, onInput: preview }, renderNode(props.content)));
 }
-// Mermaid(source): a diagram, drawn with the mermaid build the inbox serves. A laptop inbox checked the source with
+// Mermaid(source): a diagram, drawn with the mermaid build the inbox serves. Your own inbox checked the source with
 // this version when the card was posted, so it draws. Diagrams draw one at a time, since mermaid keeps one in progress.
 export const MERMAID_VERSION = '11.17.2';
 let mermaidLoad = null;
@@ -263,7 +263,7 @@ function BodyCheck({ body, onParsed }) {
 }
 
 // One rendered card. Its initial state is read once, so later renders keep what you typed.
-// A body may not draw whole: one stored before the laptop inbox checked bodies, for which the inbox sends `bodyFallback`,
+// A body may not draw whole: one stored before your own inbox checked bodies, for which the inbox sends `bodyFallback`,
 // or one the hosted inbox took unchecked. For that one the page finds the faults itself, draws the same fallback, and
 // reports the faults, so the card goes back to its agent.
 export function CardView({ draftKey, card, onAction, recommendationText }) {
@@ -748,7 +748,7 @@ export function FileChip({ card, path }) {
 // Card text with [[card-id]] links. A link shows the linked card title, and its text on hover.
 // Card text is Markdown, and [[card-id]] links to another card by its title.
 // A ```mermaid block draws as a diagram, except on a system card, which quotes an agent's words as they are.
-// With a card id in `files`, a file: link is a chip that opens the file in a new tab, which the laptop inbox serves for that card only.
+// With a card id in `files`, a file: link is a chip that opens the file in a new tab, which your own inbox serves for that card only.
 // Without one, as on the hosted inbox or for a card from another machine, the link shows its path as code.
 // A link to a card the state leaves out shows what `lookup(id)` finds: a cleared card's title, which opens that card, or
 // the id as plain text.
@@ -1208,7 +1208,7 @@ export function useTelemetry(signedIn) {
 
 const WHAT_COUNTS = 'how many cards were posted and answered, pairing requests, page opens, and how many agents, agent processes and tokens connected';
 
-// Shown until the person picks. On a laptop it offers the counts, which stay off unless they say yes.
+// Shown until the person picks. On your own inbox it offers the counts, which stay off unless they say yes.
 // On the hosted service it says once that the counts are always on.
 export function UsageNotice({ telemetry: t, onChange }) {
   if (!t || !t.notice) return null;
@@ -1244,7 +1244,7 @@ export function PhoneLink() {
   const [qr, setQr] = React.useState(null);
   const [copied, setCopied] = React.useState(null);
   const ref = React.useRef(null);
-  // A phone cannot reach an address that names this computer itself, so a laptop inbox gives its network addresses.
+  // A phone cannot reach an address that names this computer itself, so your own inbox gives its network addresses.
   const local = /^(localhost|127(\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)$/.test(location.hostname);
   const [network, setNetwork] = React.useState([]);
   const address = (local && network[0] ? network[0] : location.origin) + location.pathname;

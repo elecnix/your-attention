@@ -1,4 +1,4 @@
-// The usage collector: a small Worker apart from the inbox Worker. A laptop inbox posts one
+// The usage collector: a small Worker apart from the inbox Worker. Your own inbox posts one
 // report a day here, and the collector writes it to the Analytics Engine dataset that hosted
 // inboxes write directly. It checks each report against the fixed fields, and keeps no address.
 import { dataPoint, parseReport } from '../core/telemetry.ts';
@@ -45,7 +45,7 @@ export default {
     try { body = JSON.parse(text); } catch { return json({ error: 'the body is not JSON' }, 400); }
     const report = parseReport(body, Date.now());
     if (typeof report === 'string') return json({ error: report }, 400);
-    // Hosted inboxes write their own data points. A report here that claims an invite is not from a laptop.
+    // Hosted inboxes write their own data points. A report here that claims an invite does not come from your own inbox.
     if (report.source !== 'laptop' || report.invite !== '') return json({ error: 'only laptop reports come here' }, 400);
     env.USAGE.writeDataPoint(dataPoint(report));
     return new Response(null, { status: 204 });
