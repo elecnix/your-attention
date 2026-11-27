@@ -6,10 +6,22 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import { Client } from '../src/client.ts';
 import { SecretRequests } from '../src/integrations/secrets.ts';
 import { serve } from '../src/node/server.ts';
+
+// The README shows the dark picture, so only a dark run with no path writes docs/screenshot.png.
+const [scheme = 'dark', given] = process.argv.slice(2);
+if (scheme !== 'dark' && scheme !== 'light') {
+  console.error(`usage: readme-screenshot.ts [dark|light] [out.png]. "${scheme}" isn't a scheme, so nothing was drawn`);
+  process.exit(2);
+}
+if (scheme === 'light' && !given) {
+  console.error('usage: readme-screenshot.ts light out.png. A light picture needs its own path, because docs/screenshot.png is the dark one');
+  process.exit(2);
+}
+const out = given ?? path.join(import.meta.dirname, '..', 'docs', 'screenshot.png');
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-screenshot-'));
 const server = await serve({ port: 0, host: '127.0.0.1', home, mdns: false, watch: false, log: () => {}, telemetry: { url: 'http://127.0.0.1:9/v1/report' } });
@@ -55,20 +67,20 @@ try {
   void agent.stream('nightly-eval', () => {}, stop.signal);
 
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, colorScheme: process.argv[2] === 'light' ? 'light' : 'dark' });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, colorScheme: scheme });
   await page.goto(`${server.url}/#token=${server.ownerToken}`);
   await page.locator('.bar .pill.on').waitFor();
   await page.locator('.q', { hasText: 'Give the nightly eval run an Ollama API key?' }).click();
   // The field shows the made-up value below as dots. It is no key, works nowhere, and says so, so a reader who
   // recovers it from the picture finds nothing to use.
   await page.getByLabel('OLLAMA_API_KEY', { exact: true }).fill('fixture-not-a-key-0000000000000000');
-  await page.getByLabel('Run tonight at 02:00').check();
+  // A click that lands before the radio group is ready changes nothing, so the check repeats until it holds.
+  await expect(async () => { await page.getByLabel('Run tonight at 02:00').check({ timeout: 2000 }); }).toPass({ timeout: 15000 });
   await page.locator('.focus-card svg[id^="diagram-"]').first().waitFor();
   await page.mouse.move(0, 0);
   // The page grows with the diagram, so the picture takes its full height and cuts no part of the card.
   await page.setViewportSize({ width: 1440, height: await page.evaluate(() => document.documentElement.scrollHeight) });
   await page.waitForTimeout(500);
-  const out = process.argv[3] ?? path.join(import.meta.dirname, '..', 'docs', 'screenshot.png');
   await page.screenshot({ path: out });
   await browser.close();
   console.log(`wrote ${out}`);
