@@ -2434,7 +2434,7 @@ export class Inbox {
     // The first decision on a one-time code is final: a later answer keeps it, and an approval mints one ticket.
     let minted: OtpTicket[];
     try {
-      minted = this.decideOtp(card, before, codes, values, late);
+      minted = this.decideOtp(card, before, codes, values, late, Number(input.version ?? card.version));
     } catch (e) {
       await refund();
       throw e;
@@ -2516,7 +2516,7 @@ export class Inbox {
 
   /** Put each one-time code decision in `values`, keeping one made before, and return the tickets to store with the
    * answer. Synchronous, so the check of the earlier answer and the answer that follows it are one step. */
-  private decideOtp(card: Card, before: Answer | undefined, codes: Map<string, 'approve' | 'decline'>, values: Record<string, unknown>, late: LateAnswer | undefined): OtpTicket[] {
+  private decideOtp(card: Card, before: Answer | undefined, codes: Map<string, 'approve' | 'decline'>, values: Record<string, unknown>, late: LateAnswer | undefined, version: number): OtpTicket[] {
     const minted: OtpTicket[] = [];
     const fields = new Map(oneTimeCodes(String(card.body ?? '')).map((f) => [f.name, f]));
     for (const field of card.otp ?? []) {
@@ -2531,6 +2531,8 @@ export class Inbox {
       if (now === 'decline') { values[field] = { decline: true }; continue; }
       if (now !== 'approve') continue;
       if (late) throw new InboxError(409, `${field}: the agent closed this card, so it no longer asks for a code. Nothing was approved`);
+      // An approval stands for the key and the purpose the person read, so it counts only on the version it answers.
+      if (version !== card.version) throw new InboxError(409, `${field}: the card changed to version ${card.version} after you read version ${version}. Read it again before you approve. Nothing was approved`);
       const f = fields.get(field);
       if (!f) throw new InboxError(409, `${field}: the card no longer asks for this code`);
       const at = this.now();

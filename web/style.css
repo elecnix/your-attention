@@ -243,7 +243,7 @@
   .otp .otp-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 8px; }
   .otp .otp-facts dt { color: var(--muted); }
   .otp .otp-facts dd { margin: 0; overflow-wrap: anywhere; }
-  .otp .otp-purpose { font-family: var(--mono, ui-monospace, monospace); }
+  .otp .otp-purpose { font-family: var(--font-code) !important; }
   .secret-access .access-grant { display: grid; gap: 4px; }
   .secret-access select { font: inherit; margin-left: 4px; }
   .grants { display: grid; gap: 6px; margin: 6px 0; }

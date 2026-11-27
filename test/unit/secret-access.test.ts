@@ -6,7 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { describeAnswer as describeWithIds } from '../../src/client.ts';
-import { createHandler } from '../../src/core/http.ts';
 import { DEFAULT_GUIDANCE, Inbox, InboxError, type Caller } from '../../src/core/inbox.ts';
 import { GRANT_MAX_MS, type Candidate, type SecretQuery, type SecretSources, type SourceInfo } from '../../src/core/secret-sources.ts';
 import { isSealed, newSealKeys, openSealed, secretAccesses } from '../../src/core/sealed.ts';
@@ -17,6 +16,7 @@ import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import type { Client } from '../../src/client.ts';
 import { sealValue } from '../../src/core/sealed.ts';
+import { call } from './call-route.ts';
 import { withoutIds } from './fixture.ts';
 
 // The text around the field IDs, which test/unit/field-ids.test.ts covers.
@@ -70,13 +70,6 @@ function accessBody(publicKey: JsonWebKey, candidates: unknown[] = [DB], name = 
 
 const grant = (until = NOW + 3_600_000) => ({ grant: 'db-staging', source: 'age', instance: 'laptop', until });
 const rejects = (status: number, message: RegExp) => (e: unknown): boolean => e instanceof InboxError && e.status === status && message.test(e.message);
-
-/** Call the HTTP handler as one role. */
-async function call(inbox: Inbox, role: 'owner' | 'agent' | 'extension', method: string, route: string, body?: unknown): Promise<Response> {
-  const { secret } = await inbox.createToken(role, role);
-  const handle = createHandler(inbox);
-  return handle(new Request(`http://inbox.test${route}`, { method, headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }));
-}
 
 describe('the secret lookup routes', () => {
   it('answers candidates as metadata only, for an agent or the owner', async () => {

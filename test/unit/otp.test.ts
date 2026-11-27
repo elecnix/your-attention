@@ -9,7 +9,6 @@ import { describe, it } from 'node:test';
 import { sealedOtpKeys } from '../../src/cloudflare/otp-keys.ts';
 import { fileOtpKeys, OTP_KEYS_FILE } from '../../src/node/otp-keys.ts';
 import { describeAnswer, type Client } from '../../src/client.ts';
-import { createHandler } from '../../src/core/http.ts';
 import { Inbox, InboxError, type Caller } from '../../src/core/inbox.ts';
 import { base32Decode, base32Encode, isOtpApproval, issueCode, keyChecksum, readKey, STEP_MS, TICKET_MS, totp, verifyTotp, type OtpApproval, type OtpKeyStore } from '../../src/core/otp.ts';
 import { isSealed, newSealKeys, oneTimeCodes, openSealed } from '../../src/core/sealed.ts';
@@ -17,6 +16,7 @@ import { MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, Answer, NewCard } from '../../src/core/types.ts';
 import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
+import { call } from './call-route.ts';
 
 // The RFC 6238 test key for SHA-1: the ASCII digits 1 to 0, twice. Not anyone's authenticator key.
 const RFC_KEY = new TextEncoder().encode('12345678901234567890');
@@ -62,12 +62,6 @@ const post = (inbox: Inbox, publicKey: JsonWebKey, opts: { agent?: string; id?: 
   inbox.postCard(agent, { id: opts.id ?? 'c1', agent: opts.agent ?? SESSION, title: 'Publish 1.4.0 to npm?', body: otpBody(publicKey, opts) });
 
 const rejects = (status: number, message: RegExp) => (e: unknown): boolean => e instanceof InboxError && e.status === status && message.test(e.message);
-
-/** Call the HTTP handler with a new token of one role, which is never the token that posted a card here. */
-async function call(inbox: Inbox, role: 'owner' | 'agent' | 'extension', method: string, path: string, body?: unknown): Promise<Response> {
-  const { secret } = await inbox.createToken(role, role);
-  return createHandler(inbox)(new Request(`http://inbox.test${path}`, { method, headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }));
-}
 
 const tickets = (inbox: Inbox): number => (inbox as unknown as { store: MemoryStorage }).store.list('otptickets').length;
 const storedAnswer = (inbox: Inbox, id: string): Answer => (inbox as unknown as { store: MemoryStorage }).store.get<Answer>('answers', id)!;
@@ -207,6 +201,17 @@ describe('the otp card', () => {
     inbox.close(agent, 'c2', 'retracted', 'released already');
     await assert.rejects(inbox.answer('c2', { values: { NPM_OTP: 'approve' }, by: owner }), rejects(409, /closed this card/));
     assert.equal(tickets(inbox), 1);
+  });
+
+  it('takes an approval only for the version the person read, so a revision to another key mints nothing', async () => {
+    const { inbox, session } = await setup();
+    post(inbox, session.publicKey);
+    post(inbox, session.publicKey, { purpose: 'npm stage publish another-package@9.9.9' });
+    assert.equal(inbox.getCard('c1').version, 2);
+    await assert.rejects(inbox.answer('c1', { values: { NPM_OTP: 'approve' }, version: 1, by: owner }), rejects(409, /changed to version 2 after you read version 1/));
+    assert.equal(tickets(inbox), 0);
+    const ok = await inbox.answer('c1', { values: { NPM_OTP: 'approve' }, version: 2, by: owner });
+    assert.equal((ok.values['NPM_OTP'] as OtpApproval).purpose, 'npm stage publish another-package@9.9.9');
   });
 
   it('keeps the approval out of a dismissal', async () => {

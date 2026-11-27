@@ -8,13 +8,13 @@ import { BUILTIN_WIDGETS, expandWidgets } from '../../src/core/widgets.ts';
 import { loadParser } from '../../src/tui/body.ts';
 import { setup } from './tui-pane.ts';
 
-async function pane() {
+async function pane(purpose = 'npm stage approve your-attention@1.4.0') {
   const keys = await newSealKeys();
   const widget = { name: 'otp', ...BUILTIN_WIDGETS.find((w) => w.name === 'otp')!.versions[0]! };
   const body = expandWidgets([
     'root = Card([intro, npm])',
     'intro = TextContent("The automated review passed.")',
-    `npm = widget otp ${JSON.stringify({ name: 'NPM_OTP', key: 'npm', purpose: 'npm stage approve your-attention@1.4.0', publicKey: JSON.stringify(keys.publicKey) })}`,
+    `npm = widget otp ${JSON.stringify({ name: 'NPM_OTP', key: 'npm', purpose, publicKey: JSON.stringify(keys.publicKey) })}`,
   ].join('\n'), () => widget).body;
   const c: Card = { id: 'otp', agent: 'a1', kind: 'ask', title: 'Publish?', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], body, otp: ['NPM_OTP'], otpHolder: 'your own inbox on mbp, in ~/.your-attention/otp-keys.json, which only its user reads' };
   return setup(c, {}, 110);
@@ -30,6 +30,12 @@ describe('an otp field in the terminal', () => {
     assert.match(t, /Key kept by: your own inbox on mbp, in ~\/\.your-attention\/otp-keys\.json, which only its user reads/);
     assert.match(t, /Approve one code from npm/);
     assert.match(t, /Decline/);
+  });
+
+  it('drops the control characters of a purpose, so an escape sequence never reaches the terminal', async () => {
+    const t = (await pane('npm publish\u001b]0;pwned\u0007 now')).text();
+    assert.match(t, /For: npm publish\]0;pwned now/);
+    assert.doesNotMatch(t, /[\u001b\u0007]/);
   });
 
   it('sends nothing for a field the person left alone, and the decision the person picked', async () => {

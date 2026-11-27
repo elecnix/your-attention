@@ -557,10 +557,17 @@ function OneTimeCode({ props }) {
   const purpose = String(props.purpose ?? '');
   const [, redraw] = React.useState(0);
   React.useEffect(() => { const f = () => redraw((n) => n + 1); secretWatchers.add(f); return () => { secretWatchers.delete(f); }; }, []);
-  const pick = typedSecrets.get(card)?.get(name)?.otp;
+  // A choice holds for the key and the purpose it was made for: a revision that changes either drops it, so Send answer
+  // never approves text the person did not read.
+  React.useEffect(() => {
+    const entry = typedSecrets.get(card)?.get(name);
+    if (entry?.otp && (entry.key !== key || entry.purpose !== purpose)) { typedSecrets.get(card).delete(name); secretsChanged(); }
+  }, [card, name, key, purpose]);
+  const entry = typedSecrets.get(card)?.get(name);
+  const pick = entry?.key === key && entry?.purpose === purpose ? entry.otp : undefined;
   const choose = (value) => {
     const fields = typedSecrets.get(card) ?? new Map();
-    fields.set(name, { otp: value });
+    fields.set(name, { otp: value, key, purpose });
     typedSecrets.set(card, fields);
     secretsChanged();
   };

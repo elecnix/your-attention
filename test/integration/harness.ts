@@ -124,6 +124,33 @@ export function runCli(env: NodeJS.ProcessEnv, ...args: string[]): Promise<{ cod
     .then((r) => ({ code: 0, ...r }), (e: { code: number; stdout: string; stderr: string }) => e);
 }
 
+/** Run the CLI with this text on stdin, as a pipe answers its questions. A child that fails to start resolves with the
+ * reason in `stderr`, so one test fails rather than the whole file. */
+export function runCliWithInput(env: NodeJS.ProcessEnv, input: string, ...args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.on('error', (e) => resolve({ code: 1, stdout, stderr: `${stderr}the CLI did not start: ${e.message}` }));
+    child.stdout.on('data', (c: Buffer) => { stdout += c.toString(); });
+    child.stderr.on('data', (c: Buffer) => { stderr += c.toString(); });
+    child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.stdin.on('error', () => {});
+    child.stdin.end(input);
+  });
+}
+
+/** Every file under `dir` whose bytes contain `text`, for a test that proves a secret reached no file. */
+export function filesHolding(dir: string, text: string): string[] {
+  const found: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    if (fs.readFileSync(file).includes(text)) found.push(file);
+  }
+  return found;
+}
+
 /** Start `your-attention serve` as its own process in a temporary home, which is what tests of the CLI itself need.
  * `setup` runs in that home before the inbox starts, for state the inbox reads once at start, such as its secret sources. */
 export async function serveForTest(prefix = 'ya-cli-', setup?: (env: NodeJS.ProcessEnv, yaHome: string) => Promise<void>, opts: { output?: string[] } = {}): Promise<CliServer> {

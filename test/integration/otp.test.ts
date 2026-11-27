@@ -3,7 +3,7 @@
 // a command gets the code in its environment. Then the digits are searched for in everything the inbox printed, every
 // file under its home, the CLI's output, the agent stream, the owner's state, and what the model read.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
@@ -12,7 +12,7 @@ import { base32Encode, totp, verifyTotp, type OtpApproval } from '../../src/core
 import type { AgentEvent } from '../../src/core/types.ts';
 import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
-import { CLI_ARGS, runCli, serveForTest, until, type CliServer } from './harness.ts';
+import { filesHolding, runCli, runCliWithInput, serveForTest, until, type CliServer } from './harness.ts';
 
 // The RFC 6238 test key for SHA-1, not anyone's authenticator key.
 const KEY = new TextEncoder().encode('12345678901234567890');
@@ -24,32 +24,8 @@ let s: CliServer;
 before(async () => { s = await serveForTest('ya-otp-', undefined, { output }); });
 after(async () => { await s.close(); });
 
-/** Run the CLI with lines on its standard input, as a pipe answers the hidden questions. */
-function cliWithInput(input: string, ...args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, ...args], { env: s.env, stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (b: Buffer) => { stdout += b.toString('utf8'); });
-    child.stderr.on('data', (b: Buffer) => { stderr += b.toString('utf8'); });
-    child.on('close', (code) => resolve({ code, stdout, stderr }));
-    child.stdin.end(input);
-  });
-}
-
-/** Every file under `dir` whose bytes hold `needle`. */
-function filesHolding(dir: string, needle: string): string[] {
-  const hits: string[] = [];
-  const walk = (d: string) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile() && fs.readFileSync(p).includes(needle)) hits.push(p);
-    }
-  };
-  walk(dir);
-  return hits;
-}
+/** Run the CLI in this inbox's home, with lines on its standard input, as a pipe answers the hidden questions. */
+const cliWithInput = (input: string, ...args: string[]) => runCliWithInput(s.env, input, ...args);
 
 describe('a one-time code on your own inbox', () => {
   it('enrolls a key from a pipe, gives an approved session a fresh code in its commands, and the digits appear nowhere else', async () => {

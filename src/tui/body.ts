@@ -322,11 +322,12 @@ export class BodyRenderer {
         return;
       case 'OneTimeCode': {
         // An approval is a decision, not a value to seal, so the terminal answers it as the page does, with no digits.
+        // The agent wrote the key and the purpose, so their control characters are dropped before they reach the terminal.
         const name = str(p['name']);
-        const key = str(p['key']);
+        const key = sanitize(str(p['key']));
         doc.para([{ text: `One-time code from the key ${key}`, style: s.bold }], { first: this.pad() });
-        doc.para([{ text: 'For: ', style: s.dim }, { text: str(p['purpose']) }], { first: this.pad() });
-        doc.para([{ text: 'Key kept by: ', style: s.dim }, { text: this.ctx.otpHolder || 'this inbox' }], { first: this.pad() });
+        doc.para([{ text: 'For: ', style: s.dim }, { text: sanitize(str(p['purpose'])) }], { first: this.pad() });
+        doc.para([{ text: 'Key kept by: ', style: s.dim }, { text: sanitize(this.ctx.otpHolder || 'this inbox') }], { first: this.pad() });
         const item = (label: string, description: string, value: string) => ({ type: 'element', typeName: 'RadioItem', props: { label, description, value } });
         this.choices({ type: 'element', typeName: 'RadioGroup', props: { name, items: [
           item(`Approve one code from ${key}`, 'The agent gets a ticket that gives it one fresh code within 10 minutes. You never see the code.', 'approve'),
