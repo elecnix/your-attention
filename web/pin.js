@@ -10,7 +10,7 @@ const send = (method, path, body) => fetch(BASE + path, { method, headers: { 'co
 // The PIN never leaves the page. It derives a key with the salt and iterations of GET /v1/pin, and sends the key.
 const pinState = () => fetch(`${BASE}v1/pin`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`the inbox answered ${r.status}`))));
 const currentKey = async (pin, onProgress) => { const s = await pinState(); return pinKey(pin, s.salt, s.iterations, onProgress); };
-// A page without Web Crypto, such as a phone at a plain-HTTP laptop address, derives the key in seconds, and says how far it got.
+// A page without Web Crypto, such as a phone at the plain-HTTP address of your own inbox, derives the key in seconds, and says how far it got.
 const progressText = (fraction) => (fraction === null ? null : `Checking the PIN on this device: ${Math.floor(fraction * 100)}%`);
 
 // A loopback, private network or .local address means a computer runs the inbox, and its CLI resets the PIN.

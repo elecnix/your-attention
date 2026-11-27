@@ -1,4 +1,4 @@
-// The usage collector, a Worker apart from the inbox. Laptop inboxes post their daily report here.
+// The usage collector, a Worker apart from the inbox. Inboxes that people run on their own computers post their daily report here.
 // The `deploy-cloudflare` workflow deploys it on every run, before the inbox. See SPEC.md, "Usage counts".
 {
   "name": "telemetry",
@@ -6,6 +6,6 @@
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "analytics_engine_datasets": [{ "binding": "USAGE", "dataset": "your_attention_usage" }],
-  // Ten reports a minute per sender address: a laptop sends one a day, and at most a week of them after it was offline.
+  // Ten reports a minute per sender address: such an inbox sends one a day, and at most a week of them after it was offline.
   "ratelimits": [{ "name": "LIMITER", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } }]
 }

@@ -227,8 +227,8 @@ export class Client {
   }
 
   /** An inbox that does not check diagrams or bodies itself, such as the hosted one, takes them unchecked. So the client
-   * reads what the inbox would store, after templates and widgets, and checks it as a laptop inbox would, before it sends the card.
-   * It fails with the laptop inbox's own words. */
+   * reads what the inbox would store, after templates and widgets, and checks it as your own inbox would, before it sends the card.
+   * It fails with the words of your own inbox. */
   private async checkFirst(route: string, req: { card?: NewCard; id?: string; edits?: { old: string; new: string }[]; field?: string | undefined; pullRequests?: PullRequest | PullRequest[] | null }): Promise<void> {
     this.inboxChecks ??= this.call<{ checks?: { diagrams: boolean; body: boolean } }>('GET', '/v1/info')
       .then((i) => i.checks ?? { diagrams: true, body: true }, (e: unknown) => { this.inboxChecks = undefined; throw e; });

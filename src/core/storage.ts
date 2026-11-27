@@ -86,7 +86,7 @@ export class MemoryStorage implements Storage {
   close(): void {}
 }
 
-/** Where file bytes go: R2 in the Cloudflare build, files on disk on a laptop.
+/** Where file bytes go: R2 in the Cloudflare build, files on disk in the Node build.
  * Calls are asynchronous, so the inbox stores the bytes before it commits the card. */
 export interface BlobStore {
   put(key: string, bytes: Uint8Array<ArrayBuffer>, type: string): Promise<void>;

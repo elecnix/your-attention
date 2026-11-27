@@ -124,7 +124,7 @@ export class PinLock {
     return () => this.listeners.delete(listener);
   }
 
-  /** Set a PIN typed in this process, such as at the laptop's terminal. Clients send the key to setKey instead. */
+  /** Set a PIN typed in this process, such as at the terminal of the computer that runs the inbox. Clients send the key to setKey instead. */
   async set(pin: string): Promise<void> {
     await this.setKey(await newPinKey(pin, this.iterations));
   }
@@ -163,7 +163,7 @@ export class PinLock {
       ? { failures: 0, lockouts: t.lockouts + 1, until: now + Math.min(FIRST_LOCKOUT_MS * 2 ** t.lockouts, MAX_LOCKOUT_MS) }
       : { ...t, failures };
     this.store.put('meta', 'pin-tries', next);
-    // An older laptop inbox stored the derived key itself, so its hash is the SHA-256 of that.
+    // An older version of your own inbox stored the derived key itself, so its hash is the SHA-256 of that.
     const expected = r.key ?? (await sha256(r.hash ?? ''));
     if (validKey(key) && same(await sha256(key), expected)) {
       this.store.delete('meta', 'pin-tries');
