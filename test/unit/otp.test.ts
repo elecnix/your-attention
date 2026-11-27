@@ -409,6 +409,18 @@ describe('where the keys live', () => {
     }
   });
 
+  it('names the key file, and quotes none of it, when the file does not parse', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-otp-'));
+    try {
+      const keys = fileOtpKeys(home, 'test-machine');
+      // A file cut off in the middle of the key, as a full disk would leave it.
+      fs.writeFileSync(path.join(home, OTP_KEYS_FILE), `{"npm": "${KEY_TEXT}`);
+      await assert.rejects(keys.load('npm'), (e: Error) => /otp-keys\.json is not a JSON object of labels and keys$/.test(e.message) && !e.message.includes(KEY_TEXT.slice(0, 8)));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the hosted keys as ciphertext under the Worker secret, which another inbox or another secret cannot open', async () => {
     const storage = new MemoryStorage();
     const keys = sealedOtpKeys('worker-secret-for-tests', 'inbox-a', storage);

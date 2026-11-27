@@ -259,16 +259,18 @@ const stop = new AbortController();
 // the hooks on every tool call of a session that never received one.
 let secretSocket: Awaited<ReturnType<typeof serveSecrets>> | undefined;
 let socketError = '';
-const openSecretSocket = async (): Promise<boolean> => {
-  if (secretSocket) return true;
-  try {
-    secretSocket = await serveSecrets(secrets, agent, session);
-    return true;
-  } catch (e) {
+// An answer and a card_otp call can ask at the same moment, so they share one open rather than start two sockets.
+let opening: Promise<boolean> | undefined;
+const openSecretSocket = (): Promise<boolean> => {
+  if (secretSocket) return Promise.resolve(true);
+  opening ??= serveSecrets(secrets, agent, session).then((s) => { secretSocket = s; return true; }, (e: unknown) => {
     socketError = (e as Error).message;
     log('no socket for secrets:', socketError);
+    // A failed open may succeed later, such as once a folder exists, so the next grant tries again.
+    opening = undefined;
     return false;
-  }
+  });
+  return opening;
 };
 const quit = (): void => { stop.abort(); asks.stop(); secretSocket?.close(); process.exit(0); };
 // Exit with the session: a leftover server would show the agent as listening.

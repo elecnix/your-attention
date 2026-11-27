@@ -19,7 +19,9 @@ export function fileOtpKeys(home: string, machine: string): OtpKeyStore {
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {};
       throw e;
     }
-    const keys = JSON.parse(text) as unknown;
+    // JSON.parse quotes the text near a fault in its message, and this text is keys, so the error names the file alone.
+    let keys: unknown;
+    try { keys = JSON.parse(text); } catch { keys = undefined; }
     if (!keys || typeof keys !== 'object' || Array.isArray(keys)) throw new Error(`${shown} is not a JSON object of labels and keys`);
     return keys as Record<string, string>;
   };
