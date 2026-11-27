@@ -133,9 +133,10 @@ describe('the Claude Code channel', () => {
     const run = spawnSync('bash', ['-c', rewritten.updatedInput.command], { encoding: 'utf8' });
     assert.equal(run.stdout, 'demo-value-not-real|19', run.stderr);
     const again = spawnSync('bash', ['-c', rewritten.updatedInput.command], { encoding: 'utf8' });
-    assert.notEqual(again.status, 0, 'a token works once');
-    assert.equal(again.stdout, '');
-    assert.match(again.stderr, /did not reach the command: this token is unknown, used or expired/);
+    assert.equal(again.stdout, '', 'a token works once, so the command never ran');
+    // The rewritten command reports the failure as text and ends with status 0, so secret-post still runs on it.
+    assert.equal(again.status, 0);
+    assert.match(again.stderr, /did not reach the command: this token is unknown, used or expired\nExit code 1\n$/);
 
     const post = await runHook(h, 'secret-post', { session_id: SESSION, tool_name: 'Bash', tool_input: rewritten.updatedInput, tool_response: { stdout: run.stdout, stderr: '', interrupted: false, isImage: false } }, { env });
     const masked = (JSON.parse(post.out) as { hookSpecificOutput: { hookEventName: string; updatedToolOutput: { stdout: string; isImage: boolean } } }).hookSpecificOutput;

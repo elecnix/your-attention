@@ -138,5 +138,13 @@ export function exportLines(reply: Record<string, unknown> | undefined): string 
 /** The command the hook runs instead of `command`: read the variables once with `token`, export them, then run it.
  * The original command keeps the same shell, so a `cd` or a function it defines behaves as before. */
 export function rewrite(command: string, file: string, token: string, reader: string[]): string {
-  return `eval "$(${reader.map(shellQuote).join(' ')} ${shellQuote(file)} ${shellQuote(token)})" && {\n${command}\n}`;
+  // Claude Code runs only PostToolUse hooks on a command that exits 0, and a PostToolUseFailure hook can't change the
+  // error text. So the command reports a failure as text and ends with status 0, which lets secret-post mask it.
+  return `${readerPrefix(reader)} ${shellQuote(file)} ${shellQuote(token)})" && {\n${command}\n}\n`
+    + `__ya_status=$?; if [ "$__ya_status" -ne 0 ]; then printf 'Exit code %s\\n' "$__ya_status" >&2; fi; unset __ya_status; true`;
+}
+
+/** How every command the hook rewrote begins, so secret-post can tell one that may hold a secret. */
+export function readerPrefix(reader: string[]): string {
+  return `eval "$(${reader.map(shellQuote).join(' ')}`;
 }

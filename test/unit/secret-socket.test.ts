@@ -5,7 +5,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { spawnSync } from 'node:child_process';
 import { ask, exportLines, rewrite, serveSecrets, socketPath } from '../../src/integrations/claude/secret-socket.ts';
+import { handle, READER } from '../../src/integrations/claude/secret-hook.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 
 /** A runtime folder short enough for a socket path on macOS. */
@@ -51,6 +53,36 @@ describe('the secrets socket of the Claude Code channel', { skip: process.platfo
 
   it('runs the command after a newline, so a command without a trailing semicolon still closes the group', () => {
     const out = rewrite('git status', '/run/s.sock', 'tok', ['node', 'reader.ts']);
-    assert.equal(out, `eval "$('node' 'reader.ts' '/run/s.sock' 'tok')" && {\ngit status\n}`);
+    assert.ok(out.startsWith(`eval "$('node' 'reader.ts' '/run/s.sock' 'tok')" && {\ngit status\n}`), out);
+  });
+
+  it('reports a failed command as text and ends with status 0, so the hook that masks its output still runs', () => {
+    // A reader that prints what the channel would, without a channel.
+    const reader = ['sh', '-c', 'printf "%s\\n" "export K=value-not-real" true', 'reader'];
+    const run = spawnSync('bash', ['-c', rewrite('printf "%s" "$K"; cd /; false', '/run/s.sock', 'tok', reader) + '\npwd'], { encoding: 'utf8' });
+    assert.equal(run.status, 0);
+    assert.equal(run.stdout, 'value-not-real/\n', 'the cd still holds after the command');
+    assert.equal(run.stderr, 'Exit code 1\n');
+    const ok = spawnSync('bash', ['-c', rewrite('true', '/run/s.sock', 'tok', reader)], { encoding: 'utf8' });
+    assert.equal(ok.status, 0);
+    assert.equal(ok.stderr, '', 'a command that succeeds reports nothing');
+  });
+
+  it('withholds the output of a rewritten command when the channel does not mask it', async () => {
+    const dir = runtime();
+    const env = { XDG_RUNTIME_DIR: dir };
+    // A file where the socket should be: nothing answers on it.
+    fs.mkdirSync(path.dirname(socketPath('s3', env)), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(socketPath('s3', env), '');
+    try {
+      const rewritten = rewrite('printf "%s" "$K"', socketPath('s3', env), 'tok', READER);
+      const out = await handle('secret-post', { session_id: 's3', tool_name: 'Bash', tool_input: { command: rewritten }, tool_response: { stdout: 'value-not-real', stderr: '', interrupted: false, isImage: false } }, env) as { hookSpecificOutput: { updatedToolOutput: { stdout: string } } };
+      assert.match(out.hookSpecificOutput.updatedToolOutput.stdout, /withheld/);
+      assert.doesNotMatch(JSON.stringify(out), /value-not-real/);
+      const plain = await handle('secret-post', { session_id: 's3', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: { stdout: 'a', stderr: '', interrupted: false, isImage: false } }, env);
+      assert.equal(plain, undefined, 'a command the hook did not rewrite got no secret, so its output goes through');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

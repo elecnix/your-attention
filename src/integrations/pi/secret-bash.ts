@@ -30,6 +30,20 @@ export async function loadPiTools(): Promise<PiTools | undefined> {
   }
 }
 
+/** Load pi's tools and register the secret bash tool. Says whether it did; a failure anywhere is logged and answers
+ * false, so the answer that carried the grant still reaches the model, with a line that says bash won't get it. */
+export async function installSecretBash(load: () => Promise<PiTools | undefined>, cwd: string, secrets: SecretRequests, agent: () => string, register: (tool: BashTool) => void, log: (message: string) => void): Promise<boolean> {
+  try {
+    const found = await load();
+    if (!found) return false;
+    register(secretBash(found, cwd, secrets, agent));
+    return true;
+  } catch (e) {
+    log(`could not rebuild the bash tool: ${(e as Error).message}`);
+    return false;
+  }
+}
+
 /** The bash tool for `agent`: pi's own, with the live grants added to each command's environment and its output masked. */
 export function secretBash(pi: PiTools, cwd: string, secrets: SecretRequests, agent: () => string): BashTool {
   const local = pi.createLocalBashOperations();

@@ -11,6 +11,7 @@ import { newSealKeys, sealValue } from '../../src/core/sealed.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { Redactor } from '../../src/secrets/redact.ts';
+import { installSecretBash, type PiTools } from '../../src/integrations/pi/secret-bash.ts';
 
 const T0 = Date.UTC(2026, 10, 27, 12, 0);
 const MIN = 60_000;
@@ -158,6 +159,16 @@ describe('a secret_access grant in the session', () => {
       for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the bash tool of pi', () => {
+  it('says the grants did not reach bash, rather than throwing, when pi fails to build the tool', async () => {
+    const broken = { createLocalBashOperations: () => ({ exec: async () => ({ exitCode: 0 }) }), createBashTool: () => { throw new Error('no bash here'); } } as unknown as PiTools;
+    const logged: string[] = [];
+    const ok = await installSecretBash(async () => broken, '/repo', new SecretRequests(), () => 'pi:s1', () => { throw new Error('never registered'); }, (m) => logged.push(m));
+    assert.equal(ok, false);
+    assert.match(logged.join('\n'), /no bash here/);
   });
 });
 

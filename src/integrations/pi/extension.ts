@@ -9,7 +9,7 @@ import { herdrPlace } from '../herdr/place.ts';
 import { saveAnswerImages } from '../images.ts';
 import { createPromptCards, type PromptEvent } from './prompt.ts';
 import { SecretRequests } from '../secrets.ts';
-import { loadPiTools, type PiTools, secretBash } from './secret-bash.ts';
+import { installSecretBash, loadPiTools, type PiTools } from './secret-bash.ts';
 import { runTool } from '../run-tool.ts';
 import { parseTagsFlag } from '../tags.ts';
 import { CardAsks, memoryStore } from '../card-asks.ts';
@@ -85,12 +85,9 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
   /** Whether this session's bash tool adds the grants to each command, which it does from the first grant on. */
   let secretBashOn: Promise<boolean> | undefined;
   const deliverGrants = (cwd: string): Promise<boolean> => {
-    secretBashOn ??= tools().then((found) => {
-      if (!found) return false;
-      const bash = secretBash(found, cwd, secrets, () => agent);
+    secretBashOn ??= installSecretBash(tools, cwd, secrets, () => agent, (bash) => {
       pi.registerTool({ ...bash, execute: (id: string, params: unknown, signal?: AbortSignal, onUpdate?: unknown) => bash.execute(id, params, signal, onUpdate) } as unknown as Parameters<PiApi['registerTool']>[0]);
-      return true;
-    }, (e: Error) => { log('could not rebuild the bash tool:', e.message); return false; });
+    }, (message) => log(message));
     return secretBashOn;
   };
   // A session waiting on a prompt draws no output, so only pi's own lifecycle tells it apart from a session that
