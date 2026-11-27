@@ -232,7 +232,7 @@ export class Client {
   }
 
   /** Enroll a key with the current code of the person's authenticator. The owner only. */
-  otpEnroll(label: string, input: { key: string; code: string; allow: string[] }): Promise<OtpKeyInfo> {
+  otpEnroll(label: string, input: { key: string; code: string; allow?: string[] }): Promise<OtpKeyInfo> {
     return this.call('PUT', `/v1/otp/keys/${encodeURIComponent(label)}`, input);
   }
 
@@ -711,6 +711,7 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
       const used = v.issuedAt === undefined ? '' : ` The inbox already issued its code at ${utc(v.issuedAt)}, so the ticket is used.`;
       lines.push(`${name}: the person approved a code from the key ${v.key} for "${v.purpose}". Call card_otp with ticket ${v.ticket} right before the command that needs it, and that command gets a fresh code as $${name}. The ticket gives one code and ends at ${utc(v.expiresAt)}, ${TICKET_MS / 60_000} minutes after the approval.${used}`);
     } else if (isOtpDecline(v)) lines.push(`${name}: the person declined, so there is no ticket and no code. Do not run the command that needs it.`);
+    else if (late) lines.push(`${name}: not approved, because the card was closed when the person answered, so there is no ticket. Post a new otp card if you still need a code.`);
     else lines.push(`${name}: the person did not approve a code, so there is no ticket. Do not run the command that needs it.`);
   }
   for (const [k, v] of Object.entries(answer.values)) {

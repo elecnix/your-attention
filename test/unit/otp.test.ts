@@ -16,7 +16,7 @@ import { MemoryStorage } from '../../src/core/storage.ts';
 import type { AgentEvent, Answer, NewCard } from '../../src/core/types.ts';
 import { runTool } from '../../src/integrations/run-tool.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
-import { call } from './call-route.ts';
+import { createHandler } from '../../src/core/http.ts';
 
 // The RFC 6238 test key for SHA-1: the ASCII digits 1 to 0, twice. Not anyone's authenticator key.
 const RFC_KEY = new TextEncoder().encode('12345678901234567890');
@@ -62,6 +62,12 @@ const post = (inbox: Inbox, publicKey: JsonWebKey, opts: { agent?: string; id?: 
   inbox.postCard(agent, { id: opts.id ?? 'c1', agent: opts.agent ?? SESSION, title: 'Publish 1.4.0 to npm?', body: otpBody(publicKey, opts) });
 
 const rejects = (status: number, message: RegExp) => (e: unknown): boolean => e instanceof InboxError && e.status === status && message.test(e.message);
+
+/** Call the HTTP handler with a new token of one role, which is never the token that posted a card here. */
+async function call(inbox: Inbox, role: 'owner' | 'agent' | 'extension', method: string, route: string, body?: unknown): Promise<Response> {
+  const { secret } = await inbox.createToken(role, role);
+  return createHandler(inbox)(new Request(`http://inbox.test${route}`, { method, headers: { authorization: `Bearer ${secret}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }));
+}
 
 const tickets = (inbox: Inbox): number => (inbox as unknown as { store: MemoryStorage }).store.list('otptickets').length;
 const storedAnswer = (inbox: Inbox, id: string): Answer => (inbox as unknown as { store: MemoryStorage }).store.get<Answer>('answers', id)!;
@@ -126,6 +132,14 @@ describe('enrolling a key', () => {
   it('answers that an inbox without a key store keeps no keys', async () => {
     const inbox = new Inbox(new MemoryStorage(), () => NOW);
     await assert.rejects(inbox.otpEnroll(owner, 'npm', { key: KEY_TEXT, code: await totp(RFC_KEY, NOW), allow: [SESSION] }), rejects(404, /keeps no one-time code keys/));
+  });
+
+  it('keeps the allowlist when the owner enrolls a key again without naming sessions', async () => {
+    const { inbox } = await setup({ allow: [SESSION, 'twin'] });
+    const again = await inbox.otpEnroll(owner, 'npm', { key: KEY_TEXT, code: await totp(RFC_KEY, NOW) });
+    assert.deepEqual(again.allow, [SESSION, 'twin']);
+    const replaced = await inbox.otpEnroll(owner, 'npm', { key: KEY_TEXT, code: await totp(RFC_KEY, NOW), allow: ['other'] });
+    assert.deepEqual(replaced.allow, ['other']);
   });
 
   it('adds and removes sessions from the allowlist, and removes the key', async () => {
@@ -199,7 +213,11 @@ describe('the otp card', () => {
 
     post(inbox, session.publicKey, { id: 'c2' });
     inbox.close(agent, 'c2', 'retracted', 'released already');
-    await assert.rejects(inbox.answer('c2', { values: { NPM_OTP: 'approve' }, by: owner }), rejects(409, /closed this card/));
+    // A late answer reaches the agent with its comment, as any late answer does, and its approval mints nothing.
+    const late = await inbox.answer('c2', { values: { NPM_OTP: 'approve' }, comment: 'too late?', by: owner });
+    assert.equal(late.values['NPM_OTP'], undefined);
+    assert.equal(late.comment, 'too late?');
+    assert.match(describeAnswer(inbox.getCard('c2'), late), /NPM_OTP: not approved, because the card was closed when the person answered, so there is no ticket/);
     assert.equal(tickets(inbox), 1);
   });
 

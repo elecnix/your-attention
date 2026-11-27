@@ -687,7 +687,7 @@ The inbox follows RFC 6238 with the parameters that authenticator apps and npm u
 
 Only the owner can call these routes. An agent or an extension gets 403.
 
-- `PUT /v1/otp/keys/<label> {key, code, allow}` enrolls a key, or replaces the one with that label, and answers 201 with `{label, allow, enrolledAt}`. A label is 1 to 40 lowercase letters, digits, dots, dashes or underscore characters.
+- `PUT /v1/otp/keys/<label> {key, code, allow?}` enrolls a key, or replaces the one with that label, and answers 201 with `{label, allow, enrolledAt}`. Without `allow`, a replaced key keeps the sessions it allowed, so a ticket approved before the repair of a damaged key still redeems. A label is 1 to 40 lowercase letters, digits, dots, dashes or underscore characters.
 - `PATCH /v1/otp/keys/<label> {add, remove}` changes the allowlist.
 - `DELETE /v1/otp/keys/<label>` removes the key.
 - `GET /v1/otp/keys` answers `{holder, keys}`, where each key is `{label, allow, enrolledAt, lastIssuedAt?}`. It never answers a key or its checksum.
@@ -716,9 +716,7 @@ npm = widget otp {"name": "NPM_OTP", "key": "npm", "purpose": "npm stage publish
 
 `name` sets the variable that receives the code. `key` gives the label of an enrolled key. `purpose` is one line, at most 300 characters, that says what the code is for. `card_post` fills `publicKey` with the session's key for secret fields. The widget places `OneTimeCode(name, key, purpose, publicKey)`, four string literals, inside a form.
 
-On a post or a patch, the inbox sets `otpHolder`, a phrase that says which inbox holds the keys, and lists the names of the `otp` fields on the card.
-
-The agent can't set either.
+On a post or a patch, the inbox lists the names of the card's otp fields in its `otp` field, and sets `otpHolder`, a phrase that says which inbox holds the keys. The agent can't set either.
 
 Should a call go wrong, the inbox answers 400 when the inbox has no key store, when no key has that label, when the purpose is empty, when a call doesn't give four string literals, or when a name repeats or also names a secret or a privileged action. It answers 403 when the key doesn't list the session.
 
@@ -737,7 +735,7 @@ Inside the owner's `POST /v1/cards/<id>/answer`, each otp field takes `"approve"
 - An empty field doesn't get a ticket.
 - Any other value gets 400.
 
-The first decision is final. A later answer that repeats the same decision, or sends none, keeps the earlier value and doesn't create a second ticket. A later answer with the other decision gets 409. An approval that arrives after the agent closed the card gets 409 and approves nothing. Dismissing the card leaves the otp field empty.
+The first decision is final. A later answer that repeats the same decision, or sends none, keeps the earlier value and doesn't create a second ticket. A later answer with the other decision gets 409. An approval in a [late answer](#late-answers) mints nothing, as the inbox drops `approval_<i>` from one. The inbox still stores the rest of that answer and delivers it, and the agent's answer text says the code was not approved because the card was closed. Dismissing the card leaves the otp field empty.
 
 A ticket lasts 10 minutes. An agent with an open stream receives the answer within a second and redeems the ticket at once. The rest of the window covers an agent that is in the middle of a command, or one whose stream reconnects. A ticket older than that no longer matches when the person approved, so the agent asks again on a new card.
 

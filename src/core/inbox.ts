@@ -2536,7 +2536,9 @@ export class Inbox {
       }
       if (now === 'decline') { values[field] = { decline: true }; continue; }
       if (now !== 'approve') continue;
-      if (late) throw new InboxError(409, `${field}: the agent closed this card, so it no longer asks for a code. Nothing was approved`);
+      // A late answer still reaches the agent, comment and all, but the agent no longer asks for a code, so it mints
+      // nothing, as an approval sentence on a closed card is never sent.
+      if (late) continue;
       // An approval stands for the key and the purpose the person read, so it counts only on the version it answers.
       if (version !== card.version) throw new InboxError(409, `${field}: the card changed to version ${card.version} after you read version ${version}. Read it again before you approve. Nothing was approved`);
       const f = fields.get(field);
@@ -2568,7 +2570,9 @@ export class Inbox {
     const store = this.ownerOnly(caller, 'enrolls a one-time code key');
     const name = String(label ?? '');
     if (!KEY_LABEL.test(name)) throw new InboxError(400, 'a key label is 1 to 40 lowercase letters, digits, dots, dashes or underscores, such as npm');
-    const allow = agentList(input.allow);
+    // Enrolling a key again, as a damaged key's message asks, keeps the sessions it allowed unless the call names others,
+    // so a ticket approved before the repair still redeems.
+    const allow = input.allow === undefined ? (this.store.get<OtpKeyRecord>('otpkeys', name)?.allow ?? []) : agentList(input.allow);
     const key = readKey(String(input.key ?? ''));
     const at = this.now();
     if (!(await verifyTotp(key, String(input.code ?? '').replace(/\s/g, ''), at))) {

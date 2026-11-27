@@ -421,6 +421,7 @@ switch (command) {
     const { values, positionals } = parseCommand(command, { args: rest, allowPositionals: true, options: { allow: { type: 'string', multiple: true } } });
     const [sub = 'list', label, ...sessions] = positionals;
     if (!['list', 'enroll', 'allow', 'disallow', 'remove'].includes(sub)) usageError(command, `unknown subcommand ${sub}`);
+    if (sub === 'list' && label) usageError(command, `unexpected argument ${label}: otp list lists every key`);
     if (sub !== 'list' && !label) usageError(command, `otp ${sub} needs the key's label, such as npm`);
     if ((sub === 'allow' || sub === 'disallow') && !sessions.length) usageError(command, `otp ${sub} needs one session id or more`);
     if (sub !== 'allow' && sub !== 'disallow' && sessions.length) usageError(command, `unexpected argument ${sessions[0]}`);
@@ -443,7 +444,8 @@ switch (command) {
         } finally {
           t.close();
         }
-        const k = await inbox.otpEnroll(label!, { key, code, allow: values.allow ?? [] });
+        // Without --allow, enrolling an existing label again keeps the sessions it allowed.
+        const k = await inbox.otpEnroll(label!, { key, code, ...(values.allow ? { allow: values.allow } : {}) });
         console.log(`Enrolled ${k.label}. The inbox checked your code against it. ${allowed(k.allow)}`);
       } else if (sub === 'allow' || sub === 'disallow') {
         const k = await inbox.otpAllow(label!, sub === 'allow' ? { add: sessions } : { remove: sessions });
