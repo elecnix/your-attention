@@ -236,7 +236,7 @@ A change a person can see needs a picture in the pull request body, because the 
 
 A change to the web interface needs a screenshot of the screen it changes, and of the screen before it when the layout moved. A diff of JavaScript says nothing about what the page draws.
 
-When a pull request changes what a terminal prints, put a terminal screenshot in the body. Take one with `scripts/terminal-shot.sh`, which runs the command in a tmux session of a fixed size and renders the capture to a PNG with the headless browser already on the machine. It needs tmux and a browser, and it doesn't call a service or a skill:
+When a pull request changes what a terminal prints, put a terminal screenshot in the body. Take one with `scripts/terminal-shot.sh`, which runs the command in a tmux session of a fixed size and renders the capture to a PNG with the headless browser already on the machine. It needs tmux and a browser, and it doesn't call a service or a skill. It takes the browser that `TERMINAL_SHOT_BROWSER` names, or else the first one it finds on `PATH`, in `/Applications` as Google Chrome or Chromium, or in Playwright's download folder. On macOS, Chrome is not on `PATH`, so when the script doesn't find a browser, set `TERMINAL_SHOT_BROWSER` to the Chrome executable. Never wrap, link or replace a browser executable to make the script find it, because a write through a link replaces the browser itself:
 
 ```sh
 scripts/terminal-shot.sh -W 132 -H 28 -o install.png -- your-attention install
