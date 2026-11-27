@@ -366,7 +366,7 @@ your-attention secret age passphrase ~/.secrets   # reads the folder's passphras
 
 ### The age source
 
-It reads every `*.age` file of the folders in its `dirs` setting, and each file's name without `.age` is a candidate's `id` and `label`. Its type is `file`. A file encrypted to the instance's identity, `~/.your-attention/age/identity.txt`, opens with that identity. A file encrypted with a passphrase opens with the passphrase from the folder's envelope, `~/.your-attention/age/envelopes/<sha256 of the folder path>.age`, which age encrypts to the same identity. So no prompt appears at release, and the source leaves the files in the folder as they are. `src/secrets/age.ts` decrypts both kinds without writing the plaintext to a file.
+It reads every `*.age` file of the folders in its `dirs` setting. A candidate's `id` is the file's absolute path, so two folders with a file of the same name give two candidates. Its `label` is the file's name without `.age`, its `store` is the folder, and its type is `file`. A file encrypted to the instance's identity, `~/.your-attention/age/identity.txt`, opens with that identity. A file encrypted with a passphrase opens with the passphrase from the folder's envelope, `~/.your-attention/age/envelopes/<sha256 of the folder path>.age`, which age encrypts to the same identity. So no prompt appears at release, and the source leaves the files in the folder as they are. `src/secrets/age.ts` decrypts both kinds without writing the plaintext to a file.
 
 ### Lookup
 
@@ -381,7 +381,7 @@ db = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_U
 ai = widget secret_access {"name": "OPENAI_API_KEY", "query": {"type": "api-key", "host": "api.openai.com"}}
 ```
 
-Before `card_post` posts the card, it runs the lookup for each placement's `query`. It then sets `candidates` to the result as JSON text, and `publicKey` to the public half of the key pair it keeps for the card. A placement may give `candidates` itself, and then `card_post` keeps them. The widget places one field:
+Before `card_post` posts the card, it runs the lookup for each placement's `query`. It then sets `candidates` to the result as JSON text, and `publicKey` to the public half of the key pair it keeps for the card. A placement may also list its own `candidates`. `card_post` keeps those, and the inbox checks them as the next paragraph says. The widget places one field:
 
 ```
 db = Form("DATABASE_URL", db_buttons, [db_field])
@@ -389,7 +389,7 @@ db_buttons = Buttons([])
 db_field = FormControl("DATABASE_URL", SecretAccess("DATABASE_URL", "<public key JWK>", "<candidates JSON>"))
 ```
 
-The inbox reads each `SecretAccess(name, publicKey, candidates)` call as it reads `SecretInput`, with the same 400s, and adds the names to the card's `secrets`. The inbox answers 400 unless the candidates are a JSON list of objects with `id`, `source`, `instance` and `label` each.
+The inbox reads each `SecretAccess(name, publicKey, candidates)` call as it reads `SecretInput`, with the same 400s, and adds the names to the card's `secrets`. The inbox answers 400 unless the candidates are a JSON list of objects with `id`, `source`, `instance` and `label` each. It also answers 400 for a candidate that none of its lookups of the last hour returned with the same `source`, `instance`, `id` and `label`, so an agent can't label one secret as another. An empty list is valid, and the field then offers only the typed value.
 
 The page shows each candidate with its label, its source and its instance, and the type and host when present. A candidate whose source isn't `ready` shows as unavailable, and the person can't pick it. The person picks one candidate, declines, or types a value instead, which the page seals as the `secret` widget does. For a grant, the person also sets how long it lasts. The idle window is 15 minutes, and each use restarts it. The ceiling defaults to one hour and goes up to 24 hours. Use doesn't push it later. A card with several `secret_access` fields takes a choice for each, so the person can grant one and decline another.
 
@@ -407,7 +407,7 @@ Only the owner may answer: `POST /v1/cards/<id>/answer` answers 403 to an agent 
 
 Hooks, answer webhooks and triage get the answer without these fields, as for the `secret` widget. The agent stream gets all of it.
 
-`POST /v1/cards/<id>/revoke` takes `{field}` and revokes that field's grant. Only the owner may call it, and an agent or extension token gets 403. The inbox records the revocation on the answer value as `revokedAt`, and sends the agent stream `{type: "revoke", id, card, field, case}`. The page shows a **Revoke** button on each granted field of a card in the outbox or in Sent, until its `until` passes.
+`POST /v1/cards/<id>/revoke` takes `{field}` and revokes that field's grant. Only the owner may call it, and an agent or extension token gets 403. The inbox records the revocation on the answer value as `revokedAt`, and sends the agent stream `{type: "revoke", id, card, field, case}`. When no stream of that agent is open, the inbox keeps the event and sends it first when a stream opens, so a revocation never waits for the grant to expire. The page shows a **Revoke** button on each granted field of a card in the outbox or in Sent, until its `until` passes.
 
 ### Delivery in the session
 
