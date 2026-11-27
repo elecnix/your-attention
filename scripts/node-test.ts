@@ -4,15 +4,17 @@
 //
 // Usage: node scripts/node-test.ts [node flags] -- PATTERN...
 // The flags go before `--` and the patterns after it, so a flag whose value is a separate argument, such as
-// `--test-reporter spec`, is never read as a pattern. Both go to `node --test` as written, so Node expands the patterns
-// exactly as it did before.
+// `--test-reporter spec`, is never read as a pattern. After `--`, an argument that starts with `-` is still a flag, so
+// `npm run test:unit -- --test-name-pattern=card` reaches `node --test`. A flag given there needs its value after `=`.
+// Both go to `node --test` as written, so Node expands the patterns exactly as it did before.
 import { spawnSync } from 'node:child_process';
 import { globSync } from 'node:fs';
 
 const args = process.argv.slice(2);
 const split = args.indexOf('--');
-const flags = split === -1 ? [] : args.slice(0, split);
-const patterns = split === -1 ? [] : args.slice(split + 1);
+const after = split === -1 ? [] : args.slice(split + 1);
+const flags = [...(split === -1 ? [] : args.slice(0, split)), ...after.filter((arg) => arg.startsWith('-'))];
+const patterns = after.filter((arg) => !arg.startsWith('-'));
 if (patterns.length === 0) {
   console.error('node-test: give the test file patterns after --, as in: node scripts/node-test.ts [flags] -- PATTERN...');
   process.exit(2);

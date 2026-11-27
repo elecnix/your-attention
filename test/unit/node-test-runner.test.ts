@@ -38,6 +38,12 @@ describe('the test runner', () => {
     assert.match(result.stdout, /^# pass [1-9]/m);
   });
 
+  it('passes a flag that npm appends after the patterns to node --test', () => {
+    const result = run('--test-reporter=tap', '--experimental-test-isolation=none', '--', 'test/unit/age.test.ts', '--test-name-pattern=no test has this name');
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^# tests 0/m);
+  });
+
   it('runs the tests a pattern selects', () => {
     const result = run('--test-reporter=tap', '--', 'test/unit/age.test.ts');
     assert.equal(result.status, 0, result.stderr);
