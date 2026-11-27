@@ -2,6 +2,7 @@
 // candidate, the owner grants it, and the session opens the sealed value in memory, with no file holding it.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,7 +34,9 @@ describe('your-attention serve with secret sources', { skip: NO_AGE }, () => {
       fs.rmSync(plain);
     });
     try {
-      const result = await prove({ url: server.url, agentToken: server.read('agent-token'), ownerToken: server.read('owner-token'), name: 'PROOF_TOKEN', expected: VALUE, home: yaHome, log: () => {} });
+      // As the runbook runs it: with the SHA-256 only, so the leak checks work from the value the session opened.
+      const expectSha256 = createHash('sha256').update(VALUE).digest('hex');
+      const result = await prove({ url: server.url, agentToken: server.read('agent-token'), ownerToken: server.read('owner-token'), name: 'PROOF_TOKEN', expectSha256, home: yaHome, log: () => {} });
       assert.equal(result.ok, true, result.lines.join('\n'));
       assert.ok(!result.lines.join('\n').includes(VALUE), 'the proof never prints the value');
     } finally {

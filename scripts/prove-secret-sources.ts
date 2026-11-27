@@ -15,6 +15,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Client } from '../src/client.ts';
 import type { Candidate, SourceInfo } from '../src/core/secret-sources.ts';
 import type { AgentEvent } from '../src/core/types.ts';
@@ -46,6 +47,12 @@ export interface ProofResult {
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
 
+/** The names of the places whose text holds `value`. The proof checks them with the value the session opened, so a run
+ * that only knows the SHA-256 still finds a leak. */
+export function leaks(value: string, places: Record<string, string>): string[] {
+  return Object.entries(places).filter(([, text]) => value !== '' && text.includes(value)).map(([name]) => name);
+}
+
 export async function prove(input: ProofInput): Promise<ProofResult> {
   const lines: string[] = [];
   const say = (line: string): void => { lines.push(line); (input.log ?? console.log)(line); };
@@ -73,7 +80,6 @@ export async function prove(input: ProofInput): Promise<ProofResult> {
   const candidate: Candidate | undefined = found.candidates[0];
   if (!candidate) return fail(`the lookup of ${input.name} found no candidate`);
   for (const c of found.candidates) say(`candidate ${c.label} from ${c.source} on ${c.instance}${c.store ? ` in ${c.store}` : ''}`);
-  if (JSON.stringify(found).includes(input.expected ?? '\u0000never')) return fail('the lookup answer holds the value');
 
   // 3. The card, filled by card_post's own prepare.
   const secrets = new SecretRequests();
@@ -108,14 +114,14 @@ export async function prove(input: ProofInput): Promise<ProofResult> {
     if (!ev) return fail(`no answer for ${card.id} reached the agent stream within ${timeoutMs} ms`);
     const field = ev.answer.values[input.name] as { case?: string; sealed?: { alg?: string; data?: string } } | undefined;
     if (!field?.sealed?.data) return fail(`the answer on the agent stream holds no sealed value for ${input.name}`);
-    if (input.expected && JSON.stringify(ev).includes(input.expected)) return fail('the answer on the agent stream holds the value in the clear');
     say(`the agent stream delivered case ${field.case}: ${field.sealed.alg}, ${field.sealed.data.length} characters of ciphertext`);
     const text = await secrets.receive(ev.card, ev.answer);
     const value = secrets.env(agent)[input.name];
     if (value === undefined) return fail(`the session holds no grant for ${input.name} after the answer: ${text}`);
     if (input.expected !== undefined && value !== input.expected) return fail('the value the session opened is not the one expected');
     if (input.expectSha256 !== undefined && sha256(value) !== input.expectSha256.toLowerCase()) return fail(`the value's SHA-256 is ${sha256(value)}, not ${input.expectSha256}`);
-    if (input.expected !== undefined && text.includes(input.expected)) return fail('the text for the model holds the value');
+    const leaked = leaks(value, { 'the lookup answer': JSON.stringify(found), 'the answer on the agent stream': JSON.stringify(ev), 'the text for the model': text });
+    if (leaked.length) return fail(`the value is in the clear in ${leaked.join(' and ')}`);
     say(`the session opened ${input.name} in memory${input.expected || input.expectSha256 ? ', and it matches' : ''} (SHA-256 ${sha256(value).slice(0, 12)}…)`);
 
     // 6. Revoke.
@@ -153,7 +159,15 @@ function filesHolding(dir: string, value: string): string[] {
   return out;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/** Whether node runs this file as the command. Both sides resolve to a real path, because import.meta.url is
+ * percent-encoded and follows symlinks while argv[1] is the path as typed. */
+function isMain(): boolean {
+  const arg = process.argv[1];
+  if (!arg) return false;
+  try { return fs.realpathSync(arg) === fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+}
+
+if (isMain()) {
   const args = process.argv.slice(2);
   const name = args.find((a) => !a.startsWith('--'));
   const i = args.indexOf('--expect-sha256');
