@@ -39,19 +39,15 @@ describe('the value a secret_access field answers', () => {
   const candidates = accessCandidates(JSON.stringify(list));
   const now = 1_700_000_000_000;
 
+  const grant = (i: number, ceiling?: number) => accessValue({ pick: candidateKey(candidates[i]!), ...(ceiling === undefined ? {} : { ceiling }) }, candidates, now);
+
   it('grants the picked candidate until the answer time plus the ceiling', () => {
-    const v = accessValue({ pick: candidateKey(candidates[2]!), ceiling: 4 * 3600_000 }, candidates, now);
-    assert.deepEqual(v, { grant: 'openai', source: 'age', instance: 'desktop', until: now + 4 * 3600_000 });
+    assert.deepEqual(grant(2, 4 * 3600_000), { grant: 'openai', source: 'age', instance: 'desktop', until: now + 4 * 3600_000 });
   });
 
-  it('caps the ceiling at 24 hours', () => {
-    const v = accessValue({ pick: candidateKey(candidates[0]!), ceiling: 48 * 3600_000 }, candidates, now);
-    assert.deepEqual(v, { grant: 'openai', source: 'age', instance: 'laptop', until: now + GRANT_MAX_MS });
-  });
-
-  it('uses one hour when no ceiling was picked', () => {
-    const v = accessValue({ pick: candidateKey(candidates[0]!) }, candidates, now) as { until: number };
-    assert.equal(v.until, now + GRANT_DEFAULT_MS);
+  it('caps the ceiling at 24 hours, and uses one hour when none was picked', () => {
+    assert.deepEqual(grant(0, 48 * 3600_000), { grant: 'openai', source: 'age', instance: 'laptop', until: now + GRANT_MAX_MS });
+    assert.deepEqual(grant(0), { grant: 'openai', source: 'age', instance: 'laptop', until: now + GRANT_DEFAULT_MS });
   });
 
   it('declines only on an explicit decline', () => {

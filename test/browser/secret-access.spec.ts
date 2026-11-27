@@ -1,33 +1,20 @@
 // The secret_access field on the whole page, on the stand-in inbox of the built stories: what Send answer posts for each
 // field, the ceiling the person picks, a typed value sealed to the card's key, keyboard-only use, and Revoke.
 // Run `npm run storybook:build` first.
-import fs from 'node:fs';
-import http from 'node:http';
-import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { openSealed } from '../../src/core/sealed.ts';
 import type { Sealed } from '../../src/core/types.ts';
+import { serveStories } from './stories-server.ts';
 import { TEST_PRIVATE_KEY } from './test-private-key.ts';
 
-const DIR = path.resolve('storybook-static');
-const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
-let server: http.Server;
+let storybook: Awaited<ReturnType<typeof serveStories>> | undefined;
 let base = '';
 
 test.beforeAll(async () => {
-  if (!fs.existsSync(path.join(DIR, 'index.json'))) throw new Error('Build the stories first: npm run storybook:build');
-  server = http.createServer((req, res) => {
-    const url = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/');
-    // The page imports sealed.js next to itself, and the stories serve the page's files under /web.
-    const file = path.join(DIR, url === '/sealed.js' ? '/web/sealed.js' : url);
-    if (!file.startsWith(DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return void res.writeHead(404).end();
-    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' });
-    fs.createReadStream(file).pipe(res);
-  });
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  storybook = await serveStories();
+  base = storybook.base;
 });
-test.afterAll(() => { server?.close(); });
+test.afterAll(() => { storybook?.close(); });
 
 const story = (page: Page, id: string) => page.goto(`${base}/iframe.html?id=${id}&viewMode=story`);
 /** The page story, with its one card open. */

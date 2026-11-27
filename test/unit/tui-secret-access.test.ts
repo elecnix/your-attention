@@ -1,17 +1,11 @@
 // The secret_access field in the terminal client: the same candidates, choices and answer values as the page.
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
-import { summarize } from '../../src/core/summary.ts';
 import { newSealKeys, openSealed } from '../../src/core/sealed.ts';
 import type { Card, Sealed } from '../../src/core/types.ts';
 import { loadParser } from '../../src/tui/body.ts';
-import { CardView, type CardViewHost } from '../../src/tui/cardview.ts';
-import type { KeyEvent } from '../../src/tui/input.ts';
-import { makeTheme } from '../../src/tui/theme.ts';
-import { buildQueue, type InboxState } from '../../web/queue.js';
+import { setup } from './tui-pane.ts';
 
-const theme = makeTheme({ color: 0, unicode: true, hyperlinks: false });
-const plain = (doc: { lines: { spans: { text: string }[] }[] }): string => doc.lines.map((l) => l.spans.map((x) => x.text).join('')).join('\n');
 const J = JSON.stringify;
 
 const CANDIDATES = [
@@ -20,34 +14,26 @@ const CANDIDATES = [
   { id: 'openai', label: 'OpenAI key, personal', source: 'age', instance: 'desktop' },
 ];
 
-async function setup() {
+/** A card with one SecretAccess field per entry, each in a form of its own, and the pane that draws it. */
+async function pane(fields: { name: string; candidates: unknown[] }[]) {
   const keys = await newSealKeys();
   const body = [
-    'root = Card([a, b])',
-    'a = Form("OPENAI_API_KEY", ab, [af])', 'ab = Buttons([])',
-    `af = FormControl("OPENAI_API_KEY", SecretAccess("OPENAI_API_KEY", ${J(J(keys.publicKey))}, ${J(J(CANDIDATES))}))`,
-    'b = Form("DEPLOY_TOKEN", bb, [bf])', 'bb = Buttons([])',
-    `bf = FormControl("DEPLOY_TOKEN", SecretAccess("DEPLOY_TOKEN", ${J(J(keys.publicKey))}, "[]"))`,
+    `root = Card([${fields.map((_, i) => `a${i}`).join(', ')}])`,
+    ...fields.flatMap(({ name, candidates }, i) => [
+      `a${i} = Form(${J(name)}, a${i}b, [a${i}f])`, `a${i}b = Buttons([])`,
+      `a${i}f = FormControl("Field ${i}", SecretAccess(${J(name)}, ${J(J(keys.publicKey))}, ${J(J(candidates))}))`,
+    ]),
   ].join('\n');
-  const c: Card = { id: 'acc', agent: 'a1', kind: 'ask', title: 'Two secrets', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], body, secrets: ['OPENAI_API_KEY', 'DEPLOY_TOKEN'] };
-  const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 600_000 };
-  const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence: {}, states: { [c.id]: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }] };
-  const view = new CardView(c, host);
-  const build = () => view.build(90, s, buildQueue(s, 'none'));
-  build();
-  const text = () => plain(build());
-  const focus = (prefix: string) => { build(); const id = view.stops().find((x) => x.startsWith(prefix)); assert.ok(id, `no stop ${prefix} in ${view.stops().join(', ')}`); view.focus = id; build(); };
-  const key = (name: string, mods: Partial<KeyEvent> = {}) => { view.key({ type: 'key', name, ctrl: false, alt: false, shift: false, ...mods }); build(); };
-  const type = (t: string) => { for (const ch of t) key(ch, { text: ch }); };
-  return { keys, view, text, focus, key, type };
+  const c: Card = { id: 'acc', agent: 'a1', kind: 'ask', title: 'Secrets', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], body, secrets: fields.map((f) => f.name) };
+  return { keys, ...setup(c, {}, 90) };
 }
+const twoFields = () => pane([{ name: 'OPENAI_API_KEY', candidates: CANDIDATES }, { name: 'DEPLOY_TOKEN', candidates: [] }]);
 
 before(async () => { await loadParser(); });
 
 describe('a secret_access field in the terminal', () => {
   it('shows each candidate with its source and instance, grouped by instance, and an unavailable one as such', async () => {
-    const { text } = await setup();
-    const t = text();
+    const t = (await twoFields()).text();
     assert.match(t, /On laptop/);
     assert.match(t, /On desktop/);
     assert.match(t, /age on laptop · api-key · api\.openai\.com/);
@@ -57,13 +43,12 @@ describe('a secret_access field in the terminal', () => {
   });
 
   it('sends nothing for a field the person left alone', async () => {
-    const { view } = await setup();
-    const { values } = await view.sealedAnswer();
+    const { values } = await (await twoFields()).view.sealedAnswer();
     assert.deepEqual(values, {});
   });
 
   it('grants a candidate, skipping the unavailable one, until the answer time plus the ceiling picked', async () => {
-    const { view, focus, key, text } = await setup();
+    const { view, focus, key, text } = await twoFields();
     focus('access:OPENAI_API_KEY/OPENAI_API_KEY');
     key('down'); // past the unavailable candidate, to the one on desktop
     key('space');
@@ -79,7 +64,7 @@ describe('a secret_access field in the terminal', () => {
   });
 
   it('declines one field and seals a typed value in the other', async () => {
-    const { keys, view, focus, key, type } = await setup();
+    const { keys, view, focus, key, type } = await twoFields();
     focus('access:OPENAI_API_KEY/OPENAI_API_KEY');
     key('down'); key('down'); // decline
     key('space');
@@ -94,24 +79,12 @@ describe('a secret_access field in the terminal', () => {
     // A dismissal never records what was typed.
     assert.equal(view.draft().values['DEPLOY_TOKEN'], undefined);
   });
-});
 
-describe('a secret_access field with control characters', () => {
-  it('draws the field name and the instance without their escape sequences', async () => {
-    const keys = await newSealKeys();
-    const name = 'BAD\u001b]0;owned\u0007';
-    const cands = [{ id: 'x', label: 'X', source: 'age', instance: 'lap\u001b[2Jtop' }];
-    const body = ['root = Card([a])', `a = Form("f", ab, [af])`, 'ab = Buttons([])', `af = FormControl("F", SecretAccess(${J(name)}, ${J(J(keys.publicKey))}, ${J(J(cands))}))`].join('\n');
-    const c: Card = { id: 'esc', agent: 'a1', kind: 'ask', title: 'Escapes', priority: 'now', deliver: 'stream', version: 1, createdAt: 0, updatedAt: 0, replies: [], body };
-    const host: CardViewHost = { theme, address: (id) => `http://127.0.0.1:4815/#card=${id}`, act: () => {}, fileText: () => undefined, now: () => 600_000 };
-    const s: InboxState = { cards: [summarize(c, undefined)], answers: {}, presence: {}, states: { [c.id]: 'open' }, levels: [{ id: 'now', label: 'Decide now', definition: '', color: '#e5484d' }] };
-    const view = new CardView(c, host);
-    const build = () => view.build(90, s, buildQueue(s, 'none'));
-    build();
-    view.focus = view.stops().find((x) => x.startsWith('access:'));
-    build();
-    view.key({ type: 'key', name: 'space', ctrl: false, alt: false, shift: false });
-    const t = plain(build());
+  it('draws a field name and an instance without their escape sequences', async () => {
+    const { focus, key, text } = await pane([{ name: 'BAD\u001b]0;owned\u0007', candidates: [{ id: 'x', label: 'X', source: 'age', instance: 'lap\u001b[2Jtop' }] }]);
+    focus('access:');
+    key('space');
+    const t = text();
     assert.match(t, /access ends at most after/);
     assert.doesNotMatch(t, /\u001b|\u0007/);
   });
