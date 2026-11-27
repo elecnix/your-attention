@@ -8,12 +8,17 @@ import path from 'node:path';
 import { MAX_OUTPUT_CHARS, NO_AUDIT_EXIT, readMachine, remoteCommand, RUN_TIMEOUT_MS, startedMark, uncovered, WRONG_MACHINE_EXIT, type PrivilegedRunner, type RemoteMachine, type RunResult } from '../core/privileged.ts';
 
 /** Start `file` with `args`, or a shell line when `args` is undefined, write `input` to its standard input and close it,
- * and gather what it prints until it ends or the time limit stops it. */
-function runProcess(file: string, args: string[] | undefined, input: string, timeoutMs: number): Promise<RunResult> {
+ * and gather what it prints until it ends or the time limit stops it. With `after`, the input waits until the process
+ * printed that text, and a process that ends before it gets no input at all. */
+function runProcess(file: string, args: string[] | undefined, input: string, timeoutMs: number, after?: string): Promise<RunResult> {
   return new Promise<RunResult>((resolve) => {
     let output = '';
     let ended: string | undefined;
-    const add = (chunk: Buffer) => { output = (output + chunk.toString('utf8')).slice(-MAX_OUTPUT_CHARS * 2); };
+    let waiting = after !== undefined && input !== '';
+    const add = (chunk: Buffer) => {
+      output = (output + chunk.toString('utf8')).slice(-MAX_OUTPUT_CHARS * 2);
+      if (waiting && output.includes(after!)) { waiting = false; child.stdin.end(input); }
+    };
     const child = args === undefined
       ? spawn(file, { shell: true, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
       : spawn(file, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -25,9 +30,10 @@ function runProcess(file: string, args: string[] | undefined, input: string, tim
     child.on('error', (e) => { clearTimeout(timer); resolve({ exitCode: null, output, ended: `the command did not start: ${e.message}` }); });
     child.on('close', (code) => {
       clearTimeout(timer);
+      waiting = false;
       resolve({ exitCode: code, output, ...(ended ? { ended } : {}) });
     });
-    child.stdin.end(input);
+    if (!waiting) child.stdin.end(after === undefined ? input : '');
   });
 }
 
@@ -80,7 +86,9 @@ export function sshRunner(machine: RemoteMachine, opts: { ssh?: string; timeoutM
       // The rule is checked again here, so no path reaches ssh with a command it doesn't cover.
       const refused = uncovered(machine, command);
       if (refused) return { exitCode: null, output: '', ended: `nothing ran, because ${refused}` };
-      const result = await runProcess(ssh, sshArgs(machine, remoteCommand(machine, command, ctx)), machine.sudo === 'password' ? `${password}\n` : '', timeoutMs);
+      // The password waits until the far side printed its mark: it proved its name and logged the audit line first, so a
+      // host that turns out to be another machine never receives it.
+      const result = await runProcess(ssh, sshArgs(machine, remoteCommand(machine, command, ctx)), machine.sudo === 'password' ? `${password}\n` : '', timeoutMs, startedMark(machine.name, ctx.audit));
       const started = result.output.includes(startedMark(machine.name, ctx.audit));
       if (result.ended || started) {
         if (result.exitCode === SSH_FAILED && !result.ended) return { ...result, exitCode: null, ended: `the connection to ${machine.name} ended after sudo started, so the command may have run in part: ${lastLine(result.output)}. The system log of ${machine.name} holds audit ${ctx.audit}` };

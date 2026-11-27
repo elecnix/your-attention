@@ -81,6 +81,8 @@ describe('the machines of machines.jsonl', () => {
     assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: ['systemctl restart nginx'] })), /not an absolute path/);
     assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: [`/bin/echo 'a  b'`] })), /whitespace other than single spaces/);
     assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: ['/bin/ls | /bin/sh'] })), /shell syntax/);
+    // A path is matched by sudoers as a pattern, so it holds only the characters of a plain path.
+    assert.match(String(readMachine({ name: 'x', user: 'u', sudo: 'password', allow: ["'/usr/bin/systemc*' restart nginx"] })), /the path "\/usr\/bin\/systemc\*" holds a character other than letters, digits/);
   });
 
   it('refuses a machine named as this inbox, and a name given twice', () => {

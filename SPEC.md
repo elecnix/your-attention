@@ -562,7 +562,7 @@ On a post or a patch, the inbox reads each `PrivilegedAction` call and lists the
 - A name repeats, or also names a secret.
 - The command is empty or longer than 4,000 characters.
 
-The page shows the machine, the command exactly as the card gives it in a code block, what it changes, and a password field. For a machine that takes an approval, it shows a **Run this command on** box in place of the password field. The terminal client shows the same text and sends the person to the page, since it can't seal a password yet.
+The page shows the machine, the command exactly as the card gives it in a code block, what it changes, and a password field. For a machine that takes an approval, it shows a **Run this command on** box in place of the password field. Until `GET /v1/privileged/key` says which of the two the machine takes, the field shows neither, so a password can't go to a machine that takes an approval. The terminal client shows the same text and sends the person to the page, since it can't seal a password yet.
 
 ### The broker key
 
@@ -578,7 +578,7 @@ The inbox takes these steps for each privileged field, inside the owner's `POST 
 2. The inbox opens the value with the broker's private key, in memory. A value sealed before a restart doesn't open: the answer is 409, and the person types the password again.
 3. The inbox compares the sealed command with the card's command, character by character. When they differ, the answer is 409 and nothing runs. The message gives the position of the first character that differs, with the text around it in both commands. The inbox checks again after it writes the answer's images, against the card as it is then.
 4. The answer is 409 when the agent closed the card, or when this field already ran or is running. A command runs once, and a new run needs a new card. Of two answers sent at the same moment, one runs the command and the other gets 409.
-5. On its own machine, the inbox starts the command with the shell of its machine, as the user that runs the inbox. On another machine, it opens an `ssh` connection, as [Another machine](#another-machine) describes. It writes the password and a newline to the standard input of the process it starts, then closes it. The password never goes in an environment variable, an argument list, a file or a log. A run that takes more than 2 minutes is stopped.
+5. On its own machine, the inbox starts the command with the shell of its machine, as the user that runs the inbox. On another machine, it opens an `ssh` connection, as [Another machine](#another-machine) describes. It writes the password and a newline to the standard input of the process it starts, then closes it. On another machine, it writes them only after the far side has printed its mark. The password never goes in an environment variable, an argument list, a file or a log. A run that takes more than 2 minutes is stopped.
 6. In what the command printed, the inbox replaces each occurrence of the password with `[password]`, and keeps the last 64 KB.
 
 In the stored answer, the field holds `{command, machine, exitCode, output, ended?, audit, ranAt}`, and never the sealed value. `exitCode` is null when the run stopped early, and `ended` says why. Only the owner answers, so an agent's answer to its own card gets 403. A later answer to the card keeps the stored run. This answer goes to the agent stream, to hooks and to webhooks, like any other answer. The answer text for the agent reads `restart_nginx: ran on office-pc, exit code 0 (audit 1a2b3c4d). The command printed:`, with the output in a fenced block after it. When `exitCode` is null, the text reads `restart_nginx: on web1, ` followed by `ended`, such as `nothing ran on web1 or on this machine, because ssh could not connect to web1 (web1.lan): …`. When the person left the field empty, it reads `restart_nginx: not run, because the person sent no password or approval`.
@@ -603,7 +603,7 @@ Each run adds one entry to the audit, in the inbox's storage: `{id, card, field,
 - `user` is the account `ssh` logs in as, which the sudoers rule names.
 - `hostname` is the short name `uname -n` prints on that machine, `name` by default.
 - `sudo` is `password` for a machine whose `sudo` asks for the person's password, or `approval` for one whose sudoers rule needs none.
-- `allow` lists each command a person may approve there, as a card shows it. Each one starts with an absolute path.
+- `allow` lists each command a person may approve there, as a card shows it. Each one starts with an absolute path made of letters, digits and `. _ / + -`, since sudoers reads a path as a pattern.
 
 `serve` logs each line it can't read and leaves that machine out, so a card for it gets 400. `serve` also refuses a line for the inbox's own machine, and a line that repeats the name of an earlier one. `your-attention machines` lists the machines, and `your-attention machines sudoers <name>` prints the sudoers rule for one of them.
 
@@ -631,7 +631,7 @@ Each word of the command is in single quotes, so the far shell gets the same wor
 
 #### The path of the password
 
-The password goes from the page, sealed, to the inbox's memory, then to the standard input of `ssh`. `ssh` sends it through its encrypted channel to the far `sshd`, which hands it to the login shell's standard input. The shell's own commands, `uname`, `logger` and `echo`, don't read standard input. `exec` makes `sudo` the process that reads it, through `-S`. No argument list, environment variable or file on either machine holds it. While the command runs, `ps` shows these processes:
+The password goes from the page, sealed, to the inbox's memory. The broker holds it until the far side prints its mark, which it does only after it checked its own name and wrote the audit line. Then the broker writes it to the standard input of `ssh`. A far side that is another machine exits before the mark, so it doesn't receive any of the password. `ssh` sends it through its encrypted channel to the far `sshd`, which hands it to the login shell's standard input. By then the shell has only `exec sudo` left to run, so `sudo` reads the password through `-S`. No argument list, environment variable or file on either machine holds it. While the command runs, `ps` shows these processes:
 
 - On the inbox's machine, `ssh` with the arguments above. The line contains the command, the audit id, the card and the approver, but not the password.
 - On the far machine, `sshd: deploy@notty` and the shell that runs the line. Then `exec` turns the shell into `sudo -k -S -p  -- /usr/bin/systemctl restart nginx`, and its child is the command, running as root.

@@ -43,6 +43,12 @@ const child = spawn('/bin/sh', ['-c', line], {
   // Its own process group, so a cut connection ends the far command too, as sshd's hangup does.
   detached: true,
 });
+// How many bytes reached the far side's standard input, by host, never what they were: a password sent to the wrong
+// machine shows here as a count above zero.
+let received = 0;
+process.stdin.on('data', (chunk) => { received += chunk.length; });
+const record = () => fs.appendFileSync(path.join(dir, 'ssh-stdin.jsonl'), `${JSON.stringify({ host, bytes: received })}\n`);
+process.on('exit', record);
 process.stdin.pipe(child.stdin);
 child.stdin.on('error', () => {});
 if (far.cutAfterMs) {

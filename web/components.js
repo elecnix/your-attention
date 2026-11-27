@@ -509,19 +509,22 @@ function rememberTyped(card, name, entry) {
 /** How each machine the broker serves takes a privileged action, "password" or "approval", as the inbox last said. */
 const machineSudo = new Map();
 
-/** Ask the inbox how its machines take a privileged action, and remember the answer. A page that can't ask, such as a
- * story, keeps what it knew. */
+/** Ask the inbox how its machines take a privileged action, and remember the answer. It throws with the reason when
+ * the inbox doesn't say. */
 async function readMachineSudo() {
-  const res = await fetch(`${BASE}v1/privileged/key`).catch(() => undefined);
-  const body = res?.ok ? await res.json().catch(() => ({})) : {};
-  for (const m of Array.isArray(body.machines) ? body.machines : []) if (typeof m?.name === 'string') machineSudo.set(m.name, m.sudo === 'approval' ? 'approval' : 'password');
+  const res = await fetch(`${BASE}v1/privileged/key`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !Array.isArray(body.machines)) throw new Error(body.error || `the inbox answered ${res.status}`);
+  for (const m of body.machines) if (typeof m?.name === 'string') machineSudo.set(m.name, m.sudo === 'approval' ? 'approval' : 'password');
 }
 
 // PrivilegedAction(name, command, machine, changes): a command that needs the person's password or approval, which the
 // privileged_action widget places. The page shows the command exactly as the card holds it, and Send answer seals the
 // password, with that command, to the inbox's broker: never to the agent, which holds no key that opens it. A machine
 // whose sudo needs no password for the command shows an approval box instead, and the page seals the command alone.
-// The broker runs that one command, on that one machine, and refuses when it differs from the card's.
+// Until the inbox says which of the two a machine takes, the field asks for neither, so no password goes to a machine
+// that takes an approval. The broker runs that one command, on that one machine, and refuses when it differs from the
+// card's.
 function PrivilegedAction({ props }) {
   const card = React.useContext(SecretScope);
   const name = String(props.name ?? '');
@@ -529,39 +532,44 @@ function PrivilegedAction({ props }) {
   const machine = String(props.machine ?? '');
   const changes = String(props.changes ?? '');
   const [value, setValue] = React.useState(() => typedSecrets.get(card)?.get(name)?.value ?? '');
+  const [readError, setReadError] = React.useState('');
   const [, redraw] = React.useState(0);
   React.useEffect(() => { const f = () => redraw((n) => n + 1); secretWatchers.add(f); return () => { secretWatchers.delete(f); }; }, []);
-  React.useEffect(() => { let live = true; readMachineSudo().then(() => { if (live) redraw((n) => n + 1); }); return () => { live = false; }; }, [machine]);
-  const approval = machineSudo.get(machine) === 'approval';
+  React.useEffect(() => {
+    let live = true;
+    readMachineSudo().then(() => { if (live) { setReadError(''); redraw((n) => n + 1); } }, (e) => { if (live) setReadError(String(e.message || e)); });
+    return () => { live = false; };
+  }, [machine]);
+  const mode = machineSudo.get(machine);
+  const approval = mode === 'approval';
   // A revision of the card may change the command: a password typed before it seals with the command shown now.
   React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.privileged = { ...typed.privileged, command }; }, [card, name, command]);
   const failure = sealFailures.get(card)?.get(name);
   const canSeal = !!(window.isSecureContext && crypto.subtle);
   const change = (next) => { setValue(next); rememberTyped(card, name, next && { privileged: { command, ...(approval ? { approve: true } : {}) }, value: next }); };
-  if (approval) {
-    return h('fieldset', { className: 'secret privileged' },
-      h('legend', null, `Run on ${machine}`),
-      h('pre', { className: 'privileged-command', 'aria-label': `The command ${name} runs` }, h('code', null, command)),
-      h('div', { className: 'privileged-changes' }, h('strong', null, 'What it changes: '), changes),
-      canSeal
+  const control = !canSeal
+    ? h('div', { className: 'note warn' }, `This page cannot seal ${approval ? 'an approval' : 'a password'} over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.`)
+    : mode === undefined
+      ? h('div', { className: readError ? 'note warn' : 'hint', role: readError ? 'alert' : 'status' }, readError
+        ? `The inbox didn't say whether ${machine} takes a password or an approval, so this field asks for neither: ${readError}. Reload the page to try again.`
+        : `Reading whether ${machine} takes a password or an approval…`)
+      : approval
         ? h('label', { className: 'privileged-approve' },
           h('input', { type: 'checkbox', name, checked: value === 'approve', onChange: (e) => change(e.target.checked ? 'approve' : '') }),
           ` Run this command on ${machine}`)
-        : h('div', { className: 'note warn' }, 'This page cannot seal an approval over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.'),
-      failure && h('div', { className: 'note warn', role: 'alert' }, `Not sent: ${failure}`),
-      h('span', { className: 'hint' }, `${machine} runs this command through sudo without a password, so it needs your approval only. Send answer runs it once there, and the agent gets only what it prints. Leave the box clear to send your answer without running it.`));
-  }
+        : h('span', { className: 'secret-field' },
+          h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
+          h('input', { type: 'password', name, 'aria-label': `Password to run ${name} on ${machine}`, autoComplete: 'off', spellCheck: false, value, onChange: (e) => change(e.target.value) }));
+  const hint = approval
+    ? `${machine} runs this command through sudo without a password, so it needs your approval only. Send answer runs it once there, and the agent gets only what it prints. Leave the box clear to send your answer without running it.`
+    : `Send answer runs this command once on ${machine}, with your password on its input. Your browser seals the password for the inbox, never for the agent, and the agent gets only what the command prints. Leave the password empty to send your answer without running it.`;
   return h('fieldset', { className: 'secret privileged' },
     h('legend', null, `Run on ${machine}`),
     h('pre', { className: 'privileged-command', 'aria-label': `The command ${name} runs` }, h('code', null, command)),
     h('div', { className: 'privileged-changes' }, h('strong', null, 'What it changes: '), changes),
-    canSeal
-      ? h('span', { className: 'secret-field' },
-        h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
-        h('input', { type: 'password', name, 'aria-label': `Password to run ${name} on ${machine}`, autoComplete: 'off', spellCheck: false, value, onChange: (e) => change(e.target.value) }))
-      : h('div', { className: 'note warn' }, 'This page cannot seal a password over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.'),
+    control,
     failure && h('div', { className: 'note warn', role: 'alert' }, `Not sent: ${failure}`),
-    h('span', { className: 'hint' }, `Send answer runs this command once on ${machine}, with your password on its input. Your browser seals the password for the inbox, never for the agent, and the agent gets only what the command prints. Leave the password empty to send your answer without running it.`));
+    mode !== undefined && h('span', { className: 'hint' }, hint));
 }
 
 /** The Revoke button of each granted field on an answered card, until its ceiling passes. The inbox records the

@@ -168,6 +168,10 @@ describe('a privileged action on another machine', { skip: process.platform === 
     assert.match(run.ended ?? '', /because far-wrong\.test answered as another machine than far-wrong/);
     assert.match(run.output, /this machine is imposter, not farwrong, so nothing ran/);
     assert.ok(!fs.existsSync(marker('wrong')));
+    // The broker writes the password only after the far side proved its name, so the wrong machine got no byte of it.
+    const got = lines('ssh-stdin.jsonl').map((l) => JSON.parse(l) as { host: string; bytes: number });
+    assert.deepEqual(got.filter((g) => g.host === 'far-wrong.test').map((g) => g.bytes), [0]);
+    assert.ok(got.some((g) => g.host === 'far-pw.test' && g.bytes === PASSWORD.length + 1), 'the right machine got the password and a newline');
   });
 
   it('refuses when the far system log takes no audit line', async () => {

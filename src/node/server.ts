@@ -116,7 +116,7 @@ function serveStatic(pathname: string, res: http.ServerResponse): boolean {
 function defaultRunners(home: string, log: (...a: unknown[]) => void): PrivilegedRunner[] {
   const local = instanceName();
   const { machines, problems } = loadMachines(home, local);
-  for (const p of problems) log(`privileged actions: ${p}. Cards for that machine are refused until ${MACHINES_FILE} is fixed and the inbox restarts.`);
+  for (const p of problems) log(`privileged actions: ${p}. serve ignores that line until ${MACHINES_FILE} is fixed and the inbox restarts.`);
   return [localRunner(local), ...machines.map((m) => sshRunner(m))];
 }
 

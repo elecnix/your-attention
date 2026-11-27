@@ -67,3 +67,20 @@ test('a machine that takes an approval shows a box instead of a password, and ru
   const { answer } = await inbox.detail('privileged-nas');
   expect((answer?.values['restart_smbd'] as PrivilegedRun).machine).toBe('nas');
 });
+
+test('the field asks for neither a password nor an approval until the inbox says which the machine takes', async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  await page.route('**/v1/privileged/key', async (route) => { await held; await route.continue(); });
+  await inbox.agent.post({
+    id: 'privileged-wait', agent: 's-privileged', title: 'Restart smbd on nas?', priority: 'now',
+    body: `root = Card([run])\nrun = widget privileged_action ${JSON.stringify({ name: 'restart_smbd', command: '/usr/bin/systemctl restart smbd', machine: 'nas', changes: 'Restarts the file server on nas' })}`,
+  });
+  await inbox.open(page);
+  const field = page.locator('fieldset.privileged').filter({ hasText: 'Run on nas' });
+  await expect(field.getByRole('status')).toHaveText('Reading whether nas takes a password or an approval…');
+  await expect(field.locator('input')).toHaveCount(0);
+  release();
+  await expect(field.getByRole('checkbox', { name: 'Run this command on nas' })).toBeVisible();
+  await expect(field.locator('input[type=password]')).toHaveCount(0);
+});

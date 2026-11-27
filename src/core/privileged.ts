@@ -218,6 +218,8 @@ const USER = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
  * joined by spaces, so an empty argument, or one with other whitespace, has no exact rule. */
 function sudoersGap(words: string[]): string | undefined {
   if (!words[0]!.startsWith('/')) return `${JSON.stringify(words[0])} is not an absolute path, which sudoers needs and which keeps PATH on either machine out of it`;
+  // sudoers matches the path as a pattern, so a * or a [ there would allow more commands than this one.
+  if (!/^[A-Za-z0-9._/+-]+$/.test(words[0]!)) return `the path ${JSON.stringify(words[0])} holds a character other than letters, digits and . _ / + -, which sudoers would read as a pattern or as syntax`;
   const bad = words.slice(1).find((w) => w === '' || /[^\S ]|^ | $| {2}/.test(w));
   return bad === undefined ? undefined : `the argument ${JSON.stringify(bad)} is empty or holds whitespace other than single spaces, which a sudoers rule cannot list exactly`;
 }

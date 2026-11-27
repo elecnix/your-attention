@@ -88,10 +88,9 @@ const privilegedBody = expandWidgets([
   'intro = TextContent("The new nginx configuration passed nginx -t. Restarting applies it.")',
   `restart = widget privileged_action ${JSON.stringify({ name: 'restart_nginx', command: "sudo -S -p '' systemctl restart nginx", machine: 'laptop', changes: 'Restarts nginx, which drops the open connections for about a second' })}`,
 ].join('\n'), () => ({ name: 'privileged_action', ...privilegedWidget })).body;
-export const PrivilegedAction = { render: () => mount(view(card({ title: 'Restart nginx on laptop?', body: privilegedBody, privileged: ['restart_nginx'] }))) };
-// The same widget for a machine whose sudo needs no password for the command: an approval box instead of a password.
-// A stand-in answers the broker's key with that machine while the story is on screen.
-function ApprovalMachineStandIn({ children }) {
+// The broker's key names each machine and how it takes an action, and the field waits for it. A stand-in answers it
+// while a story is on screen: laptop takes a password, and nas an approval.
+function BrokerStandIn({ children }) {
   React.useLayoutEffect(() => {
     const real = window.fetch;
     window.fetch = (url, init) => (/\/v1\/privileged\/key$/.test(String(url)) ? Promise.resolve(Response.json({ publicKey: {}, machine: 'laptop', machines: [{ name: 'laptop', sudo: 'password' }, { name: 'nas', sudo: 'approval' }] })) : real(url, init));
@@ -99,11 +98,13 @@ function ApprovalMachineStandIn({ children }) {
   }, []);
   return children;
 }
+export const PrivilegedAction = { render: () => mount(h(BrokerStandIn, null, view(card({ title: 'Restart nginx on laptop?', body: privilegedBody, privileged: ['restart_nginx'] })))) };
+// The same widget for a machine whose sudo needs no password for the command: an approval box instead of a password.
 const approvalBody = expandWidgets([
   'root = Card([restart])',
   `restart = widget privileged_action ${JSON.stringify({ name: 'restart_smbd', command: '/usr/bin/systemctl restart smbd', machine: 'nas', changes: 'Restarts the file server on nas, which drops open shares for a few seconds' })}`,
 ].join('\n'), () => ({ name: 'privileged_action', ...privilegedWidget })).body;
-export const PrivilegedActionApproval = { render: () => mount(h(ApprovalMachineStandIn, null, view(card({ title: 'Restart smbd on nas?', body: approvalBody, privileged: ['restart_smbd'] })))) };
+export const PrivilegedActionApproval = { render: () => mount(h(BrokerStandIn, null, view(card({ title: 'Restart smbd on nas?', body: approvalBody, privileged: ['restart_smbd'] })))) };
 
 export const HtmlAllowed = { render: () => mount(h(HtmlCard, { card: card({ html: '<p style="font:16px sans-serif">Pick one:</p><button onclick="yourAttention.answer({colour:\'blue\'})">Blue</button>' }), allowed: true, onAnswer: () => {} })) };
 
