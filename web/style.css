@@ -226,6 +226,9 @@
   .secret .secret-field { position: relative; display: block; }
   .secret .secret-field input { width: 100%; box-sizing: border-box; padding-left: 34px; }
   .secret .key-icon { position: absolute; left: 10px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+  .privileged { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0; }
+  .privileged legend { font-weight: 600 !important; padding: 0 4px; }
+  .privileged .privileged-command { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); white-space: pre-wrap; word-break: break-all; font-family: var(--mono, ui-monospace, monospace); }
   .secret-access { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0; }
   .secret-access legend { font-weight: 600 !important; padding: 0 4px; }
   .secret-access .access-group { display: grid; gap: 4px; }

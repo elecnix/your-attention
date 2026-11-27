@@ -281,3 +281,10 @@ A card shows the session name and id, the harness, and where the session runs. T
 
 Sometimes you need the session itself, and some agents run where no link can go.
 
+## Privileged actions
+
+### DP44: A password goes to the broker, never to the agent
+
+The privileged_action widget shows the exact command, the machine it runs on and what it changes, and asks for the password to run it. The browser seals the password to the broker's key. The inbox keeps that key in memory only. No key in the agent's session opens the password. The broker opens it for one run of that one command. It refuses a command that differs from the one on the card by one character. The agent gets what the command printed, with the password masked, and the audit records who approved which command on which machine.
+
+A password unlocks more than the one command the agent needs. An agent that could read it would keep that power after the card is gone.

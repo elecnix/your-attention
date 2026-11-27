@@ -668,6 +668,12 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       if (method === 'GET' && b === 'sources' && !c) return json({ sources: await inbox.secretSourceList(me) });
       return json({ error: 'not found' }, 404);
     }
+    // The broker's key seals the password of a privileged action in the page, and the audit says who approved what.
+    if (a === 'privileged') {
+      if (method === 'GET' && b === 'key' && !c) return json(await inbox.privilegedKey(me));
+      if (method === 'GET' && b === 'audit' && !c) return json({ audit: inbox.privilegedAudit(me) });
+      return json({ error: 'not found' }, 404);
+    }
     if (method === 'POST' && a === 'preview' && !b) return json(inbox.preview(me, await readJson<Parameters<Inbox['preview']>[1]>(req)));
     // The person sends a card to an agent: it waits for the agent's stream, and goes out as soon as one opens.
     if (method === 'POST' && a === 'send' && !b) {
@@ -730,6 +736,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
             comment: body['comment'] as string | undefined,
             delivery: body['delivery'] as Delivery | undefined,
             version: body['version'] as number | undefined,
+            by: me,
           });
           // The owner's answer types each approval it turned on into its pane, and the reply says how each went.
           return json((await inbox.sendApprovals(me, b)) ?? saved);

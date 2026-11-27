@@ -382,6 +382,9 @@ export interface Card {
   secret?: SecretRequest;
   /** The answer fields that take only a sealed value: the names of the SecretInput fields in the body, which the secret widget places. */
   secrets?: string[];
+  /** The answer fields of the PrivilegedAction calls in the body, which the privileged_action widget places. Each takes
+   * only a password sealed to the broker's key, and the stored answer holds what the command printed instead. */
+  privileged?: string[];
   /** Raw HTML with scripts, shown in a sandboxed frame when the settings allow it. */
   html?: string;
   attachments?: Attachment[];

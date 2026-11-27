@@ -2,6 +2,7 @@
 // 1. YOUR_ATTENTION_URL and YOUR_ATTENTION_TOKEN
 // 2. ~/.your-attention/client.json, written by `your-attention pair`
 // 3. the inbox running on this machine, with its local agent token
+import type { PrivilegedRun } from './core/privileged.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagrams.ts';
@@ -643,7 +644,15 @@ export function describeAnswer(card: Card, answer: Answer, imagePaths?: string[]
     }
     else if (!isSealed(v)) lines.push(`${name}: declined`);
   }
+  // A privileged action says what ran, where, and what it printed, which the inbox masked. It never holds a password.
+  for (const name of card.privileged ?? []) {
+    const v = answer.values[name] as Partial<PrivilegedRun> | undefined;
+    if (!v || typeof v.command !== 'string') { lines.push(`${name}: not run, because the person sent no password`); continue; }
+    const how = v.exitCode === null || v.exitCode === undefined ? `stopped: ${v.ended ?? 'no exit code'}` : `exit code ${v.exitCode}`;
+    lines.push(`${name}: ran on ${v.machine}, ${how} (audit ${v.audit}). The command printed:`, '```', String(v.output ?? '').trimEnd(), '```');
+  }
   for (const [k, v] of Object.entries(answer.values)) {
+    if (card.privileged?.includes(k)) continue;
     if (access.has(k) && !isSealed(v)) continue;
     if (card.questions?.length && /^q\d+(_comment)?$/.test(k)) continue;
     if (card.approvals?.length && /^approval_\d+$/.test(k)) continue;

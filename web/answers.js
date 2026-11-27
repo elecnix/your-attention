@@ -348,7 +348,10 @@ export function formValues(formState) {
 
 /** The fields of a card that take only a sealed value, as the inbox's sealedFields reads them: the card's `secrets`, or
  * `sealed` on a secret card that an older inbox stored. */
-export const secretFieldsOf = (c) => c.secrets ?? (c.kind === 'secret' && c.secret ? ['sealed'] : []);
+export const secretFieldsOf = (c) => [...(c.secrets ?? (c.kind === 'secret' && c.secret ? ['sealed'] : [])), ...(c.privileged ?? [])];
+
+/** Whether an answer value is a privileged action that ran: the command, the machine, and what it printed. */
+export const isRunValue = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.audit === 'string' && typeof v.command === 'string';
 
 // A secret_access field: SecretAccess(name, publicKey, candidates). The person grants one candidate, declines, or types
 // a value that the client seals. SPEC.md#the-secret_access-widget states the values.
@@ -434,6 +437,8 @@ export function describe(card, a) {
     // A grant shows what it let the agent read, and until when, never the ciphertext it stores.
     // Only a secret field answers a grant or a decline: a check group with an item named `decline` lists its boxes.
     const secret = secretFieldsOf(card).includes(k);
+    // A privileged action shows that its command ran, where, and how it ended, never a password.
+    if (secret && isRunValue(v)) return `${(f && f.label) || k}: Ran on ${v.machine}, ${v.exitCode === null ? (v.ended || 'stopped') : `exit code ${v.exitCode}`}`;
     if (secret && isGrantValue(v)) return `${(f && f.label) || k}: Granted ${v.grant} from ${v.source} on ${v.instance} until ${clock(v.until)}${v.case ? `, case ${v.case}` : ''}${v.revokedAt ? `, revoked at ${clock(v.revokedAt)}` : ''}`;
     if (secret && v && typeof v === 'object' && v.decline === true) return `${(f && f.label) || k}: Declined`;
     // A sealed secret shows that it went, never its ciphertext.

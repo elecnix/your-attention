@@ -245,6 +245,7 @@ const library = extendLibrary(openuiChatLibrary, {
   Mermaid: ({ props }) => h(Diagram, { source: String(props.source ?? '') }),
   SecretInput,
   SecretAccess,
+  PrivilegedAction,
   FormControl: MarkdownFormControl,
   OptionCards: RecommendingOptionCards,
   Table: MarkdownTable,
@@ -502,6 +503,44 @@ function SecretAccess({ props }) {
     failure && h('div', { className: 'note warn', role: 'alert' }, `${name} could not be sealed, so nothing was sent: ${failure}. Ask the agent to post the card again.`));
 }
 
+// PrivilegedAction(name, command, machine, changes): a command that needs the person's password, which the
+// privileged_action widget places. The page shows the command exactly as the card holds it, and Send answer seals the
+// password, with that command, to the inbox's broker: never to the agent, which holds no key that opens it. The broker
+// runs that one command and refuses when it differs from the card's.
+function PrivilegedAction({ props }) {
+  const card = React.useContext(SecretScope);
+  const name = String(props.name ?? '');
+  const command = String(props.command ?? '');
+  const machine = String(props.machine ?? '');
+  const changes = String(props.changes ?? '');
+  const [value, setValue] = React.useState(() => typedSecrets.get(card)?.get(name)?.value ?? '');
+  const [, redraw] = React.useState(0);
+  React.useEffect(() => { const f = () => redraw((n) => n + 1); secretWatchers.add(f); return () => { secretWatchers.delete(f); }; }, []);
+  // A revision of the card may change the command: a password typed before it seals with the command shown now.
+  React.useEffect(() => { const typed = typedSecrets.get(card)?.get(name); if (typed) typed.privileged = { command }; }, [card, name, command]);
+  const failure = sealFailures.get(card)?.get(name);
+  const canSeal = !!(window.isSecureContext && crypto.subtle);
+  const change = (next) => {
+    setValue(next);
+    if (sealFailures.get(card)?.delete(name)) secretsChanged();
+    const fields = typedSecrets.get(card) ?? new Map();
+    if (next) fields.set(name, { privileged: { command }, value: next });
+    else fields.delete(name);
+    typedSecrets.set(card, fields);
+  };
+  return h('fieldset', { className: 'secret privileged' },
+    h('legend', null, `Run on ${machine}`),
+    h('pre', { className: 'privileged-command', 'aria-label': `The command ${name} runs` }, h('code', null, command)),
+    h('div', { className: 'privileged-changes' }, h('strong', null, 'What it changes: '), changes),
+    canSeal
+      ? h('span', { className: 'secret-field' },
+        h('svg', { className: 'key-icon', viewBox: '0 0 24 24', 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }, ICONS.key.map((d) => h('path', { key: d, d }))),
+        h('input', { type: 'password', name, 'aria-label': `Password to run ${name} on ${machine}`, autoComplete: 'off', spellCheck: false, value, onChange: (e) => change(e.target.value) }))
+      : h('div', { className: 'note warn' }, 'This page cannot seal a password over plain HTTP from another machine. Open the inbox on the machine that runs it, or over HTTPS.'),
+    failure && h('div', { className: 'note warn', role: 'alert' }, `Not sent: ${failure}`),
+    h('span', { className: 'hint' }, `Send answer runs this command once on ${machine}, with your password on its input. Your browser seals the password for the inbox, never for the agent, and the agent gets only what the command prints. Leave the password empty to send your answer without running it.`));
+}
+
 /** The Revoke button of each granted field on an answered card, until its ceiling passes. The inbox records the
  * revocation, and the agent stream tells the session, which ends the grant before its next command. */
 export function GrantRevoke({ card, answer }) {
@@ -546,25 +585,54 @@ export async function sealSecrets(card, names) {
   // A grant or a decline needs no sealing. The ceiling counts from the moment Send answer is pressed.
   const now = Date.now();
   const toSeal = new Map();
+  const privileged = new Map();
   for (const [name, f] of typed) {
+    if (f.privileged) { privileged.set(name, JSON.stringify({ command: f.privileged.command, password: f.value })); continue; }
     if (!f.access) { toSeal.set(name, f.value); continue; }
     if (f.access.pick === 'type') { if (f.access.value) toSeal.set(name, f.access.value); continue; }
     const v = accessValue(f.access, f.candidates, now);
     if (v) out[name] = v;
   }
   let seal;
-  if (toSeal.size) {
-    try { ({ seal } = await import(`${BASE}sealed.js`)); } catch (e) { for (const name of toSeal.keys()) failed.set(name, String(e.message || e)); }
+  if (toSeal.size || privileged.size) {
+    try { ({ seal } = await import(`${BASE}sealed.js`)); } catch (e) { for (const name of [...toSeal.keys(), ...privileged.keys()]) failed.set(name, String(e.message || e)); }
   }
   if (seal) {
     for (const [name, value] of toSeal) {
       try { out[name] = await seal(JSON.parse(typed.get(name).publicKey), value); } catch (e) { failed.set(name, String(e.message || e)); }
+    }
+    // A password seals to the broker's key, which the inbox answers to the owner alone, and never to a key on the card.
+    if (privileged.size) {
+      let key;
+      try { key = await brokerKey(); } catch (e) { for (const name of privileged.keys()) failed.set(name, String(e.message || e)); }
+      if (key) {
+        for (const [name, value] of privileged) {
+          try { out[name] = await seal(key, value); } catch (e) { failed.set(name, String(e.message || e)); }
+        }
+      }
     }
   }
   sealFailures.set(card, failed);
   secretsChanged();
   if (failed.size) throw new Error(`could not seal ${[...failed.keys()].join(', ')}`);
   return out;
+}
+
+/** Show on each privileged action field of a card why the inbox ran nothing, such as a command that differs from the
+ * card's. The typed password stays in the field, so the person can send again. */
+export function refusePrivileged(card, names, why) {
+  const failed = sealFailures.get(card) ?? new Map();
+  for (const name of names) if (typedSecrets.get(card)?.has(name)) failed.set(name, why);
+  sealFailures.set(card, failed);
+  secretsChanged();
+}
+
+/** The broker's public key, read fresh for each answer: the inbox makes a new one when it restarts. */
+async function brokerKey() {
+  const res = await fetch(`${BASE}v1/privileged/key`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.publicKey) throw new Error(body.error || `the inbox answered ${res.status} for its broker key`);
+  return body.publicKey;
 }
 
 /** Drop what was typed in a card's secret fields, once the answer went or the card was dismissed. */

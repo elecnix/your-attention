@@ -3,7 +3,7 @@
 import { BASE, CLOSED_LABEL, ICONS, Icon, J, STATE_LABEL, VIEWER, api, h, notify, report, store, time, unlockToken, withUnlock } from './env.js';
 import { PinControls, PinForm, PinUnlock, lockTab, neverAsk } from './pin.js';
 import { clearPasted, installPaste, pastedImages } from './paste-images.js';
-import { Approvals, AgentPin, GrantRevoke, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, PinMove, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetDrafts, forgetSecrets, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions, triageState } from './components.js';
+import { Approvals, AgentPin, GrantRevoke, CodeSignIn, Attachments, BroadcastForm, CardAge, CardTags, CardView, Changes, ClosedCard, TriagePushback, DevicesLink, DrawFaults, drawFaultsOf, HtmlCard, LinkedText, NotifyToggle, openSessionLink, PhoneLink, PinMove, TagPin, UsageNotice, UsageToggle, AgentsPanel, answerValues, approvalValues, forgetDrafts, forgetSecrets, refusePrivileged, sealSecrets, secretFieldsOf, useTelemetry, describe, formValues, presenceOf, recommendedOptions, triageState } from './components.js';
 import { after, agentName, buildQueue, movePin, notifies, samePin, SECTION_ID } from './queue.js';
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
@@ -586,7 +586,9 @@ export function App() {
     // Approvals on a closed card are never sent, so an answer to one carries none.
     const values = { ...answerValues(c, picked), ...sealed, ...(c.closed ? {} : approvalValues(c, picksOf(c))) };
     const images = pastedImages.payload(c.id);
-    await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
+    const res = await api(`${BASE}v1/cards/${c.id}/answer`, { values, comment, version: c.version, ...(images.length ? { images } : {}) });
+    // A card with a privileged action stays on screen when the broker refuses, and its field says why nothing ran.
+    if (!res.ok && c.privileged?.length) { refusePrivileged(c.id, c.privileged, (await res.json().catch(() => ({}))).error || `the inbox answered ${res.status}`); return; }
     clearPasted(c.id);
     forgetSecrets(c.id);
     store.del(`draft:${c.id}:${c.version}`);

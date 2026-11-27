@@ -37,6 +37,15 @@ export const BUILTIN_WIDGETS: Template[] = [{
     when: 'A secret that a source on the person\'s computer already keeps, such as a database address or an API key, which this session needs for a while. Place it in the card body of a card_post call, once per secret: `db = widget secret_access {"name": "DATABASE_URL", "query": {"name": "DATABASE_URL"}}`. `name` is the variable your commands read, and `query` takes `name`, `type` or `host`. card_post looks up the candidates and fills `candidates` and `publicKey`, and the private key stays in your session. The person grants one candidate for a time, declines, or types a value. The source seals the value to your session, and the answer gives the case id and the deadline, never the value. Each command you run then gets `$NAME` until the grant ends or the person revokes it.',
     at: 0,
   }],
+}, {
+  name: 'privileged_action',
+  builtin: true,
+  versions: [{
+    version: 1,
+    source: 'root = Form({{name}}, buttons, [field])\nbuttons = Buttons([])\nfield = FormControl({{name}}, PrivilegedAction({{name}}, {{command}}, {{machine}}, {{changes}}))',
+    when: 'A command that needs the person\'s password, such as one run with sudo, which you must never see. Place it in the card body of a card_post call: `restart = widget privileged_action {"name": "restart_nginx", "command": "systemctl restart nginx", "machine": "laptop", "changes": "Restarts nginx, which drops open connections"}`. `command` is the exact command, which reads the password on its standard input as `sudo -S` does, `machine` the machine the inbox runs it on, and `changes` one sentence about what it changes. The person reads the command and types the password, which the page seals to the inbox\'s broker. The inbox runs that one command with the password on its standard input, and the answer gives you only what it printed, with the exit code. The command runs once: ask on a new card to run it again.',
+    at: 0,
+  }],
 }];
 
 export interface WidgetSource {

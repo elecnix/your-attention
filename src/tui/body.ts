@@ -311,6 +311,13 @@ export class BodyRenderer {
       case 'SecretAccess':
         this.access(n, form ?? '');
         return;
+      case 'PrivilegedAction':
+        // The terminal client seals no password to the broker yet, so it shows the command and sends the person to the page.
+        doc.para([{ text: `Run on ${str(p['machine'])}:`, style: s.bold }], { first: this.pad() });
+        codeBlock(doc, str(p['command']), this.pad(), this.ctx.theme);
+        doc.para([{ text: `What it changes: ${str(p['changes'])}` }], { first: this.pad() });
+        doc.para([{ text: 'Open this card on the page to type the password and run the command.', style: s.dim }], { first: this.pad() });
+        return;
       case 'DatePicker':
         if (str(p['mode']) === 'range') { this.fallback('DatePicker'); return; }
         this.textField(n, form ?? '', false, 'date');

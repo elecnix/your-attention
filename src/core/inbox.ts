@@ -7,7 +7,8 @@ import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { readShortCode, shortCode } from './sign-in.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, waitText, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
-import { isSealed, sealedFields, secretAccesses, secretInputs, withoutSealed } from './sealed.ts';
+import { isSealed, newSealKeys, openSealed, privilegedActions, sealedFields, secretAccesses, secretInputs, withoutSealed, type PrivilegedField } from './sealed.ts';
+import { commandDifference, maskPassword, MAX_COMMAND_CHARS, MAX_OUTPUT_CHARS, readSeal, type AuditEntry, type BrokerKey, type PrivilegedRun, type PrivilegedRunner } from './privileged.ts';
 import { GRANT_MAX_MS, type AccessGrant, type SecretQuery, type SecretSources, type SourceInfo, type Candidate } from './secret-sources.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
 import { BUILTIN_WIDGETS, distinctWidgets, expandWidgets, fill, respond, type WidgetSource } from './widgets.ts';
@@ -139,6 +140,11 @@ function isGrantChoice(v: unknown): v is { grant: string; source: string; instan
   return typeof g['grant'] === 'string' && typeof g['source'] === 'string' && typeof g['instance'] === 'string' && typeof g['until'] === 'number' && Number.isFinite(g['until']);
 }
 
+/** A privileged action field's value once its command ran. */
+function isRun(v: unknown): v is PrivilegedRun {
+  return !!v && typeof v === 'object' && typeof (v as Record<string, unknown>)['audit'] === 'string' && typeof (v as Record<string, unknown>)['command'] === 'string';
+}
+
 export interface InboxOptions {
   keepPresence?: boolean;
   uploadLimitBytes?: number | undefined;
@@ -167,6 +173,9 @@ export interface InboxOptions {
   /** The secret sources of this computer, which the laptop's serve runs. Without them, as on the hosted inbox, a lookup
    * finds nothing and a grant fails with 502. */
   secretSources?: SecretSources | undefined;
+  /** Runs the command of a privileged action the owner approved, with the password the page sealed to the broker's key.
+   * Without it, as on the hosted inbox, the inbox takes no card with a privileged action. */
+  privileged?: PrivilegedRunner | undefined;
   /** Whether a new card pushes to a device that collapsed these groups. The page's own rule, `notifies` in web/queue.js,
    * which an adapter passes in because the core imports only the core. Without it, every new card pushes to every device. */
   pushRule?: ((state: ReturnType<Inbox['summaryState']>, card: CardSummary, collapsed: ReadonlySet<string>) => boolean) | undefined;
@@ -457,6 +466,13 @@ export class Inbox {
   private readonly now: () => number;
   private readonly approvalSender: ApprovalSender | undefined;
   private readonly secretSources: SecretSources | undefined;
+  private readonly privileged: PrivilegedRunner | undefined;
+  /** The broker's key pair, made once and kept in memory only: a restart makes a new one, so a password sealed before
+   * it no longer opens, and no file ever holds the private key. */
+  private brokerKeys: Promise<{ publicKey: JsonWebKey; privateKey: CryptoKey }> | undefined;
+  /** Each card field whose command started, claimed before the run awaits, so two answers at the same moment run it
+   * once. A finished run stays claimed: its stored answer refuses the next one anyway. */
+  private readonly claimedRuns = new Set<string>();
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
   /** Each candidate a lookup of the last hour returned, keyed by every metadata field it carries, with when that ends.
@@ -500,6 +516,7 @@ export class Inbox {
     this.shownCardLimit = opts.shownCardLimit;
     this.approvalSender = opts.approvals;
     this.secretSources = opts.secretSources;
+    this.privileged = opts.privileged;
     // Workers refuse a fetch called as a method of another object, so the default calls it bare.
     this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
     this.pushRule = opts.pushRule;
@@ -759,6 +776,7 @@ export class Inbox {
     if (bodyProblems.length) throw new InboxError(400, bodyProblemsMessage(bodyProblems));
     const secrets = body === undefined ? [] : secretInputs(String(body));
     if (body !== undefined && secrets.length) this.checkCandidates(String(body), before?.body);
+    const privileged = body === undefined ? [] : this.checkPrivileged(privilegedActions(String(body)), secrets);
     let widgets = before?.widgets;
     let responses = before?.responses;
     if (expanded) {
@@ -809,6 +827,7 @@ export class Inbox {
       screen: input.screen,
       secret: kind === 'secret' ? before?.secret : undefined,
       secrets: secrets.length ? secrets : undefined,
+      privileged: privileged.length ? privileged : undefined,
       html: input.html,
       attachments: attachments?.length ? attachments : undefined,
       template: template ?? before?.template,
@@ -2219,7 +2238,7 @@ export class Inbox {
     if (card.closed) throw new InboxError(409, 'this card is already closed');
     // A secret field holds the secret itself, and a dismissal is not an answer to seal it, so it stays out of the record.
     // The other fields and the comment are the person's own words about the card, so they stay.
-    const sealed = sealedFields(card);
+    const sealed = [...sealedFields(card), ...(card.privileged ?? [])];
     const values = !input.values || typeof input.values !== 'object' || Array.isArray(input.values)
       ? {} : Object.fromEntries(Object.entries(input.values as Record<string, unknown>).filter(([k]) => !sealed.includes(k)));
     return this.closeAs(card, 'dismissed', 'Nothing was sent to the agent.', { values, comment: String(input.comment ?? '').trim(), at: this.now() });
@@ -2255,7 +2274,7 @@ export class Inbox {
 
   // ---- answers ----
 
-  async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number; images?: (NewAttachment & { field?: string })[] }): Promise<Answer> {
+  async answer(id: string, input: { values?: Record<string, unknown>; comment?: string; delivery?: Delivery; version?: number; images?: (NewAttachment & { field?: string })[]; by?: Caller }): Promise<Answer> {
     const posted = this.getCard(id);
     const delivery = input.delivery ?? 'default';
     if (!DELIVERIES.has(delivery)) throw new InboxError(400, 'unknown delivery');
@@ -2281,6 +2300,9 @@ export class Inbox {
       else if (!isSealed(v)) throw new InboxError(400, `${field} takes only a sealed value: seal it with the public key on the card`);
       if (input.images?.some((f) => f?.field === field)) throw new InboxError(400, `${field} takes no images`);
     }
+    // A privileged action takes only the password the page sealed to the broker's key, with the command it showed. The
+    // broker opens each one here, in memory, and refuses before anything runs when a command differs from the card's.
+    const runs = await this.openPrivileged(posted, values, input.images);
     // Each source seals its value to the card's key before the answer is stored, so a refusal leaves no partial grant.
     // This happens only here, inside the owner's answer: no route releases a value on its own.
     for (const g of grants) {
@@ -2320,6 +2342,20 @@ export class Inbox {
       ? { kind: card.closed.kind, outcome: card.closed.outcome, at: card.closed.at } : undefined;
     // Approvals on a closed card are never sent, so a late answer does not keep any as approved.
     if (late) for (const k of Object.keys(values)) if (/^approval_\d+$/.test(k)) delete values[k];
+    // Each approved command runs now, against the card as it is after the files were written, and only its output stays.
+    if (runs.length) {
+      try {
+        await this.runPrivileged(card, before, runs, values, late, input.by);
+      } catch (e) {
+        await refund();
+        throw e;
+      }
+    }
+    // A later answer, such as a changed comment, keeps the record of a command that already ran.
+    for (const field of card.privileged ?? []) {
+      const ran = before?.values?.[field];
+      if (!(field in values) && isRun(ran)) values[field] = ran;
+    }
     const answer: Answer = {
       card: id,
       version: Number(input.version ?? card.version),
@@ -2357,6 +2393,107 @@ export class Inbox {
       this.queueAnswer(card, saved);
     }
     return this.store.get<Answer>('answers', id) ?? answer;
+  }
+
+  // ---- privileged actions ----
+
+  /** The PrivilegedAction fields of a body, checked against the runner this inbox has: their names. */
+  private checkPrivileged(fields: PrivilegedField[], secrets: string[]): string[] {
+    if (!fields.length) return [];
+    const runner = this.privileged;
+    if (!runner) throw new InboxError(400, 'this inbox runs no privileged actions: only the laptop inbox runs a command on its own machine');
+    for (const f of fields) {
+      if (secrets.includes(f.name)) throw new InboxError(400, `${f.name} names both a secret and a privileged action: give each its own name`);
+      if (f.command.length > MAX_COMMAND_CHARS) throw new InboxError(400, `privileged action ${f.name}: the command is ${f.command.length} characters, over the limit of ${MAX_COMMAND_CHARS}`);
+      if (f.machine !== runner.machine) throw new InboxError(400, `privileged action ${f.name}: this inbox runs commands on ${runner.machine} only, not on ${f.machine}. Name ${runner.machine} as the machine`);
+    }
+    return fields.map((f) => f.name);
+  }
+
+  private keys(): Promise<{ publicKey: JsonWebKey; privateKey: CryptoKey }> {
+    this.brokerKeys ??= newSealKeys();
+    return this.brokerKeys;
+  }
+
+  /** The broker's public key, which the page seals a password to, and the machine it runs commands on. Only the owner
+   * reads it, since only the owner's answer carries a password. */
+  async privilegedKey(caller: Caller): Promise<BrokerKey> {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner seals a password for a privileged action');
+    if (!this.privileged) throw new InboxError(404, 'this inbox runs no privileged actions');
+    return { publicKey: (await this.keys()).publicKey, machine: this.privileged.machine };
+  }
+
+  /** The audit of privileged actions, oldest first. Only the owner reads it, and no route changes it. */
+  privilegedAudit(caller: Caller): AuditEntry[] {
+    if (caller.role !== 'owner') throw new InboxError(403, 'only the owner reads the audit of privileged actions');
+    return this.store.list<AuditEntry>('audit');
+  }
+
+  /** Open each password the answer carries for a privileged action, and check its command against the card's. It
+   * changes `values` so the answer stores no field of a privileged action until the command ran. */
+  private async openPrivileged(card: Card, values: Record<string, unknown>, images: { field?: string }[] | undefined): Promise<{ field: string; command: string; password: string }[]> {
+    const names = card.privileged ?? [];
+    if (!names.length) return [];
+    const fields = new Map(privilegedActions(String(card.body ?? '')).map((f) => [f.name, f]));
+    const out: { field: string; command: string; password: string }[] = [];
+    for (const field of names) {
+      const v = Object.hasOwn(values, field) ? values[field] : undefined;
+      delete values[field];
+      if (images?.some((f) => f?.field === field)) throw new InboxError(400, `${field} takes no images`);
+      if (v === undefined || v === null || v === '') continue;
+      if (!isSealed(v)) throw new InboxError(400, `${field} takes only a password sealed to the broker's key: GET /v1/privileged/key answers it`);
+      let plain: string;
+      try {
+        plain = await openSealed((await this.keys()).privateKey, v);
+      } catch {
+        throw new InboxError(409, `${field}: the inbox cannot open this password, since it restarted after the page sealed it. Type the password again`);
+      }
+      const seal = readSeal(plain);
+      if (!seal) throw new InboxError(400, `${field}: the sealed value must be the command and the password as JSON`);
+      if (!seal.password) continue;
+      const shown = fields.get(field)?.command ?? '';
+      const differs = commandDifference(shown, seal.command);
+      if (differs) throw new InboxError(409, `${field}: nothing ran, because ${differs}`);
+      out.push({ field, command: seal.command, password: seal.password });
+    }
+    return out;
+  }
+
+  /** Run each approved command on the card as it is now, and put only what it printed in `values`, with the password
+   * masked. Each run adds a line to the audit. */
+  private async runPrivileged(card: Card, before: Answer | undefined, runs: { field: string; command: string; password: string }[], values: Record<string, unknown>, late: LateAnswer | undefined, by: Caller | undefined): Promise<void> {
+    const runner = this.privileged;
+    if (!runner) throw new InboxError(502, 'this inbox runs no privileged actions');
+    if (late) throw new InboxError(409, `nothing ran: the agent closed this card, so its commands are no longer asked for`);
+    const fields = new Map(privilegedActions(String(card.body ?? '')).map((f) => [f.name, f]));
+    for (const r of runs) {
+      // The card may have changed while the answer's files were written.
+      const differs = commandDifference(fields.get(r.field)?.command ?? '', r.command);
+      if (differs) throw new InboxError(409, `${r.field}: nothing ran, because ${differs}`);
+      if ([before, ...(before?.previous ?? [])].some((a) => isRun(a?.values?.[r.field]))) throw new InboxError(409, `${r.field}: this command already ran once. Ask the agent for a new card to run it again`);
+    }
+    // Claimed in the same synchronous step as the checks above, before the first await.
+    const keys = runs.map((r) => `${card.id}\n${r.field}`);
+    const busy = runs.find((_, i) => this.claimedRuns.has(keys[i]!));
+    if (busy) throw new InboxError(409, `${busy.field}: this command is already running or ran once. Ask the agent for a new card to run it again`);
+    for (const k of keys) this.claimedRuns.add(k);
+    const approvedBy = (by && this.store.get<Token>('tokens', by.token)?.name) || 'the owner';
+    for (const r of runs) {
+      let result;
+      try {
+        result = await runner.run(r.command, r.password);
+      } catch (e) {
+        result = { exitCode: null, output: '', ended: `the command did not start: ${(e as Error)?.message || 'the runner failed'}` };
+      }
+      const output = maskPassword(result.output, r.password).slice(-MAX_OUTPUT_CHARS);
+      const ended = result.ended === undefined ? undefined : maskPassword(result.ended, r.password);
+      const at = this.now();
+      const audit = randomId(8);
+      const entry: AuditEntry = { id: audit, card: card.id, field: r.field, agent: card.agent, command: r.command, machine: runner.machine, approvedBy, at, exitCode: result.exitCode, ...(ended ? { ended } : {}) };
+      this.store.put('audit', audit, entry);
+      const run: PrivilegedRun = { command: r.command, machine: runner.machine, exitCode: result.exitCode, output, ...(ended ? { ended } : {}), audit, ranAt: at };
+      values[r.field] = run;
+    }
   }
 
   // ---- secret sources ----
