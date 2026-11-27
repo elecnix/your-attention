@@ -275,7 +275,7 @@ function listen(client: Client): void {
   asks.resync();
   void client.stream(agent, async (ev) => {
     // Each event the channel pushes starts a turn the session did not ask for: activity, which ends the stretch.
-    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer' || ev.type === 'revoke') asks.activity();
+    if (ev.type === 'guidance' || ev.type === 'returned' || ev.type === 'advice' || ev.type === 'card' || ev.type === 'answer') asks.activity();
     // A new rule may move the next ask, or turn the asks on or off.
     if (ev.type === 'settings') return asks.resync();
     if (ev.type === 'guidance') {
@@ -296,7 +296,10 @@ function listen(client: Client): void {
     }
     if (ev.type === 'revoke') {
       // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
-      if (secrets.revoke(ev.case)) await notify(`The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`, { card_id: ev.card.id });
+      // Only a revoke that ends a grant pushes a turn, so only that one counts as activity.
+      if (!secrets.revoke(ev.case)) return;
+      asks.activity();
+      await notify(`The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`, { card_id: ev.card.id });
       return;
     }
     if (ev.type !== 'answer') return;
@@ -309,6 +312,7 @@ function listen(client: Client): void {
     const urgency = answer.delivery === 'force' ? ' They force-sent it: act on it now.' : '';
     let sealed = await secrets.receive(card, answer);
     // Without the socket, the Bash hooks have nothing to read, so the model hears that the variable won't come.
+    if (secretSocket && secrets.holds(agent)) sealed += '\nA Bash command run in the background does not get these variables, because its output reaches you through a tool that does not mask it.';
     if (!secretSocket && secrets.holds(agent)) sealed += `\nThis session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get these variables. Tell the person.`;
     const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}`;
     // A newer answer to the same card replaces the one the channel is still trying to deliver.

@@ -140,7 +140,9 @@ export function exportLines(reply: Record<string, unknown> | undefined): string 
 export function rewrite(command: string, file: string, token: string, reader: string[]): string {
   // Claude Code runs only PostToolUse hooks on a command that exits 0, and a PostToolUseFailure hook can't change the
   // error text. So the command reports a failure as text and ends with status 0, which lets secret-post mask it.
-  return `${readerPrefix(reader)} ${shellQuote(file)} ${shellQuote(token)})" && {\n${command}\n}\n`
+  // A command that runs `exit` itself skips the tail, so an EXIT trap reports its status the same way, in bash and zsh.
+  const trap = `trap '__ya_status=$?; if [ "$__ya_status" -ne 0 ]; then printf "Exit code %s\\n" "$__ya_status" >&2; fi; exit 0' EXIT`;
+  return `${readerPrefix(reader)} ${shellQuote(file)} ${shellQuote(token)})" && {\n${trap}\n${command}\n}\n`
     + `__ya_status=$?; if [ "$__ya_status" -ne 0 ]; then printf 'Exit code %s\\n' "$__ya_status" >&2; fi; unset __ya_status; true`;
 }
 

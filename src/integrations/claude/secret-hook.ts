@@ -29,6 +29,9 @@ export async function handle(mode: 'secret-pre' | 'secret-post', input: HookInpu
   if (!fs.existsSync(file)) return undefined;
   const command = input.tool_input?.['command'];
   if (typeof command !== 'string') return undefined;
+  // The model reads a background command's output through another tool, which secret-post doesn't see, so a
+  // background command runs as written, without the variables.
+  if (input.tool_input?.['run_in_background'] === true) return undefined;
   const reply = await ask(file, { op: 'token' });
   const token = reply?.['token'];
   if (typeof token !== 'string') return undefined;

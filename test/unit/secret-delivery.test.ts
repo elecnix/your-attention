@@ -111,6 +111,17 @@ describe('a secret_access grant in the session', () => {
     }
   });
 
+  it('ends every grant that shares a case id on one revoke', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const one = await granted(secrets, 'c13', T0 + 60 * MIN, { case: 'shared' });
+    await secrets.receive(one.card, one.answer);
+    const two = await granted(secrets, 'c14', T0 + 60 * MIN, { case: 'shared' });
+    await secrets.receive({ ...two.card, secrets: ['OPENAI_KEY'] } as Card, { ...two.answer, values: { OPENAI_KEY: two.answer.values['DATABASE_URL'] } });
+    assert.deepEqual(Object.keys(secrets.env('pi:s1')).sort(), ['DATABASE_URL', 'OPENAI_KEY']);
+    assert.equal(secrets.revoke('shared'), true);
+    assert.deepEqual(secrets.env('pi:s1'), {});
+  });
+
   it('holds no grant for a declined field, and says so', async () => {
     const secrets = new SecretRequests(() => T0);
     const card = { id: 'c5', agent: 'pi:s1', title: 'Database?', secrets: ['DATABASE_URL'], createdAt: T0 } as unknown as Card;

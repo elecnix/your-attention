@@ -125,12 +125,14 @@ export class Grants {
 
   /** Kills the grant with this case id, and says whether one was found. Takes effect on the next `take`. */
   revoke(caseId: string): boolean {
+    // A case id from the inbox may name more than one grant, so every one that carries it ends.
+    let found = false;
     for (const [k, grant] of this.held) {
       if (grant.caseId !== caseId) continue;
       this.held.delete(k);
-      return true;
+      found = true;
     }
-    return false;
+    return found;
   }
 
   /** Drops every dead grant. Nothing depends on this: `take` checks both clocks itself. */

@@ -9,6 +9,8 @@ import { spawnSync } from 'node:child_process';
 import { ask, exportLines, rewrite, serveSecrets, socketPath } from '../../src/integrations/claude/secret-socket.ts';
 import { handle, READER } from '../../src/integrations/claude/secret-hook.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
+import { newSealKeys, sealValue } from '../../src/core/sealed.ts';
+import type { Answer, Card } from '../../src/core/types.ts';
 
 /** A runtime folder short enough for a socket path on macOS. */
 const runtime = (): string => fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'ya-sk-'));
@@ -53,7 +55,8 @@ describe('the secrets socket of the Claude Code channel', { skip: process.platfo
 
   it('runs the command after a newline, so a command without a trailing semicolon still closes the group', () => {
     const out = rewrite('git status', '/run/s.sock', 'tok', ['node', 'reader.ts']);
-    assert.ok(out.startsWith(`eval "$('node' 'reader.ts' '/run/s.sock' 'tok')" && {\ngit status\n}`), out);
+    assert.ok(out.startsWith(`eval "$('node' 'reader.ts' '/run/s.sock' 'tok')" && {\n`), out);
+    assert.ok(out.includes('\ngit status\n}\n'), out);
   });
 
   it('reports a failed command as text and ends with status 0, so the hook that masks its output still runs', () => {
@@ -63,9 +66,36 @@ describe('the secrets socket of the Claude Code channel', { skip: process.platfo
     assert.equal(run.status, 0);
     assert.equal(run.stdout, 'value-not-real/\n', 'the cd still holds after the command');
     assert.equal(run.stderr, 'Exit code 1\n');
+    // A command that runs exit itself skips the tail, and the EXIT trap reports it the same way, in both shells.
+    for (const shell of ['bash', 'zsh']) {
+      if (spawnSync(shell, ['-c', 'true']).error) continue;
+      const exited = spawnSync(shell, ['-c', rewrite('printf "%s" "$K"; exit 3', '/run/s.sock', 'tok', reader)], { encoding: 'utf8' });
+      assert.equal(exited.status, 0, shell);
+      assert.equal(exited.stdout, 'value-not-real', shell);
+      assert.equal(exited.stderr, 'Exit code 3\n', shell);
+    }
     const ok = spawnSync('bash', ['-c', rewrite('true', '/run/s.sock', 'tok', reader)], { encoding: 'utf8' });
     assert.equal(ok.status, 0);
     assert.equal(ok.stderr, '', 'a command that succeeds reports nothing');
+  });
+
+  it('leaves a background command as written, since the model reads its output through a tool the hook does not see', async () => {
+    const dir = runtime();
+    const env = { XDG_RUNTIME_DIR: dir };
+    const secrets = new SecretRequests();
+    const served = await serveSecrets(secrets, 'claude:s4', 's4', env);
+    try {
+      const { publicKey, privateKey } = await newSealKeys();
+      secrets.remember('k4', privateKey);
+      const card = { id: 'k4', agent: 'claude:s4', title: 'Key?', kind: 'question', secrets: ['K'], createdAt: Date.now() } as unknown as Card;
+      await secrets.receive(card, { values: { K: await sealValue(publicKey, 'value-not-real') }, answeredAt: Date.now() } as unknown as Answer);
+      const input = (background: boolean) => ({ session_id: 's4', tool_name: 'Bash', tool_input: { command: 'printf "%s" "$K"', run_in_background: background } });
+      assert.ok(await handle('secret-pre', input(false), env), 'a foreground command gets the variables');
+      assert.equal(await handle('secret-pre', input(true), env), undefined);
+    } finally {
+      served.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('withholds the output of a rewritten command when the channel does not mask it', async () => {
