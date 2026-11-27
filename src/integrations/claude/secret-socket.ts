@@ -47,22 +47,29 @@ export async function serveSecrets(secrets: SecretRequests, agent: string, sessi
   privateDir(path.dirname(file));
   // A socket left by a channel of the same session that crashed: nothing answers on it any more.
   fs.rmSync(file, { force: true });
-  const tokens = new Map<string, number>();
+  // token -> when it expires, and the names the session held when the hook made it.
+  const tokens = new Map<string, { until: number; names: string[] }>();
   const answer = (req: Request): unknown => {
     const now = Date.now();
-    for (const [t, until] of tokens) if (until <= now) tokens.delete(t);
+    for (const [t, { until }] of tokens) if (until <= now) tokens.delete(t);
     if (req.op === 'token') {
       if (!secrets.holds(agent)) return {};
       const token = crypto.randomBytes(16).toString('hex');
       // The oldest token goes first when too many wait: a Map keeps insertion order.
       while (tokens.size >= MAX_TOKENS) tokens.delete(tokens.keys().next().value as string);
-      tokens.set(token, now + TOKEN_MS);
+      tokens.set(token, { until: now + TOKEN_MS, names: secrets.names(agent) });
       return { token };
     }
     if (req.op === 'env') {
       // A token works once: the shell of one command reads the variables, and nobody can read them again with it.
-      if (!tokens.delete(req.token)) return { error: 'this token is unknown, used or expired' };
-      return { env: secrets.env(agent) };
+      const made = tokens.get(req.token);
+      if (!made || !tokens.delete(req.token)) return { error: 'this token is unknown, used or expired' };
+      const env = secrets.env(agent);
+      // A grant that ended between the hook and the command fails the command, rather than run it with that variable
+      // empty while the others are set.
+      const gone = made.names.filter((n) => !Object.hasOwn(env, n));
+      if (gone.length) return { error: `the grant of ${gone.join(', ')} ended before the command started` };
+      return { env };
     }
     if (req.op === 'mask') return { value: secrets.maskDeep(req.value) };
     return { error: 'unknown request' };

@@ -138,6 +138,29 @@ describe('the secrets socket of the Claude Code channel', { skip: process.platfo
     }
   });
 
+  it('fails a command whose grant ended after the hook made its token, even when another grant still lives', async () => {
+    const dir = runtime();
+    const env = { XDG_RUNTIME_DIR: dir };
+    const secrets = new SecretRequests();
+    const served = await serveSecrets(secrets, 'claude:s6', 's6', env);
+    try {
+      const { publicKey, privateKey } = await newSealKeys();
+      secrets.remember('k6', privateKey);
+      const card = { id: 'k6', agent: 'claude:s6', title: 'Keys?', kind: 'question', secrets: ['A', 'B'], createdAt: Date.now() } as unknown as Card;
+      const until = Date.now() + 3_600_000;
+      const access = async (c: string) => ({ grant: c, source: 'age', instance: 'laptop', until, case: `case-${c}`, sealed: await sealValue(publicKey, `${c}-value-not-real`) });
+      await secrets.receive(card, { values: { A: await access('a'), B: await access('b') }, answeredAt: Date.now() } as unknown as Answer);
+      const { token } = (await ask(served.path, { op: 'token' })) as { token: string };
+      secrets.revoke('case-b');
+      const reply = await ask(served.path, { op: 'env', token });
+      assert.match(String(reply?.['error']), /B ended/);
+      assert.equal(reply?.['env'], undefined, 'no value goes out with the refusal');
+    } finally {
+      served.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('lets the plugin runner skip the CLI when this user has no secrets socket, in the folder socketDir names', () => {
     const dir = runtime();
     try {

@@ -11,6 +11,7 @@ import { newSealKeys, sealValue } from '../../src/core/sealed.ts';
 import type { Answer, Card } from '../../src/core/types.ts';
 import { SecretRequests } from '../../src/integrations/secrets.ts';
 import { Redactor } from '../../src/secrets/redact.ts';
+import { Grants } from '../../src/secrets/grant.ts';
 import { installSecretBash, type PiTools } from '../../src/integrations/pi/secret-bash.ts';
 
 const T0 = Date.UTC(2026, 10, 27, 12, 0);
@@ -135,6 +136,21 @@ describe('a secret_access grant in the session', () => {
     assert.deepEqual(plain.granted, [], 'an answer with no secret grants nothing, even while an earlier grant lives');
   });
 
+  it('leaves another card\'s live grant of the same name alone when a late answer arrives past its ceiling', async () => {
+    const secrets = new SecretRequests(() => T0);
+    const live = await granted(secrets, 'c17', T0 + 60 * MIN);
+    await secrets.receive(live.card, live.answer);
+    const late = await granted(secrets, 'c18', T0 - MIN);
+    assert.match(await secrets.receive(late.card, late.answer), /ended at/);
+    assert.deepEqual(secrets.env('pi:s1'), { DATABASE_URL: VALUE });
+  });
+
+  it('delivers a grant whose name is __proto__', () => {
+    const grants = new Grants(() => T0);
+    grants.hold({ name: '__proto__', agent: 'a', value: 'value-not-real', until: T0 + MIN });
+    assert.equal(Object.getOwnPropertyDescriptor(grants.env('a'), '__proto__')?.value, 'value-not-real');
+  });
+
   it('holds no grant for a declined field, and says so', async () => {
     const secrets = new SecretRequests(() => T0);
     const card = { id: 'c5', agent: 'pi:s1', title: 'Database?', secrets: ['DATABASE_URL'], createdAt: T0 } as unknown as Card;
@@ -238,6 +254,9 @@ describe('masking a value in output', () => {
     r.add('K', 'value-not-real');
     assert.deepEqual(r.maskDeep({ stdout: 'k=value-not-real', n: 1, list: ['value-not-real'] }), { stdout: 'k=[secret K]', n: 1, list: ['[secret K]'] });
     assert.deepEqual(r.maskDeep({ 'value-not-real': 'alice' }), { '[secret K]': 'alice' }, 'a key is masked too');
+    const digits = new Redactor();
+    digits.add('PIN', '1234567890');
+    assert.deepEqual(digits.maskDeep({ pin: 1234567890, other: 42 }), { pin: '[secret PIN]', other: 42 }, 'a number that shows the value is masked');
   });
 });
 

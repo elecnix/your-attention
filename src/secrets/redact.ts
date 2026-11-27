@@ -66,6 +66,12 @@ export class Redactor {
   maskDeep<T>(value: T): T {
     if (this.empty) return value;
     if (typeof value === 'string') return this.mask(value) as T;
+    // A value made of digits can come back as a JSON number, which is masked as the text it prints as.
+    if (typeof value === 'number') {
+      const text = String(value);
+      const masked = this.mask(text);
+      return (masked === text ? value : masked) as T;
+    }
     if (Array.isArray(value)) return value.map((v) => this.maskDeep(v)) as T;
     if (value && typeof value === 'object') {
       // A value can be a key too, such as a map from a token to its user.

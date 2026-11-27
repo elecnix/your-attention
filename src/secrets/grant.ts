@@ -105,13 +105,14 @@ export class Grants {
    * one counts as a use, so its idle window restarts, and a dead one is dropped as it is found.
    */
   env(agent: string, now = this.now()): Record<string, string> {
-    const out: Record<string, string> = {};
+    const entries: [string, string][] = [];
     for (const name of this.names(agent, now)) {
       const value = this.take(agent, name, now);
-      if (value !== undefined) out[name] = value;
+      if (value !== undefined) entries.push([name, value]);
     }
     this.sweep(now);
-    return out;
+    // fromEntries defines each name as an own key, so a name such as __proto__ is an ordinary one.
+    return Object.fromEntries(entries);
   }
 
   /** Ends the grant of `name` for `agent`, whatever its case id, and says whether one was live. A later answer that

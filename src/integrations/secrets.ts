@@ -76,8 +76,8 @@ export class SecretRequests {
       }
       const now = this.now();
       // An answer can reach the session after the ceiling it carries, such as one queued while the session was away.
+      // An expired answer is no decision against the name, so a live grant another card gave for it stays.
       if (access && access.until <= now) {
-        this.grants.end(card.agent, name);
         this.redactor.add(name, plain);
         lines.push(`The grant of ${name} on card ${card.id} (case ${access.case}) ended at ${new Date(access.until).toISOString().slice(0, 16).replace('T', ' ')} UTC, before it reached this session, so this session has no ${name}. Ask again if you still need it.`);
         continue;
@@ -106,6 +106,11 @@ export class SecretRequests {
    * counts as a use, so its idle window restarts. */
   env(agent: string): Record<string, string> {
     return this.grants.env(agent, this.now());
+  }
+
+  /** The names `agent` holds a live grant for now, without using one. */
+  names(agent: string): string[] {
+    return this.grants.names(agent, this.now());
   }
 
   /** Whether `agent` holds a live grant now, without using one. */
