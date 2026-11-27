@@ -455,8 +455,8 @@ export class Inbox {
   private readonly secretSources: SecretSources | undefined;
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
-  /** Each candidate a lookup of the last hour returned, by its source, instance, id and label, with when that ends. A
-   * card offers only these, so an agent can't label one secret as another. Memory is enough: a restart forgets them,
+  /** Each candidate a lookup of the last hour returned, keyed by every metadata field it carries, with when that ends.
+   * A card offers only these, so an agent can't change what the page shows about a secret. Memory is enough: a restart forgets them,
    * and card_post looks up again. */
   private readonly lookedUp = new Map<string, number>();
   private readonly pages = new Set<PageSend>();

@@ -150,7 +150,7 @@ describe('the secret_access widget', () => {
     assert.match(patched.body ?? '', /second migration/);
   });
 
-  it('keeps fields beyond the four it checks, such as a status the lookup gave', async () => {
+  it('keeps every metadata field the lookup gave on the card, such as a status and its reason', async () => {
     const { inbox, keys } = await setup();
     const card = inbox.postCard(agent, { agent: 's1', title: 'Database?', body: accessBody(keys.publicKey, [OFF]) });
     assert.deepEqual(secretAccesses(card.body ?? '')[0]?.candidates, [OFF]);
