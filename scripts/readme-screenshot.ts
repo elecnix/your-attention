@@ -45,7 +45,7 @@ try {
       '',
       'Type a key below and your browser seals it to this session\'s public key before it leaves the page. Only this session can open it. Each command it runs gets the value as `$OLLAMA_API_KEY` for one hour, and the model, the inbox, the hooks and the transcript never see it.',
     ].join('\n'),
-    recommendation: 'Create a key scoped to the eval project, so a leak costs only the eval budget.',
+    recommendation: 'Create a key for this run alone at [ollama.com/settings/keys](https://ollama.com/settings/keys), so you can revoke it without breaking anything else.',
     body: sealing.body,
   });
   sealing.keep(posted.id);
