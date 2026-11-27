@@ -173,9 +173,12 @@ switch (command) {
   case 'serve': {
     const { values } = parseCommand(command, { args: rest, options: SERVE_OPTIONS });
     const relayKey = values.relay ? process.env[String(values['relay-key-env'])] ?? fail(`--relay needs the relay key in $${values['relay-key-env']}`) : '';
-    const stop = async (): Promise<void> => { await server.close(); process.exit(0); };
+    const stop = async (): Promise<void> => { await server.close(); secretSources.close(); process.exit(0); };
     const { serve } = await import('./node/server.ts');
-    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop(), ...(process.stdin.isTTY && process.stderr.isTTY ? { ask: askYesNo } : {}) });
+    // The secret sources of this computer, as its home configures them: the inbox routes each lookup and each release to them.
+    const { instanceName, loadSecretSources } = await import('./secrets/registry.ts');
+    const secretSources = loadSecretSources({ home: homeDir(), instance: instanceName() });
+    const server = await serve({ port: Number(values.port), host: String(values.host), mdns: !values['no-mdns'], relay: values.relay ? { url: values.relay, key: relayKey } : undefined, onShutdown: () => void stop(), secretSources, ...(process.stdin.isTTY && process.stderr.isTTY ? { ask: askYesNo } : {}) });
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     // In a terminal, the inbox asks for a PIN until it has one or the person says never. A service has no terminal and never waits here.

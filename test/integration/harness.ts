@@ -124,8 +124,9 @@ export function runCli(env: NodeJS.ProcessEnv, ...args: string[]): Promise<{ cod
     .then((r) => ({ code: 0, ...r }), (e: { code: number; stdout: string; stderr: string }) => e);
 }
 
-/** Start `your-attention serve` as its own process in a temporary home, which is what tests of the CLI itself need. */
-export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
+/** Start `your-attention serve` as its own process in a temporary home, which is what tests of the CLI itself need.
+ * `setup` runs in that home before the inbox starts, for state the inbox reads once at start, such as its secret sources. */
+export async function serveForTest(prefix = 'ya-cli-', setup?: (env: NodeJS.ProcessEnv, yaHome: string) => Promise<void>): Promise<CliServer> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   const yaHome = path.join(home, '.your-attention');
   const env = { ...process.env, HOME: home, USERPROFILE: home, YOUR_ATTENTION_HOME: yaHome };
@@ -136,6 +137,9 @@ export async function serveForTest(prefix = 'ya-cli-'): Promise<CliServer> {
   // A test inbox takes its place from the home it is given, never from the herdr session that runs the tests: a card
   // posted here must not ask herdr about the developer's own pane.
   for (const k of Object.keys(env)) if (k.startsWith('HERDR_')) delete (env as Record<string, string | undefined>)[k];
+  if (setup) {
+    try { await setup(env, yaHome); } catch (e) { fs.rmSync(home, { recursive: true, force: true }); throw e; }
+  }
   const serve: ChildProcess = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', ...CLI_ARGS, 'serve', '--port', '0', '--host', '127.0.0.1', '--no-mdns'], { env, stdio: 'ignore' });
   // Right after the spawn: a failed spawn emits `error` on the next tick, which would otherwise kill the test process
   // before the cleanup below exists.
