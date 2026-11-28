@@ -311,7 +311,12 @@ function listen(client: Client): void {
       return;
     }
     if (ev.type === 'reassigned') {
+      // The inbox sends the notice again on each connection until this session acknowledges it, so the acknowledgment
+      // waits until Claude Code has the notification. The log lines show where a notice stopped.
+      log('reassigned', ev.card.id, 'from', ev.from);
       await notify(describeReassigned(ev), { card_id: ev.card.id });
+      log('pushed notice', ev.card.id);
+      await client.ackNotice(ev.card.id).catch((e: Error) => log('notice not acknowledged:', e.message));
       return;
     }
     if (ev.type === 'revoke') {

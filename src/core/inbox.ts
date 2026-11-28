@@ -2337,25 +2337,42 @@ export class Inbox {
     this.store.put('cards', id, next);
     this.emit({ type: 'change', card: id });
     if (to) {
-      this.sendReassignments(card.token ?? '', to);
+      this.sendReassignments(card.token ?? '', to, { card: id });
       // An answer the retired agent never received goes to the new holder, as a claim sends it.
       this.flush(to);
     }
     return this.store.get<Card>('cards', id) ?? next;
   }
 
-  /** Tell this agent's streams about each card the inbox gave it that they have not heard of yet, and record that they did. */
-  private sendReassignments(token: string, agent: string): void {
-    const subs = this.agents.get(this.key(token, agent));
-    if (!subs?.size) return;
-    for (const card of this.store.list<Card>('cards')) {
+  /** Tell this agent's streams about each card the inbox gave it whose notice no session acknowledged yet. A send only
+   * hands the event to a socket, which may be one the platform closed without saying so, so the inbox sends the notice
+   * again to each new connection until the agent acknowledges it. `to` limits the send to the stream that just
+   * connected, and `card` to the card that just moved, so the streams already open don't hear an old notice twice. */
+  private sendReassignments(token: string, agent: string, only: { to?: AgentSend; card?: string } = {}): void {
+    const subs = only.to ? [only.to] : [...(this.agents.get(this.key(token, agent)) ?? [])];
+    if (!subs.length) return;
+    for (const card of only.card ? [this.getCard(only.card)] : this.store.list<Card>('cards')) {
       const last = card.reassignedFrom?.at(-1);
-      if (card.agent !== agent || (card.token ?? '') !== token || !last || last.to !== agent || last.noticeSentAt !== undefined) continue;
-      const sent: Card = { ...card, reassignedFrom: [...card.reassignedFrom!.slice(0, -1), { ...last, noticeSentAt: this.now() }] };
-      this.store.put('cards', card.id, sent);
+      if (card.agent !== agent || (card.token ?? '') !== token || !last || last.to !== agent || last.noticeReadAt !== undefined) continue;
+      // A notice for a card the agent no longer waits on, such as a closed one, has nothing left to say.
+      if (!WAITING_STATES.has(cardState(card, this.store.get<Answer>('answers', card.id)))) continue;
+      const sent: Card = last.noticeSentAt !== undefined ? card : { ...card, reassignedFrom: [...card.reassignedFrom!.slice(0, -1), { ...last, noticeSentAt: this.now() }] };
+      if (sent !== card) this.store.put('cards', card.id, sent);
       const ev: AgentEvent = { type: 'reassigned', id: randomId(6), card: publicCard(sent), from: last.from, why: last.why };
       for (const send of subs) send(ev);
     }
+  }
+
+  /** The agent's session showed the notice of the card's last change of hands, so the inbox stops sending it. */
+  ackNotice(caller: Caller, id: string): Card {
+    const card = this.owned(caller, id);
+    const last = card.reassignedFrom?.at(-1);
+    if (!last?.to) throw new InboxError(404, 'no notice of a change of hands for this card');
+    if (last.noticeReadAt !== undefined) return publicCard(card);
+    const next: Card = { ...card, reassignedFrom: [...card.reassignedFrom!.slice(0, -1), { ...last, noticeReadAt: this.now() }] };
+    this.store.put('cards', id, next);
+    this.emit({ type: 'change', card: id });
+    return publicCard(next);
   }
 
   // ---- answers ----
@@ -3309,7 +3326,7 @@ export class Inbox {
     // A revoke the agent missed goes before anything else, so its session ends the grant before its next command.
     this.sendRevokes(caller.token, agent);
     // A card the inbox gave this agent while it was away, because the agent that asked retired.
-    this.sendReassignments(caller.token, agent);
+    this.sendReassignments(caller.token, agent, { to: send });
     this.flush(agent);
     // A card the person sent while this agent was away goes out as soon as it connects, as a waiting answer does.
     this.deliverSent(agent);

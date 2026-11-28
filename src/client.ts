@@ -180,10 +180,13 @@ export class Client {
     throw new Error(`${method} ${route}: no link answered (${(lastError as Error)?.message ?? 'none tried'})`);
   }
 
-  /** True the first time an answer is seen, false for a copy from another link or a replay. */
+  /** True the first time an answer or a notice is seen, false for a copy from another link or a replay. The inbox sends a
+   * notice of a change of hands to each connection until the session acknowledges it, so a reconnect may bring it twice. */
   private fresh(ev: AgentEvent): boolean {
-    if (ev.type !== 'answer') return true;
-    const key = `${ev.card.id}:${ev.answer.savedAt}:${ev.answer.forcedAt ?? 0}`;
+    if (ev.type !== 'answer' && ev.type !== 'reassigned') return true;
+    const key = ev.type === 'answer'
+      ? `${ev.card.id}:${ev.answer.savedAt}:${ev.answer.forcedAt ?? 0}`
+      : `reassigned:${ev.card.id}:${ev.card.reassignedFrom?.at(-1)?.at ?? 0}`;
     if (this.seen.has(key)) return false;
     this.seen.add(key);
     return true;
@@ -325,6 +328,9 @@ export class Client {
     return Array.isArray(reply?.records) ? reply.records : [];
   }
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
+  /** Tell the inbox the session showed the notice that the card changed hands, so the inbox stops sending it. Call it
+   * only once the notice reached the model: until then the inbox sends it again on each connection. */
+  ackNotice(id: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, { notice: 'reassigned' }); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
   /** Cards that match the words and the filters. An empty query, or `*`, lists by the filters alone, and a
    * `nextCursor` reads the page after this one. */

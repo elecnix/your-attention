@@ -470,8 +470,12 @@ export interface Reassignment {
   at: number;
   /** Why, in a few words, such as `fix-login retired`. */
   why: string;
-  /** When the stream of `to` heard about it. Until then the notice waits, as an undelivered answer does. */
+  /** When the inbox first sent the notice to a stream of `to`. Until then the notice waits, as an undelivered answer does.
+   * A send hands the event to a socket and proves nothing about the session, so the notice goes again to each new
+   * connection until `noticeReadAt`. */
   noticeSentAt?: number;
+  /** When the session of `to` acknowledged the notice, after it handed the notice to its model. */
+  noticeReadAt?: number;
 }
 
 /** The close a late answer came after. */

@@ -767,6 +767,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
           // Agents no longer reply on a card: a follow-up is a new card that follows this one.
           return json({ error: `agent replies are gone: post a new card with card_post and follows: "${b}"` }, 410);
         case 'ack':
+          // `{notice: "reassigned"}` acknowledges the notice of the card's last change of hands, and leaves its answer alone.
+          if (body?.['notice'] === 'reassigned') return json(inbox.ackNotice(me, b));
           return json(inbox.ack(me, b));
         case 'patch':
           // pullRequests is its own parameter, beside the text edits: null or an empty array clears it, and leaving it out
