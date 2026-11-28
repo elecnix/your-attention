@@ -15,6 +15,8 @@ export interface Env {
   /** Invite codes for the hosted service: "invite:<code>" holds the uses left. Inbox ids: "inbox:<id>". */
   INVITES: KVNamespace;
   MODE?: string;
+  /** The commit this deployment runs, which the deploy workflow sets with `--var COMMIT:<sha>`. */
+  COMMIT?: string;
   /** In single mode, the owner token, set with `wrangler secret put OWNER_TOKEN`. */
   OWNER_TOKEN?: string;
   /** The bytes of files each inbox may store over its life. */

@@ -203,9 +203,9 @@ Set `YOUR_ATTENTION_SKIP_MDNS=1` to skip the mDNS test on a network that drops m
 
 ## Releases
 
-A release is a tag whose name carries the version `package.json` declares. `release.yml` runs on a `v*` tag and refuses one that disagrees with `package.json` or with `VERSION` in `src/core/version.ts`. With an `NPM_TOKEN` secret in the repository, it publishes the package to npm. It always creates the GitHub release, whose tarball the Homebrew formula installs.
+A release is a tag whose name carries the version `package.json` declares. `release.yml` runs on a `v*` tag and refuses one that disagrees with `package.json`. With an `NPM_TOKEN` secret in the repository, it publishes the package to npm. It always creates the GitHub release, whose tarball the Homebrew formula installs.
 
-1. Set `version` in `package.json` and `VERSION` in `src/core/version.ts` to the same value. A unit test keeps the two in step.
+1. Set `version` in `package.json`, and the same value in `.claude-plugin/plugin.json`, where a unit test checks it. The inbox reads its version from the package at run time, so `GET /v1/info` follows on its own.
 2. Merge that bump to `main` through a pull request, so CI has passed on the same commit you will tag.
 3. Tag and push only the tag: `git tag -a v1.2.3 -m "v1.2.3" && git push origin v1.2.3`.
 4. Watch the run with `gh run watch --workflow release.yml`. A red run produces nothing to install.

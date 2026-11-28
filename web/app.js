@@ -150,14 +150,15 @@ export function App() {
   const refreshRef = React.useRef(refresh);
   refreshRef.current = refresh;
 
-  // The release the inbox runs, read once: GET /v1/state carries no version, and the GitHub mark names it on hover.
+  // The build the inbox runs, read once: GET /v1/state carries no version, and the GitHub mark names it on hover. The
+  // short commit tells apart two builds of one release.
   // The request is aborted on the way out, so a page that closes takes no half-open socket with it.
   const [release, setRelease] = React.useState('');
   React.useEffect(() => {
     if (auth !== 'ok') return;
     const stop = new AbortController();
     fetch(BASE + 'v1/info', { signal: stop.signal }).then((r) => (r.ok ? r.json() : null)).then((info) => {
-      if (info && typeof info.version === 'string') setRelease(info.version);
+      if (info && typeof info.version === 'string') setRelease(typeof info.commit === 'string' ? `${info.version} (${info.commit.slice(0, 7)})` : info.version);
     }).catch(() => {});
     return () => stop.abort();
   }, [auth]);

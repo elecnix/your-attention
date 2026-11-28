@@ -2,6 +2,7 @@
 // at a time, and it hibernates when idle: agent sockets stay open, and the
 // object rebuilds each connection from the socket's attachment when it wakes.
 import { COOKIE, createHandler, originParam } from '../core/http.ts';
+import { workerBuild } from './build.ts';
 import { Inbox, connectionOrigin } from '../core/inbox.ts';
 import { pinKeyError, type PinKey } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
@@ -99,6 +100,7 @@ export class InboxObject {
     this.env = env;
     const storage = new DurableSqlStorage(ctx.storage.sql);
     this.inbox = new Inbox(storage, Date.now, new R2Blobs(env.FILES, ctx.id.toString()), {
+      build: workerBuild(env.COMMIT),
       keepPresence: true,
       // One-time code keys, encrypted under the Worker secret. Without it the inbox keeps none and refuses an otp card.
       otpKeys: env.OTP_KEY_SECRET ? sealedOtpKeys(env.OTP_KEY_SECRET, ctx.id.toString(), storage) : undefined,

@@ -146,7 +146,8 @@ jobs:
           if [ "$CODE_UPDATE" = immediate ]; then mode=immediate; else mode="deferred 60s"; fi
           # Wrangler prints its whole help on an error, so the log stays in a file: a failure shows its tail, and a
           # success shows the four lines that say what happened.
-          if ! npx wrangler deploy --var "MODE:${MODE}" --durable-objects-code-update-mode "$mode" > deploy.log 2>&1; then
+          # COMMIT is the commit GET /v1/info names, so the hosted inbox answers with the build it runs.
+          if ! npx wrangler deploy --var "MODE:${MODE}" --var "COMMIT:${GITHUB_SHA}" --durable-objects-code-update-mode "$mode" > deploy.log 2>&1; then
             tail -30 deploy.log
             exit 1
           fi

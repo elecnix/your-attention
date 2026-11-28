@@ -36,10 +36,6 @@ jobs:
             echo "::error::the tag $GITHUB_REF_NAME does not match the version $version in package.json"
             exit 1
           fi
-          grep -q "'$version'" src/core/version.ts || {
-            echo "::error::src/core/version.ts does not declare $version"
-            exit 1
-          }
       - name: publish to npm
         # The guard is a shell test, not a step condition: GitHub refuses to read `secrets` in an
         # `if`, and that refusal is a startup failure, which runs no step at all.

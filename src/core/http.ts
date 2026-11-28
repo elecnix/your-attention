@@ -1,4 +1,3 @@
-import { VERSION } from './version.ts';
 // The HTTP protocol, with fetch Request and Response only, so the same handler
 // runs on Node, Bun, Deno and Workers. SPEC.md lists each route.
 import { randomId } from './crypto.ts';
@@ -303,7 +302,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
 
     // Routes open to any client on the network.
     // `checks` says what the inbox checks itself. A posting client checks the rest before it posts.
-    if (method === 'GET' && a === 'info') return json({ name: 'your-attention', version: VERSION, protocol: PROTOCOL_VERSION, id: inbox.id(), pair: '/v1/pair', checks: inbox.checks() });
+    if (method === 'GET' && a === 'info') return json({ name: 'your-attention', ...inbox.build, protocol: PROTOCOL_VERSION, id: inbox.id(), pair: '/v1/pair', checks: inbox.checks() });
     if (method === 'POST' && a === 'pair' && !b) {
       if (inbox.storageFull()) return json({ error: 'this inbox is full' }, 507);
       const body = await readJson<{ name?: string; role?: Role }>(req, BODY_LIMIT.open);
