@@ -267,14 +267,30 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   // ---- the inbox ----
   let refreshing: Promise<void> | null = null;
   let again = false;
+  // Group by and the pins change here before the inbox stores them. A state the inbox built before it stored this
+  // client's last settings write would put the old value back, so a state applies its settings only when no write is in
+  // flight and its request started after the last write settled. One counter orders the starts and the settles.
+  let settingsClock = 0;
+  let writing = 0;
+  let settled = 0;
+  const saveSettings = (patch: Record<string, unknown>, failed: (e: Error) => void): void => {
+    writing++;
+    api.call('PUT', '/v1/settings', patch).catch(failed).finally(() => {
+      writing--;
+      settled = ++settingsClock;
+      // Another device may have changed the settings while this write was in flight, so read them again.
+      void refresh();
+    });
+  };
   async function refresh(): Promise<void> {
     if (refreshing) { again = true; return refreshing; }
     refreshing = (async () => {
       do {
         again = false;
         try {
+          const started = ++settingsClock;
           const s = await api.state();
-          setState(s);
+          setState(s, writing === 0 && started > settled);
         } catch (e) {
           if (e instanceof ApiError && e.status === 423) { m.pin = m.pin ?? { typed: 0 }; m.blank = 'This inbox is locked.'; }
           else if (e instanceof ApiError && e.status === 401) m.blank = `The inbox at ${config.url} refused the token in ${config.source}.\nPair again, or start the inbox on this machine.`;
@@ -289,14 +305,15 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     try { await refreshing; } finally { refreshing = null; }
   }
 
-  function setState(s: InboxState): void {
+  /** Show a state from the inbox. `settingsCurrent` is false when the state may predate this client's own settings write. */
+  function setState(s: InboxState, settingsCurrent: boolean): void {
     if (known) {
       for (const c of s.cards) if (!known.has(c.id) && !c.closed) m.fresh.add(c.id);
     }
     known = new Set(s.cards.map((c) => c.id));
     m.state = s;
     // Group by and the pins are the inbox's settings, as on the page, so a change on any page reaches this one.
-    if (s.settings) {
+    if (s.settings && settingsCurrent) {
       if (typeof s.settings.groupBy === 'string') m.groupBy = s.settings.groupBy;
       pins = Array.isArray(s.settings.pins) ? s.settings.pins : [];
     }
@@ -346,7 +363,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     m.groupBy = g[(g.indexOf(m.groupBy) + 1) % g.length] ?? 'none';
     if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
     status(`Group by ${m.groupBy === 'none' ? 'nothing' : m.groupBy.replace(/^tag:/, '')}.`);
-    api.call('PUT', '/v1/settings', { groupBy: m.groupBy }).catch((e: Error) => status(`The inbox did not keep the grouping: ${e.message}`, 'warn'));
+    saveSettings({ groupBy: m.groupBy }, (e) => status(`The inbox did not keep the grouping: ${e.message}`, 'warn'));
   };
   /** Pin the open card's value of the queue's grouping, or unpin it, as a heading's pin does on the page: a tag value
    * under a tag grouping, and the agent that posted the card under an agent grouping. */
@@ -376,7 +393,7 @@ export async function runTui(opts: TuiOptions): Promise<number> {
     if (m.state) m.queue = buildQueue(m.state, m.groupBy, pins, m.collapsed) as Queue;
     status(had ? `Unpinned ${what}.` : `Pinned ${what} to the top.`, 'ok');
     // The change travels as one pin in or out, so a pin another device adds at the same moment survives.
-    api.call('PUT', '/v1/settings', had ? { pinRemove: [pin] } : { pinAdd: [pin] }).catch((e: Error) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
+    saveSettings(had ? { pinRemove: [pin] } : { pinAdd: [pin] }, (e) => status(`The inbox did not keep the pin: ${e.message}`, 'warn'));
   };
   const clearDealt = () => {
     const n = m.queue?.dealt.length ?? 0;
