@@ -8,6 +8,7 @@ import { after, agentName, buildQueue, movePin, notifies, reassignments, samePin
 import { cardDetails, linkIds, linkLookup, ownLinkIds, summaryOutcome } from './details.js';
 import { highlightParts, matchCard, searchTerms } from './search.js';
 import { arrivals, notifiable, readFocusMode, releaseNotice } from './focus.js';
+import { settingsWrites } from './settings-writes.js';
 
 const { React, createRoot } = window.__OpenUI;
 
@@ -82,16 +83,15 @@ export function App() {
   });
   const isPinned = (tag) => pins.some((p) => Array.isArray(p) && p[0] === tag[0] && p[1] === tag[1]);
   const isAgentPinned = (agent) => pins.some((p) => !Array.isArray(p) && p.agent === agent);
-  const saveSettings = (patch) => api(`${BASE}v1/settings`, patch, 'PUT').catch(() => {});
-  // A save in flight owns the list until it answers, so a state that arrives meanwhile cannot undo the click.
-  const savingPins = React.useRef(0);
-  // The same guard for Group by: a state that arrives before the PUT commits must not put the old choice back.
-  const savingGroupBy = React.useRef(0);
+  // The page shows a Group by or pin change at once, and the inbox stores it a moment later. The writes go one at a time,
+  // and a state applies its settings only when its request started after the last write settled, as in the terminal
+  // client. After each write the page reads the state again, which shows the inbox's value, a refused write's included.
+  const writesRef = React.useRef(null);
+  if (!writesRef.current) writesRef.current = settingsWrites((patch) => api(`${BASE}v1/settings`, patch, 'PUT'));
+  const saveSettings = (patch) => { writesRef.current.save(patch).catch(() => {}).finally(() => refreshRef.current()); };
   const togglePin = (pin) => setPins((pins) => {
     const next = pins.some((p) => samePin(p, pin)) ? pins.filter((p) => !samePin(p, pin)) : [...pins, pin];
-    savingPins.current += 1;
-    const mine = savingPins.current;
-    api(`${BASE}v1/settings`, { pins: next }, 'PUT').catch(() => {}).finally(() => { if (savingPins.current === mine) savingPins.current = 0; });
+    saveSettings({ pins: next });
     return next;
   });
   // Move a pin one place up or down. The pins are the inbox's settings, oldest first, so the order is the groups'
@@ -99,9 +99,7 @@ export function App() {
   const movePinBy = (pin, delta) => setPins((pins) => {
     const next = movePin(pins, pin, delta);
     if (next === pins) return pins;
-    savingPins.current += 1;
-    const mine = savingPins.current;
-    api(`${BASE}v1/settings`, { pins: next }, 'PUT').catch(() => {}).finally(() => { if (savingPins.current === mine) savingPins.current = 0; });
+    saveSettings({ pins: next });
     return next;
   });
   const [queueWidth, setQueueWidth] = React.useState(() => clampWidth(Number(store.get('queueWidth')) || QUEUE_WIDTH));
@@ -116,13 +114,15 @@ export function App() {
   const lockedRef = React.useRef(false);
   lockedRef.current = auth === 'locked';
 
-  const refresh = React.useCallback(() => { const sent = unlockToken.get(); return fetch(BASE + 'v1/state').then((r) => {
+  // Refreshes overlap, and their answers may arrive in either order, so a state whose request started before the last
+  // one applied is dropped.
+  const refresh = React.useCallback(() => { const sent = unlockToken.get(); const started = writesRef.current.started(); return fetch(BASE + 'v1/state').then((r) => {
     if (r.status === 401) { setAuth('needed'); return null; }
     // A refusal for an unlock token this tab has since replaced is stale.
     if (r.status === 423) { if (!settingPinRef.current && unlockToken.get() === sent) setAuth('locked'); return null; }
     return r.json();
   }).then((s) => {
-    if (!s) return;
+    if (!s || !writesRef.current.newest(started)) return;
     reachedRef.current = Date.now();
     setAuth('ok');
     const ids = new Set(s.cards.map((c) => c.id));
@@ -145,6 +145,12 @@ export function App() {
     knownRef.current = ids;
     // A cleared card opened from a link keeps its copy, though the state leaves it out, from its fetch on.
     details.keep(outsideRef.current ? new Set([...ids, outsideRef.current]) : ids);
+    // Each state carries the inbox's Group by and pins, so a change on another page reaches this one without a reload.
+    if (writesRef.current.settingsCurrent(started)) {
+      const settings = s.settings || {};
+      setGroupBy(typeof settings.groupBy === 'string' ? settings.groupBy : 'none');
+      setPins((pins) => (Array.isArray(settings.pins) && JSON.stringify(pins) !== JSON.stringify(settings.pins) ? settings.pins : pins));
+    }
     setState(s);
   }); }, [state, closing, groupBy, pins, collapsedGroups]);
   const refreshRef = React.useRef(refresh);
@@ -162,14 +168,6 @@ export function App() {
     }).catch(() => {});
     return () => stop.abort();
   }, [auth]);
-
-  // Each state carries the inbox's Group by and pins, so a change on another page reaches this one without a reload.
-  React.useEffect(() => {
-    if (!state) return;
-    const s = state.settings || {};
-    if (!savingGroupBy.current) setGroupBy(typeof s.groupBy === 'string' ? s.groupBy : 'none');
-    if (!savingPins.current) setPins((pins) => (Array.isArray(s.pins) && JSON.stringify(pins) !== JSON.stringify(s.pins) ? s.pins : pins));
-  }, [state]);
 
   // A page that finds Group by or the pins in this device's storage and none in the inbox copies them over once,
   // then reads the inbox. A value the inbox already has is never overwritten, and each device copies once.
@@ -677,7 +675,7 @@ export function App() {
     terms.length > 0 && h('div', { className: 'search-count', role: 'status' }, matches.size ? `${matches.size} card${matches.size === 1 ? '' : 's'} match${matches.size === 1 ? 'es' : ''}` : 'No card matches'),
     h('div', { className: 'queue-head' },
       h('label', { className: 'group-by' }, 'Group by ',
-      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); savingGroupBy.current += 1; const mine = savingGroupBy.current; api(`${BASE}v1/settings`, { groupBy: e.target.value }, 'PUT').catch(() => {}).finally(() => { if (savingGroupBy.current === mine) savingGroupBy.current = 0; }); } },
+      h('select', { value: groupBy, onChange: (e) => { setGroupBy(e.target.value); saveSettings({ groupBy: e.target.value }); } },
         h('option', { value: 'none' }, 'nothing'), h('option', { value: 'priority' }, 'priority'), h('option', { value: 'agent' }, 'agent'),
         groupTags.map((k) => h('option', { key: k, value: `tag:${k}` }, k)))),
       searchField),

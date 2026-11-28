@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { cardDetails } from '../../web/details.js';
 import { after, agentName, buildQueue, type InboxState, type Queue } from '../../web/queue.js';
+import { settingsWrites } from '../../web/settings-writes.js';
 import type { CardSummary } from '../core/summary.ts';
 import type { Attachment, Pin } from '../core/types.ts';
 import { notOwnerAdvice } from '../client.ts';
@@ -267,23 +268,13 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   // ---- the inbox ----
   let refreshing: Promise<void> | null = null;
   let again = false;
-  // Group by and the pins change here before the inbox stores them. A state the inbox built before it stored this
-  // client's last settings write would put the old value back, so a state applies its settings only when no write is in
-  // flight and its request started after the last write settled. One counter orders the starts and the settles.
-  let settingsClock = 0;
-  let writing = 0;
-  let settled = 0;
-  // Each write starts after the one before it settled. Two writes in flight at once may reach the inbox in either
-  // order, over two connections, and the inbox would then keep the older value.
-  let writes: Promise<void> = Promise.resolve();
+  // Group by and the pins change here before the inbox stores them. The writes go one at a time, and a state applies its
+  // settings only when its request started after the last write settled. web/settings-writes.js holds the rule, which
+  // the page follows too.
+  const writes = settingsWrites((patch) => api.call('PUT', '/v1/settings', patch));
   const saveSettings = (patch: Record<string, unknown>, failed: (e: Error) => void): void => {
-    writing++;
-    writes = writes.then(() => api.call('PUT', '/v1/settings', patch).then(() => {}, failed)).finally(() => {
-      writing--;
-      settled = ++settingsClock;
-      // Another device may have changed the settings while this write was in flight, so read them again.
-      void refresh();
-    });
+    // Another device may have changed the settings while this write was in flight, so read them again.
+    writes.save(patch).then(() => {}, failed).finally(() => { void refresh(); });
   };
   async function refresh(): Promise<void> {
     if (refreshing) { again = true; return refreshing; }
@@ -291,9 +282,9 @@ export async function runTui(opts: TuiOptions): Promise<number> {
       do {
         again = false;
         try {
-          const started = ++settingsClock;
+          const started = writes.started();
           const s = await api.state();
-          setState(s, writing === 0 && started > settled);
+          setState(s, writes.settingsCurrent(started));
         } catch (e) {
           if (e instanceof ApiError && e.status === 423) { m.pin = m.pin ?? { typed: 0 }; m.blank = 'This inbox is locked.'; }
           else if (e instanceof ApiError && e.status === 401) m.blank = `The inbox at ${config.url} refused the token in ${config.source}.\nPair again, or start the inbox on this machine.`;
