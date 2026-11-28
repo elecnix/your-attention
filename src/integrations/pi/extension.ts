@@ -135,7 +135,7 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
           if (ctx.isIdle()) pi.sendUserMessage(note);
           else pi.sendUserMessage(note, { deliverAs: 'followUp' });
           // The inbox sends a notice again on each connection until the session acknowledges it.
-          if (ev.type === 'reassigned') await client.ackNotice(ev.card.id).catch((e: Error) => log('notice not acknowledged:', e.message));
+          if (ev.type === 'reassigned') await client.ackNotice(ev).catch((e: Error) => log('notice not acknowledged:', e.message));
           return;
         }
         if (ev.type === 'revoke') {

@@ -2363,12 +2363,15 @@ export class Inbox {
     }
   }
 
-  /** The agent's session showed the notice of the card's last change of hands, so the inbox stops sending it. */
-  ackNotice(caller: Caller, id: string): Card {
+  /** The agent's session showed the notice of the change of hands at `at`, so the inbox stops sending it. Only the last
+   * move has a notice to send, so an acknowledgment of an earlier one, such as a retry that arrives after the card moved
+   * again, changes nothing. */
+  ackNotice(caller: Caller, id: string, at: unknown): Card {
+    if (typeof at !== 'number') throw new InboxError(400, 'at must be the time of the move the notice told of');
     const card = this.owned(caller, id);
     const last = card.reassignedFrom?.at(-1);
-    if (!last?.to) throw new InboxError(404, 'no notice of a change of hands for this card');
-    if (last.noticeReadAt !== undefined) return publicCard(card);
+    if (!card.reassignedFrom?.some((r) => r.to && r.at === at)) throw new InboxError(404, 'no notice of a change of hands at that time for this card');
+    if (!last || last.at !== at || last.noticeReadAt !== undefined) return publicCard(card);
     const next: Card = { ...card, reassignedFrom: [...card.reassignedFrom!.slice(0, -1), { ...last, noticeReadAt: this.now() }] };
     this.store.put('cards', id, next);
     this.emit({ type: 'change', card: id });

@@ -36,7 +36,7 @@ describe('reassigning a card whose agent retired', () => {
     assert.equal(reassignedEvents(events).length, 0);
     connect('claude:parent');
     assert.equal(reassignedEvents(events).length, 1);
-    inbox.ackNotice(agent, 'c1');
+    inbox.ackNotice(agent, 'c1', inbox.getCard('c1').reassignedFrom?.[0]?.at);
     assert.equal(typeof inbox.getCard('c1').reassignedFrom?.[0]?.noticeReadAt, 'number');
     connect('claude:parent');
     assert.equal(reassignedEvents(events).length, 1, 'a connection after the acknowledgment hears nothing new');
@@ -70,12 +70,28 @@ describe('reassigning a card whose agent retired', () => {
     assert.equal(reassignedEvents(second).length, 1);
   });
 
+  it('ignores a late acknowledgment of an earlier move, so the notice of the later move still goes out', () => {
+    const { inbox, agent, owner, clock, events, connect } = setup();
+    inbox.postCard(agent, { id: 'c1', agent: 'claude:child', title: 'Which schema?' });
+    inbox.reassign(owner, 'c1', { to: 'claude:parent', why: 'fix-login retired' });
+    const first = inbox.getCard('c1').reassignedFrom?.[0]?.at;
+    clock.advance(1000);
+    inbox.reassign(owner, 'c1', { to: 'claude:grandparent', why: 'parent retired' });
+    // The parent's acknowledgment, retried after the second move, names the first move.
+    inbox.ackNotice(agent, 'c1', first);
+    assert.equal(inbox.getCard('c1').reassignedFrom?.[1]?.noticeReadAt, undefined);
+    connect('claude:grandparent');
+    assert.equal(reassignedEvents(events).filter((e) => e.card.agent === 'claude:grandparent').length, 1);
+  });
+
   it('takes the acknowledgment of a notice on POST /v1/cards/<id>/ack with {notice: "reassigned"}, from the token that posted the card', async () => {
     const { inbox, call, post, owner, agentA, agentB } = await httpInbox();
     await post(agentA, { id: 'c1', agent: 'claude:child', title: 'q' });
     await call('POST', '/v1/cards/c1/reassign', { token: owner, body: { to: 'claude:parent', why: 'x retired' } });
-    assert.equal((await call('POST', '/v1/cards/c1/ack', { token: agentB, body: { notice: 'reassigned' } })).status, 403);
-    assert.equal((await call('POST', '/v1/cards/c1/ack', { token: agentA, body: { notice: 'reassigned' } })).status, 200);
+    const at = inbox.getCard('c1').reassignedFrom?.[0]?.at;
+    assert.equal((await call('POST', '/v1/cards/c1/ack', { token: agentB, body: { notice: 'reassigned', at } })).status, 403);
+    assert.equal((await call('POST', '/v1/cards/c1/ack', { token: agentA, body: { notice: 'reassigned' } })).status, 400, 'the acknowledgment names the move');
+    assert.equal((await call('POST', '/v1/cards/c1/ack', { token: agentA, body: { notice: 'reassigned', at } })).status, 200);
     assert.equal(typeof inbox.getCard('c1').reassignedFrom?.[0]?.noticeReadAt, 'number');
     assert.equal(inbox.state().states['c1'], 'open', 'acknowledging the notice leaves the card waiting on the person');
   });

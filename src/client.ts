@@ -330,7 +330,12 @@ export class Client {
   ack(id: string): Promise<Answer> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, {}); }
   /** Tell the inbox the session showed the notice that the card changed hands, so the inbox stops sending it. Call it
    * only once the notice reached the model: until then the inbox sends it again on each connection. */
-  ackNotice(id: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/ack`, { notice: 'reassigned' }); }
+  ackNotice(ev: Extract<AgentEvent, { type: 'reassigned' }>): Promise<Card> {
+    // The move's time names which change of hands the session showed, so a late acknowledgment of an earlier move
+    // never marks a later one read.
+    const at = ev.card.reassignedFrom?.at(-1)?.at;
+    return this.call('POST', `/v1/cards/${encodeURIComponent(ev.card.id)}/ack`, { notice: 'reassigned', at });
+  }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
   /** Cards that match the words and the filters. An empty query, or `*`, lists by the filters alone, and a
    * `nextCursor` reads the page after this one. */
