@@ -101,7 +101,9 @@ export function createPlugin(z: unknown) {
     const followed = new Map<string, AbortController>();
     /** This plugin's life: dispose aborts the wait for an inbox along with the streams, so a reload leaves no timer. */
     const lifetime = new AbortController();
-    const pending = new Map<string, string>();
+    // Receipt -> the acknowledgment to send once the conversation holds that receipt: an answer's, a notice's, or a sent
+    // card's. promptAsync only queues a message, so a session interrupted before the queue runs never shows it.
+    const pending = new Map<string, () => Promise<unknown>>();
     const checked = new Set<string>();
 
     const send = (session: string, text: string): Promise<unknown> =>
@@ -117,18 +119,18 @@ export function createPlugin(z: unknown) {
         if (ev.type === 'guidance') { await send(session, `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`); return; }
         if (ev.type === 'returned') { await send(session, `[your-attention] ${describeReturned(ev)}`); return; }
         if (ev.type === 'advice') { await send(session, `[your-attention] ${describeAdvice(ev)}`); return; }
+        // The inbox sends a sent card, and a notice, again on each connection until the session acknowledges it, so each
+        // note carries a receipt, and the acknowledgment waits until the conversation holds it, as an answer's does.
         if (ev.type === 'card') {
-          await send(session, `[your-attention] ${describeSentCard(ev)}`);
-          // The inbox sends the card again on each connection until the session acknowledges it. A failed
-          // acknowledgment only means the card comes again.
-          await box.ackSent(ev).catch(() => {});
+          const receipt = `card ${ev.id}`;
+          pending.set(receipt, () => box.ackSent(ev));
+          await send(session, `[your-attention ${receipt}] ${describeSentCard(ev)}`);
           return;
         }
         if (ev.type === 'reassigned') {
-          await send(session, `[your-attention] ${describeReassigned(ev)}`);
-          // The inbox sends a notice again on each connection until the session acknowledges it. A failed
-          // acknowledgment only means the notice comes again.
-          await box.ackNotice(ev).catch(() => {});
+          const receipt = `notice ${ev.id}`;
+          pending.set(receipt, () => box.ackNotice(ev));
+          await send(session, `[your-attention ${receipt}] ${describeReassigned(ev)}`);
           return;
         }
         if (ev.type === 'revoke') {
@@ -137,7 +139,7 @@ export function createPlugin(z: unknown) {
           return;
         }
         if (ev.type !== 'answer') return;
-        pending.set(ev.id, ev.card.id);
+        pending.set(ev.id, () => box.ack(ev.card.id));
         const sealed = await secrets.receive(ev.card, ev.answer);
         const what = `The person answered card "${ev.card.title}" (id ${ev.card.id}):\n${describeAnswer(ev.card, ev.answer, await saveAnswerImages(box, agentOf(session), ev.answer))}${sealed ? `\n${sealed}` : ''}${describeOpenCards(ev.openCards)}`;
         await send(session, `[your-attention answer ${ev.id}] ${what}`);
@@ -191,10 +193,11 @@ export function createPlugin(z: unknown) {
       async 'chat.message'(_input, output) {
         if (!pending.size || !inbox) return;
         const text = output.parts.map((p) => p.text ?? '').join('\n');
-        for (const [receipt, card] of pending) {
+        for (const [receipt, ack] of pending) {
           if (!text.includes(receipt)) continue;
           pending.delete(receipt);
-          await inbox.ack(card).catch(() => {});
+          // A failed acknowledgment only means the inbox sends it again.
+          await ack().catch(() => {});
         }
       },
       // A grant reaches the shells of its own session only. The person's terminal has no session, and gets none.

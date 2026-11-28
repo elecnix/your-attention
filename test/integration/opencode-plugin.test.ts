@@ -76,6 +76,30 @@ describe('the OpenCode plugin', () => {
     await until(async () => (await state()).states['oc-1'] === 'read' || undefined);
   });
 
+  it('acknowledges a card the person sent only once the note reaches the conversation, not when OpenCode queues it', async () => {
+    const res = await h.owner('POST', '/v1/send', { agent: 'opencode:ses_1', text: 'Please rebase on main.' });
+    const { id } = (await res.json()) as { id: string };
+    const msg = await until(() => prompts.find((p) => p.text.includes(id)));
+    assert.match(msg.text, /The person sent this session a card/);
+    // promptAsync only queues the note, and a session interrupted before the queue runs never shows it.
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(h.server.inbox.sent(id)?.readAt, null);
+    await hooks['chat.message']!({ sessionID: 'ses_1' }, { message: {} as never, parts: [{ type: 'text', text: msg.text }] as never });
+    await until(() => h.server.inbox.sent(id)?.readAt ?? undefined);
+  });
+
+  it('acknowledges the notice of a card reassigned to the session only once the note reaches the conversation', async () => {
+    assert.equal((await h.postAsAgent({ id: 'oc-moved', agent: 'opencode:retired-child', title: 'Which schema?' })).status, 201);
+    assert.equal((await h.owner('POST', '/v1/cards/oc-moved/reassign', { to: 'opencode:ses_1', why: 'fix-login retired' })).status, 200);
+    const msg = await until(() => prompts.find((p) => p.text.includes('oc-moved') && p.text.includes('reassigned')));
+    const entry = async () => (await h.card('oc-moved'))?.reassignedFrom?.at(-1);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await entry())?.noticeReadAt, undefined);
+    await hooks['chat.message']!({ sessionID: 'ses_1' }, { message: {} as never, parts: [{ type: 'text', text: msg.text }] as never });
+    await until(async () => (await entry())?.noticeReadAt);
+    await h.owner('POST', '/v1/cards/oc-moved/close', { kind: 'retracted', outcome: 'test over' });
+  });
+
   it('follows a session it sees in an event when that session has an open card', async () => {
     await new Client({ url: h.server.url, token: h.agentToken }).post({ id: 'oc-2', agent: 'opencode:ses_2', title: 'From before a restart' });
     await hooks.event!({ event: { type: 'session.status', properties: { sessionID: 'ses_2', status: { type: 'idle' } } } as never });

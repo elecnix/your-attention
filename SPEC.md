@@ -300,7 +300,9 @@ Because any connection that reports the agent id receives the card, the card has
 
 Claude Code's channel acknowledges once the transcript shows the receipt, as it does for an answer. If the receipt never appears, the channel pushes the card once more and then types it into its own pane.
 
-The pi extension acknowledges once the card's id appears in the model's context, and the OpenCode plugin acknowledges once the session took the note. Clients drop a copy of a card only while they still handle the first. Failed acknowledgments, or a card the channel gave up on, let the next copy through.
+In pi and OpenCode, the note starts with a receipt, `card <id>`. Pi acknowledges once the receipt appears in the model's context. OpenCode's `promptAsync` only queues the note, and a session interrupted before its queue runs never shows it, so the plugin waits until the `chat.message` hook shows the receipt.
+
+A client drops a copy of a card while it still handles the first. Failed acknowledgments let the next copy through, and so does a card the channel gave up on.
 
 A record written before the inbox asked for acknowledgments has no `readAt`. It counts as read once it has `deliveredAt`, so an old message never goes again. The sweep deletes a sent card 30 days after it went, so a session that never returns leaves the inbox as it was. `POST /v1/reset` removes those records too.
 
@@ -1189,7 +1191,7 @@ A channel that starts while its inbox is stopped completes the MCP handshake any
 
 The channel keeps watching the transcript for the receipt. When the receipt has not appeared within 60 seconds, and the transcript has not changed in that time, the channel pushes the answer once more. When the second push misses too, and the session runs in a herdr pane, the channel types the answer into that pane with `herdr agent prompt`. It follows the rule of an approval: it sends only to the session's own pane. It never types over text the person put in that pane's input box, and it puts a space before a text that opens with a dash, which herdr would read as an option. A successful send acknowledges the answer, because the session now has it as its own message. Outside herdr, in a pane with a draft, or in a pane with no input box, the answer stays `delivered`, and the card's status reads **Not seen by the agent** with the reason.
 
-The OpenCode plugin follows one stream per session, as agent `opencode:<session id>`: each session that calls a card tool, and each session from before a restart that still has an open card. It sends each answer into its session with OpenCode's `promptAsync`. OpenCode starts a new turn when the session is idle, and queues the message behind a turn that runs. The plugin acknowledges the answer when OpenCode's `chat.message` hook shows the receipt in the conversation.
+The OpenCode plugin follows one stream per session, as agent `opencode:<session id>`: each session that calls a card tool, and each session from before a restart that still has an open card. It sends each answer into its session with OpenCode's `promptAsync`. OpenCode starts a new turn when the session is idle, and queues the message behind a turn that runs. The plugin acknowledges the answer when OpenCode's `chat.message` hook shows the receipt in the conversation, and does the same for a card the person sent and for the notice of a card reassigned to the session.
 
 The pi extension reads the answer to a blocked prompt on the session's own stream, before the generic answer path, and types it into the session's pane. The model doesn't receive a message for it, since the prompt already asked the question. The herdr sidecar does the same for the cards it posts, on a stream of its own.
 
