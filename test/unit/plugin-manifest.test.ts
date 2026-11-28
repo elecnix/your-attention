@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { VERSION } from '../../src/core/version.ts';
+import { nodeBuild } from '../../src/node/build.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const pluginJson = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8')) as {
@@ -18,10 +18,10 @@ const hooksJson = JSON.parse(fs.readFileSync(path.join(root, 'hooks', 'hooks.jso
 };
 
 describe('the Claude Code plugin manifest', () => {
-  it('keeps its version in step with package.json and VERSION', () => {
+  it('keeps its version in step with package.json and the build the inbox reports', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string };
     assert.equal(pluginJson.version, pkg.version);
-    assert.equal(pluginJson.version, VERSION);
+    assert.equal(pluginJson.version, nodeBuild().version);
   });
 
   it('serves the channel server this package implements', () => {

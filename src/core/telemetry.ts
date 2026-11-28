@@ -5,7 +5,7 @@
 // random install id only. A hosted inbox always counts, with its invite id, and says so.
 import { sha256 } from './crypto.ts';
 import type { Storage } from './storage.ts';
-import { VERSION } from './version.ts';
+import { UNKNOWN_BUILD } from './version.ts';
 
 /** Event counts and distinct counts, in the order of the data point's doubles. */
 export const COUNTS = ['cards', 'answers', 'pairings', 'pages', 'agents', 'instances', 'tokens'] as const;
@@ -87,12 +87,15 @@ export class Usage {
   private readonly store: Storage;
   private readonly now: () => number;
   private readonly alwaysOn: boolean;
+  private readonly version: string;
 
-  /** `alwaysOn` is for a hosted inbox, which counts whatever is stored. Your own inbox starts off. */
-  constructor(store: Storage, now: () => number = Date.now, opts: { alwaysOn?: boolean } = {}) {
+  /** `alwaysOn` is for a hosted inbox, which counts whatever is stored. Your own inbox starts off. `version` is the
+   * release each report names. */
+  constructor(store: Storage, now: () => number = Date.now, opts: { alwaysOn?: boolean; version?: string } = {}) {
     this.store = store;
     this.now = now;
     this.alwaysOn = opts.alwaysOn === true;
+    this.version = opts.version ?? UNKNOWN_BUILD.version;
   }
 
   private load(): Stored {
@@ -179,7 +182,7 @@ export class Usage {
 
   report(d: DayCounts, source: Source): TelemetryReport {
     const s = this.settings();
-    return { schema: 1, source, installId: s.installId, invite: source === 'hosted' ? s.invite : '', version: VERSION, day: d.day, counts: { ...d.counts } };
+    return { schema: 1, source, installId: s.installId, invite: source === 'hosted' ? s.invite : '', version: this.version, day: d.day, counts: { ...d.counts } };
   }
 }
 

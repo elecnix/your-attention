@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.png binary
+# A release archive (git archive, and the tarball GitHub serves for a tag) writes its commit into COMMIT, which a
+# build without .git reads as its commit. See src/node/build.ts.
+COMMIT export-subst

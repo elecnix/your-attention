@@ -10,6 +10,7 @@
 // Node that already runs the project.
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import { stripTypeScriptTypes } from "node:module";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -56,4 +57,17 @@ for (const entry of fs.readdirSync(WEB, { recursive: true, withFileTypes: true }
 	fs.writeFileSync(target, fs.readFileSync(from));
 	copied++;
 }
-console.log(`compiled ${files} source file(s) and copied ${copied} page file(s) into dist/`);
+// The build the package runs, which src/node/build.ts reads in place of a checkout's package.json and git: the
+// version package.json declares, and the commit packed. A checkout asks git. A release archive, such as the tarball
+// the Homebrew formula installs, has no .git, but git wrote its commit into COMMIT (export-subst in .gitattributes).
+// Without either, a workflow's GITHUB_SHA, and otherwise no commit.
+const version = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+let commit;
+try {
+	commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+} catch {
+	const archived = fs.existsSync(path.join(ROOT, "COMMIT")) ? fs.readFileSync(path.join(ROOT, "COMMIT"), "utf8").trim() : "";
+	commit = /^[0-9a-f]{40,64}$/.test(archived) ? archived : process.env.GITHUB_SHA;
+}
+fs.writeFileSync(path.join(OUT, "build.json"), `${JSON.stringify({ version, ...(commit ? { commit } : {}) })}\n`);
+console.log(`compiled ${files} source file(s) and copied ${copied} page file(s) into dist/, built from ${version}${commit ? ` at ${commit}` : ""}`);

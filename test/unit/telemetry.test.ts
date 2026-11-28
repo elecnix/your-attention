@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 import { describe, it } from 'node:test';
 import { createHandler } from '../../src/core/http.ts';
 import { Inbox } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import { COUNTS, Usage, dataPoint, inviteId, parseReport, utcDay } from '../../src/core/telemetry.ts';
-import { VERSION } from '../../src/core/version.ts';
 import { sendDue, summarize, usageQuery } from '../../src/node/telemetry.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -21,7 +18,7 @@ describe('usage counts', () => {
   it('counts the day in the inbox and keeps the sets on this machine', async () => {
     const c = clock();
     const store = new MemoryStorage();
-    const inbox = new Inbox(store, c.now);
+    const inbox = new Inbox(store, c.now, undefined, { build: { version: '3.2.1' } });
     inbox.usage.update({ enabled: true, notified: true });
     inbox.postCard({ token: 'ta', role: 'agent' }, { id: 'c1', agent: 'secret-agent-name', title: 'a private title' });
     inbox.postCard({ token: 'ta', role: 'agent' }, { id: 'c1', agent: 'secret-agent-name', title: 'a revision is not a new card' });
@@ -36,7 +33,7 @@ describe('usage counts', () => {
     const report = inbox.usage.report(inbox.usage.today(), 'laptop');
     assert.deepEqual(report.counts, { cards: 1, answers: 1, pairings: 1, pages: 1, agents: 2, instances: 2, tokens: 2 });
     assert.equal(report.day, '2026-10-28');
-    assert.equal(report.version, VERSION);
+    assert.equal(report.version, '3.2.1', 'the report names the release of the build the platform handed the inbox');
     assert.match(report.installId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     const sent = JSON.stringify(report);
     for (const secret of ['secret-agent-name', 'other-agent', 'private', 'proc-', 'viewer-', '"ta"', '"tb"', '"c1"']) assert.ok(!sent.includes(secret), `the report carries ${secret}`);
@@ -154,9 +151,9 @@ describe('the report the collector accepts', () => {
     assert.deepEqual(dataPoint(good as never).indexes, ['laptop']);
   });
 
-  it('keeps the version in step with package.json', () => {
-    const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'package.json'), 'utf8')) as { version: string };
-    assert.equal(VERSION, pkg.version);
+  it('reports no release when the platform handed the inbox none, and the collector refuses that report', () => {
+    const report = new Inbox(new MemoryStorage()).usage.report({ day: '2026-10-28', counts: { cards: 0, answers: 0, pairings: 0, pages: 0, agents: 0, instances: 0, tokens: 0 } }, 'laptop');
+    assert.equal(typeof parseReport(report, T0), 'string');
   });
 });
 

@@ -2,6 +2,7 @@
 // hibernatable sockets and alarms. "Hibernation" builds a new object on the same
 // storage and sockets, as the runtime does when it wakes the object.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, it } from 'node:test';
 
@@ -104,6 +105,14 @@ async function alarmAfter(obj: InstanceType<typeof InboxObject>, server: FakeSoc
 }
 
 describe('the inbox Durable Object', () => {
+  it('names the version its bundled package declares and the commit its deploy set', async () => {
+    const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
+    const commit = 'a'.repeat(40);
+    const info = (await (await call(runtime({ COMMIT: commit }).make(), 'GET', '/v1/info')).json()) as { version?: unknown; commit?: unknown };
+    assert.equal(info.version, version, `the hosted inbox answered version ${String(info.version)}, but package.json declares ${version}`);
+    assert.equal(info.commit, commit, `the hosted inbox answered commit ${String(info.commit)}, but its deploy set ${commit}`);
+  });
+
   it('shows at most SHOWN_CARDS_LIMIT cards, so the state fits its CPU time', async () => {
     const rt = runtime({ SHOWN_CARDS_LIMIT: '2' });
     const obj = rt.make();

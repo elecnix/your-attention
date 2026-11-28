@@ -18,6 +18,7 @@ import { cleanTags, SummarizedStorage, type AnswerSummary, type CardSummary, typ
 import { Usage } from './telemetry.ts';
 import { generateVapid, sendPush, b64urlDecode, type Vapid } from './webpush.ts';
 import { MAX_PULL_REQUESTS, MAX_TAGS } from './types.ts';
+import { UNKNOWN_BUILD, type Build } from './version.ts';
 import type {
   Reassignment, AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, PullRequest, RequireCardInput, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
@@ -146,6 +147,8 @@ function isRun(v: unknown): v is PrivilegedRun {
 }
 
 export interface InboxOptions {
+  /** The build this inbox runs, which GET /v1/info and the usage reports name. The platform reads it. */
+  build?: Build;
   keepPresence?: boolean;
   uploadLimitBytes?: number | undefined;
   storageLimitBytes?: number | undefined;
@@ -496,6 +499,8 @@ export class Inbox {
   private readonly pushWait: InboxOptions['pushWait'];
   /** The VAPID key, read or made once. A promise, so two requests that ask at once make one key. */
   private vapid: Promise<Vapid> | undefined;
+  /** The build this inbox runs. */
+  readonly build: Build;
   /** The usage counts the platform sends once a day, when the person left them on. */
   readonly usage: Usage;
   /** The PIN a browser tab types before it acts as the owner. */
@@ -529,7 +534,8 @@ export class Inbox {
     this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
     this.pushRule = opts.pushRule;
     this.pushWait = opts.pushWait;
-    this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn });
+    this.build = opts.build ?? UNKNOWN_BUILD;
+    this.usage = new Usage(store, now, { alwaysOn: opts.usageAlwaysOn, version: this.build.version });
     this.pin = new PinLock(store, now, opts.pinIterations);
     // A page that opened before the PIN changed must unlock again.
     this.pin.onChange(() => this.closeLockedPages());

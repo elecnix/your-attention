@@ -13,6 +13,7 @@ import { SqliteStorage } from '../adapters/sqlite.ts';
 import { randomId } from '../core/crypto.ts';
 import type { SecretSources } from '../core/secret-sources.ts';
 import { createHandler, originParam } from '../core/http.ts';
+import { nodeBuild } from './build.ts';
 import type { ApprovalSender, Caller } from '../core/inbox.ts';
 import type { PrivilegedRunner } from '../core/privileged.ts';
 import { instanceName } from '../secrets/registry.ts';
@@ -125,7 +126,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, privileged: opts.privileged === false ? undefined : opts.privileged ?? defaultRunners(home, log), pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { build: nodeBuild(), checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, privileged: opts.privileged === false ? undefined : opts.privileged ?? defaultRunners(home, log), pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');

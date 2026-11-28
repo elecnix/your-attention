@@ -2,6 +2,7 @@
 // at a time, and it hibernates when idle: agent sockets stay open, and the
 // object rebuilds each connection from the socket's attachment when it wakes.
 import { COOKIE, createHandler, originParam } from '../core/http.ts';
+import { workerBuild } from './build.ts';
 import { Inbox, connectionOrigin } from '../core/inbox.ts';
 import { pinKeyError, type PinKey } from '../core/pin.ts';
 import { agentSocket, pageSocket, type AgentSocket } from '../core/socket.ts';
@@ -97,6 +98,7 @@ export class InboxObject {
     this.ctx = ctx;
     this.env = env;
     this.inbox = new Inbox(new DurableSqlStorage(ctx.storage.sql), Date.now, new R2Blobs(env.FILES, ctx.id.toString()), {
+      build: workerBuild(env.COMMIT),
       keepPresence: true,
       uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES),
       storageLimitBytes: limit(env.STORAGE_LIMIT_BYTES),
