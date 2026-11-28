@@ -10,7 +10,7 @@ import { createHandler } from '../../src/core/http.ts';
 import { Inbox } from '../../src/core/inbox.ts';
 import { MemoryStorage } from '../../src/core/storage.ts';
 import { PROTOCOL_VERSION } from '../../src/core/types.ts';
-import { nodeBuild } from '../../src/node/build.ts';
+import { checkoutCommit, nodeBuild } from '../../src/node/build.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string };
@@ -68,6 +68,18 @@ describe('the build an inbox reports', () => {
       fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ version: '1.2.3' }));
       fs.writeFileSync(path.join(pkgDir, 'COMMIT'), '$Format:%H$\n');
       assert.deepEqual(nodeBuild(pkgDir), { version: '1.2.3' }, 'the folder is not the top of the outer checkout, so its HEAD is not this build');
+    });
+  });
+
+  it('reads a branch from packed-refs, and a detached HEAD, without asking git', () => {
+    inTempDir((dir) => {
+      const id = 'b'.repeat(40);
+      fs.mkdirSync(path.join(dir, '.git'));
+      fs.writeFileSync(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+      fs.writeFileSync(path.join(dir, '.git', 'packed-refs'), `# pack-refs with: peeled fully-peeled sorted\n${id} refs/heads/main\n`);
+      assert.equal(checkoutCommit(dir), id);
+      fs.writeFileSync(path.join(dir, '.git', 'HEAD'), `${'d'.repeat(40)}\n`);
+      assert.equal(checkoutCommit(dir), 'd'.repeat(40));
     });
   });
 
