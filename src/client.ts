@@ -335,10 +335,7 @@ export class Client {
     const at = ev.at;
     // An acknowledgment that fails leaves the notice unread in the inbox, which sends it again on the next connection,
     // so this process lets that copy through.
-    return this.call<Card>('POST', `/v1/cards/${encodeURIComponent(ev.card.id)}/ack`, { notice: 'reassigned', at }).catch((e: unknown) => {
-      this.releaseNotice(ev);
-      throw e;
-    });
+    return this.ackOrRelease<Card>(`/v1/cards/${encodeURIComponent(ev.card.id)}/ack`, { notice: 'reassigned', at }, () => this.releaseNotice(ev));
   }
   /** Forget a notice this process handed on but could not get acknowledged, so the copy the inbox sends on the next
    * connection reaches the handler instead of being dropped as one already seen. */
@@ -348,8 +345,12 @@ export class Client {
   ackSent(ev: Extract<AgentEvent, { type: 'card' }>): Promise<SentCard> {
     // An acknowledgment that fails leaves the card unread in the inbox, which sends it again on the next connection, so
     // this process lets that copy through.
-    return this.call<SentCard>('POST', `/v1/send/${encodeURIComponent(ev.id)}/ack`, { agent: ev.card.agent }).catch((e: unknown) => {
-      this.releaseSent(ev);
+    return this.ackOrRelease<SentCard>(`/v1/send/${encodeURIComponent(ev.id)}/ack`, { agent: ev.card.agent }, () => this.releaseSent(ev));
+  }
+  /** Send an acknowledgment, and on a failure let the inbox's next copy of the event through before passing the error on. */
+  private ackOrRelease<T>(route: string, body: unknown, release: () => void): Promise<T> {
+    return this.call<T>('POST', route, body).catch((e: unknown) => {
+      release();
       throw e;
     });
   }

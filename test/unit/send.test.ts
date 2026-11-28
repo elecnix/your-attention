@@ -62,10 +62,12 @@ describe('a card the person sends to an agent', () => {
   });
 
   it('sends the card again to each new connection until the agent acknowledges it', () => {
-    const { inbox, events, connect } = setup();
+    const { inbox, events, connect, clock } = setup();
     const sent = inbox.sendCard(owner, { agent: 'claude:s1', text: 'One card, please.' });
     connect('claude:s1');
-    // A send only hands the event to a socket, which the platform may have closed without saying so.
+    // A send only hands the event to a socket, which the platform may have closed without saying so. The second
+    // connection comes later, so an inbox that moved deliveredAt to the resend would fail below.
+    clock.advance(1000);
     connect('claude:s1');
     assert.equal(cardEvents(events).length, 2, 'no session acknowledged the card, so the next connection gets it again');
     assert.equal(inbox.sent(sent.id)?.deliveredAt, NOW, 'deliveredAt keeps the first send');
