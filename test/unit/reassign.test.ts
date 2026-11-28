@@ -26,6 +26,7 @@ describe('reassigning a card whose agent retired', () => {
     assert.equal(told[0]?.card.id, 'c1');
     assert.equal(told[0]?.from, 'claude:child');
     assert.equal(told[0]?.why, 'fix-login retired');
+    assert.equal(told[0]?.at, card.reassignedFrom?.[0]?.at, 'the event names the move, for the acknowledgment to echo');
     assert.equal(inbox.state().states['c1'], 'open');
   });
 

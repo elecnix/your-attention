@@ -2358,7 +2358,7 @@ export class Inbox {
       if (!WAITING_STATES.has(cardState(card, this.store.get<Answer>('answers', card.id)))) continue;
       const sent: Card = last.noticeSentAt !== undefined ? card : { ...card, reassignedFrom: [...card.reassignedFrom!.slice(0, -1), { ...last, noticeSentAt: this.now() }] };
       if (sent !== card) this.store.put('cards', card.id, sent);
-      const ev: AgentEvent = { type: 'reassigned', id: randomId(6), card: publicCard(sent), from: last.from, why: last.why };
+      const ev: AgentEvent = { type: 'reassigned', id: randomId(6), card: publicCard(sent), from: last.from, why: last.why, at: last.at };
       for (const send of subs) send(ev);
     }
   }

@@ -331,7 +331,7 @@ export class Client {
   ackNotice(ev: Extract<AgentEvent, { type: 'reassigned' }>): Promise<Card> {
     // The move's time names which change of hands the session showed, so a late acknowledgment of an earlier move
     // never marks a later one read.
-    const at = ev.card.reassignedFrom?.at(-1)?.at;
+    const at = ev.at;
     // An acknowledgment that fails leaves the notice unread in the inbox, which sends it again on the next connection,
     // so this process lets that copy through.
     return this.call<Card>('POST', `/v1/cards/${encodeURIComponent(ev.card.id)}/ack`, { notice: 'reassigned', at }).catch((e: unknown) => {
@@ -583,7 +583,7 @@ export class Client {
 
 /** The key that tells one change of hands from another: the card and the time of its last move. */
 function noticeKey(ev: Extract<AgentEvent, { type: 'reassigned' }>): string {
-  return `reassigned:${ev.card.id}:${ev.card.reassignedFrom?.at(-1)?.at ?? 0}`;
+  return `reassigned:${ev.card.id}:${ev.at}`;
 }
 
 /** The address parameters of a search or a cards listing, by the filter each one carries. `format=page` tells the

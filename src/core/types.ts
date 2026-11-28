@@ -646,7 +646,7 @@ export type AgentEvent =
    * an agent with no open stream, and sends it first when one opens. */
   | { type: 'revoke'; id: string; card: Card; field: string; case: string }
   /** The inbox gave this agent a card whose agent retired, because this agent is its nearest living ancestor. */
-  | { type: 'reassigned'; id: string; card: Card; from: string; why: string };
+  | { type: 'reassigned'; id: string; card: Card; from: string; why: string; at: number };
 
 /** What pages receive. They refetch state on "change". */
 export type PageEvent =
