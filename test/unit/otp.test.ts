@@ -332,6 +332,20 @@ describe('redeeming a ticket', () => {
     assert.equal((await call(inbox, 'agent', 'PATCH', '/v1/otp/keys/npm%252Dx', { add: ['me'] })).status, 403);
   });
 
+  it('holds the code for the time the inbox says it has left, whatever the session clock reads', async () => {
+    const { inbox, ticket, session, clock } = await approved();
+    // This session's clock runs 25 seconds ahead of the inbox's, and the code has 20 seconds of its step left.
+    const ahead = () => clock.now() + 25_000;
+    const secrets = new SecretRequests(ahead);
+    secrets.remember('c1', session.privateKey);
+    await secrets.receive(inbox.getCard('c1'), storedAnswer(inbox, 'c1'));
+    const waits: number[] = [];
+    const ctx = { inbox: clientOver(inbox), secrets, agent: SESSION, origin: async () => undefined, arrival: 'later', now: ahead, sleep: async (ms: number) => { waits.push(ms); } };
+    const said = await runTool(ctx, 'card_otp', { ticket });
+    assert.equal(secrets.env(SESSION)['NPM_OTP'], await totp(RFC_KEY, clock.now()), 'the next command gets the code');
+    assert.match(said, /20 seconds from now/);
+  });
+
   it('leaves the ticket unused when the session cannot hand the code to a command', async () => {
     const { inbox, ticket, clock } = await approved();
     const ctx = { inbox: clientOver(inbox), secrets: new SecretRequests(clock.now), agent: SESSION, origin: async () => undefined, arrival: 'later', now: clock.now, sleep: async () => {} };

@@ -209,7 +209,10 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       const left = STEP_MS - (now() % STEP_MS);
       if (left < OTP_MARGIN_MS) await (ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); })))(left + 250);
       const r = await inbox.otpRedeem(ticket, agent);
-      const line = await ctx.secrets.holdCode(r.card, agent, r.field, r.sealed, r.expiresAt);
+      // The inbox's clock says how long the code has left, and the grant counts that from this session's clock, so a
+      // session whose clock differs from a hosted inbox's still holds the code for its whole life.
+      const until = now() + Math.max(0, r.expiresAt - r.issuedAt);
+      const line = await ctx.secrets.holdCode(r.card, agent, r.field, r.sealed, until);
       if (line === undefined) throw new Error(`this session no longer has the key of card ${r.card}, so it cannot open the code. The ticket is used: post a new otp card`);
       return `The inbox issued a code from the key ${r.key} for "${r.purpose}". ${line}`;
     }
