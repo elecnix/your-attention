@@ -124,6 +124,8 @@ interface Push {
   /** A notice that the card changed hands. A missed one stays unacknowledged, and the inbox sends it again on the next
    * connection, so it never marks the card as not seen. */
   notice?: boolean;
+  /** Lets the inbox's next copy of a missed notice through the client, which drops a copy it already handed on. */
+  release?: () => void;
   body: string;
   meta: { card_id: string; receipt: string };
   /** When this push went out, or when the transcript last grew after it. The retry waits for this to age. */
@@ -208,11 +210,14 @@ async function fallback(receipt: string, push: Push): Promise<void> {
       return;
     } catch (e) {
       log('no herdr send for', push.card, '-', (e as Error).message);
-      if (push.notice) return;
+      if (push.notice) return push.release?.();
       return markNotSeen(push.card, (e as Error).message);
     }
   }
-  if (push.notice) return log('notice not seen, the inbox sends it again on the next connection:', push.card);
+  if (push.notice) {
+    push.release?.();
+    return log('notice not seen, the inbox sends it again on the next connection:', push.card);
+  }
   await markNotSeen(push.card, channelOff ? 'its channel is off' : 'channel dropped it twice');
 }
 
@@ -324,7 +329,7 @@ function listen(client: Client): void {
       log('reassigned', ev.card.id, 'from', ev.from);
       const receipt = ev.id;
       const ack = (): Promise<void> => client.ackNotice(ev).then(() => log('notice read', ev.card.id), (e: Error) => log('notice not acknowledged:', e.message));
-      const push: Push = { card: ev.card.id, ack, notice: true, body: describeReassigned(ev), meta: { card_id: ev.card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
+      const push: Push = { card: ev.card.id, ack, notice: true, release: () => client.releaseNotice(ev), body: describeReassigned(ev), meta: { card_id: ev.card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
       pending.set(receipt, push);
       try {
         await notify(push.body, push.meta);

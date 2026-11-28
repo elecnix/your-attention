@@ -110,6 +110,23 @@ describe('the pi extension', () => {
     await until(async () => (await state()).states['pi-1'] === 'read' || undefined);
   });
 
+  it('tells the session of a card reassigned to it, and acknowledges the notice only once the context holds it', async () => {
+    const agent = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'pi-1')!.agent;
+    const posted = await fetch(`${h.server.url}/v1/cards`, { method: 'POST', headers: { authorization: `Bearer ${h.agentToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pi-moved', agent: 'pi:retired-child', title: 'Which schema?' }) });
+    assert.equal(posted.status, 201);
+    assert.equal((await h.owner('POST', '/v1/cards/pi-moved/reassign', { to: agent, why: 'fix-login retired' })).status, 200);
+    const msg = await until(() => sent.find((m) => m.text.includes('pi-moved')));
+    assert.match(msg.text, /was reassigned to you because fix-login retired/);
+    const entry = async () => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'pi-moved')?.reassignedFrom?.at(-1);
+    // A note queued for a later turn may never run, so the acknowledgment waits for the model's context.
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await entry())?.noticeReadAt, undefined);
+    await handlers.get('context')?.({ messages: [{ role: 'user', content: msg.text }] }, ctx);
+    await until(async () => (await entry())?.noticeReadAt);
+    // The asks for a card below need a session with no open card.
+    await h.owner('POST', '/v1/cards/pi-moved/close', { kind: 'retracted', outcome: 'test over' });
+  });
+
   it('gives each bash command the secret as $PI_KEY, masks it in the output, and writes no file', async () => {
     const res = await tools.get('card_post')!.execute('call-s', { id: 'pi-key', title: 'Need the pi key', body: 'root = Card([key])\nkey = widget secret {"name": "PI_KEY"}' }, undefined, undefined, ctx);
     assert.match(res.content[0]!.text, /Posted card pi-key/);

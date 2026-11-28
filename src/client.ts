@@ -184,9 +184,7 @@ export class Client {
    * notice of a change of hands to each connection until the session acknowledges it, so a reconnect may bring it twice. */
   private fresh(ev: AgentEvent): boolean {
     if (ev.type !== 'answer' && ev.type !== 'reassigned') return true;
-    const key = ev.type === 'answer'
-      ? `${ev.card.id}:${ev.answer.savedAt}:${ev.answer.forcedAt ?? 0}`
-      : `reassigned:${ev.card.id}:${ev.card.reassignedFrom?.at(-1)?.at ?? 0}`;
+    const key = ev.type === 'answer' ? `${ev.card.id}:${ev.answer.savedAt}:${ev.answer.forcedAt ?? 0}` : noticeKey(ev);
     if (this.seen.has(key)) return false;
     this.seen.add(key);
     return true;
@@ -334,8 +332,16 @@ export class Client {
     // The move's time names which change of hands the session showed, so a late acknowledgment of an earlier move
     // never marks a later one read.
     const at = ev.card.reassignedFrom?.at(-1)?.at;
-    return this.call('POST', `/v1/cards/${encodeURIComponent(ev.card.id)}/ack`, { notice: 'reassigned', at });
+    // An acknowledgment that fails leaves the notice unread in the inbox, which sends it again on the next connection,
+    // so this process lets that copy through.
+    return this.call<Card>('POST', `/v1/cards/${encodeURIComponent(ev.card.id)}/ack`, { notice: 'reassigned', at }).catch((e: unknown) => {
+      this.releaseNotice(ev);
+      throw e;
+    });
   }
+  /** Forget a notice this process handed on but could not get acknowledged, so the copy the inbox sends on the next
+   * connection reaches the handler instead of being dropped as one already seen. */
+  releaseNotice(ev: Extract<AgentEvent, { type: 'reassigned' }>): void { this.seen.delete(noticeKey(ev)); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
   /** Cards that match the words and the filters. An empty query, or `*`, lists by the filters alone, and a
    * `nextCursor` reads the page after this one. */
@@ -573,6 +579,11 @@ export class Client {
       for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }
   }
+}
+
+/** The key that tells one change of hands from another: the card and the time of its last move. */
+function noticeKey(ev: Extract<AgentEvent, { type: 'reassigned' }>): string {
+  return `reassigned:${ev.card.id}:${ev.card.reassignedFrom?.at(-1)?.at ?? 0}`;
 }
 
 /** The address parameters of a search or a cards listing, by the filter each one carries. `format=page` tells the
