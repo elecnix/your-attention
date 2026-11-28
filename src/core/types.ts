@@ -390,6 +390,11 @@ export interface Card {
   /** The answer fields of the PrivilegedAction calls in the body, which the privileged_action widget places. Each takes
    * only a password sealed to the broker's key, and the stored answer holds what the command printed instead. */
   privileged?: string[];
+  /** The answer fields of the OneTimeCode calls in the body, which the otp widget places. Each takes "approve" or
+   * "decline" from the owner, and the stored answer holds a ticket or a decline, never a code. */
+  otp?: string[];
+  /** Set by the inbox on a card with a one-time code, never by the agent: which inbox holds the keys, and how. */
+  otpHolder?: string;
   /** Raw HTML with scripts, shown in a sandboxed frame when the settings allow it. */
   html?: string;
   attachments?: Attachment[];

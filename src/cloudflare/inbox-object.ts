@@ -9,6 +9,7 @@ import { dataPoint } from '../core/telemetry.ts';
 import type { PresenceOrigin, Role } from '../core/types.ts';
 import { notifies } from '../../web/queue.js';
 import { DurableSqlStorage, R2Blobs } from './storage.ts';
+import { sealedOtpKeys } from './otp-keys.ts';
 import type { Env } from './worker.ts';
 
 /** What each agent socket keeps across hibernation. */
@@ -96,8 +97,11 @@ export class InboxObject {
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
     this.env = env;
-    this.inbox = new Inbox(new DurableSqlStorage(ctx.storage.sql), Date.now, new R2Blobs(env.FILES, ctx.id.toString()), {
+    const storage = new DurableSqlStorage(ctx.storage.sql);
+    this.inbox = new Inbox(storage, Date.now, new R2Blobs(env.FILES, ctx.id.toString()), {
       keepPresence: true,
+      // One-time code keys, encrypted under the Worker secret. Without it the inbox keeps none and refuses an otp card.
+      otpKeys: env.OTP_KEY_SECRET ? sealedOtpKeys(env.OTP_KEY_SECRET, ctx.id.toString(), storage) : undefined,
       uploadLimitBytes: uploadLimit(env.UPLOAD_LIMIT_BYTES),
       storageLimitBytes: limit(env.STORAGE_LIMIT_BYTES),
       shownCardLimit: limit(env.SHOWN_CARDS_LIMIT),

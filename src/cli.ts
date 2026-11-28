@@ -415,6 +415,50 @@ switch (command) {
     }
     break;
   }
+  case 'otp': {
+    // The owner's keys for one-time codes. The key and the enrollment code are read from the terminal without echo, or
+    // one per line from a pipe, so neither goes in argv or the shell history.
+    const { values, positionals } = parseCommand(command, { args: rest, allowPositionals: true, options: { allow: { type: 'string', multiple: true } } });
+    const [sub = 'list', label, ...sessions] = positionals;
+    if (!['list', 'enroll', 'allow', 'disallow', 'remove'].includes(sub)) usageError(command, `unknown subcommand ${sub}`);
+    if (sub === 'list' && label) usageError(command, `unexpected argument ${label}: otp list lists every key`);
+    if (sub !== 'list' && !label) usageError(command, `otp ${sub} needs the key's label, such as npm`);
+    if ((sub === 'allow' || sub === 'disallow') && !sessions.length) usageError(command, `otp ${sub} needs one session id or more`);
+    if (sub !== 'allow' && sub !== 'disallow' && sessions.length) usageError(command, `unexpected argument ${sessions[0]}`);
+    const inbox = new Client(pinTarget());
+    const allowed = (allow: string[]) => (allow.length ? `Sessions that may ask for it: ${allow.join(', ')}.` : 'No session may ask for it yet. Add one with `your-attention otp allow <label> <session id>`.');
+    try {
+      if (sub === 'list') {
+        const { holder, keys } = await inbox.otpKeys();
+        console.log(`Keys kept by ${holder}:`);
+        if (!keys.length) console.log('  none. Enroll one with `your-attention otp enroll <label> --allow <session id>`.');
+        for (const k of keys) console.log(`  ${k.label}: enrolled ${new Date(k.enrolledAt).toISOString().slice(0, 16).replace('T', ' ')} UTC, ${k.lastIssuedAt ? `last code issued ${new Date(k.lastIssuedAt).toISOString().slice(0, 19).replace('T', ' ')} UTC` : 'no code issued yet'}. ${allowed(k.allow)}`);
+      } else if (sub === 'enroll') {
+        const t = terminal();
+        let key: string;
+        let code: string;
+        try {
+          t.say(`Enroll the key ${label}. First add the key to your authenticator app, as the service's setup asks, so the app and the inbox give the same codes. Then paste the same key here: the base32 text the service showed, or its otpauth:// address.`);
+          key = await t.askHidden('Key (hidden): ');
+          code = await t.askHidden('The code your authenticator shows now (hidden): ');
+        } finally {
+          t.close();
+        }
+        // Without --allow, enrolling an existing label again keeps the sessions it allowed.
+        const k = await inbox.otpEnroll(label!, { key, code, ...(values.allow ? { allow: values.allow } : {}) });
+        console.log(`Enrolled ${k.label}. The inbox checked your code against it. ${allowed(k.allow)}`);
+      } else if (sub === 'allow' || sub === 'disallow') {
+        const k = await inbox.otpAllow(label!, sub === 'allow' ? { add: sessions } : { remove: sessions });
+        console.log(`${k.label}: ${allowed(k.allow)}`);
+      } else {
+        await inbox.otpRemove(label!);
+        console.log(`Removed ${label}. Remove it from your authenticator app too if nothing else uses it.`);
+      }
+    } catch (e) {
+      fail(`The inbox refused: ${(e as Error).message}`);
+    }
+    break;
+  }
   case 'clear':
   case 'reset': {
     parseCommand(command, { args: rest, options: command === 'reset' ? { yes: { type: 'boolean' } } : {} });

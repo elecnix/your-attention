@@ -7,7 +7,8 @@ import { newSecret, pairingCode, randomId, sha256 } from './crypto.ts';
 import { readShortCode, shortCode } from './sign-in.ts';
 import { parse, test as testRule, type Value } from './expr.ts';
 import { HOOK_VERSION, HOOKS, deliverWebhook, isHook, postSigned, waitText, type ExtensionRegistration, type HookEvent, type HookName, type Verdict, type Webhook } from './hooks.ts';
-import { isSealed, newSealKeys, openSealed, privilegedActions, sealedFields, secretAccesses, secretInputs, withoutSealed, type PrivilegedField } from './sealed.ts';
+import { isSealed, newSealKeys, oneTimeCodes, openSealed, privilegedActions, sealedFields, sealValue, secretAccesses, secretInputs, withoutSealed, type OtpField, type PrivilegedField } from './sealed.ts';
+import { AGENT_ID, isOtpApproval, isOtpDecline, issueCode, KEY_LABEL, keyChecksum, readKey, TICKET_MS, utc, verifyTotp, type OtpApproval, type OtpKeyInfo, type OtpKeyRecord, type OtpKeyStore, type OtpTicket } from './otp.ts';
 import { commandDifference, machineDifference, maskPassword, MAX_COMMAND_CHARS, MAX_OUTPUT_CHARS, readSeal, type AuditEntry, type BrokerKey, type PrivilegedRun, type PrivilegedRunner } from './privileged.ts';
 import { GRANT_MAX_MS, type AccessGrant, type SecretQuery, type SecretSources, type SourceInfo, type Candidate } from './secret-sources.ts';
 import { MAX_DIAGRAMS, bodyProblemsMessage, checkDiagrams, diagramMessage, findDiagrams, requireChecked, type CheckedDiagrams, type DiagramCheck } from './diagrams.ts';
@@ -21,7 +22,7 @@ import { MAX_PULL_REQUESTS, MAX_TAGS } from './types.ts';
 import type {
   Reassignment, AgentEvent, Answer, AnswerEvent, Approval, ApprovalPlace, ApprovalResult, AskQuestion, Broadcast, Card, CardGuidance, CardState, CardVersion, CloseKind, DefaultTag, DefaultTags, DefaultTagsWrite, Delivery, Draft, Guidance, GuidanceEdit, NewCard, Origin, PageEvent, Pairing, Presence,
   Attachment, NewAttachment, Option, PersonPresence, Pin, PinChange, PresenceOrigin, PriorityLevel, PublicSubscription, PullRequest, RequireCardInput, RequireCardSettings, Role, SentCard, Settings, Subscription, TagCount, Template, Token,
-  FeedbackFinding, FeedbackVerdict, LateAnswer, OpenCards, TriageFeedback, TriagePushback,
+  FeedbackFinding, FeedbackVerdict, LateAnswer, OpenCards, Sealed, TriageFeedback, TriagePushback,
 } from './types.ts';
 
 /** A sign-in code as the inbox keeps it in `meta`. A code made before short codes has no `short`. */
@@ -145,6 +146,21 @@ function isRun(v: unknown): v is PrivilegedRun {
   return !!v && typeof v === 'object' && typeof (v as Record<string, unknown>)['audit'] === 'string' && typeof (v as Record<string, unknown>)['command'] === 'string';
 }
 
+/** What a session reads when a key does not list it, with the command that adds it. */
+function otpNotAllowed(agent: string, key: string): string {
+  return `session ${agent} may not ask for a code from the key ${key}. The person allows it with \`your-attention otp allow ${key} ${agent}\`, then the session posts the card again`;
+}
+
+function keyInfo(r: OtpKeyRecord): OtpKeyInfo {
+  return { label: r.label, allow: r.allow, enrolledAt: r.enrolledAt, ...(r.lastIssuedAt === undefined ? {} : { lastIssuedAt: r.lastIssuedAt }) };
+}
+
+/** A list of agent ids, each as a session reports it. */
+function agentList(v: unknown): string[] {
+  if (!Array.isArray(v) || v.some((a) => typeof a !== 'string' || !AGENT_ID.test(a))) throw new InboxError(400, 'allow takes a list of session ids, each 1 to 80 characters without spaces');
+  return [...new Set(v as string[])];
+}
+
 export interface InboxOptions {
   keepPresence?: boolean;
   uploadLimitBytes?: number | undefined;
@@ -177,6 +193,9 @@ export interface InboxOptions {
    * each on the one machine it names. Without one, as on the hosted inbox, the inbox takes no card with a privileged
    * action. Two runners may not serve the same machine name. */
   privileged?: PrivilegedRunner | PrivilegedRunner[] | undefined;
+  /** Where this inbox keeps the TOTP keys the owner enrolled: a file on your own inbox's machine, encrypted storage on the hosted
+   * inbox. Without it, the inbox takes no otp card and enrolls no key. */
+  otpKeys?: OtpKeyStore | undefined;
   /** Whether a new card pushes to a device that collapsed these groups. The page's own rule, `notifies` in web/queue.js,
    * which an adapter passes in because the core imports only the core. Without it, every new card pushes to every device. */
   pushRule?: ((state: ReturnType<Inbox['summaryState']>, card: CardSummary, collapsed: ReadonlySet<string>) => boolean) | undefined;
@@ -477,6 +496,10 @@ export class Inbox {
   /** Each card field whose command started, claimed before the run awaits, so two answers at the same moment run it
    * once. A finished run stays claimed: its stored answer refuses the next one anyway. */
   private readonly claimedRuns = new Set<string>();
+  private readonly otpKeys: OtpKeyStore | undefined;
+  /** Each ticket a redemption is computing a code for, claimed before the first await, so two redemptions at the same
+   * moment give one code. */
+  private readonly claimedTickets = new Set<string>();
   private readonly agents = new Map<string, Set<AgentSend>>();
   private readonly instances = new WeakMap<AgentSend, string>();
   /** Each candidate a lookup of the last hour returned, keyed by every metadata field it carries, with when that ends.
@@ -525,6 +548,7 @@ export class Inbox {
       if (this.runners.has(r.machine)) throw new Error(`two runners of privileged actions serve the machine ${r.machine}: give each machine one`);
       this.runners.set(r.machine, r);
     }
+    this.otpKeys = opts.otpKeys;
     // Workers refuse a fetch called as a method of another object, so the default calls it bare.
     this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init));
     this.pushRule = opts.pushRule;
@@ -785,6 +809,7 @@ export class Inbox {
     const secrets = body === undefined ? [] : secretInputs(String(body));
     if (body !== undefined && secrets.length) this.checkCandidates(String(body), before?.body);
     const privileged = body === undefined ? [] : this.checkPrivileged(privilegedActions(String(body)), secrets);
+    const otp = body === undefined ? [] : this.checkOtp(oneTimeCodes(String(body)), agent, [...secrets, ...privileged]);
     let widgets = before?.widgets;
     let responses = before?.responses;
     if (expanded) {
@@ -836,6 +861,8 @@ export class Inbox {
       secret: kind === 'secret' ? before?.secret : undefined,
       secrets: secrets.length ? secrets : undefined,
       privileged: privileged.length ? privileged : undefined,
+      otp: otp.length ? otp : undefined,
+      otpHolder: otp.length ? this.otpKeys?.holder : undefined,
       html: input.html,
       attachments: attachments?.length ? attachments : undefined,
       template: template ?? before?.template,
@@ -2246,7 +2273,7 @@ export class Inbox {
     if (card.closed) throw new InboxError(409, 'this card is already closed');
     // A secret field holds the secret itself, and a dismissal is not an answer to seal it, so it stays out of the record.
     // The other fields and the comment are the person's own words about the card, so they stay.
-    const sealed = [...sealedFields(card), ...(card.privileged ?? [])];
+    const sealed = [...sealedFields(card), ...(card.privileged ?? []), ...(card.otp ?? [])];
     const values = !input.values || typeof input.values !== 'object' || Array.isArray(input.values)
       ? {} : Object.fromEntries(Object.entries(input.values as Record<string, unknown>).filter(([k]) => !sealed.includes(k)));
     return this.closeAs(card, 'dismissed', 'Nothing was sent to the agent.', { values, comment: String(input.comment ?? '').trim(), at: this.now() });
@@ -2359,6 +2386,9 @@ export class Inbox {
     // A privileged action takes only the password the page sealed to the broker's key, with the command it showed. The
     // broker opens each one here, in memory, and refuses before anything runs when a command differs from the card's.
     const runs = await this.openPrivileged(posted, values, input.images);
+    // A one-time code field takes "approve" or "decline", and only the owner approves. The ticket is minted below,
+    // once the answer is final, and no code is ever computed here.
+    const codes = this.readOtp(posted, values, input.images, input.by);
     // Each source seals its value to the card's key before the answer is stored, so a refusal leaves no partial grant.
     // This happens only here, inside the owner's answer: no route releases a value on its own.
     for (const g of grants) {
@@ -2407,6 +2437,14 @@ export class Inbox {
         throw e;
       }
     }
+    // The first decision on a one-time code is final: a later answer keeps it, and an approval mints one ticket.
+    let minted: OtpTicket[];
+    try {
+      minted = this.decideOtp(card, before, codes, values, late, Number(input.version ?? card.version));
+    } catch (e) {
+      await refund();
+      throw e;
+    }
     // A later answer, such as a changed comment, keeps the record of a command that already ran.
     for (const field of card.privileged ?? []) {
       const ran = before?.values?.[field];
@@ -2434,6 +2472,7 @@ export class Inbox {
     if (kept.some(Boolean)) answer.approvalResults = kept;
     for (const p of answer.previous) delete (p as Partial<Answer>).previous;
     this.store.put('answers', id, answer);
+    for (const t of minted) this.store.put('otptickets', t.id, t);
     this.store.index(id, `${searchText(card)}\n${answer.comment}`);
     this.usage.record('answers');
     this.emit({ type: 'change', card: id });
@@ -2449,6 +2488,168 @@ export class Inbox {
       this.queueAnswer(card, saved);
     }
     return this.store.get<Answer>('answers', id) ?? answer;
+  }
+
+  // ---- one-time codes ----
+
+  /** The OneTimeCode fields of a body, checked against the keys this inbox holds and the posting session: their names. */
+  private checkOtp(fields: OtpField[], agent: string, taken: string[]): string[] {
+    if (!fields.length) return [];
+    if (!this.otpKeys) throw new InboxError(400, 'this inbox keeps no one-time code keys, so it cannot compute a code. Your own inbox keeps them, and a hosted one does once its operator sets OTP_KEY_SECRET');
+    for (const f of fields) {
+      if (taken.includes(f.name)) throw new InboxError(400, `${f.name} names both a one-time code and another sealed field: give each its own name`);
+      const record = this.store.get<OtpKeyRecord>('otpkeys', f.key);
+      if (!record) throw new InboxError(400, `no key named ${f.key} is enrolled in this inbox. The person enrolls it with \`your-attention otp enroll ${f.key} --allow ${agent}\``);
+      if (!record.allow.includes(agent)) throw new InboxError(403, otpNotAllowed(agent, f.key));
+    }
+    return fields.map((f) => f.name);
+  }
+
+  /** The decision on each one-time code field of an answer, taken out of `values`: undefined for an empty field. */
+  private readOtp(card: Card, values: Record<string, unknown>, images: { field?: string }[] | undefined, by: Caller | undefined): Map<string, 'approve' | 'decline'> {
+    const out = new Map<string, 'approve' | 'decline'>();
+    for (const field of card.otp ?? []) {
+      const v = Object.hasOwn(values, field) ? values[field] : undefined;
+      delete values[field];
+      if (images?.some((f) => f?.field === field)) throw new InboxError(400, `${field} takes no images`);
+      if (v === undefined || v === null || v === '') continue;
+      if (v !== 'approve' && v !== 'decline') throw new InboxError(400, `${field} takes "approve" or "decline"`);
+      if (v === 'approve' && by?.role !== 'owner') throw new InboxError(403, 'only the owner approves a one-time code');
+      out.set(field, v);
+    }
+    return out;
+  }
+
+  /** Put each one-time code decision in `values`, keeping one made before, and return the tickets to store with the
+   * answer. Synchronous, so the check of the earlier answer and the answer that follows it are one step. */
+  private decideOtp(card: Card, before: Answer | undefined, codes: Map<string, 'approve' | 'decline'>, values: Record<string, unknown>, late: LateAnswer | undefined, version: number): OtpTicket[] {
+    const minted: OtpTicket[] = [];
+    const fields = new Map(oneTimeCodes(String(card.body ?? '')).map((f) => [f.name, f]));
+    for (const field of card.otp ?? []) {
+      const was = [before, ...(before?.previous ?? [])].map((a) => a?.values?.[field]).find((v) => isOtpApproval(v) || isOtpDecline(v));
+      const now = codes.get(field);
+      if (was !== undefined) {
+        const same = now === undefined || (now === 'approve' ? isOtpApproval(was) : isOtpDecline(was));
+        if (!same) throw new InboxError(409, `${field}: the person already ${isOtpApproval(was) ? 'approved' : 'declined'} this code, and that answer is final. Ask the agent for a new card`);
+        values[field] = was;
+        continue;
+      }
+      if (now === 'decline') { values[field] = { decline: true }; continue; }
+      if (now !== 'approve') continue;
+      // A late answer still reaches the agent, comment and all, but the agent no longer asks for a code, so it mints
+      // nothing, as an approval sentence on a closed card is never sent.
+      if (late) continue;
+      // An approval stands for the key and the purpose the person read, so it counts only on the version it answers.
+      if (version !== card.version) throw new InboxError(409, `${field}: the card changed to version ${card.version} after you read version ${version}. Read it again before you approve. Nothing was approved`);
+      const f = fields.get(field);
+      if (!f) throw new InboxError(409, `${field}: the card no longer asks for this code`);
+      const at = this.now();
+      const ticket: OtpTicket = { id: randomId(16), card: card.id, field, agent: card.agent, token: card.token ?? '', key: f.key, purpose: f.purpose, publicKey: f.publicKey, approvedAt: at, expiresAt: at + TICKET_MS };
+      minted.push(ticket);
+      const approval: OtpApproval = { ticket: ticket.id, key: f.key, purpose: f.purpose, approvedAt: at, expiresAt: ticket.expiresAt };
+      values[field] = approval;
+    }
+    return minted;
+  }
+
+  private ownerOnly(caller: Caller, what: string): OtpKeyStore {
+    if (caller.role !== 'owner') throw new InboxError(403, `only the owner ${what}`);
+    if (!this.otpKeys) throw new InboxError(404, 'this inbox keeps no one-time code keys. Your own inbox keeps them, and a hosted one does once its operator sets OTP_KEY_SECRET');
+    return this.otpKeys;
+  }
+
+  /** The keys enrolled here, and which inbox holds them. Never a key or its checksum. */
+  otpKeyList(caller: Caller): { holder: string; keys: OtpKeyInfo[] } {
+    const store = this.ownerOnly(caller, 'lists the one-time code keys');
+    return { holder: store.holder, keys: this.store.list<OtpKeyRecord>('otpkeys').map(keyInfo) };
+  }
+
+  /** Enroll a key, or replace one with the same label. `code` is the current code of the person's authenticator, which
+   * proves the key was copied whole: a key that does not produce it is refused, so it never sends a code npm rejects. */
+  async otpEnroll(caller: Caller, label: string, input: { key?: unknown; code?: unknown; allow?: unknown }): Promise<OtpKeyInfo> {
+    const store = this.ownerOnly(caller, 'enrolls a one-time code key');
+    const name = String(label ?? '');
+    if (!KEY_LABEL.test(name)) throw new InboxError(400, 'a key label is 1 to 40 lowercase letters, digits, dots, dashes or underscores, such as npm');
+    // Enrolling a key again, as a damaged key's message asks, keeps the sessions it allowed unless the call names others,
+    // so a ticket approved before the repair still redeems.
+    const allow = input.allow === undefined ? (this.store.get<OtpKeyRecord>('otpkeys', name)?.allow ?? []) : agentList(input.allow);
+    const key = readKey(String(input.key ?? ''));
+    const at = this.now();
+    if (!(await verifyTotp(key, String(input.code ?? '').replace(/\s/g, ''), at))) {
+      throw new InboxError(400, `the code does not match the key at ${utc(at)}: check that you copied the whole key, then type the code your authenticator shows now`);
+    }
+    const checksum = await keyChecksum(key);
+    await store.save(name, key);
+    const record: OtpKeyRecord = { label: name, allow, checksum, enrolledAt: at };
+    this.store.put('otpkeys', name, record);
+    return keyInfo(record);
+  }
+
+  /** Add or remove agent ids from a key's allowlist. */
+  otpAllow(caller: Caller, label: string, input: { add?: unknown; remove?: unknown }): OtpKeyInfo {
+    this.ownerOnly(caller, 'changes who may ask for a one-time code');
+    const record = this.store.get<OtpKeyRecord>('otpkeys', String(label ?? ''));
+    if (!record) throw new InboxError(404, `no key named ${String(label)} is enrolled`);
+    const add = input.add === undefined ? [] : agentList(input.add);
+    const remove = input.remove === undefined ? [] : agentList(input.remove);
+    const allow = [...record.allow.filter((a) => !remove.includes(a)), ...add.filter((a) => !record.allow.includes(a))];
+    const next = { ...record, allow };
+    this.store.put('otpkeys', record.label, next);
+    return keyInfo(next);
+  }
+
+  async otpRemove(caller: Caller, label: string): Promise<void> {
+    const store = this.ownerOnly(caller, 'removes a one-time code key');
+    const record = this.store.get<OtpKeyRecord>('otpkeys', String(label ?? ''));
+    if (!record) throw new InboxError(404, `no key named ${String(label)} is enrolled`);
+    this.store.delete('otpkeys', record.label);
+    await store.remove(record.label);
+  }
+
+  /** Redeem a ticket: compute a code from the key now, check it, and seal it to the card's public key. Only the token
+   * and the session that posted the card redeem it, once, within TICKET_MS of the approval. The code exists only inside
+   * this call and in the sealed value it returns: the inbox stores when it issued a code, never the code. */
+  async otpRedeem(caller: Caller, input: { ticket?: unknown; agent?: unknown }): Promise<{ card: string; field: string; key: string; purpose: string; sealed: Sealed; issuedAt: number; expiresAt: number }> {
+    const id = String(input.ticket ?? '');
+    const agent = String(input.agent ?? '');
+    const ticket = this.store.get<OtpTicket>('otptickets', id);
+    if (!ticket) throw new InboxError(404, `no ticket ${id}: a ticket comes in the answer to an otp card the person approved`);
+    if (ticket.token !== caller.token || ticket.agent !== agent) throw new InboxError(403, `ticket ${id} belongs to the session that posted card ${ticket.card}, and only that session redeems it`);
+    if (ticket.issuedAt !== undefined) throw new InboxError(409, `ticket ${id} was used at ${utc(ticket.issuedAt)}: a ticket gives one code. Post a new otp card for another code`);
+    const at = this.now();
+    if (at >= ticket.expiresAt) throw new InboxError(410, `ticket ${id} ended at ${utc(ticket.expiresAt)}, ${TICKET_MS / 60_000} minutes after the approval. Post a new otp card for another code`);
+    const store = this.otpKeys;
+    if (!store) throw new InboxError(502, 'this inbox no longer keeps one-time code keys');
+    const record = this.store.get<OtpKeyRecord>('otpkeys', ticket.key);
+    if (!record) throw new InboxError(409, `the key ${ticket.key} is no longer enrolled, so the inbox sent no code`);
+    if (!record.allow.includes(agent)) throw new InboxError(403, otpNotAllowed(agent, ticket.key));
+    if (this.claimedTickets.has(id)) throw new InboxError(409, `ticket ${id} is being redeemed by another call: a ticket gives one code`);
+    this.claimedTickets.add(id);
+    let issued: { code: string; expiresAt: number };
+    let sealed: Sealed;
+    try {
+      let key: Uint8Array | undefined;
+      try { key = await store.load(ticket.key); } catch (e) { throw new InboxError(500, `the key ${ticket.key} is damaged: ${(e as Error)?.message || 'it does not decrypt'}. The inbox sent no code. Enroll it again with \`your-attention otp enroll ${ticket.key}\``); }
+      if (!key) throw new InboxError(500, `the key ${ticket.key} is missing from ${store.holder}, so the inbox sent no code. Enroll it again with \`your-attention otp enroll ${ticket.key}\``);
+      issued = await issueCode(ticket.key, key, record.checksum, at);
+      sealed = await sealValue(JSON.parse(ticket.publicKey) as JsonWebKey, issued.code);
+    } catch (e) {
+      this.claimedTickets.delete(id);
+      throw e;
+    }
+    // From here on nothing awaits: the ticket, the answer and the key record take the time of issue together.
+    const now = this.store.get<OtpTicket>('otptickets', id);
+    if (now) this.store.put<OtpTicket>('otptickets', id, { ...now, issuedAt: at });
+    const answer = this.store.get<Answer>('answers', ticket.card);
+    const value = answer?.values?.[ticket.field];
+    if (answer && isOtpApproval(value) && value.ticket === id) {
+      this.store.put<Answer>('answers', ticket.card, { ...answer, values: { ...answer.values, [ticket.field]: { ...value, issuedAt: at } } });
+    }
+    const latest = this.store.get<OtpKeyRecord>('otpkeys', ticket.key);
+    if (latest) this.store.put<OtpKeyRecord>('otpkeys', ticket.key, { ...latest, lastIssuedAt: at });
+    this.claimedTickets.delete(id);
+    this.emit({ type: 'change', card: ticket.card });
+    return { card: ticket.card, field: ticket.field, key: ticket.key, purpose: ticket.purpose, sealed, issuedAt: at, expiresAt: issued.expiresAt };
   }
 
   // ---- privileged actions ----

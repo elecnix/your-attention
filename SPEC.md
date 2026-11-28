@@ -665,6 +665,155 @@ An `approval` machine's rule reads `NOPASSWD: YOUR_ATTENTION_NAS`. The rule esca
 
 The `ssh` key the broker uses is the inbox user's, which an agent running as that user can also read. On a `password` machine, that key opens the far account, and `sudo` still asks for the password. On an `approval` machine, an agent that uses the key can run the allowed commands without a card. Give an `approval` machine a key that the agent's user can't read, or keep its allowed commands harmless.
 
+## One-time codes
+
+An npm publish with two-factor authentication requires a six-digit code, and a staged publish requires two. Until now, the person read each code off a phone and typed it into a terminal. With the `otp` widget, the inbox keeps the authenticator key, and the person approves a card instead. The person never reads the digits, and the digits don't appear in a transcript, a log, card history, a hook, a webhook or the page.
+
+### Enrolling a key
+
+Here, the owner enrolls the npm key once:
+
+```
+your-attention otp enroll npm --allow <session id>
+```
+
+Before running it, the person adds the key to their authenticator app, as the service's setup asks. The phone and the inbox then give the same codes, so npm sees one authenticator.
+
+With no echo, the command reads two lines, or one per line from a pipe. On the first line goes the base32 key that the service showed during the authenticator setup, or its `otpauth://` address. The second line is the code that the person's authenticator shows now for that key.
+
+For that moment, the inbox computes the code, plus the codes for one step before and one step after it. When none of them matches, the inbox rejects the key and doesn't store it, so npm never receives a key copied with a typo.
+
+The inbox follows RFC 6238 with the parameters that authenticator apps and npm use: HMAC-SHA-1, six digits and 30-second steps. The inbox rejects an `otpauth://` address that asks for other parameters. A key must be at least 10 bytes.
+
+Only the owner can call these routes. An agent or an extension gets 403.
+
+- `PUT /v1/otp/keys/<label> {key, code, allow?}` enrolls a key, or replaces the one with that label, and answers 201 with `{label, allow, enrolledAt}`. Without `allow`, a replaced key keeps the sessions it allowed, so a ticket approved before the repair of a damaged key still redeems. A label is 1 to 40 lowercase letters, digits, dots, dashes or underscore characters.
+- `PATCH /v1/otp/keys/<label> {add, remove}` changes the allowlist.
+- `DELETE /v1/otp/keys/<label>` removes the key.
+- `GET /v1/otp/keys` answers `{holder, keys}`, where each key is `{label, allow, enrolledAt, lastIssuedAt?}`. It never answers a key or its checksum.
+
+`your-attention otp list`, `allow`, `disallow` and `remove` call these routes.
+
+An inbox without a key store answers 404 on these routes. This happens on a hosted deployment without `OTP_KEY_SECRET`.
+
+### The allowlist
+
+A key belongs to the inbox. At enrollment, the person names the sessions allowed to request a code from it, by agent id. The inbox rejects a card from any other session with 403:
+
+```
+session stray may not ask for a code from the key npm. The person allows it with `your-attention otp allow npm stray`, then the session posts the card again
+```
+
+The session reports its agent id, and every session that holds the machine's agent token can report any id. The allowlist only stops sessions from asking by mistake. The approval decides. Even a session that copies an allowed id gets a code only for a card it posted itself, sealed to its own key, after the person reads that card and approves it.
+
+### The otp widget
+
+To request a code, an agent places the built-in widget `otp`, version 1:
+
+```
+npm = widget otp {"name": "npm_config_otp", "key": "npm", "purpose": "npm stage publish your-attention@1.4.0"}
+```
+
+`name` sets the variable that receives the code. npm reads `npm_config_otp` as its `otp` setting, so `npm stage publish` takes the code with no `--otp` flag, and the code stays out of the command's arguments, which `ps` shows to every user of the machine. `key` gives the label of an enrolled key. `purpose` is one line, at most 300 characters, that says what the code is for. `card_post` fills `publicKey` with the session's key for secret fields. The widget places `OneTimeCode(name, key, purpose, publicKey)`, four string literals, inside a form.
+
+On a post or a patch, the inbox lists the names of the card's otp fields in its `otp` field, and sets `otpHolder`, a phrase that says which inbox holds the keys. The agent can't set either.
+
+Should a call go wrong, the inbox answers 400 when the inbox has no key store, when no key has that label, when the purpose is empty, when a call doesn't give four string literals, or when a name repeats or also names a secret or a privileged action. It also answers 400 for a name that is no variable name, and for a public key that is no RSA public key in JSON Web Key text, as for the `secret` widget. A card without a key to seal to never gets posted. It answers 403 when the key doesn't list the session.
+
+The page shows the key's label, the purpose, the requesting session, where that session runs, and which inbox holds the key. It offers **Approve one code from npm** and **Decline**.
+
+Before approving, the person sees the session's state in the card's header, as for any card, so a disconnected session shows up there. In the terminal, the client shows the same facts and the same choice. Both hide the code.
+
+### The approval, and the ticket it mints
+
+A card can wait for hours, but a code lives 30 seconds. An answer that included a code would usually arrive after the code had expired. Instead, an approval creates a ticket, and the agent redeems the ticket when it needs the code.
+
+Inside the owner's `POST /v1/cards/<id>/answer`, each otp field takes `"approve"`, `"decline"`, or nothing:
+
+- `"approve"` from the owner stores `{ticket, key, purpose, approvedAt, expiresAt}` as the field's value and writes a ticket record to the inbox's storage. `expiresAt` is 10 minutes after the approval. Only the owner can approve. Any other caller gets 403.
+- `"decline"` stores `{decline: true}`. There is no ticket and no code.
+- An empty field doesn't get a ticket.
+- Any other value gets 400.
+
+The first decision is final. A later answer that repeats the same decision, or sends none, keeps the earlier value and doesn't create a second ticket. A later answer with the other decision gets 409. An approval in a [late answer](#late-answers) mints nothing, as the inbox drops `approval_<i>` from one. The inbox still stores the rest of that answer and delivers it, and the agent's answer text says the code was not approved because the card was closed. Dismissing the card leaves the otp field empty.
+
+A ticket lasts 10 minutes. An agent with an open stream receives the answer within a second and redeems the ticket at once. The rest of the window covers an agent that is in the middle of a command, or one whose stream reconnects. A ticket older than that no longer matches when the person approved, so the agent asks again on a new card.
+
+The answer text for the agent reads:
+
+```
+npm_config_otp: the person approved a code from the key npm for "npm stage publish your-attention@1.4.0". Call card_otp with ticket <ticket> right before the command that needs it, and that command gets a fresh code as $npm_config_otp. The ticket gives one code and ends at 14:13:02 UTC, 10 minutes after the approval.
+```
+
+A decline reads `npm_config_otp: the person declined, so there is no ticket and no code. Do not run the command that needs it.`
+
+The agent stream receives the ticket, which only the posting session can redeem. Hooks, webhooks and triage receive `{approved: true, key, purpose, expiresAt, issuedAt?}` instead, without the ticket.
+
+### Redeeming a ticket
+
+`POST /v1/otp/redeem {ticket, agent}` redeems a ticket, and the inbox checks it in this order:
+
+1. The ticket exists, or the answer is 404.
+2. The token and the agent id are the ones that posted the card, or the answer is 403.
+3. The ticket is unused, or the answer is 409.
+4. The ticket hasn't expired, or the answer is 410.
+5. The key exists and still lists the session. Otherwise the answer is 409 or 403.
+
+Step 2's 403 reads `ticket <id> belongs to the session that posted card <card>, and only that session redeems it`.
+
+Step 3's 409 reads `ticket <id> was used at 14:03:12 UTC: a ticket gives one code. Post a new otp card for another code`.
+
+Next, the inbox reads the key and checks the SHA-256 of its bytes against the checksum taken at enrollment.
+
+Then it computes the code for the current moment and checks it with the verifier, which accepts the current step and one step on each side. The checksum is the check that catches a damaged key. The verifier reads the same key, so it guards the generator alone. With the generator as it is, it never refuses a code. A unit test feeds it a broken generator to prove that it would.
+
+Should the inbox be unable to use the key, the answer is 500. That covers a key whose bytes changed, a hosted key that no longer decrypts, and a code the verifier refuses. In that case the inbox doesn't send a code:
+
+```
+the key npm is damaged: its bytes no longer match the ones enrolled, so the inbox sent no code. Enroll it again with `your-attention otp enroll npm`
+```
+
+After a 500, the ticket is still unused, so it works if the person enrolls the key again within its 10 minutes. Past them, the redemption gets 410, and the agent posts a new card.
+
+Once the key checks out, the inbox seals the code to the card's public key, using the same sealing as the `secret` widget. It answers `{card, field, key, purpose, sealed, issuedAt, expiresAt}`, where `expiresAt` is the end of the code's step.
+
+Each redemption records `issuedAt` on the ticket, on the answer's field and as the key's `lastIssuedAt`. The redemption never records the code. When two redemptions arrive at the same moment, one gets the code and the other gets 409.
+
+### Delivery in the session
+
+The `card_otp` tool redeems a ticket. When fewer than 10 seconds of the current step remain, it waits for the next step first, so the command has time to run with the code.
+
+Using the card's private key, the session opens the sealed code and holds it as a grant named after the field, until the end of the code's step. Commands the agent runs next receive it as `$npm_config_otp`, through the same delivery as any granted secret: pi's bash tool, the Claude Code socket and hooks, or opencode's `shell.env`. Output that shows the code reads `[secret npm_config_otp]`. A command that took the code as an argument, such as `--otp "$npm_config_otp"`, would show it in the process list to every user of the machine while it runs, so the guidance points the agent at the variable npm reads instead.
+
+From the model's side, only the variable's name and the deadline are visible, never the code or a path:
+
+```
+The inbox issued a code from the key npm for "npm stage publish your-attention@1.4.0". $npm_config_otp holds a fresh one-time code until 14:03:30 UTC, 18 seconds from now. Run the command that needs it at once: it reads the code from its environment. npm reads a variable named npm_config_otp with no --otp flag. Never put the code in a command's arguments, where ps shows it to every user of the machine, and never print it or write it to a file. Output that shows it reads [secret npm_config_otp].
+```
+
+When a staged publish needs two codes, one for `npm stage publish` and one for `npm stage approve` after the registry's review, the agent posts one otp card for each.
+
+The code never goes to a file. [DP8](PRINCIPLES.md#dp8-secrets-go-to-the-agent-sealed-and-never-into-the-conversation) says that your-attention never writes a secret's value to a file. A grant already sets a value in a command's environment. It masks the value in output and ends on time.
+
+### Key storage
+
+The inbox stores a SHA-256 hash of each token and never the token itself, because a hash is enough to check a token. A TOTP key can't follow that rule. Each code comes from an HMAC keyed by the key itself, and a hash of the key can't compute a code. So a TOTP key is the one secret the inbox keeps whole. How it's protected depends on the deployment:
+
+- **Your own inbox.** The keys are in `otp-keys.json` in the inbox's home, `~/.your-attention` by default, beside `owner-token`, with mode 0600 in a folder of mode 0700. Only the user that runs the inbox can read the file. The agent on the same machine usually runs as that same user, so the agent can read the file, just as it can read `owner-token`. The SQLite store keeps only each key's label, allowlist, checksum and times.
+- **Hosted inbox.** The Worker encrypts each key with AES-GCM before writing it to the Durable Object's storage. The encryption key comes from HKDF over the Worker secret `OTP_KEY_SECRET`, with the inbox's id as the salt. One inbox's ciphertext doesn't open with another inbox's key, and the label is the additional data. The plaintext key exists in the Worker's memory only while it computes a code. A deployment without `OTP_KEY_SECRET` doesn't store keys and rejects otp cards. Changing the secret makes every enrolled key unreadable, so each person enrolls again.
+
+The widget shows the holder on the card, because a reader weighs that difference before approving. No route, page, terminal client or agent receives a key after enrollment.
+
+The inbox doesn't store recovery codes. Losing the key means enrolling again, in the inbox and in the authenticator app.
+
+### Core or extension
+
+The code generator is in the core, next to the `secret_access` grant and the privileged action. The key store is behind an adapter ([DP35](PRINCIPLES.md#dp35-platform-details-sit-behind-small-adapter-interfaces)). Even with no adapter, the core runs, as a hosted deployment without the secret does.
+
+Features belong in extensions ([DP25](PRINCIPLES.md#dp25-the-core-is-small-and-features-are-extensions)). Through hooks that see cards and answers, an extension connects to the inbox. Put a generator outside the core, and it would pass the key and the session's public key to another process, which would add a box to the trust diagram for no gain.
+
+The approval and its ticket happen inside the owner's answer. The code is computed and sealed later, when the session redeems the ticket. Both steps run in the inbox's single writer ([DP33](PRINCIPLES.md#dp33-each-inbox-has-one-writer)), as the grant of a secret source does. In `src/core/otp.ts`, the generator runs to about 40 lines of Web Crypto.
+
 ## Follow-ups
 
 An agent follows up on a card by posting a new card with `follows` set to the id of the earlier card. The card tools do this with `card_post` and `follows: "<card id>"`. The inbox sets `followedBy` on the earlier card, so the chain links both ways. The page shows **Followed by** on the earlier card. On the new card it shows a fold labeled **The card before this one, and your answer**.
@@ -778,7 +927,7 @@ A widget version can also carry `when` and `response`, as `POST /v1/widgets {nam
 
 `response` is text for the agent. When the person answers, the inbox fills it and stores it in the answer's `responses`. The agent reads it after the answer fields. `{{field}}` is the answer's value for that field. When the answer has no value for a field, the inbox uses the value that the card placed the widget with, so a prefilled field the person never edits still counts. `{{#field}}...{{/field}}` shows its text when the field is on or filled, and `{{^field}}...{{/field}}` when it is off or empty. A check box group counts as on when one of its items is on. A response can tell the agent what to do next, such as where to post a message the person approved.
 
-The page adds four components to OpenUI's. `Mermaid(source)` draws a diagram, as [Diagrams](#diagrams) describes. `SecretInput(name, publicKey)` draws a secret field, as [Secret widget](#secret-widget) describes. `SecretAccess(name, publicKey, candidates)` draws a request for access to a secret, as [Secret sources](#secret-sources) describes. `CheckWithText(label, check, [content])` It shows a check box and a label. A click on the label shows or hides the content, such as a `TextArea` the person can edit, and it leaves the box as it was. Hovering the label previews the text of the content's fields. The content stays on the page while hidden, so its fields send their values with the answer. A `FormControl` or a `Card` can hold it.
+The page adds six components to OpenUI's. `Mermaid(source)` draws a diagram, as [Diagrams](#diagrams) describes. `SecretInput(name, publicKey)` draws a secret field, as [Secret widget](#secret-widget) describes. `SecretAccess(name, publicKey, candidates)` draws a request for access to a secret, as [Secret sources](#secret-sources) describes. `PrivilegedAction(name, command, machine, changes)` draws a command that needs the person's password, as [Privileged actions](#privileged-actions) describes. `OneTimeCode(name, key, purpose, publicKey)` draws the approval of one code from an enrolled key, as [One-time codes](#one-time-codes) describes. `CheckWithText(label, check, [content])` It shows a check box and a label. A click on the label shows or hides the content, such as a `TextArea` the person can edit, and it leaves the box as it was. Hovering the label previews the text of the content's fields. The content stays on the page while hidden, so its fields send their values with the answer. A `FormControl` or a `Card` can hold it.
 
 ## Diagrams
 
@@ -787,7 +936,7 @@ A card draws [Mermaid](https://mermaid.js.org) diagrams in two places:
 - In `text` and `recommendation`, a fenced block whose first line is ```` ```mermaid ```` draws its lines as a diagram.
 - In `body`, the `Mermaid(source)` component draws one. Its source must be a string literal in double or single quotes, such as `flow = Mermaid("flowchart TD\n  A --> B")`, and the inbox refuses a reference to another statement. The inbox reads the body as OpenUI does, so it skips a call in a `//` or `#` comment. A `Card`, `SectionItem`, `TabItem`, `AccordionItem` or `Carousel` can hold it, as for a `CodeBlock`.
 
-Every inbox has four built-in widgets. `secret` asks for a sealed value, as [Secret widget](#secret-widget) describes. `secret_access` asks the person to grant a secret from a source, as [Secret sources](#secret-sources) describes. `privileged_action` asks the person to run a command with their password, as [Privileged actions](#privileged-actions) describes. The widget `mermaid`, version 1, places `Mermaid` with its `source` value: `flow = widget mermaid {"source": "flowchart TD\n  A --> B"}`. `GET /v1/widgets` lists them first, with `builtin: true`, and the catalog in `GET /v1/guidance` lists them with the saved widgets. Saving a widget named `mermaid`, `secret`, `secret_access` or `privileged_action` answers 400.
+Every inbox has five built-in widgets. `secret` asks for a sealed value, as [Secret widget](#secret-widget) describes. `secret_access` asks the person to grant a secret from a source, as [Secret sources](#secret-sources) describes. `privileged_action` asks the person to run a command with their password, as [Privileged actions](#privileged-actions) describes. `otp` asks the person to approve one code from an enrolled key, as [One-time codes](#one-time-codes) describes. The widget `mermaid`, version 1, places `Mermaid` with its `source` value: `flow = widget mermaid {"source": "flowchart TD\n  A --> B"}`. `GET /v1/widgets` lists them first, with `builtin: true`, and the catalog in `GET /v1/guidance` lists them with the saved widgets. Saving a widget named `mermaid`, `secret`, `secret_access`, `privileged_action` or `otp` answers 400.
 
 When an agent posts or patches a card, your own inbox parses each diagram with mermaid 11.17.2, after it fills a template and places widgets. That covers `POST /v1/cards`, `card_patch`, and a widget or template that expands into a diagram. The inbox refuses a diagram that does not parse with 400. Its message names where the diagram is and quotes mermaid's error. For a dotted link with text and a pipe label, mermaid's error reads:
 

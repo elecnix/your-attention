@@ -17,6 +17,7 @@ import type { ApprovalSender, Caller } from '../core/inbox.ts';
 import type { PrivilegedRunner } from '../core/privileged.ts';
 import { instanceName } from '../secrets/registry.ts';
 import { loadMachines, localRunner, MACHINES_FILE, sshRunner } from './privileged.ts';
+import { fileOtpKeys } from './otp-keys.ts';
 import { agentSocket, pageSocket } from '../core/socket.ts';
 import { WebSocketServer } from 'ws';
 import { Inbox } from '../core/inbox.ts';
@@ -125,7 +126,7 @@ export async function serve(opts: ServeOptions): Promise<RunningServer> {
   const home = opts.home ?? homeDir();
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   const store = new SqliteStorage(path.join(home, 'inbox.sqlite'));
-  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, privileged: opts.privileged === false ? undefined : opts.privileged ?? defaultRunners(home, log), pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
+  const inbox = new Inbox(store, Date.now, new FileBlobs(path.join(home, 'files')), { checkDiagram: checkMermaid, checkBody: bodyErrors, fallbackBody, approvals: opts.approvals ?? herdrApprovals(), fetch: opts.fetch, secretSources: opts.secretSources, privileged: opts.privileged === false ? undefined : opts.privileged ?? defaultRunners(home, log), otpKeys: fileOtpKeys(home, instanceName()), pushRule: (state, card, collapsed) => notifies(state, card, collapsed) });
   const secret = await localToken(inbox, home, 'owner');
   await localToken(inbox, home, 'agent');
   await localToken(inbox, home, 'extension');

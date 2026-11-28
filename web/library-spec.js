@@ -10,7 +10,8 @@ export function extendLibrary(base, draw = {}) {
   const secretInputProps = Input.props.pick({ name: true }).extend({ publicKey: Input.props.shape.name });
   const secretAccessProps = secretInputProps.extend({ candidates: Input.props.shape.name });
   const privilegedActionProps = Input.props.pick({ name: true }).extend({ command: Input.props.shape.name, machine: Input.props.shape.name, changes: Input.props.shape.name });
-  const checkWithTextProps = FormControl.props.pick({ label: true }).extend({ check: FormControl.props.shape.input, content: AccordionItem.props.shape.content });
+  const oneTimeCodeProps = Input.props.pick({ name: true }).extend({ key: Input.props.shape.name, purpose: Input.props.shape.name, publicKey: Input.props.shape.name });
+  const checkWithTextProps =FormControl.props.pick({ label: true }).extend({ check: FormControl.props.shape.input, content: AccordionItem.props.shape.content });
   return base.extend({ components: {
     add: [{
       component: { name: 'CheckWithText', props: checkWithTextProps, ref: checkWithTextProps, description: 'A check box with a label that shows editable content when clicked.', component: draw.CheckWithText ?? nothing },
@@ -27,6 +28,9 @@ export function extendLibrary(base, draw = {}) {
       slots: ['FormControl.input'],
     }, {
       component: { name: 'PrivilegedAction', props: privilegedActionProps, ref: privilegedActionProps, description: 'A command that needs the person\'s password: the page shows the command, the machine and what it changes, and seals the password to the inbox\'s broker.', component: draw.PrivilegedAction ?? nothing },
+      slots: ['FormControl.input'],
+    }, {
+      component: { name: 'OneTimeCode', props: oneTimeCodeProps, ref: oneTimeCodeProps, description: 'Asks the person to approve a one-time code from an enrolled key, for the purpose it states. The page shows the key, the purpose and which inbox holds the key, never a code.', component: draw.OneTimeCode ?? nothing },
       slots: ['FormControl.input'],
     }],
     override: [
