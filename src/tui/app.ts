@@ -273,9 +273,12 @@ export async function runTui(opts: TuiOptions): Promise<number> {
   let settingsClock = 0;
   let writing = 0;
   let settled = 0;
+  // Each write starts after the one before it settled. Two writes in flight at once may reach the inbox in either
+  // order, over two connections, and the inbox would then keep the older value.
+  let writes: Promise<void> = Promise.resolve();
   const saveSettings = (patch: Record<string, unknown>, failed: (e: Error) => void): void => {
     writing++;
-    api.call('PUT', '/v1/settings', patch).catch(failed).finally(() => {
+    writes = writes.then(() => api.call('PUT', '/v1/settings', patch).then(() => {}, failed)).finally(() => {
       writing--;
       settled = ++settingsClock;
       // Another device may have changed the settings while this write was in flight, so read them again.
