@@ -46,6 +46,15 @@ export const BUILTIN_WIDGETS: Template[] = [{
     when: 'A command that needs the person\'s password, such as one run with sudo, which you must never see. Place it in the card body of a card_post call: `restart = widget privileged_action {"name": "restart_nginx", "command": "systemctl restart nginx", "machine": "office-pc", "changes": "Restarts nginx, which drops open connections"}`. `command` is the exact command, which reads the password on its standard input as `sudo -S` does, `machine` the machine the inbox runs it on, and `changes` one sentence about what it changes. On the inbox\'s own machine, the shell runs the command. Another machine is one the person listed in machines.jsonl: there the inbox runs it through ssh and sudo, so give the command as an absolute path and its arguments, with no sudo and no shell syntax, exactly as that machine allows it. A card for a machine the inbox doesn\'t serve, or a command its rule doesn\'t cover, is refused with the reason. The person reads the command and types the password, or approves it on a machine that needs none. The page seals it to the inbox\'s broker. The inbox runs that one command on that one machine, and the answer gives you only what it printed, with the exit code. When the connection fails, nothing runs anywhere. The command runs once: ask on a new card to run it again.',
     at: 0,
   }],
+}, {
+  name: 'otp',
+  builtin: true,
+  versions: [{
+    version: 1,
+    source: 'root = Form({{name}}, buttons, [field])\nbuttons = Buttons([])\nfield = FormControl({{name}}, OneTimeCode({{name}}, {{key}}, {{purpose}}, {{publicKey}}))',
+    when: 'A one-time code from an authenticator key the person enrolled in the inbox, such as the npm key for a publish that asks for --otp. Place it in the card body of a card_post call: `npm = widget otp {"name": "npm_config_otp", "key": "npm", "purpose": "npm stage publish your-attention@1.4.0"}`. `name` is the variable your command reads: npm_config_otp is the one npm reads with no --otp flag, which keeps the code out of the command\'s arguments, where ps shows it to every user. `key` is the label the person enrolled, and `purpose` one line that says what the code is for, which the person reads before approving. card_post fills `publicKey`. The person approves or declines, and never reads digits. An approval gives you a ticket, never a code: call card_otp with it right before the command, and that command gets a fresh code in its environment. A ticket gives one code and lasts 10 minutes from the approval. Only a session the person allowed for that key may post the card.',
+    at: 0,
+  }],
 }];
 
 export interface WidgetSource {

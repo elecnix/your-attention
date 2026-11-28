@@ -1,6 +1,7 @@
 // Sealed secrets: the agent side, a key pair per card and opening what the page sealed with web/sealed.js, and the
 // inbox side, the fields of a card that take only a sealed value. Web Crypto only.
 import { InboxError } from './inbox.ts';
+import { isOtpApproval, MAX_PURPOSE_CHARS } from './otp.ts';
 import type { Candidate } from './secret-sources.ts';
 import type { Answer, Card, Sealed } from './types.ts';
 
@@ -165,8 +166,33 @@ function candidatesOf(name: string, text: string): Candidate[] {
  * fences. Each call must give its arguments as string literals, so the inbox knows every field that takes only a
  * sealed value, and the candidates each access field offers. */
 function secretCalls(body: string): { name: string; publicKey: string; candidates?: Candidate[] }[] {
-  const src = withoutComments(fencedCode(body.trim())).trim();
   const calls: { name: string; publicKey: string; candidates?: Candidate[] }[] = [];
+  for (const call of literalCalls(body, { SecretInput: 2, SecretAccess: 3 })) {
+    if (!call.args) throw new InboxError(400, call.word === 'SecretInput' ? LITERALS : ACCESS_LITERALS);
+    const [name = '', key = '', candidates] = call.args;
+    if (!FIELD_NAME.test(name)) throw new InboxError(400, `secret ${JSON.stringify(name)}: the name must be a variable name, such as API_KEY`);
+    if (calls.some((c) => c.name === name)) throw new InboxError(400, `the card asks for ${name} twice: give each secret its own name`);
+    checkPublicKey(`secret ${name}`, key);
+    calls.push(candidates === undefined ? { name, publicKey: key } : { name, publicKey: key, candidates: candidatesOf(name, candidates) });
+  }
+  return calls;
+}
+
+/** Refuse a key that is not an RSA public key as JSON Web Key text, naming the field as `what`. */
+function checkPublicKey(what: string, key: string): void {
+  if (!key) throw new InboxError(400, `${what} needs the public key that card_post fills in. Post the card with the card_post tool of a Claude Code, pi or opencode session, which keeps the private key`);
+  let jwk: Record<string, unknown>;
+  try { jwk = JSON.parse(key) as Record<string, unknown>; } catch { throw new InboxError(400, `${what}: the public key must be an RSA key as JSON Web Key text`); }
+  if (!jwk || typeof jwk !== 'object' || jwk['kty'] !== 'RSA' || typeof jwk['n'] !== 'string' || typeof jwk['e'] !== 'string') throw new InboxError(400, `${what}: the public key must be an RSA key as JSON Web Key text`);
+  if (PRIVATE_MEMBERS.some((k) => Object.hasOwn(jwk, k))) throw new InboxError(400, `${what}: the key is a private key. The private key never leaves the agent's session: place only the public key`);
+}
+
+/** The calls of the named components in a body, in order, read with the OpenUI parser's strings, comments and fences.
+ * `counts` gives how many string literals each component takes. A call that does not give exactly that many, each a
+ * string literal, has `args` undefined, so its reader can say what the component takes. */
+function literalCalls(body: string, counts: Record<string, number>): { word: string; args: string[] | undefined }[] {
+  const src = withoutComments(fencedCode(body.trim())).trim();
+  const out: { word: string; args: string[] | undefined }[] = [];
   const space = (i: number) => { while (/\s/.test(src[i] ?? '')) i++; return i; };
   let i = 0;
   while (i < src.length) {
@@ -175,8 +201,8 @@ function secretCalls(body: string): { name: string; publicKey: string; candidate
     const word = /^[A-Za-z_]\w*/.exec(src.slice(i, i + 64))?.[0];
     if (!word) { i++; continue; }
     i += word.length;
-    if ((word !== 'SecretInput' && word !== 'SecretAccess') || src[space(i)] !== '(') continue;
-    const count = word === 'SecretInput' ? 2 : 3;
+    const count = Object.hasOwn(counts, word) ? counts[word] : undefined;
+    if (count === undefined || src[space(i)] !== '(') continue;
     const args: string[] = [];
     let at = space(space(i) + 1);
     for (;;) {
@@ -187,19 +213,12 @@ function secretCalls(body: string): { name: string; publicKey: string; candidate
       if (args.length === count || src[at] !== ',') break;
       at = space(at + 1);
     }
-    if (args.length !== count || src[at] !== ')') throw new InboxError(400, count === 2 ? LITERALS : ACCESS_LITERALS);
+    const whole = args.length === count && src[at] === ')';
+    out.push({ word, args: whole ? args : undefined });
+    if (!whole) return out;
     i = at + 1;
-    const [name = '', key = '', candidates] = args;
-    if (!FIELD_NAME.test(name)) throw new InboxError(400, `secret ${JSON.stringify(name)}: the name must be a variable name, such as API_KEY`);
-    if (calls.some((c) => c.name === name)) throw new InboxError(400, `the card asks for ${name} twice: give each secret its own name`);
-    if (!key) throw new InboxError(400, `secret ${name} needs the public key that card_post fills in. Post the card with the card_post tool of a Claude Code, pi or opencode session, which keeps the private key`);
-    let jwk: Record<string, unknown>;
-    try { jwk = JSON.parse(key) as Record<string, unknown>; } catch { throw new InboxError(400, `secret ${name}: the public key must be an RSA key as JSON Web Key text`); }
-    if (!jwk || typeof jwk !== 'object' || jwk['kty'] !== 'RSA' || typeof jwk['n'] !== 'string' || typeof jwk['e'] !== 'string') throw new InboxError(400, `secret ${name}: the public key must be an RSA key as JSON Web Key text`);
-    if (PRIVATE_MEMBERS.some((k) => Object.hasOwn(jwk, k))) throw new InboxError(400, `secret ${name}: the key is a private key. The private key never leaves the agent's session: place only the public key`);
-    calls.push(candidates === undefined ? { name, publicKey: key } : { name, publicKey: key, candidates: candidatesOf(name, candidates) });
   }
-  return calls;
+  return out;
 }
 
 /** A field the privileged_action widget places: the command the card shows, the machine it runs on, and what it changes. */
@@ -216,36 +235,45 @@ const PRIVILEGED_LITERALS = 'PrivilegedAction takes four string literals: the fi
  * secretCalls reads its calls. Each call gives its arguments as string literals, so the inbox knows the exact command
  * each field approves. */
 export function privilegedActions(body: string): PrivilegedField[] {
-  const src = withoutComments(fencedCode(body.trim())).trim();
   const out: PrivilegedField[] = [];
-  const space = (i: number) => { while (/\s/.test(src[i] ?? '')) i++; return i; };
-  let i = 0;
-  while (i < src.length) {
-    const str = stringAt(src, i);
-    if (str) { i = str.end; continue; }
-    const word = /^[A-Za-z_]\w*/.exec(src.slice(i, i + 64))?.[0];
-    if (!word) { i++; continue; }
-    i += word.length;
-    if (word !== 'PrivilegedAction' || src[space(i)] !== '(') continue;
-    const args: string[] = [];
-    let at = space(space(i) + 1);
-    for (;;) {
-      const arg = stringAt(src, at);
-      if (!arg) break;
-      args.push(arg.value);
-      at = space(arg.end);
-      if (args.length === 4 || src[at] !== ',') break;
-      at = space(at + 1);
-    }
-    if (args.length !== 4 || src[at] !== ')') throw new InboxError(400, PRIVILEGED_LITERALS);
-    i = at + 1;
-    const [name = '', command = '', machine = '', changes = ''] = args;
+  for (const call of literalCalls(body, { PrivilegedAction: 4 })) {
+    if (!call.args) throw new InboxError(400, PRIVILEGED_LITERALS);
+    const [name = '', command = '', machine = '', changes = ''] = call.args;
     if (!FIELD_NAME.test(name)) throw new InboxError(400, `privileged action ${JSON.stringify(name)}: the name must be a field name, such as restart_nginx`);
     if (out.some((c) => c.name === name)) throw new InboxError(400, `the card names the privileged action ${name} twice: give each one its own name`);
     if (!command.trim()) throw new InboxError(400, `privileged action ${name} needs the command it runs`);
     if (!machine.trim()) throw new InboxError(400, `privileged action ${name} needs the machine it runs on`);
     if (!changes.trim()) throw new InboxError(400, `privileged action ${name} needs a sentence that says what it changes`);
     out.push({ name, command, machine, changes });
+  }
+  return out;
+}
+
+/** A field the otp widget places: the variable the code goes in, the enrolled key's label, what the code is for, and
+ * the public key of the session that posted the card. */
+export interface OtpField {
+  name: string;
+  key: string;
+  purpose: string;
+  publicKey: string;
+}
+
+const OTP_LITERALS = 'OneTimeCode takes four string literals: the field name, the key\'s label, the purpose and the public key. Place it with the otp widget: npm = widget otp {"name": "npm_config_otp", "key": "npm", "purpose": "npm stage publish your-attention@1.4.0"}';
+
+/** The OneTimeCode calls in a body, in order. Each gives its arguments as string literals, so the inbox knows the key
+ * and the purpose the person approves, and the public key it seals the code to. */
+export function oneTimeCodes(body: string): OtpField[] {
+  const out: OtpField[] = [];
+  for (const call of literalCalls(body, { OneTimeCode: 4 })) {
+    if (!call.args) throw new InboxError(400, OTP_LITERALS);
+    const [name = '', key = '', purpose = '', publicKey = ''] = call.args;
+    if (!FIELD_NAME.test(name)) throw new InboxError(400, `one-time code ${JSON.stringify(name)}: the name must be a variable name, such as npm_config_otp, since each command gets the code in it`);
+    if (out.some((c) => c.name === name)) throw new InboxError(400, `the card names the one-time code ${name} twice: give each one its own name`);
+    if (!key.trim()) throw new InboxError(400, `one-time code ${name} needs the label of an enrolled key, such as npm`);
+    if (!purpose.trim()) throw new InboxError(400, `one-time code ${name} needs a purpose: one line that says what the code is for, such as "npm stage publish your-attention@1.4.0", which the person reads before approving`);
+    if (purpose.length > MAX_PURPOSE_CHARS) throw new InboxError(400, `one-time code ${name}: the purpose is ${purpose.length} characters, over the limit of ${MAX_PURPOSE_CHARS}`);
+    checkPublicKey(`one-time code ${name}`, publicKey);
+    out.push({ name, key: key.trim(), purpose: purpose.trim(), publicKey });
   }
   return out;
 }
@@ -267,10 +295,14 @@ export function sealedFields(card: Pick<Card, 'kind' | 'secrets'>): string[] {
 }
 
 /** The answer without its sealed fields, nor those of the answers before it, for every reader except the agent stream:
- * hooks and webhooks hold no key. */
+ * hooks and webhooks hold no key. A one-time code field says that the person approved and until when, without the
+ * ticket, which only the posting session redeems. */
 export function withoutSealed(card: Pick<Card, 'kind' | 'secrets'>, answer: Answer): Answer {
   const fields = sealedFields(card);
-  if (!fields.length) return answer;
-  const strip = (values: Record<string, unknown>) => Object.fromEntries(Object.entries(values).filter(([k]) => !fields.includes(k)));
+  // An approval is summarized by its shape, not by the card's field list, so a revision that drops the OneTimeCode
+  // call after the approval leaves no ticket for a hook to read.
+  const strip = (values: Record<string, unknown>) => Object.fromEntries(Object.entries(values)
+    .filter(([k]) => !fields.includes(k))
+    .map(([k, v]) => [k, isOtpApproval(v) ? { approved: true, key: v.key, purpose: v.purpose, expiresAt: v.expiresAt, ...(v.issuedAt === undefined ? {} : { issuedAt: v.issuedAt }) } : v]));
   return { ...answer, values: strip(answer.values), previous: (answer.previous ?? []).map((p) => ({ ...p, values: strip(p.values ?? {}) })) };
 }

@@ -72,7 +72,7 @@ const state = async () => (await h.stored()) as { states: Record<string, string>
 describe('the pi extension', () => {
   it('registers the card tools and connects on session start', async () => {
     yourAttention(pi as never, async () => piTools);
-    assert.deepEqual([...tools.keys()].sort(), ['card_close', 'card_guidance', 'card_patch', 'card_post', 'card_read', 'card_search', 'card_status', 'card_tag', 'card_tags', 'card_template_save', 'card_triage_feedback', 'card_widget_save', 'settings']);
+    assert.deepEqual([...tools.keys()].sort(), ['card_close', 'card_guidance', 'card_otp', 'card_patch', 'card_post', 'card_read', 'card_search', 'card_status', 'card_tag', 'card_tags', 'card_template_save', 'card_triage_feedback', 'card_widget_save', 'settings']);
     await handlers.get('session_start')?.({}, ctx);
     await until(async () => (await state()).presence['pi:pi-session-1']?.online);
   });

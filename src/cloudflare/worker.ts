@@ -28,6 +28,9 @@ export interface Env {
   ATTACHMENT_READS_PER_DAY?: string;
   /** In hosted mode, the key that signs inbox addresses, so the Worker checks an address without a KV read. */
   INBOX_ID_SECRET?: string;
+  /** The key each inbox's one-time code keys are encrypted under, through HKDF with the inbox's id. Without it, the
+   * inbox keeps no keys. Changing it makes every enrolled key unreadable, and the person enrolls each one again. */
+  OTP_KEY_SECRET?: string;
   /** Counts signed-in API requests per inbox and client address. */
   LIMITER?: RateLimit;
   /** Counts requests without a token per client address: pairing, sign-in, and new inboxes. */

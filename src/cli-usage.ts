@@ -40,6 +40,7 @@ const LIST: [name: string, syntax: string, summary: string][] = [
   ['reset', 'reset --yes', 'remove every card, answer and file; tokens and templates stay'],
   ['login-url', 'login-url', 'print a sign-in link that works once, like open --link'],
   ['pin', 'pin status|set|reset|clear', 'read, set, reset or remove the PIN that each browser tab types'],
+  ['otp', 'otp list|enroll <label> [--allow ID]...|allow <label> ID...|disallow <label> ID...|remove <label>', 'keep authenticator keys in the inbox, so an approval on a card gives an agent a one-time code'],
   ['install', 'install [--from-source PATH]', "print the exact commands that connect this machine's harnesses, and ask nothing"],
   ['install', 'install --help <harness>', 'the full recipe for one harness, even when it is not installed'],
   ['discover', 'discover [--seconds 3]', 'list inboxes on the LAN'],
@@ -91,6 +92,14 @@ const OPTIONS: Record<string, [string, string][]> = {
     ['set', 'choose a PIN when the inbox has none'],
     ['reset', 'replace the PIN, or remove it, and lift a lockout'],
     ['clear', 'remove the PIN'],
+  ],
+  otp: [
+    ['list', 'list the keys, the sessions each allows, and when each last gave a code, the default'],
+    ['enroll <label>', 'read a key and a current code from the terminal without echo, or one per line from a pipe, and keep the key if the code matches'],
+    ['--allow ID', 'with enroll: a session id that may ask for a code from the key; repeat it for each session'],
+    ['allow <label> ID...', 'let more sessions ask for a code from the key'],
+    ['disallow <label> ID...', 'stop sessions from asking for a code from the key'],
+    ['remove <label>', 'delete the key from the inbox'],
   ],
   install: [
     ['--from-source PATH', 'name the checkout at PATH in the line that links the command with npm link'],

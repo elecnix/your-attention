@@ -6,6 +6,8 @@ name: deploy-cloudflare
 #   variable  KV_NAMESPACE_ID, the namespace for invite codes and inbox ids
 #   secret    OWNER_TOKEN, in single mode: the owner token the Worker gets as its OWNER_TOKEN secret
 #   secret    INBOX_ID_SECRET, in hosted mode: the key that signs inbox addresses. Changing it makes every address invalid
+#   secret    OTP_KEY_SECRET, optional: the key one-time code keys are encrypted under. Changing it makes every enrolled key
+#             unreadable, so each person enrolls their keys again. Without it, the inbox keeps no one-time code keys
 # One dispatch deploys both Workers: the telemetry collector first, then the inbox. The collector
 # (wrangler.telemetry.jsonc) reads no secrets or variables, so it needs nothing extra.
 #
@@ -165,6 +167,17 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           INBOX_ID_SECRET: ${{ secrets.INBOX_ID_SECRET }}
         run: printf %s "$INBOX_ID_SECRET" | npx wrangler secret put INBOX_ID_SECRET
+      - name: set the one-time code key
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OTP_KEY_SECRET: ${{ secrets.OTP_KEY_SECRET }}
+        run: |
+          # Optional. A Worker that never had the secret keeps no one-time code keys, and says so to the person who tries
+          # to enroll one. An empty value here leaves the Worker's secret as it is: deleting it would make every enrolled
+          # key unreadable, so turning key storage off is a deliberate `wrangler secret delete OTP_KEY_SECRET`.
+          if [ -z "$OTP_KEY_SECRET" ]; then echo "OTP_KEY_SECRET is not in this environment, so the deploy leaves the Worker's secret as it is: set already, enrolled keys stay readable; never set, the inbox keeps no one-time code keys"; exit 0; fi
+          printf %s "$OTP_KEY_SECRET" | npx wrangler secret put OTP_KEY_SECRET
       - name: check the deployment answers
         if: inputs.mode == 'hosted'
         env:

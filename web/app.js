@@ -583,7 +583,7 @@ export function App() {
     if (c.kind === 'blocked' && ev.humanFriendlyMessage !== 'send answer') return api(`${BASE}v1/cards/${c.id}/open`, {});
     let sealed;
     // A secret that cannot be sealed stops the answer, and its field says why: the person typed it to send it.
-    try { sealed = await sealSecrets(c.id, secretFieldsOf(c)); } catch { return; }
+    try { sealed = await sealSecrets(c.id, secretFieldsOf(c), c.version); } catch { return; }
     // Approvals on a closed card are never sent, so an answer to one carries none.
     const values = { ...answerValues(c, picked), ...sealed, ...(c.closed ? {} : approvalValues(c, picksOf(c))) };
     const images = pastedImages.payload(c.id);
@@ -600,7 +600,7 @@ export function App() {
   // answer and says it went after the card closed. It answers why it failed, or nothing once it is sent.
   const sendLate = async (c, draft) => {
     let sealed;
-    try { sealed = await sealSecrets(c.id, secretFieldsOf(c)); } catch (e) { return String(e.message || e); }
+    try { sealed = await sealSecrets(c.id, secretFieldsOf(c), c.version); } catch (e) { return String(e.message || e); }
     const images = pastedImages.payload(c.id);
     const res = await api(`${BASE}v1/cards/${c.id}/answer`, { values: { ...draft.values, ...sealed }, comment: draft.comment, version: c.version, ...(images.length ? { images } : {}) });
     if (!res.ok) return (await res.json().catch(() => ({}))).error || `the inbox answered ${res.status}`;

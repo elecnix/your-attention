@@ -234,8 +234,10 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
       label: tool.name.replace('_', ' '),
       description: tool.description,
       parameters: Type.Unsafe(tool.schema),
-      async execute(_id, args) {
-        return result(await runTool({ inbox: need(), secrets, agent, origin: async () => (origin && { ...here(), ...(await herdrPlace(origin.herdrPane)) }), arrival: 'as a user message' }, tool.name, args));
+      async execute(_id, args, _signal, _onUpdate, ctx) {
+        // A one-time code becomes a grant inside the tool, so the bash tool that delivers grants is built here as well.
+        const deliver = async () => ((await deliverGrants(ctx?.sessionManager.getCwd() ?? process.cwd())) ? undefined : 'This pi has no bash tool the extension can rebuild, so its commands do not get the code. Tell the person.');
+        return result(await runTool({ inbox: need(), secrets, agent, origin: async () => (origin && { ...here(), ...(await herdrPlace(origin.herdrPane)) }), arrival: 'as a user message', deliverGrants: deliver }, tool.name, args));
       },
     });
   }

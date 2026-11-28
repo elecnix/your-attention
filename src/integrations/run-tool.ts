@@ -7,6 +7,7 @@ import type { Approval, AskQuestion, CloseKind, FeedbackFinding, FeedbackVerdict
 import type { SecretRequests } from './secrets.ts';
 import { envRequireCard, ruleFromView } from './require-card.ts';
 import { describeDelays } from '../core/require-card.ts';
+import { STEP_MS } from '../core/otp.ts';
 import { cardTools, removedTools } from './tools.ts';
 
 export interface ToolContext {
@@ -17,7 +18,16 @@ export interface ToolContext {
   origin: () => Promise<Origin | undefined>;
   /** How the answer reaches this harness, for the tool result: "as a channel event". */
   arrival: string;
+  /** Make the session's grants reach its commands, as the first grant of an answer does: pi rebuilds its bash tool and
+   * Claude Code opens its socket. It answers why commands won't get them, or undefined when they will. */
+  deliverGrants?: () => Promise<string | undefined>;
+  /** The clock and the wait card_otp uses, which a test replaces. */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
+
+/** The seconds of a code's step that card_otp wants left when the code reaches the command. */
+const OTP_MARGIN_MS = 10_000;
 
 /** A file the agent names by path or URL, as the inbox takes it. */
 export function toAttachment(a: { path?: string; url?: string; name?: string; alt?: string }): NewAttachment {
@@ -184,6 +194,24 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       return lines.length
         ? `The default tags of this session, which every card it posts inherits under its own tags:\n${lines.join('\n')}`
         : 'This session has no default tags. Set them with card_tags, for example {"tags": {"repo": "acme/api", "topic": "billing"}}, and every card it posts inherits them under its own tags.';
+    }
+    case 'card_otp': {
+      const ticket = String(args['ticket'] ?? '').trim();
+      if (!ticket) throw new Error('give the ticket from the answer to your otp card');
+      // A ticket gives one code, so the harness must be able to hand the code to a command before the ticket is spent.
+      const cannot = ctx.deliverGrants ? await ctx.deliverGrants() : undefined;
+      if (cannot) throw new Error(`${cannot} The ticket is not used, so it still works once that is fixed.`);
+      // Only the session that received the answer holds the card's key, and a restart loses it: redeeming then would spend
+      // the person's one approval on a code nothing here can open.
+      if (!ctx.secrets.canOpenTicket(ticket)) throw new Error(`this session has no key for ticket ${ticket}: only the session that posted the otp card and received its answer opens the code, and a restarted session loses that key. The ticket is not used. Post a new otp card if this session needs a code`);
+      // A code redeemed in the last seconds of its step dies before the command reads it, so wait for the next step.
+      const now = ctx.now ?? Date.now;
+      const left = STEP_MS - (now() % STEP_MS);
+      if (left < OTP_MARGIN_MS) await (ctx.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); })))(left + 250);
+      const r = await inbox.otpRedeem(ticket, agent);
+      const line = await ctx.secrets.holdCode(r.card, agent, r.field, r.sealed, r.expiresAt);
+      if (line === undefined) throw new Error(`this session no longer has the key of card ${r.card}, so it cannot open the code. The ticket is used: post a new otp card`);
+      return `The inbox issued a code from the key ${r.key} for "${r.purpose}". ${line}`;
     }
     case 'card_close':
       await inbox.close(String(args['card_id']), args['kind'] as CloseKind, String(args['outcome'] ?? ''));

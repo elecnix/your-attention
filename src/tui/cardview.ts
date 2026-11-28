@@ -330,6 +330,7 @@ export class CardView {
     const ctx: BodyContext = {
       theme, md, store: this.store, ui: this.ui, errors: this.errors, focused: this.focus, widgets: this.widgets, secrets: this.secrets, access: this.access,
       address: this.host.address(card.id),
+      otpHolder: card.otpHolder,
       onAction: (action) => this.host.act(this, action),
       recommended: {
         ...Object.fromEntries(Object.entries(questionRecommendations(card)).map(([name, values]) => [name, { values }])),
