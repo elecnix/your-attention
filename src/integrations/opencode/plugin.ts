@@ -117,7 +117,13 @@ export function createPlugin(z: unknown) {
         if (ev.type === 'guidance') { await send(session, `[your-attention] The person approved new card guidance, version ${ev.guidance.version}. Follow it from now on:\n${ev.guidance.text}`); return; }
         if (ev.type === 'returned') { await send(session, `[your-attention] ${describeReturned(ev)}`); return; }
         if (ev.type === 'advice') { await send(session, `[your-attention] ${describeAdvice(ev)}`); return; }
-        if (ev.type === 'card') { await send(session, `[your-attention] ${describeSentCard(ev)}`); return; }
+        if (ev.type === 'card') {
+          await send(session, `[your-attention] ${describeSentCard(ev)}`);
+          // The inbox sends the card again on each connection until the session acknowledges it. A failed
+          // acknowledgment only means the card comes again.
+          await box.ackSent(ev).catch(() => {});
+          return;
+        }
         if (ev.type === 'reassigned') {
           await send(session, `[your-attention] ${describeReassigned(ev)}`);
           // The inbox sends a notice again on each connection until the session acknowledges it. A failed

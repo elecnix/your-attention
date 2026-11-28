@@ -80,6 +80,10 @@ describe('the channel asks an inactive session for a card', () => {
     await until(() => !fs.existsSync(file) || undefined);
     await sleep(MINUTE * 6);
     assert.equal(asks.length, 0);
+    // The session showed the card, so it acknowledges it. Without that, the inbox sends the card again when the channel
+    // restarts, and the card's arrival ends the stretch the restart below carries.
+    const { id } = (await res.json()) as { id: string };
+    assert.equal((await callAt(h.server.url, h.agentToken, 'POST', `/v1/send/${id}/ack`, { agent: `claude:${SESSION}` })).status, 200);
   });
 
   it('ends the stretch once the session holds an open card', async () => {

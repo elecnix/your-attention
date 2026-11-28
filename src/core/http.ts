@@ -693,6 +693,8 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
       owner();
       return json(inbox.sendCard(me, await readJson<{ agent?: unknown; text?: unknown }>(req)), 201);
     }
+    // The session of the agent took the card, so the inbox stops sending it to each new connection.
+    if (method === 'POST' && a === 'send' && b && c === 'ack') return json(inbox.ackSent(me, b, await readJson<{ agent?: unknown }>(req)));
     if (a === 'cards') {
       if (method === 'POST' && !b) {
         const input = await readJson<NewCard>(req, BODY_LIMIT.card);

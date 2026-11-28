@@ -33,7 +33,7 @@ describe('principles', () => {
   it('a card that waited for an offline agent goes out when that agent connects', () => {
     // DP19: the inbox keeps what it cannot deliver yet, and hands it over when the session comes back.
     const connect = /connect\(caller: Caller[\s\S]*?\n  \}/.exec(read('inbox.ts'))?.[0] ?? '';
-    assert.match(connect, /this\.deliverSent\(agent\);/, 'a connection takes the cards that waited for its agent');
+    assert.match(connect, /this\.deliverSent\(agent(, \{ to: send \})?\);/, 'a connection takes the cards that waited for its agent');
   });
 
   it('the form that sends a card shows what presence says about the agent its search picks', () => {

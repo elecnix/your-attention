@@ -121,8 +121,8 @@ interface Push {
   card: string;
   /** Tells the inbox the session has it: the answer's acknowledgment, or the notice's. */
   ack: () => Promise<void>;
-  /** A notice that the card changed hands. A missed one stays unacknowledged, and the inbox sends it again on the next
-   * connection, so it never marks the card as not seen. */
+  /** A notice that the card changed hands, or a card the person sent. A missed one stays unacknowledged, and the inbox
+   * sends it again on the next connection, so it never marks the card as not seen. */
   notice?: boolean;
   /** Lets the inbox's next copy of a missed notice through the client, which drops a copy it already handed on. */
   release?: () => void;
@@ -319,7 +319,22 @@ function listen(client: Client): void {
       return;
     }
     if (ev.type === 'card') {
-      await notify(describeSentCard(ev), { card_id: ev.card.id });
+      // The inbox sends the card again on each connection until this session acknowledges it, so the card takes the
+      // notice's path: a receipt, the transcript check, one more push, then the pane, and the acknowledgment after.
+      log('sent card', ev.card.id);
+      const receipt = ev.id;
+      const ack = (): Promise<void> => client.ackSent(ev).then(() => log('sent card read', ev.card.id), (e: Error) => log('sent card not acknowledged:', e.message));
+      const push: Push = { card: ev.card.id, ack, notice: true, release: () => client.releaseSent(ev), body: describeSentCard(ev), meta: { card_id: ev.card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
+      pending.set(receipt, push);
+      try {
+        await notify(push.body, push.meta);
+        push.at = Date.now();
+        log('pushed sent card', ev.card.id, receipt);
+      } catch (e) {
+        log('push failed:', (e as Error).message);
+      } finally {
+        push.pushing = false;
+      }
       return;
     }
     if (ev.type === 'reassigned') {
