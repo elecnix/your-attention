@@ -34,22 +34,18 @@ const listen = (id: string) => {
 };
 const post = (c: NewCard) => agent.post(c);
 
-/** A proxy in front of the inbox that holds GET /v1/cards/<id> for the cards in `held` until `release`, so a test can act
- * on a card whose fields have not loaded. Everything else, the page socket too, goes through as it came. */
-async function slowCards(target: string, held: string[]) {
-  const waiting: (() => void)[] = [];
+/** A proxy in front of the inbox. `route` decides what happens to each plain request: it may call `forward` now, later,
+ * or not at all. Everything else, the page socket too, goes through as it came. */
+async function proxyTo(target: string, route: (req: http.IncomingMessage, res: http.ServerResponse, forward: () => void) => void) {
   // A socket that upgraded leaves the server's connections, so close() ends each one itself.
   const upgraded = new Set<net.Socket>();
-  let released = false;
   const server = http.createServer((req, res) => {
     const forward = () => {
       const up = http.request(`${target}${req.url}`, { method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode ?? 502, r.headers); r.pipe(res); });
       up.on('error', () => res.destroy());
       req.pipe(up);
     };
-    const id = /^\/v1\/cards\/([^/?]+)$/.exec(req.url ?? '')?.[1];
-    if (req.method === 'GET' && id && held.includes(decodeURIComponent(id)) && !released) waiting.push(forward);
-    else forward();
+    route(req, res, forward);
   });
   server.on('upgrade', (req, socket, head) => {
     const u = new URL(target);
@@ -68,12 +64,47 @@ async function slowCards(target: string, held: string[]) {
   const { port } = server.address() as { port: number };
   return {
     url: `http://127.0.0.1:${port}`,
-    release: () => { released = true; for (const f of waiting.splice(0)) f(); },
     close: () => new Promise<void>((r) => {
       for (const sock of upgraded) sock.destroy();
       server.closeAllConnections();
       server.close(() => r());
     }),
+  };
+}
+
+/** A proxy that holds GET /v1/cards/<id> for the cards in `held` until `release`, so a test can act on a card whose
+ * fields have not loaded. */
+async function slowCards(target: string, held: string[]) {
+  const waiting: (() => void)[] = [];
+  let released = false;
+  const proxy = await proxyTo(target, (req, _res, forward) => {
+    const id = /^\/v1\/cards\/([^/?]+)$/.exec(req.url ?? '')?.[1];
+    if (req.method === 'GET' && id && held.includes(decodeURIComponent(id)) && !released) waiting.push(forward);
+    else forward();
+  });
+  return { ...proxy, release: () => { released = true; for (const f of waiting.splice(0)) f(); } };
+}
+
+/** A proxy that, after `hold`, asks the inbox for each GET /v1/state at once and keeps the answer back until
+ * `releaseOne`. The client then receives a state the inbox built before the client's later writes, in a set order. */
+async function staleStates(target: string) {
+  const kept: { status: number; headers: http.IncomingHttpHeaders; body: Buffer; res: http.ServerResponse }[] = [];
+  let holding = false;
+  const proxy = await proxyTo(target, (req, res, forward) => {
+    if (!holding || req.method !== 'GET' || req.url !== '/v1/state') { forward(); return; }
+    http.get(`${target}${req.url}`, { headers: req.headers }, (r) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c: Buffer) => chunks.push(c));
+      r.on('end', () => kept.push({ status: r.statusCode ?? 502, headers: r.headers, body: Buffer.concat(chunks), res }));
+    }).on('error', () => res.destroy());
+  });
+  const send = (k: (typeof kept)[number]) => { k.res.writeHead(k.status, k.headers); k.res.end(k.body); };
+  return {
+    ...proxy,
+    hold: () => { holding = true; },
+    kept: () => kept.length,
+    releaseOne: () => { const k = kept.shift(); if (k) send(k); },
+    release: () => { holding = false; for (const k of kept.splice(0)) send(k); },
   };
 }
 
@@ -295,6 +326,36 @@ describe('your-attention tui', () => {
     h.server.inbox.setSettings({ groupBy: 'none' });
     for (const id of ['pin-a', 'pin-b', 'pin-c']) await agent.close(id, 'retracted', 'test over');
     await t.stop();
+  });
+
+  it('keeps a Group by key when a state the inbox built before that key arrives after it', async () => {
+    await post({ id: 'stale-a', agent: 's-stale', title: 'Grouped by topic', priority: 'now', tags: { topic: 'search' } });
+    h.server.inbox.setSettings({ groupBy: 'tag:topic', pins: [] });
+    const proxy = await staleStates(h.server.url);
+    try {
+      const t = tui({ url: proxy.url });
+      await t.waitFor('Group by topic');
+      // From here the proxy keeps each state back. A new card makes the client ask for one, which the inbox builds now,
+      // with Group by still at topic.
+      proxy.hold();
+      await post({ id: 'stale-b', agent: 's-stale', title: 'Posted before the key', priority: 'now' });
+      await until(() => (proxy.kept() > 0 ? true : undefined));
+      t.send('g');
+      await t.waitFor('Group by nothing.');
+      await until(() => (h.server.inbox.settings().groupBy === 'none' ? true : undefined));
+      // The state built before the key arrives after it. The client shows its card, and keeps the key's grouping.
+      proxy.releaseOne();
+      await t.waitFor('Posted before');
+      t.send('g');
+      await t.waitFor('Group by priority.');
+      await until(() => (h.server.inbox.settings().groupBy === 'priority' ? true : undefined));
+      await t.stop();
+    } finally {
+      proxy.release();
+      await proxy.close();
+      h.server.inbox.setSettings({ groupBy: 'none' });
+      for (const id of ['stale-a', 'stale-b']) await agent.close(id, 'retracted', 'test over');
+    }
   });
 
   it('p pins the agent of the open card under an agent grouping, and pins it out again', async () => {
