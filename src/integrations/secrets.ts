@@ -3,6 +3,7 @@
 // session's grant store, and the harness adds it to the environment of each command it starts while the grant lives.
 // Nothing here writes a value to a file, and the model gets the variable's name, never the value or a path.
 import { GRANT_DEFAULT_MS, GRANT_IDLE_MS, type AccessGrant, type Candidate, type SecretQuery } from '../core/secret-sources.ts';
+import { isOtpApproval } from '../core/otp.ts';
 import { isSealed, newSealKeys, openSealed, sealedFields } from '../core/sealed.ts';
 import type { Answer, Card } from '../core/types.ts';
 import { addToPlacements, placementValues } from '../core/widgets.ts';
@@ -23,6 +24,8 @@ export class SecretRequests {
   // card id -> the private keys of its posts, newest first. A revision makes a new key, and an answer sealed for an
   // earlier version still opens.
   private readonly keys = new Map<string, CryptoKey[]>();
+  /** ticket -> the card whose answer gave it, so card_otp knows before redeeming whether this session can open the code. */
+  private readonly tickets = new Map<string, string>();
   private readonly grants: Grants;
   private readonly redactor = new Redactor();
   private readonly now: () => number;
@@ -75,6 +78,10 @@ export class SecretRequests {
   async receiveDetail(card: Card, answer: Answer): Promise<{ text: string; granted: string[] }> {
     const lines: string[] = [];
     const granted: string[] = [];
+    for (const field of card.otp ?? []) {
+      const v = answer.values[field];
+      if (isOtpApproval(v)) this.tickets.set(v.ticket, card.id);
+    }
     for (const field of sealedFields(card)) {
       // A secret card that an older inbox stored names its value in `secret` and seals it in `sealed`.
       const name = card.kind === 'secret' && card.secret ? card.secret.name : field;
@@ -122,6 +129,13 @@ export class SecretRequests {
     return { text: lines.join('\n'), granted };
   }
 
+  /** Whether this session received the answer that gave `ticket` and still holds its card's key, so a redemption would
+   * open. A session that restarted lost both, and redeeming would spend the ticket on a code it cannot read. */
+  canOpenTicket(ticket: string): boolean {
+    const card = this.tickets.get(ticket);
+    return card !== undefined && (this.keys.get(card)?.length ?? 0) > 0;
+  }
+
   /** Open a one-time code the inbox sealed to a card's key, and hold it as a grant of `name` until the end of the
    * code's step, so the next command gets it as $NAME. The line for the model names the variable and the deadline,
    * never the code or a path. Undefined when this session no longer has the card's key. */
@@ -132,7 +146,7 @@ export class SecretRequests {
     this.grants.hold({ name, agent, value: plain, until, idleMs: GRANT_IDLE_MS, now });
     this.redactor.add(name, plain);
     const left = Math.max(0, Math.round((until - now) / 1000));
-    return `$${name} holds a fresh one-time code until ${new Date(until).toISOString().slice(11, 19)} UTC, ${left} seconds from now. Run the command that needs it at once, with "$${name}" in it, such as --otp "$${name}". Never print the code or write it to a file. Output that shows it reads [secret ${name}].`;
+    return `$${name} holds a fresh one-time code until ${new Date(until).toISOString().slice(11, 19)} UTC, ${left} seconds from now. Run the command that needs it at once: it reads the code from its environment. npm reads a variable named npm_config_otp with no --otp flag. Never put the code in a command's arguments, where ps shows it to every user of the machine, and never print it or write it to a file. Output that shows it reads [secret ${name}].`;
   }
 
   /** The live grants of `agent` as `{NAME: value}`, for the environment of one command it is about to start. Each

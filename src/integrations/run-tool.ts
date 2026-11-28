@@ -201,6 +201,9 @@ export async function runTool(ctx: ToolContext, name: string, args: Record<strin
       // A ticket gives one code, so the harness must be able to hand the code to a command before the ticket is spent.
       const cannot = ctx.deliverGrants ? await ctx.deliverGrants() : undefined;
       if (cannot) throw new Error(`${cannot} The ticket is not used, so it still works once that is fixed.`);
+      // Only the session that received the answer holds the card's key, and a restart loses it: redeeming then would spend
+      // the person's one approval on a code nothing here can open.
+      if (!ctx.secrets.canOpenTicket(ticket)) throw new Error(`this session has no key for ticket ${ticket}: only the session that posted the otp card and received its answer opens the code, and a restarted session loses that key. The ticket is not used. Post a new otp card if this session needs a code`);
       // A code redeemed in the last seconds of its step dies before the command reads it, so wait for the next step.
       const now = ctx.now ?? Date.now;
       const left = STEP_MS - (now() % STEP_MS);

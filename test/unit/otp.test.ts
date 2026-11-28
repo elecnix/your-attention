@@ -232,6 +232,20 @@ describe('the otp card', () => {
     assert.equal((ok.values['NPM_OTP'] as OtpApproval).purpose, 'npm stage publish another-package@9.9.9');
   });
 
+  it('keeps the ticket from hooks after a revision drops the otp field', async () => {
+    const { inbox, session } = await setup();
+    const hooks: unknown[] = [];
+    inbox.connectExtension(extension, { name: 'watch', hooks: ['answer.saved'] }, (ev) => hooks.push(ev));
+    post(inbox, session.publicKey);
+    const approved = await inbox.answer('c1', { values: { NPM_OTP: 'approve' }, by: owner });
+    const ticket = (approved.values['NPM_OTP'] as OtpApproval).ticket;
+    inbox.postCard(agent, { id: 'c1', agent: SESSION, title: 'Publish 1.4.0 to npm?', text: 'The code is no longer needed.' });
+    await inbox.answer('c1', { values: {}, comment: 'ok', version: 2, by: owner });
+    while (inbox.deliveries.size) await Promise.all([...inbox.deliveries]);
+    assert.ok(hooks.length >= 2);
+    assert.ok(!JSON.stringify(hooks).includes(ticket), 'no hook call holds the ticket');
+  });
+
   it('keeps the approval out of a dismissal', async () => {
     const { inbox, session } = await setup();
     post(inbox, session.publicKey);

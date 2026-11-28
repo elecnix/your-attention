@@ -63,10 +63,14 @@ describe('a one-time code on your own inbox', () => {
       const ev = await until(() => events.find((e): e is Extract<AgentEvent, { type: 'answer' }> => e.type === 'answer' && e.card.id === 'otp-card'));
       const said = describeAnswer(ev.card, ev.answer);
       const ticket = (ev.answer.values['NPM_OTP'] as OtpApproval).ticket;
+      // A session that never received the answer, as after a restart, refuses before it spends the ticket.
+      await assert.rejects(runTool({ ...ctx, secrets: new SecretRequests() }, 'card_otp', { ticket }), /has no key for ticket .* The ticket is not used/);
+      // The harness hands each answer to the session first, as the channel and the pi extension do.
+      const received = await secrets.receive(ev.card, ev.answer);
       const redeemed = await runTool(ctx, 'card_otp', { ticket });
       const code = secrets.env(SESSION)['NPM_OTP']!;
       assert.equal(await verifyTotp(KEY, code, Date.now()), true, 'the session holds a code that verifies now');
-      // A command gets it in its environment, as npm would read --otp "$NPM_OTP".
+      // A command gets it in its environment, never in its arguments: npm reads a field named npm_config_otp the same way.
       const cmd = spawnSync(process.execPath, ['-e', 'if (/^\\d{6}$/.test(process.env.NPM_OTP ?? "")) console.log("got a code of six digits")'], { env: { ...process.env, ...secrets.env(SESSION) }, encoding: 'utf8' });
       assert.equal(cmd.stdout.trim(), 'got a code of six digits');
       // The ticket gives one code.
@@ -81,7 +85,7 @@ describe('a one-time code on your own inbox', () => {
         'what serve printed': output.join(''),
         'what the CLI printed': cliOut.join('\n'),
         'the agent stream': JSON.stringify(events),
-        'the answer text for the model': said,
+        'the answer text for the model': `${said}\n${received}`,
         'the card_otp result': redeemed,
         'the owner state': state,
         'the card as the agent reads it': asAgent,

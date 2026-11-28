@@ -291,7 +291,7 @@ export function CardView({ draftKey, card, onAction, recommendationText }) {
   const rec = Object.fromEntries(Object.entries(questionRecommendations(card)).map(([name, labels]) => [name, { values: labels, note: null }]));
   if (values.length) rec.choice = { values, note: text && recommendationText ? recommendationText(text) : null };
   // A one-time code field shows who asks and which inbox holds the key, which the inbox sets and the agent cannot.
-  const otp = { holder: card.otpHolder || '', asker: agentName(card.agent, [card]), host: card.origin?.host || '' };
+  const otp = { holder: card.otpHolder || '', asker: agentName(card.agent, [card]), host: card.origin?.host || '', version: card.version };
   return h(React.Fragment, null, checker, h(SecretScope.Provider, { value: card.id }, h(OtpScope.Provider, { value: otp }, h(Recommended.Provider, { value: rec },
     h(CardBody, { draftKey, response: cardSource(fallback !== undefined ? { ...card, body: fallback } : card), broken: fallback !== undefined, onAction })))));
 }
@@ -584,10 +584,10 @@ function PrivilegedAction({ props }) {
 // places. The person approves or declines, and never reads a code: the inbox mints a ticket on approval, and the agent's
 // session redeems it for a code sealed to its own key. The choice stays in this tab's memory with the typed secrets, and
 // an untouched field sends nothing, which mints nothing.
-const OtpScope = React.createContext({ holder: '', asker: '', host: '' });
+const OtpScope = React.createContext({ holder: '', asker: '', host: '', version: 0 });
 function OneTimeCode({ props }) {
   const card = React.useContext(SecretScope);
-  const { holder, asker, host } = React.useContext(OtpScope);
+  const { holder, asker, host, version } = React.useContext(OtpScope);
   const name = String(props.name ?? '');
   const key = String(props.key ?? '');
   const purpose = String(props.purpose ?? '');
@@ -603,7 +603,7 @@ function OneTimeCode({ props }) {
   const pick = entry?.key === key && entry?.purpose === purpose ? entry.otp : undefined;
   const choose = (value) => {
     const fields = typedSecrets.get(card) ?? new Map();
-    fields.set(name, { otp: value, key, purpose });
+    fields.set(name, { otp: value, key, purpose, version });
     typedSecrets.set(card, fields);
     secretsChanged();
   };
@@ -658,9 +658,12 @@ export function GrantRevoke({ card, answer }) {
 /** The secrets typed on a card, each sealed with the public key its field shows, by field name. `names` lists the
  * card's secret fields now: a value typed in a field that a revision dropped or renamed is forgotten, never sent. It
  * throws when a value cannot be sealed, and that field says why. */
-export async function sealSecrets(card, names) {
+export async function sealSecrets(card, names, version) {
   const typed = typedSecrets.get(card) ?? new Map();
   for (const name of [...typed.keys()]) if (!names.includes(name)) typed.delete(name);
+  // A one-time code choice counts for the card version it was made on. A revision may change the key or the purpose even
+  // where the page could not draw the field to clear it, so a choice from another version is dropped, never sent.
+  for (const [name, f] of [...typed]) if (f.otp && version !== undefined && f.version !== version) typed.delete(name);
   if (!typed.size) return {};
   const failed = new Map();
   const out = {};

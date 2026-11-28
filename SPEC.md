@@ -711,14 +711,14 @@ The session reports its agent id, and every session that holds the machine's age
 To request a code, an agent places the built-in widget `otp`, version 1:
 
 ```
-npm = widget otp {"name": "NPM_OTP", "key": "npm", "purpose": "npm stage publish your-attention@1.4.0"}
+npm = widget otp {"name": "npm_config_otp", "key": "npm", "purpose": "npm stage publish your-attention@1.4.0"}
 ```
 
-`name` sets the variable that receives the code. `key` gives the label of an enrolled key. `purpose` is one line, at most 300 characters, that says what the code is for. `card_post` fills `publicKey` with the session's key for secret fields. The widget places `OneTimeCode(name, key, purpose, publicKey)`, four string literals, inside a form.
+`name` sets the variable that receives the code. npm reads `npm_config_otp` as its `otp` setting, so `npm stage publish` takes the code with no `--otp` flag, and the code stays out of the command's arguments, which `ps` shows to every user of the machine. `key` gives the label of an enrolled key. `purpose` is one line, at most 300 characters, that says what the code is for. `card_post` fills `publicKey` with the session's key for secret fields. The widget places `OneTimeCode(name, key, purpose, publicKey)`, four string literals, inside a form.
 
 On a post or a patch, the inbox lists the names of the card's otp fields in its `otp` field, and sets `otpHolder`, a phrase that says which inbox holds the keys. The agent can't set either.
 
-Should a call go wrong, the inbox answers 400 when the inbox has no key store, when no key has that label, when the purpose is empty, when a call doesn't give four string literals, or when a name repeats or also names a secret or a privileged action. It answers 403 when the key doesn't list the session.
+Should a call go wrong, the inbox answers 400 when the inbox has no key store, when no key has that label, when the purpose is empty, when a call doesn't give four string literals, or when a name repeats or also names a secret or a privileged action. It also answers 400 for a name that is no variable name, and for a public key that is no RSA public key in JSON Web Key text, as for the `secret` widget. A card without a key to seal to never gets posted. It answers 403 when the key doesn't list the session.
 
 The page shows the key's label, the purpose, the requesting session, where that session runs, and which inbox holds the key. It offers **Approve one code from npm** and **Decline**.
 
@@ -742,10 +742,10 @@ A ticket lasts 10 minutes. An agent with an open stream receives the answer with
 The answer text for the agent reads:
 
 ```
-NPM_OTP: the person approved a code from the key npm for "npm stage publish your-attention@1.4.0". Call card_otp with ticket <ticket> right before the command that needs it, and that command gets a fresh code as $NPM_OTP. The ticket gives one code and ends at 14:13:02 UTC, 10 minutes after the approval.
+npm_config_otp: the person approved a code from the key npm for "npm stage publish your-attention@1.4.0". Call card_otp with ticket <ticket> right before the command that needs it, and that command gets a fresh code as $npm_config_otp. The ticket gives one code and ends at 14:13:02 UTC, 10 minutes after the approval.
 ```
 
-A decline reads `NPM_OTP: the person declined, so there is no ticket and no code. Do not run the command that needs it.`
+A decline reads `npm_config_otp: the person declined, so there is no ticket and no code. Do not run the command that needs it.`
 
 The agent stream receives the ticket, which only the posting session can redeem. Hooks, webhooks and triage receive `{approved: true, key, purpose, expiresAt, issuedAt?}` instead, without the ticket.
 
@@ -773,7 +773,7 @@ Should the inbox be unable to use the key, the answer is 500. That covers a key 
 the key npm is damaged: its bytes no longer match the ones enrolled, so the inbox sent no code. Enroll it again with `your-attention otp enroll npm`
 ```
 
-After a 500, the ticket is still unused, so it works once the person enrolls the key again.
+After a 500, the ticket is still unused, so it works if the person enrolls the key again within its 10 minutes. Past them, the redemption gets 410, and the agent posts a new card.
 
 Once the key checks out, the inbox seals the code to the card's public key, using the same sealing as the `secret` widget. It answers `{card, field, key, purpose, sealed, issuedAt, expiresAt}`, where `expiresAt` is the end of the code's step.
 
@@ -783,12 +783,12 @@ Each redemption records `issuedAt` on the ticket, on the answer's field and as t
 
 The `card_otp` tool redeems a ticket. When fewer than 10 seconds of the current step remain, it waits for the next step first, so the command has time to run with the code.
 
-Using the card's private key, the session opens the sealed code and holds it as a grant named after the field, until the end of the code's step. Commands the agent runs next receive it as `$NPM_OTP`, through the same delivery as any granted secret: pi's bash tool, the Claude Code socket and hooks, or opencode's `shell.env`. Output that shows the code reads `[secret NPM_OTP]`.
+Using the card's private key, the session opens the sealed code and holds it as a grant named after the field, until the end of the code's step. Commands the agent runs next receive it as `$npm_config_otp`, through the same delivery as any granted secret: pi's bash tool, the Claude Code socket and hooks, or opencode's `shell.env`. Output that shows the code reads `[secret npm_config_otp]`. A command that took the code as an argument, such as `--otp "$npm_config_otp"`, would show it in the process list to every user of the machine while it runs, so the guidance points the agent at the variable npm reads instead.
 
 From the model's side, only the variable's name and the deadline are visible, never the code or a path:
 
 ```
-The inbox issued a code from the key npm for "npm stage publish your-attention@1.4.0". $NPM_OTP holds a fresh one-time code until 14:03:30 UTC, 18 seconds from now. Run the command that needs it at once, with "$NPM_OTP" in it, such as --otp "$NPM_OTP". Never print the code or write it to a file. Output that shows it reads [secret NPM_OTP].
+The inbox issued a code from the key npm for "npm stage publish your-attention@1.4.0". $npm_config_otp holds a fresh one-time code until 14:03:30 UTC, 18 seconds from now. Run the command that needs it at once: it reads the code from its environment. npm reads a variable named npm_config_otp with no --otp flag. Never put the code in a command's arguments, where ps shows it to every user of the machine, and never print it or write it to a file. Output that shows it reads [secret npm_config_otp].
 ```
 
 When a staged publish needs two codes, one for `npm stage publish` and one for `npm stage approve` after the registry's review, the agent posts one otp card for each.

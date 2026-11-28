@@ -258,7 +258,7 @@ export interface OtpField {
   publicKey: string;
 }
 
-const OTP_LITERALS = 'OneTimeCode takes four string literals: the field name, the key\'s label, the purpose and the public key. Place it with the otp widget: npm = widget otp {"name": "NPM_OTP", "key": "npm", "purpose": "npm stage publish your-attention@1.4.0"}';
+const OTP_LITERALS = 'OneTimeCode takes four string literals: the field name, the key\'s label, the purpose and the public key. Place it with the otp widget: npm = widget otp {"name": "npm_config_otp", "key": "npm", "purpose": "npm stage publish your-attention@1.4.0"}';
 
 /** The OneTimeCode calls in a body, in order. Each gives its arguments as string literals, so the inbox knows the key
  * and the purpose the person approves, and the public key it seals the code to. */
@@ -267,7 +267,7 @@ export function oneTimeCodes(body: string): OtpField[] {
   for (const call of literalCalls(body, { OneTimeCode: 4 })) {
     if (!call.args) throw new InboxError(400, OTP_LITERALS);
     const [name = '', key = '', purpose = '', publicKey = ''] = call.args;
-    if (!FIELD_NAME.test(name)) throw new InboxError(400, `one-time code ${JSON.stringify(name)}: the name must be a variable name, such as NPM_OTP, since each command gets the code in it`);
+    if (!FIELD_NAME.test(name)) throw new InboxError(400, `one-time code ${JSON.stringify(name)}: the name must be a variable name, such as npm_config_otp, since each command gets the code in it`);
     if (out.some((c) => c.name === name)) throw new InboxError(400, `the card names the one-time code ${name} twice: give each one its own name`);
     if (!key.trim()) throw new InboxError(400, `one-time code ${name} needs the label of an enrolled key, such as npm`);
     if (!purpose.trim()) throw new InboxError(400, `one-time code ${name} needs a purpose: one line that says what the code is for, such as "npm stage publish your-attention@1.4.0", which the person reads before approving`);
@@ -297,12 +297,12 @@ export function sealedFields(card: Pick<Card, 'kind' | 'secrets'>): string[] {
 /** The answer without its sealed fields, nor those of the answers before it, for every reader except the agent stream:
  * hooks and webhooks hold no key. A one-time code field says that the person approved and until when, without the
  * ticket, which only the posting session redeems. */
-export function withoutSealed(card: Pick<Card, 'kind' | 'secrets' | 'otp'>, answer: Answer): Answer {
+export function withoutSealed(card: Pick<Card, 'kind' | 'secrets'>, answer: Answer): Answer {
   const fields = sealedFields(card);
-  const codes = card.otp ?? [];
-  if (!fields.length && !codes.length) return answer;
+  // An approval is summarized by its shape, not by the card's field list, so a revision that drops the OneTimeCode
+  // call after the approval leaves no ticket for a hook to read.
   const strip = (values: Record<string, unknown>) => Object.fromEntries(Object.entries(values)
     .filter(([k]) => !fields.includes(k))
-    .map(([k, v]) => [k, codes.includes(k) && isOtpApproval(v) ? { approved: true, key: v.key, purpose: v.purpose, expiresAt: v.expiresAt, ...(v.issuedAt === undefined ? {} : { issuedAt: v.issuedAt }) } : v]));
+    .map(([k, v]) => [k, isOtpApproval(v) ? { approved: true, key: v.key, purpose: v.purpose, expiresAt: v.expiresAt, ...(v.issuedAt === undefined ? {} : { issuedAt: v.issuedAt }) } : v]));
   return { ...answer, values: strip(answer.values), previous: (answer.previous ?? []).map((p) => ({ ...p, values: strip(p.values ?? {}) })) };
 }
