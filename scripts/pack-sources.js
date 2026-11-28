@@ -59,9 +59,7 @@ for (const entry of fs.readdirSync(WEB, { recursive: true, withFileTypes: true }
 }
 // The build the package runs, which src/node/build.ts reads in place of a checkout's package.json and git. It reads
 // them here the same way: the version package.json declares, and the commit of this checkout, never of a project the
-// folder sits inside, or else the commit a release archive wrote into COMMIT. Without either, a workflow's GITHUB_SHA.
-const built = nodeBuild(ROOT);
-const version = built.version;
-const commit = built.commit ?? process.env.GITHUB_SHA;
+// folder sits inside, or else the commit a release archive wrote into COMMIT. Without either, the stamp has no commit.
+const { version, commit } = nodeBuild(ROOT);
 fs.writeFileSync(path.join(OUT, "build.json"), `${JSON.stringify({ version, ...(commit ? { commit } : {}) })}\n`);
 console.log(`compiled ${files} source file(s) and copied ${copied} page file(s) into dist/, built from ${version}${commit ? ` at ${commit}` : ""}`);

@@ -65,7 +65,7 @@ describe('the build an inbox reports', () => {
       execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'outer'], { cwd: outer });
       const pkgDir = path.join(outer, 'vendor', 'your-attention');
       fs.mkdirSync(pkgDir, { recursive: true });
-      fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ version: '1.2.3' }));
+      fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: 'your-attention', version: '1.2.3' }));
       fs.writeFileSync(path.join(pkgDir, 'COMMIT'), '$Format:%H$\n');
       assert.deepEqual(nodeBuild(pkgDir), { version: '1.2.3' }, 'the folder is not the top of the outer checkout, so its HEAD is not this build');
     });
@@ -80,6 +80,15 @@ describe('the build an inbox reports', () => {
       assert.equal(checkoutCommit(dir), id);
       fs.writeFileSync(path.join(dir, '.git', 'HEAD'), `${'d'.repeat(40)}\n`);
       assert.equal(checkoutCommit(dir), 'd'.repeat(40));
+    });
+  });
+
+  it('reports no build for a folder whose package.json names another project', () => {
+    inTempDir((dir) => {
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'someone-else', version: '4.5.6' }));
+      fs.mkdirSync(path.join(dir, '.git'));
+      fs.writeFileSync(path.join(dir, '.git', 'HEAD'), `${'e'.repeat(40)}\n`);
+      assert.deepEqual(nodeBuild(dir), { version: 'unknown' });
     });
   });
 

@@ -128,7 +128,7 @@ describe('the report the collector accepts', () => {
   it('accepts the fixed fields and nothing else', () => {
     assert.deepEqual(parseReport(good, T0), good);
     // A release reads its version from package.json, which may name a prerelease.
-    assert.deepEqual(parseReport({ ...good, version: '0.2.0-rc.1' }, T0), { ...good, version: '0.2.0-rc.1' });
+    for (const version of ['0.2.0-rc.1', '2.0.0-rc-1', '1.0.0+abc.1', '1.0.0-beta.2+exp.sha.5114f85']) assert.deepEqual(parseReport({ ...good, version }, T0), { ...good, version }, version);
     const bad: [string, unknown][] = [
       ['an extra field', { ...good, cwd: '/home/me' }],
       ['an extra count', { ...good, counts: { ...good.counts, titles: 1 } }],

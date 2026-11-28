@@ -66,7 +66,10 @@ let cached: Build | undefined;
 export function nodeBuild(root = ROOT): Build {
   if (cached && root === ROOT) return cached;
   const stamp = readJson(path.join(root, 'build.json'));
-  const pkg = stamp ?? readJson(path.join(root, 'package.json'));
+  // Only this package's own package.json: a root resolved somewhere else, such as /, must not name another project.
+  const own = readJson(path.join(root, 'package.json'));
+  const pkg = stamp ?? (own?.['name'] === 'your-attention' ? own : undefined);
+  if (!pkg) return UNKNOWN_BUILD;
   const version = typeof pkg?.['version'] === 'string' ? pkg['version'] : UNKNOWN_BUILD.version;
   const commit = stamp ? (typeof stamp['commit'] === 'string' ? stamp['commit'] : undefined) : (checkoutCommit(root) ?? archiveCommit(root));
   const build: Build = { version, ...(commit ? { commit } : {}) };
