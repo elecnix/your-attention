@@ -85,6 +85,17 @@ async function slowCards(target: string, held: string[]) {
   return { ...proxy, release: () => { released = true; for (const f of waiting.splice(0)) f(); } };
 }
 
+/** A proxy that keeps back each PUT /v1/settings until `releaseNewest`, which sends the newest one it keeps to the inbox.
+ * Writes in flight together then reach the inbox in the reverse of the order the client sent them. */
+async function heldWrites(target: string) {
+  const kept: (() => void)[] = [];
+  const proxy = await proxyTo(target, (req, _res, forward) => {
+    if (req.method === 'PUT' && req.url === '/v1/settings') kept.push(forward);
+    else forward();
+  });
+  return { ...proxy, kept: () => kept.length, releaseNewest: () => kept.pop()?.(), release: () => { for (const f of kept.splice(0)) f(); } };
+}
+
 /** A proxy that, after `hold`, asks the inbox for each GET /v1/state at once and keeps the answer back until
  * `releaseOne`. The client then receives a state the inbox built before the client's later writes, in a set order. */
 async function staleStates(target: string) {
@@ -355,6 +366,36 @@ describe('your-attention tui', () => {
       await proxy.close();
       h.server.inbox.setSettings({ groupBy: 'none' });
       for (const id of ['stale-a', 'stale-b']) await agent.close(id, 'retracted', 'test over');
+    }
+  });
+
+  it('sends Group by keys to the inbox one at a time, so the inbox keeps the last key', async () => {
+    await post({ id: 'serial-a', agent: 's-serial', title: 'Pressed three times', priority: 'now', tags: { topic: 'search' } });
+    h.server.inbox.setSettings({ groupBy: 'none', pins: [] });
+    const proxy = await heldWrites(h.server.url);
+    try {
+      const t = tui({ url: proxy.url });
+      await t.waitFor('Pressed three times');
+      // Group by nothing, priority, agent, then the topic tag.
+      for (let i = 0; i < 3; i++) t.send('g');
+      await t.waitFor('Group by topic.');
+      // A client that sends the three writes at once has all three kept here. They then reach the inbox newest first.
+      await until(() => (proxy.kept() === 3 ? true : undefined), 1000).catch(() => {});
+      await until(() => {
+        proxy.releaseNewest();
+        return h.server.inbox.settings().groupBy === 'tag:topic' && proxy.kept() === 0 ? true : undefined;
+      });
+      // The client reads the state after its last write, which must still say topic.
+      await new Promise((r) => setTimeout(r, 300));
+      proxy.release();
+      assert.equal(h.server.inbox.settings().groupBy, 'tag:topic');
+      await t.waitFor('Group by topic  (g)');
+      await t.stop();
+    } finally {
+      proxy.release();
+      await proxy.close();
+      h.server.inbox.setSettings({ groupBy: 'none' });
+      await agent.close('serial-a', 'retracted', 'test over');
     }
   });
 
