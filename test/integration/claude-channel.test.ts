@@ -97,7 +97,7 @@ describe('the Claude Code channel', () => {
 
   it('pushes the notice of a card reassigned to this session, and acknowledges it once the transcript shows it', async () => {
     // A child session on this machine posted the card with the same agent token, then retired.
-    const posted = await fetch(`${h.server.url}/v1/cards`, { method: 'POST', headers: { authorization: `Bearer ${h.agentToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'cc-moved', agent: 'claude:retired-child', title: 'Which schema?' }) });
+    const posted = await h.postAsAgent({ id: 'cc-moved', agent: 'claude:retired-child', title: 'Which schema?' });
     assert.equal(posted.status, 201);
     const moved = await h.owner('POST', '/v1/cards/cc-moved/reassign', { to: `claude:${SESSION}`, why: 'fix-login retired' });
     assert.equal(moved.status, 200);
@@ -105,7 +105,7 @@ describe('the Claude Code channel', () => {
     assert.match(note.content, /was reassigned to you because fix-login retired/);
     // Only the session's acknowledgment stops the inbox sending the notice to each new connection, and the channel
     // acknowledges once the model has the notice, which the transcript shows, not when the push returns.
-    const entry = async () => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'cc-moved')?.reassignedFrom?.at(-1);
+    const entry = async () => (await h.card('cc-moved'))?.reassignedFrom?.at(-1);
     assert.equal((await entry())?.noticeReadAt, undefined);
     const transcript = path.join(h.home, '.claude', 'projects', '-repo', `${SESSION}.jsonl`);
     fs.appendFileSync(transcript, `${JSON.stringify({ type: 'user', receipt: note.meta.receipt })}\n`);

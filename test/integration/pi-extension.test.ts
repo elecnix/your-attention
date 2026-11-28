@@ -111,13 +111,13 @@ describe('the pi extension', () => {
   });
 
   it('tells the session of a card reassigned to it, and acknowledges the notice only once the context holds it', async () => {
-    const agent = ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'pi-1')!.agent;
-    const posted = await fetch(`${h.server.url}/v1/cards`, { method: 'POST', headers: { authorization: `Bearer ${h.agentToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pi-moved', agent: 'pi:retired-child', title: 'Which schema?' }) });
+    const agent = (await h.card('pi-1'))!.agent;
+    const posted = await h.postAsAgent({ id: 'pi-moved', agent: 'pi:retired-child', title: 'Which schema?' });
     assert.equal(posted.status, 201);
     assert.equal((await h.owner('POST', '/v1/cards/pi-moved/reassign', { to: agent, why: 'fix-login retired' })).status, 200);
     const msg = await until(() => sent.find((m) => m.text.includes('pi-moved')));
     assert.match(msg.text, /was reassigned to you because fix-login retired/);
-    const entry = async () => ((await h.stored()) as { cards: Card[] }).cards.find((c) => c.id === 'pi-moved')?.reassignedFrom?.at(-1);
+    const entry = async () => (await h.card('pi-moved'))?.reassignedFrom?.at(-1);
     // A note queued for a later turn may never run, so the acknowledgment waits for the model's context.
     await new Promise((r) => setTimeout(r, 200));
     assert.equal((await entry())?.noticeReadAt, undefined);
