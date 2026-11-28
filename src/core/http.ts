@@ -296,7 +296,7 @@ export function createHandler(inbox: Inbox, options: HandlerOptions = {}): (req:
     const url = new URL(req.url);
     if (req.method === 'GET' && url.pathname.startsWith('/v1/files/')) return ticketFile(url.pathname);
     const parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-    if (parts[0] !== `v${PROTOCOL_VERSION}`) return json({ error: 'not found' }, 404);
+    if (parts[0] !== 'v1') return json({ error: 'not found' }, 404);
     const [, a, b, c] = parts;
     const method = req.method;
 

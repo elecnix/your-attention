@@ -59,6 +59,21 @@ describe('the build an inbox reports', () => {
     assert.equal('commit' in (await info({ version: pkg.version })).body, false);
   });
 
+  it('stamps a pack inside another project with no commit of that project', () => {
+    const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'ya-outer-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: outer });
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'outer'], { cwd: outer });
+      const pkgDir = path.join(outer, 'vendor', 'your-attention');
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ version: '1.2.3' }));
+      fs.writeFileSync(path.join(pkgDir, 'COMMIT'), '$Format:%H$\n');
+      assert.deepEqual(nodeBuild(pkgDir), { version: '1.2.3' }, 'the folder is not the top of the outer checkout, so its HEAD is not this build');
+    } finally {
+      fs.rmSync(outer, { recursive: true, force: true });
+    }
+  });
+
   it('names the protocol of the routes it serves, and serves them under that number', async () => {
     const { status, body } = await info(nodeBuild(), `/v${PROTOCOL_VERSION}`);
     assert.equal(status, 200);

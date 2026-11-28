@@ -199,7 +199,8 @@ export function parseReport(body: unknown, now: number): TelemetryReport | strin
   if (r['source'] !== 'laptop' && r['source'] !== 'hosted') return 'source must be laptop or hosted';
   if (typeof r['installId'] !== 'string' || !UUID.test(r['installId'])) return 'installId must be a lowercase UUID';
   if (r['invite'] !== '' && !(typeof r['invite'] === 'string' && /^[0-9a-f]{16}$/.test(r['invite']))) return 'invite must be empty or 16 hex digits';
-  if (typeof r['version'] !== 'string' || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(r['version'])) return 'version must be MAJOR.MINOR.PATCH';
+  // A release reads its version from package.json, which may name a prerelease such as 0.2.0-rc.1.
+  if (typeof r['version'] !== 'string' || !/^\d{1,4}\.\d{1,4}\.\d{1,4}(-[0-9A-Za-z.]{1,32})?$/.test(r['version'])) return 'version must be MAJOR.MINOR.PATCH, with an optional prerelease such as -rc.1';
   const day = r['day'];
   if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return 'day must be YYYY-MM-DD';
   const today = utcDay(now);
