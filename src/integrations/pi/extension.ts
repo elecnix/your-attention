@@ -80,7 +80,8 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
   const here = (): NewCard['origin'] => origin && { ...origin, name: sessionName() };
   let stop: AbortController | undefined;
   // Receipt id -> card id, for answers sent but not yet in the model context.
-  const pending = new Map<string, string>();
+  // Receipt id -> the acknowledgment to send once the model's context holds that receipt: an answer's, or a notice's.
+  const pending = new Map<string, () => Promise<unknown>>();
   const secrets = new SecretRequests();
   /** Whether this session's bash tool adds the grants to each command, which it does from the first grant on. */
   let secretBashOn: Promise<boolean> | undefined;
@@ -130,8 +131,11 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
         }
         if (ev.type === 'card' || ev.type === 'reassigned') {
           // A card the person sent this session from the inbox page, or one the inbox gave it because its agent retired:
-          // a message to act on, not a question to answer.
-          const note = `[your-attention] ${ev.type === 'card' ? describeSentCard(ev) : describeReassigned(ev)}`;
+          // a message to act on, not a question to answer. The inbox sends a notice again on each connection until the
+          // session acknowledges it, so a notice carries a receipt, and the acknowledgment waits until the model's
+          // context holds it, as an answer's does: a follow-up queued in a turn may never run.
+          if (ev.type === 'reassigned') pending.set(ev.id, () => client.ackNotice(ev).catch((e: Error) => log('notice not acknowledged:', e.message)));
+          const note = ev.type === 'card' ? `[your-attention] ${describeSentCard(ev)}` : `[your-attention notice ${ev.id}] ${describeReassigned(ev)}`;
           if (ctx.isIdle()) pi.sendUserMessage(note);
           else pi.sendUserMessage(note, { deliverAs: 'followUp' });
           return;
@@ -147,7 +151,7 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
         if (ev.type !== 'answer') return;
         // An answer to a prompt card is typed into the pane, and the model hears nothing: the prompt already asked it.
         if (prompts.owns(ev.card.id)) { await prompts.answered(ev.card, ev.answer); return; }
-        pending.set(ev.id, ev.card.id);
+        pending.set(ev.id, () => client.ack(ev.card.id));
         const received = await secrets.receiveDetail(ev.card, ev.answer);
         let sealed = received.text;
         if (received.granted.length && !(await deliverGrants(ctx.sessionManager.getCwd()))) {
@@ -216,10 +220,10 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
   pi.on('context', (event) => {
     if (!pending.size || !inbox) return;
     const seen = JSON.stringify(event.messages);
-    for (const [receipt, card] of pending) {
+    for (const [receipt, ack] of pending) {
       if (!seen.includes(receipt)) continue;
       pending.delete(receipt);
-      inbox.ack(card).catch(() => {});
+      ack().catch(() => {});
     }
   });
 

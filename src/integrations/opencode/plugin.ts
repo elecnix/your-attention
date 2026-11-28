@@ -118,7 +118,13 @@ export function createPlugin(z: unknown) {
         if (ev.type === 'returned') { await send(session, `[your-attention] ${describeReturned(ev)}`); return; }
         if (ev.type === 'advice') { await send(session, `[your-attention] ${describeAdvice(ev)}`); return; }
         if (ev.type === 'card') { await send(session, `[your-attention] ${describeSentCard(ev)}`); return; }
-        if (ev.type === 'reassigned') { await send(session, `[your-attention] ${describeReassigned(ev)}`); return; }
+        if (ev.type === 'reassigned') {
+          await send(session, `[your-attention] ${describeReassigned(ev)}`);
+          // The inbox sends a notice again on each connection until the session acknowledges it. A failed
+          // acknowledgment only means the notice comes again.
+          await box.ackNotice(ev).catch(() => {});
+          return;
+        }
         if (ev.type === 'revoke') {
           // A revoke for a grant this session doesn't hold, such as one the inbox kept across a restart, changes nothing.
           if (secrets.revoke(ev.case)) await send(session, `[your-attention] The person revoked ${ev.field} on card ${ev.card.id} (case ${ev.case}). Commands no longer get $${ev.field}.`);

@@ -95,6 +95,24 @@ describe('the Claude Code channel', () => {
     assert.equal(s.states['cc-2'], 'closed');
   });
 
+  it('pushes the notice of a card reassigned to this session, and acknowledges it once the transcript shows it', async () => {
+    // A child session on this machine posted the card with the same agent token, then retired.
+    const posted = await h.postAsAgent({ id: 'cc-moved', agent: 'claude:retired-child', title: 'Which schema?' });
+    assert.equal(posted.status, 201);
+    const moved = await h.owner('POST', '/v1/cards/cc-moved/reassign', { to: `claude:${SESSION}`, why: 'fix-login retired' });
+    assert.equal(moved.status, 200);
+    const note = await until(() => notes.find((n) => n.meta.card_id === 'cc-moved'));
+    assert.match(note.content, /was reassigned to you because fix-login retired/);
+    // Only the session's acknowledgment stops the inbox sending the notice to each new connection, and the channel
+    // acknowledges once the model has the notice, which the transcript shows, not when the push returns.
+    const entry = async () => (await h.card('cc-moved'))?.reassignedFrom?.at(-1);
+    assert.equal((await entry())?.noticeReadAt, undefined);
+    const transcript = path.join(h.home, '.claude', 'projects', '-repo', `${SESSION}.jsonl`);
+    fs.appendFileSync(transcript, `${JSON.stringify({ type: 'user', receipt: note.meta.receipt })}\n`);
+    await until(async () => (await entry())?.noticeReadAt);
+    await mcp.callTool({ name: 'card_close', arguments: { card_id: 'cc-moved', kind: 'retracted', outcome: 'test over' } });
+  });
+
   it('gives each Bash command the secret through the hooks, once per token, masks it in the output, and writes no file', async () => {
     const res = await mcp.callTool({ name: 'card_post', arguments: { id: 'cc-key', title: 'Need the demo key', text: 'To set the CI secret.', body: 'root = Card([key])\nkey = widget secret {"name": "DEMO_API_KEY"}' } });
     assert.match(JSON.stringify(res.content), /Posted card cc-key\..*each command you run gets each secret as a variable of its name/);

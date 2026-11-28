@@ -116,9 +116,16 @@ function closeOwnDialog(cardPane: string | undefined): Promise<boolean> {
   });
 }
 
-/** An answer the session has not shown in its transcript, and what the channel has left to try. */
+/** An answer or a notice the session has not shown in its transcript, and what the channel has left to try. */
 interface Push {
   card: string;
+  /** Tells the inbox the session has it: the answer's acknowledgment, or the notice's. */
+  ack: () => Promise<void>;
+  /** A notice that the card changed hands. A missed one stays unacknowledged, and the inbox sends it again on the next
+   * connection, so it never marks the card as not seen. */
+  notice?: boolean;
+  /** Lets the inbox's next copy of a missed notice through the client, which drops a copy it already handed on. */
+  release?: () => void;
   body: string;
   meta: { card_id: string; receipt: string };
   /** When this push went out, or when the transcript last grew after it. The retry waits for this to age. */
@@ -129,7 +136,7 @@ interface Push {
   pushes: number;
 }
 
-// Receipt id -> the answer pushed but not yet seen in the transcript.
+// Receipt id -> the answer or notice pushed but not yet seen in the transcript.
 const pending = new Map<string, Push>();
 /** Cards whose page says the agent did not see the answer, with the label this channel put there. */
 const notSeen = new Map<string, string>();
@@ -168,7 +175,7 @@ function scanTranscript(): void {
         // The session wrote something and this receipt was not in it: it is at work, so the retry waits.
         if (!added.includes(receipt)) { push.at = Date.now(); continue; }
         pending.delete(receipt);
-        need().ack(push.card).then(() => { log('read', push.card); void clearNotSeen(push.card); }, (e: Error) => log('ack failed:', e.message));
+        void push.ack();
       }
     }
   } catch (e) {
@@ -199,12 +206,17 @@ async function fallback(receipt: string, push: Push): Promise<void> {
     try {
       await typeIntoOwnPane(pane, push.body);
       log('typed the answer into pane', pane, 'for', push.card);
-      void need().ack(push.card).then(() => { log('read', push.card); void clearNotSeen(push.card); }, (e: Error) => log('ack failed:', e.message));
+      void push.ack();
       return;
     } catch (e) {
       log('no herdr send for', push.card, '-', (e as Error).message);
+      if (push.notice) return push.release?.();
       return markNotSeen(push.card, (e as Error).message);
     }
+  }
+  if (push.notice) {
+    push.release?.();
+    return log('notice not seen, the inbox sends it again on the next connection:', push.card);
   }
   await markNotSeen(push.card, channelOff ? 'its channel is off' : 'channel dropped it twice');
 }
@@ -311,7 +323,23 @@ function listen(client: Client): void {
       return;
     }
     if (ev.type === 'reassigned') {
-      await notify(describeReassigned(ev), { card_id: ev.card.id });
+      // The inbox sends the notice again on each connection until this session acknowledges it, so the acknowledgment
+      // waits until Claude Code has the notification. The log lines show where a notice stopped.
+      // So the notice takes the answer's path: a receipt, the transcript check, one more push, then the pane.
+      log('reassigned', ev.card.id, 'from', ev.from);
+      const receipt = ev.id;
+      const ack = (): Promise<void> => client.ackNotice(ev).then(() => log('notice read', ev.card.id), (e: Error) => log('notice not acknowledged:', e.message));
+      const push: Push = { card: ev.card.id, ack, notice: true, release: () => client.releaseNotice(ev), body: describeReassigned(ev), meta: { card_id: ev.card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
+      pending.set(receipt, push);
+      try {
+        await notify(push.body, push.meta);
+        push.at = Date.now();
+        log('pushed notice', ev.card.id, receipt);
+      } catch (e) {
+        log('push failed:', (e as Error).message);
+      } finally {
+        push.pushing = false;
+      }
       return;
     }
     if (ev.type === 'revoke') {
@@ -336,8 +364,9 @@ function listen(client: Client): void {
     if (received.granted.length && !(await openSecretSocket())) sealed += `\nThis session could not open the socket its Bash commands read secrets from (${socketError}), so commands do not get these variables. Tell the person.`;
     const body = `${head}${urgency}\n${describeAnswer(card, answer, await saveAnswerImages(client, agent, answer))}${sealed ? `\n${sealed}` : ''}${describeOpenCards(ev.openCards)}`;
     // A newer answer to the same card replaces the one the channel is still trying to deliver.
-    for (const [older, push] of pending) if (push.card === card.id) pending.delete(older);
-    const push: Push = { card: card.id, body, meta: { card_id: card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
+    for (const [older, push] of pending) if (push.card === card.id && !push.notice) pending.delete(older);
+    const ack = (): Promise<void> => need().ack(card.id).then(() => { log('read', card.id); void clearNotSeen(card.id); }, (e: Error) => log('ack failed:', e.message));
+    const push: Push = { card: card.id, ack, body, meta: { card_id: card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
     pending.set(receipt, push);
     try {
       await notify(body, push.meta);

@@ -162,7 +162,7 @@ describe('the channel while a session cannot receive an answer', () => {
       await mcp.callTool({ name: 'card_post', arguments: { id: 'retry-2', title: 'Ship it?', options: ['Yes'] } });
       await h.owner('POST', '/v1/cards/retry-2/answer', { comment: 'not while you are typing' });
       const card = await until(async () => {
-        const c = ((await h.stored()) as { cards: Card[] }).cards.find((x) => x.id === 'retry-2');
+        const c = await h.card('retry-2');
         return c?.status?.startsWith('Not seen by the agent') ? c : undefined;
       });
       assert.equal(card.status, 'Not seen by the agent: the pane holds a draft');

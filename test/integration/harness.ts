@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Client } from '../../src/client.ts';
-import type { AgentEvent } from '../../src/core/types.ts';
+import type { AgentEvent, Card } from '../../src/core/types.ts';
 import { serve, type RunningServer, type ServeOptions } from '../../src/node/server.ts';
 
 export interface Harness {
@@ -16,6 +16,10 @@ export interface Harness {
   owner(method: string, route: string, body?: unknown): Promise<Response>;
   /** The whole cards and answers, as the inbox stores them. GET /v1/state sends summaries, which a test of a card's content can't read. */
   stored(): Promise<ReturnType<RunningServer['inbox']['state']>>;
+  /** One card as the inbox stores it, or undefined when the inbox has none by that id. */
+  card(id: string): Promise<Card | undefined>;
+  /** Post a card with this machine's agent token, as another session of the machine would. */
+  postAsAgent(card: Record<string, unknown>): Promise<Response>;
   /** Receive one agent's events into a list. `stop` ends the stream, and so does stopping the inbox, even after a failed test:
    * a client stream retries a gone inbox forever, so one left open keeps the test process alive. */
   listen(client: Client, agent: string): { events: AgentEvent[]; stop(): void; ended: Promise<void> };
@@ -36,6 +40,8 @@ export async function start(extra: Partial<ServeOptions> = {}): Promise<Harness>
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
     stored: async () => h.server.inbox.state(),
+    card: async (id) => (h.server.inbox.state() as { cards: Card[] }).cards.find((c) => c.id === id),
+    postAsAgent: (card) => fetch(`${h.server.url}/v1/cards`, { method: 'POST', headers: { authorization: `Bearer ${h.agentToken}`, 'content-type': 'application/json' }, body: JSON.stringify(card) }),
     listen(client, agent) {
       const events: AgentEvent[] = [];
       const ctl = new AbortController();
