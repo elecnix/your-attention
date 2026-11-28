@@ -284,11 +284,27 @@ The page keeps what the person types on a card in this device's store: the form 
 
 ## A card the person sends to an agent
 
-The page shows a panel of every agent known to the inbox, with one search field that picks the agent and one message field for the card. The row of actions at the foot of the panel puts **Send** first, as the default of the dialog, with **Close** after it and quieter. `POST /v1/send {agent, text}` takes that message, for the owner only, and answers 201 with `{id, agent, card, sentAt, deliveredAt?}`. The first line of the message becomes `title`, at most 300 characters, and the lines under it become `text`, so a one-line message reads once. Its `kind` is `ask`. The queue doesn't show it, since it waits for an agent rather than for the person.
+The page shows a panel of every agent known to the inbox, with one search field that picks the agent and one message field for the card. The row of actions at the foot of the panel puts **Send** first, as the default of the dialog, with **Close** after it and quieter. `POST /v1/send {agent, text}` takes that message, for the owner only, and answers 201 with `{id, agent, card, sentAt, deliveredAt?, readAt}`. The first line of the message becomes `title`, at most 300 characters, and the lines under it become `text`, so a one-line message reads once. Its `kind` is `ask`. The queue doesn't show it, since it waits for an agent rather than for the person.
 
 `GET /v1/state` feeds the panel as well. Each card summary keeps `origin.cwd` beside `origin.name` and `origin.harness`, so the page reads a working directory in the state it already fetches. The newest card that reported one decides it, and when no card reported a directory, the panel leaves that line out.
 
-A new card goes to each open connection that reports that agent id, as a guidance event goes to its agents. The inbox sets `deliveredAt` then. While no connection reports the agent, the card waits, and the next session with that id receives it as it connects ([DP19](PRINCIPLES.md#dp19-an-answer-to-an-offline-agent-is-kept-and-agents-can-find-it)). The state of an agent never prevents addressing it ([DP18](PRINCIPLES.md#dp18-each-card-shows-if-its-agent-is-listening-busy-or-not-connected)). Each card goes once. The sweep deletes a sent card 30 days after it went, so a session that never returns leaves the inbox as it was, and `POST /v1/reset` removes those records too.
+A new card goes to each open connection that reports that agent id, as a guidance event goes to its agents. When the first send happens, the inbox sets `deliveredAt`. Until a connection reports the agent, the card waits.
+
+It reaches the next session with that id as that session connects ([DP19](PRINCIPLES.md#dp19-an-answer-to-an-offline-agent-is-kept-and-agents-can-find-it)). An agent's state never stops the inbox from addressing it ([DP18](PRINCIPLES.md#dp18-each-card-shows-if-its-agent-is-listening-busy-or-not-connected)).
+
+Each send only hands the event to a socket. When the platform closes a socket without reporting it, that socket takes the event and loses it. So `deliveredAt` shows only that the inbox sent the card, never that a session holds it. Until the agent acknowledges the card, the inbox sends it again to each stream that opens. Any stream that opens hears a waiting card, but streams already open don't hear it again.
+
+An integration acknowledges the card once its session has it, with `POST /v1/send/<id>/ack` and the body `{"agent": <agent id>}`. The inbox records the time as `readAt`, which stays `null` until then, and a second acknowledgment keeps the first time.
+
+Because any connection that reports the agent id receives the card, the card has no token. Instead, the acknowledgment identifies the agent. Only an agent token may acknowledge: an owner token gets 403, and an unknown id or another agent's id gets 404.
+
+Claude Code's channel acknowledges once the transcript shows the receipt, as it does for an answer. If the receipt never appears, the channel pushes the card once more and then types it into its own pane.
+
+In pi and OpenCode, the note starts with a receipt, `card <id>`. Pi acknowledges once the receipt appears in the model's context. OpenCode's `promptAsync` only queues the note, and a session interrupted before its queue runs never shows it, so the plugin waits until the `chat.message` hook shows the receipt.
+
+A client drops a copy of a card while it still handles the first. Failed acknowledgments let the next copy through, and so does a card the channel gave up on.
+
+A record written before the inbox asked for acknowledgments has no `readAt`. It counts as read once it has `deliveredAt`, so an old message never goes again. The sweep deletes a sent card 30 days after it went, so a session that never returns leaves the inbox as it was. `POST /v1/reset` removes those records too.
 
 An agent stream receives the card as an event of its own:
 
@@ -1175,7 +1191,7 @@ A channel that starts while its inbox is stopped completes the MCP handshake any
 
 The channel keeps watching the transcript for the receipt. When the receipt has not appeared within 60 seconds, and the transcript has not changed in that time, the channel pushes the answer once more. When the second push misses too, and the session runs in a herdr pane, the channel types the answer into that pane with `herdr agent prompt`. It follows the rule of an approval: it sends only to the session's own pane. It never types over text the person put in that pane's input box, and it puts a space before a text that opens with a dash, which herdr would read as an option. A successful send acknowledges the answer, because the session now has it as its own message. Outside herdr, in a pane with a draft, or in a pane with no input box, the answer stays `delivered`, and the card's status reads **Not seen by the agent** with the reason.
 
-The OpenCode plugin follows one stream per session, as agent `opencode:<session id>`: each session that calls a card tool, and each session from before a restart that still has an open card. It sends each answer into its session with OpenCode's `promptAsync`. OpenCode starts a new turn when the session is idle, and queues the message behind a turn that runs. The plugin acknowledges the answer when OpenCode's `chat.message` hook shows the receipt in the conversation.
+The OpenCode plugin follows one stream per session, as agent `opencode:<session id>`: each session that calls a card tool, and each session from before a restart that still has an open card. It sends each answer into its session with OpenCode's `promptAsync`. OpenCode starts a new turn when the session is idle, and queues the message behind a turn that runs. The plugin acknowledges the answer when OpenCode's `chat.message` hook shows the receipt in the conversation, and does the same for a card the person sent and for the notice of a card reassigned to the session.
 
 The pi extension reads the answer to a blocked prompt on the session's own stream, before the generic answer path, and types it into the session's pane. The model doesn't receive a message for it, since the prompt already asked the question. The herdr sidecar does the same for the cards it posts, on a stream of its own.
 

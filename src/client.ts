@@ -10,7 +10,7 @@ import { bodyProblemsMessage, checkDiagrams, findDiagrams } from './core/diagram
 import { InboxError, type SearchFilters, type SearchPage, type TriageFeedbackRecord } from './core/inbox.ts';
 import { isSealed, secretAccesses } from './core/sealed.ts';
 import type { AccessGrant, Candidate, SecretQuery, SourceInfo } from './core/secret-sources.ts';
-import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, OpenCards, Origin, PublicSubscription, PullRequest, Sealed, Template } from './core/types.ts';
+import type { AgentEvent, Answer, Card, CardGuidance, CardState, CloseKind, DefaultTags, DefaultTagsWrite, FeedbackFinding, FeedbackVerdict, GuidanceEdit, NewCard, OpenCards, Origin, PublicSubscription, PullRequest, Sealed, SentCard, Template } from './core/types.ts';
 import { homeDir } from './node/home.ts';
 import { questionLines } from '../web/answers.js';
 import { answerFields, cardAt, cardFields, describeFields, type FieldId } from '../web/field-ids.js';
@@ -180,11 +180,12 @@ export class Client {
     throw new Error(`${method} ${route}: no link answered (${(lastError as Error)?.message ?? 'none tried'})`);
   }
 
-  /** True the first time an answer or a notice is seen, false for a copy from another link or a replay. The inbox sends a
-   * notice of a change of hands to each connection until the session acknowledges it, so a reconnect may bring it twice. */
+  /** True the first time an answer, a notice or a sent card is seen, false for a copy from another link or a replay. The
+   * inbox sends a notice of a change of hands, and a card the person sent, to each connection until the session
+   * acknowledges it, so a reconnect may bring it twice. */
   private fresh(ev: AgentEvent): boolean {
-    if (ev.type !== 'answer' && ev.type !== 'reassigned') return true;
-    const key = ev.type === 'answer' ? `${ev.card.id}:${ev.answer.savedAt}:${ev.answer.forcedAt ?? 0}` : noticeKey(ev);
+    if (ev.type !== 'answer' && ev.type !== 'reassigned' && ev.type !== 'card') return true;
+    const key = ev.type === 'answer' ? `${ev.card.id}:${ev.answer.savedAt}:${ev.answer.forcedAt ?? 0}` : ev.type === 'card' ? sentKey(ev) : noticeKey(ev);
     if (this.seen.has(key)) return false;
     this.seen.add(key);
     return true;
@@ -334,14 +335,27 @@ export class Client {
     const at = ev.at;
     // An acknowledgment that fails leaves the notice unread in the inbox, which sends it again on the next connection,
     // so this process lets that copy through.
-    return this.call<Card>('POST', `/v1/cards/${encodeURIComponent(ev.card.id)}/ack`, { notice: 'reassigned', at }).catch((e: unknown) => {
-      this.releaseNotice(ev);
-      throw e;
-    });
+    return this.ackOrRelease<Card>(`/v1/cards/${encodeURIComponent(ev.card.id)}/ack`, { notice: 'reassigned', at }, () => this.releaseNotice(ev));
   }
   /** Forget a notice this process handed on but could not get acknowledged, so the copy the inbox sends on the next
    * connection reaches the handler instead of being dropped as one already seen. */
   releaseNotice(ev: Extract<AgentEvent, { type: 'reassigned' }>): void { this.seen.delete(noticeKey(ev)); }
+  /** Tell the inbox the session has the card the person sent it, so the inbox stops sending it. Call it only once the
+   * card reached the model: until then the inbox sends it again on each connection. */
+  ackSent(ev: Extract<AgentEvent, { type: 'card' }>): Promise<SentCard> {
+    // An acknowledgment that fails leaves the card unread in the inbox, which sends it again on the next connection, so
+    // this process lets that copy through.
+    return this.ackOrRelease<SentCard>(`/v1/send/${encodeURIComponent(ev.id)}/ack`, { agent: ev.card.agent }, () => this.releaseSent(ev));
+  }
+  /** Send an acknowledgment, and on a failure let the inbox's next copy of the event through before passing the error on. */
+  private ackOrRelease<T>(route: string, body: unknown, release: () => void): Promise<T> {
+    return this.call<T>('POST', route, body).catch((e: unknown) => {
+      release();
+      throw e;
+    });
+  }
+  /** Forget a sent card this process handed on but could not get acknowledged, so the inbox's next copy reaches the handler. */
+  releaseSent(ev: Extract<AgentEvent, { type: 'card' }>): void { this.seen.delete(sentKey(ev)); }
   claim(id: string, agent: string): Promise<Card> { return this.call('POST', `/v1/cards/${encodeURIComponent(id)}/claim`, { agent }); }
   /** Cards that match the words and the filters. An empty query, or `*`, lists by the filters alone, and a
    * `nextCursor` reads the page after this one. */
@@ -579,6 +593,11 @@ export class Client {
       for (const ev of ((await res.json()) as { events: AgentEvent[] }).events) await deliver(ev);
     }
   }
+}
+
+/** The key of a card the person sent: its id, which the inbox gives each sent card once. */
+function sentKey(ev: Extract<AgentEvent, { type: 'card' }>): string {
+  return `sent:${ev.id}`;
 }
 
 /** The key that tells one change of hands from another: the card and the time of its last move. */

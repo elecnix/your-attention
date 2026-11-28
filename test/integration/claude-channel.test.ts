@@ -95,6 +95,21 @@ describe('the Claude Code channel', () => {
     assert.equal(s.states['cc-2'], 'closed');
   });
 
+  it('pushes a card the person sent this session, and acknowledges it once the transcript shows it', async () => {
+    const res = await h.owner('POST', '/v1/send', { agent: `claude:${SESSION}`, text: 'Please rebase on main.' });
+    assert.equal(res.status, 201);
+    const { id } = (await res.json()) as { id: string };
+    const note = await until(() => notes.find((n) => n.meta.card_id === id));
+    assert.match(note.content, /The person sent this session a card/);
+    // Only the session's acknowledgment stops the inbox sending the card to each new connection, and the channel
+    // acknowledges once the model has the card, which the transcript shows, not when the push returns.
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(h.server.inbox.sent(id)?.readAt, null);
+    const transcript = path.join(h.home, '.claude', 'projects', '-repo', `${SESSION}.jsonl`);
+    fs.appendFileSync(transcript, `${JSON.stringify({ type: 'user', receipt: note.meta.receipt })}\n`);
+    await until(() => h.server.inbox.sent(id)?.readAt ?? undefined);
+  });
+
   it('pushes the notice of a card reassigned to this session, and acknowledges it once the transcript shows it', async () => {
     // A child session on this machine posted the card with the same agent token, then retired.
     const posted = await h.postAsAgent({ id: 'cc-moved', agent: 'claude:retired-child', title: 'Which schema?' });

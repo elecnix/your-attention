@@ -61,12 +61,64 @@ describe('a card the person sends to an agent', () => {
     assert.equal(received[0]?.sentAt, NOW, 'the card keeps when the person sent it');
   });
 
-  it('sends the card once, however often the agent reconnects', () => {
-    const { inbox, events, connect } = setup();
-    inbox.sendCard(owner, { agent: 'claude:s1', text: 'One card, please.' });
+  it('sends the card again to each new connection until the agent acknowledges it', () => {
+    const { inbox, events, connect, clock } = setup();
+    const sent = inbox.sendCard(owner, { agent: 'claude:s1', text: 'One card, please.' });
     connect('claude:s1');
+    // A send only hands the event to a socket, which the platform may have closed without saying so. The second
+    // connection comes later, so an inbox that moved deliveredAt to the resend would fail below.
+    clock.advance(1000);
+    connect('claude:s1');
+    assert.equal(cardEvents(events).length, 2, 'no session acknowledged the card, so the next connection gets it again');
+    assert.equal(inbox.sent(sent.id)?.deliveredAt, NOW, 'deliveredAt keeps the first send');
+    assert.equal(inbox.sent(sent.id)?.readAt, null, 'no session acknowledged it');
+  });
+
+  it('sends nothing more once the agent acknowledged the card', () => {
+    const { inbox, events, connect, clock } = setup();
+    const sent = inbox.sendCard(owner, { agent: 'claude:s1', text: 'One card, please.' });
+    connect('claude:s1');
+    clock.advance(1000);
+    inbox.ackSent(agent, sent.id, { agent: 'claude:s1' });
+    assert.equal(inbox.sent(sent.id)?.readAt, NOW + 1000);
     connect('claude:s1');
     assert.equal(cardEvents(events).length, 1);
+    // A second acknowledgment, such as a retry, keeps the first time.
+    clock.advance(1000);
+    inbox.ackSent(agent, sent.id, { agent: 'claude:s1' });
+    assert.equal(inbox.sent(sent.id)?.readAt, NOW + 1000);
+  });
+
+  it('gives a waiting card to the connection that opens, and not again to the ones already open', () => {
+    const { inbox } = setup();
+    const first: AgentEvent[] = [];
+    const second: AgentEvent[] = [];
+    inbox.connect(agent, 'claude:s1', (ev) => first.push(ev));
+    inbox.sendCard(owner, { agent: 'claude:s1', text: 'One card, please.' });
+    inbox.connect(agent, 'claude:s1', (ev) => second.push(ev));
+    assert.equal(cardEvents(first).length, 1);
+    assert.equal(cardEvents(second).length, 1);
+  });
+
+  it('refuses an acknowledgment for another agent, an unknown card, or from a page, and keeps sending the card', () => {
+    const { inbox, events, connect } = setup();
+    const sent = inbox.sendCard(owner, { agent: 'claude:s1', text: 'One card, please.' });
+    assert.throws(() => inbox.ackSent(agent, sent.id, { agent: 'claude:s2' }), (e: InboxError) => e.status === 404);
+    assert.throws(() => inbox.ackSent(agent, 'nope', { agent: 'claude:s1' }), (e: InboxError) => e.status === 404);
+    assert.throws(() => inbox.ackSent(owner, sent.id, { agent: 'claude:s1' }), (e: InboxError) => e.status === 403);
+    connect('claude:s1');
+    assert.equal(cardEvents(events).length, 1);
+    assert.equal(inbox.sent(sent.id)?.readAt, null);
+  });
+
+  it('counts a card that a stream took before acknowledgments existed as read, so an old message never goes again', () => {
+    const { inbox, events, connect } = setup();
+    // A record written before the inbox asked for acknowledgments has deliveredAt and no readAt at all.
+    const store = (inbox as unknown as { store: { put: (c: string, id: string, v: unknown) => void } }).store;
+    const card = inbox.sendCard(owner, { agent: 'claude:s1', text: 'An old message.' });
+    store.put('sent', card.id, { id: card.id, agent: 'claude:s1', card: card.card, sentAt: NOW, deliveredAt: NOW });
+    connect('claude:s1');
+    assert.equal(cardEvents(events).length, 0);
   });
 
   it('goes on its way to the agent, whatever token its connection reported under', () => {

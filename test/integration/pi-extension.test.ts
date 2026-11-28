@@ -110,6 +110,20 @@ describe('the pi extension', () => {
     await until(async () => (await state()).states['pi-1'] === 'read' || undefined);
   });
 
+  it('tells the session of a card the person sent it, and acknowledges the card only once the context holds it', async () => {
+    const agent = (await h.card('pi-1'))!.agent;
+    const res = await h.owner('POST', '/v1/send', { agent, text: 'Please rebase on main.' });
+    assert.equal(res.status, 201);
+    const { id } = (await res.json()) as { id: string };
+    const msg = await until(() => sent.find((m) => m.text.includes(id)));
+    assert.match(msg.text, /The person sent this session a card/);
+    // A note queued for a later turn may never run, so the acknowledgment waits for the model's context.
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(h.server.inbox.sent(id)?.readAt, null);
+    await handlers.get('context')?.({ messages: [{ role: 'user', content: msg.text }] }, ctx);
+    await until(() => h.server.inbox.sent(id)?.readAt ?? undefined);
+  });
+
   it('tells the session of a card reassigned to it, and acknowledges the notice only once the context holds it', async () => {
     const agent = (await h.card('pi-1'))!.agent;
     const posted = await h.postAsAgent({ id: 'pi-moved', agent: 'pi:retired-child', title: 'Which schema?' });

@@ -360,6 +360,13 @@ export const SENT_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 const PATCH_FIELDS = new Set(['title', 'text', 'body', 'html', 'recommendation']);
 const DELIVERIES = new Set<Delivery>(['default', 'steer', 'followUp', 'force']);
 
+/** True while a sent card still goes to each new connection of its agent: no session acknowledged it. A record from
+ * before acknowledgments has no `readAt`, and counts as read once a stream took it, so an old message never goes again. */
+function waitingSent(s: SentCard): boolean {
+  if (s.readAt === undefined) return s.deliveredAt === undefined;
+  return s.readAt === null;
+}
+
 /** A card's state follows from its closure and its answer. */
 export function cardState(card: Pick<Card, 'closed' | 'triage'> | CardSummary, answer: Pick<Answer, 'savedAt' | 'readAt' | 'deliveredAt'> | undefined): CardState {
   // An answer saved after the agent closed the card still goes to the agent.
@@ -3277,22 +3284,43 @@ export class Inbox {
     };
     const size = new TextEncoder().encode(JSON.stringify(card)).length;
     if (size > MAX_CARD_BYTES) throw new InboxError(413, `the card is ${size} bytes, over the limit of ${MAX_CARD_BYTES}`);
-    this.store.put<SentCard>('sent', card.id, { id: card.id, agent, card, sentAt: now });
-    this.deliverSent(agent);
-    return this.store.get<SentCard>('sent', card.id) ?? { id: card.id, agent, card, sentAt: now };
+    this.store.put<SentCard>('sent', card.id, { id: card.id, agent, card, sentAt: now, readAt: null });
+    this.deliverSent(agent, { card: card.id });
+    return this.store.get<SentCard>('sent', card.id) ?? { id: card.id, agent, card, sentAt: now, readAt: null };
   }
 
-  /** Hand each card waiting for this agent to its open streams, and record when it went. A connection reports an agent id,
-   * as a guidance event looks up its agents, so an agent takes what is addressed to it whatever token it connected with. */
-  private deliverSent(agent: string): void {
-    const waiting = this.store.list<SentCard>('sent').filter((s) => s.agent === agent && !s.deliveredAt);
+  /** A card the person sent, as the inbox keeps it. */
+  sent(id: string): SentCard | undefined {
+    return this.store.get<SentCard>('sent', id);
+  }
+
+  /** A session of `agent` handed the sent card to its model, so the inbox stops sending it. The card carries no token,
+   * since any connection that reports the agent id receives it, so the acknowledgment names the agent instead. */
+  ackSent(caller: Caller, id: string, input: { agent?: unknown } | null | undefined): SentCard {
+    if (caller.role !== 'agent') throw new InboxError(403, 'only an agent acknowledges a card the person sent it');
+    const sent = this.store.get<SentCard>('sent', id);
+    if (!sent || sent.agent !== String(input?.agent ?? '')) throw new InboxError(404, 'no card the person sent to that agent has this id');
+    if (!waitingSent(sent)) return sent;
+    const next: SentCard = { ...sent, deliveredAt: sent.deliveredAt ?? this.now(), readAt: this.now() };
+    this.store.put<SentCard>('sent', id, next);
+    return next;
+  }
+
+  /** Hand each card waiting for this agent to its streams, and record the first send. A connection reports an agent id,
+   * as a guidance event looks up its agents, so an agent takes what is addressed to it whatever token it connected with.
+   * A send only hands the event to a socket, which may be one the platform closed without saying so, so a card goes again
+   * to each new connection until a session acknowledges it. `to` limits the send to the stream that just connected, and
+   * `card` to the card just sent, so the streams already open don't hear an old card twice. */
+  private deliverSent(agent: string, only: { to?: AgentSend; card?: string } = {}): void {
+    const waiting = (only.card ? [this.store.get<SentCard>('sent', only.card)] : this.store.list<SentCard>('sent'))
+      .filter((s): s is SentCard => !!s && s.agent === agent && waitingSent(s));
     if (!waiting.length) return;
     // The agent id is what follows the first newline of the key, so an id that contains one cannot match another's.
-    const sends = [...this.agents].filter(([k]) => k.slice(k.indexOf('\n') + 1) === agent).flatMap(([, subs]) => [...subs]);
+    const sends = only.to ? [only.to] : [...this.agents].filter(([k]) => k.slice(k.indexOf('\n') + 1) === agent).flatMap(([, subs]) => [...subs]);
     if (!sends.length) return;
     const now = this.now();
     for (const sent of waiting) {
-      this.store.put<SentCard>('sent', sent.id, { ...sent, deliveredAt: now });
+      if (sent.deliveredAt === undefined) this.store.put<SentCard>('sent', sent.id, { ...sent, deliveredAt: now });
       const event: AgentEvent = { type: 'card', id: sent.id, card: publicCard(sent.card), sentAt: sent.sentAt };
       for (const send of sends) send(event);
     }
@@ -3331,8 +3359,9 @@ export class Inbox {
     // A card the inbox gave this agent while it was away, because the agent that asked retired.
     this.sendReassignments(caller.token, agent, { to: send });
     this.flush(agent);
-    // A card the person sent while this agent was away goes out as soon as it connects, as a waiting answer does.
-    this.deliverSent(agent);
+    // A card the person sent while this agent was away goes out as soon as it connects, as a waiting answer does, and
+    // so does one no session acknowledged.
+    this.deliverSent(agent, { to: send });
     if (instance) this.resend(caller.token, agent, send, instance);
     return () => {
       const s = this.agents.get(k);

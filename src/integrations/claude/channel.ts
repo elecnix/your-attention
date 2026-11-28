@@ -121,8 +121,8 @@ interface Push {
   card: string;
   /** Tells the inbox the session has it: the answer's acknowledgment, or the notice's. */
   ack: () => Promise<void>;
-  /** A notice that the card changed hands. A missed one stays unacknowledged, and the inbox sends it again on the next
-   * connection, so it never marks the card as not seen. */
+  /** A notice that the card changed hands, or a card the person sent. A missed one stays unacknowledged, and the inbox
+   * sends it again on the next connection, so it never marks the card as not seen. */
   notice?: boolean;
   /** Lets the inbox's next copy of a missed notice through the client, which drops a copy it already handed on. */
   release?: () => void;
@@ -297,6 +297,24 @@ setInterval(scanTranscript, Math.min(500, Math.max(50, Math.floor(RETRY_MS / 4))
 // The hooks change the file from their own processes: a stat of it notices, at a fraction of a minute of the schedule.
 fs.watchFile(stretchFile(session), { interval: Math.min(1000, Math.max(20, Math.floor(MINUTE_MS / 10))), persistent: false }, () => asks.resync());
 
+/** Push an event the inbox sends again until the session acknowledges it: a notice, or a card the person sent. It takes
+ * the answer's path, with a receipt, the transcript check, one more push and then the pane, and acknowledges only once
+ * the transcript shows the receipt. A missed one is released, so the inbox's next copy gets through. */
+async function pushUntilSeen(what: string, card: string, receipt: string, body: string, acknowledge: () => Promise<unknown>, release: () => void): Promise<void> {
+  const ack = (): Promise<void> => acknowledge().then(() => log(`${what} read`, card), (e: Error) => log(`${what} not acknowledged:`, e.message));
+  const push: Push = { card, ack, notice: true, release, body, meta: { card_id: card, receipt }, at: Date.now(), pushing: true, pushes: 1 };
+  pending.set(receipt, push);
+  try {
+    await notify(push.body, push.meta);
+    push.at = Date.now();
+    log(`pushed ${what}`, card, receipt);
+  } catch (e) {
+    log('push failed:', (e as Error).message);
+  } finally {
+    push.pushing = false;
+  }
+}
+
 /** Follow the inbox for answers. The stream reconnects by itself after an inbox restart and across a new link. */
 function listen(client: Client): void {
   log('connected to', client.url, 'as', agent, channelOff ? '(channel off: the session started without the development-channels flag)' : '');
@@ -319,7 +337,10 @@ function listen(client: Client): void {
       return;
     }
     if (ev.type === 'card') {
-      await notify(describeSentCard(ev), { card_id: ev.card.id });
+      // The inbox sends the card again on each connection until this session acknowledges it, so the card takes the
+      // notice's path below.
+      log('sent card', ev.card.id);
+      await pushUntilSeen('sent card', ev.card.id, ev.id, describeSentCard(ev), () => client.ackSent(ev), () => client.releaseSent(ev));
       return;
     }
     if (ev.type === 'reassigned') {
@@ -327,19 +348,7 @@ function listen(client: Client): void {
       // waits until Claude Code has the notification. The log lines show where a notice stopped.
       // So the notice takes the answer's path: a receipt, the transcript check, one more push, then the pane.
       log('reassigned', ev.card.id, 'from', ev.from);
-      const receipt = ev.id;
-      const ack = (): Promise<void> => client.ackNotice(ev).then(() => log('notice read', ev.card.id), (e: Error) => log('notice not acknowledged:', e.message));
-      const push: Push = { card: ev.card.id, ack, notice: true, release: () => client.releaseNotice(ev), body: describeReassigned(ev), meta: { card_id: ev.card.id, receipt }, at: Date.now(), pushing: true, pushes: 1 };
-      pending.set(receipt, push);
-      try {
-        await notify(push.body, push.meta);
-        push.at = Date.now();
-        log('pushed notice', ev.card.id, receipt);
-      } catch (e) {
-        log('push failed:', (e as Error).message);
-      } finally {
-        push.pushing = false;
-      }
+      await pushUntilSeen('notice', ev.card.id, ev.id, describeReassigned(ev), () => client.ackNotice(ev), () => client.releaseNotice(ev));
       return;
     }
     if (ev.type === 'revoke') {

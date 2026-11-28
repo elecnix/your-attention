@@ -131,11 +131,12 @@ export default function yourAttention(pi: PiApi, tools: () => Promise<PiTools | 
         }
         if (ev.type === 'card' || ev.type === 'reassigned') {
           // A card the person sent this session from the inbox page, or one the inbox gave it because its agent retired:
-          // a message to act on, not a question to answer. The inbox sends a notice again on each connection until the
-          // session acknowledges it, so a notice carries a receipt, and the acknowledgment waits until the model's
+          // a message to act on, not a question to answer. The inbox sends either again on each connection until the
+          // session acknowledges it, so each carries a receipt, and the acknowledgment waits until the model's
           // context holds it, as an answer's does: a follow-up queued in a turn may never run.
           if (ev.type === 'reassigned') pending.set(ev.id, () => client.ackNotice(ev).catch((e: Error) => log('notice not acknowledged:', e.message)));
-          const note = ev.type === 'card' ? `[your-attention] ${describeSentCard(ev)}` : `[your-attention notice ${ev.id}] ${describeReassigned(ev)}`;
+          if (ev.type === 'card') pending.set(`card ${ev.id}`, () => client.ackSent(ev).catch((e: Error) => log('sent card not acknowledged:', e.message)));
+          const note = ev.type === 'card' ? `[your-attention card ${ev.id}] ${describeSentCard(ev)}` : `[your-attention notice ${ev.id}] ${describeReassigned(ev)}`;
           if (ctx.isIdle()) pi.sendUserMessage(note);
           else pi.sendUserMessage(note, { deliverAs: 'followUp' });
           return;

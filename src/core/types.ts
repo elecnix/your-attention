@@ -625,8 +625,13 @@ export interface SentCard {
   agent: string;
   card: Card;
   sentAt: number;
-  /** When a connection for the agent received the card. Absent while the card still waits for it. */
+  /** When the inbox first sent the card to a stream of the agent. Absent while the card still waits for one. A send hands
+   * the event to a socket and proves nothing about the session, so the card goes again to each new connection until
+   * `readAt`. */
   deliveredAt?: number;
+  /** When a session of the agent acknowledged the card, after it handed the card to its model. `null` until then. A record
+   * written before the inbox asked for acknowledgments has no `readAt`, and counts as read once `deliveredAt` is set. */
+  readAt?: number | null;
 }
 
 export type AgentEvent =
